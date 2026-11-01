@@ -21,6 +21,7 @@ const kinds: Record<Kind, string> = {
   identity: "Email or id",
   relationship: "Link",
   event: "Product event",
+  batch: "Undone import",
 };
 
 const reasons: Record<string, string> = {
@@ -86,7 +87,9 @@ function DeletedFor({ brand, canManage, onOpen }: { brand: string; canManage: bo
     const body =
       d.kind === "record"
         ? "Their emails, ids, links and product events come back with them. Journeys that stopped when they were deleted stay stopped."
-        : d.kind === "event"
+        : d.kind === "batch"
+          ? "Everything the undo removed comes back: the people and companies, their emails, ids, links, events and list places, the leads, and the field values it put back. Fields changed since keep their new value. Then the import can be undone again."
+          : d.kind === "event"
           ? "Reports and attribution count it again. No rule or journey fires for it again."
           : "It comes back as it was.";
     if (!(await confirmAction(`Restore ${what}?`, <p>{body}</p>, "Restore", false))) return;

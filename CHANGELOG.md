@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-01
+
+### Added
+
+- Undo a merge, and undo an import: a record's page lists its merges with Undo merge, which puts back everything the merge moved. People → Imports lists every CSV import, CRM import and send of product events; Undo… shows what it made and what changed since, then undoes only what's untouched or everything, restorable for 7 days from Recently deleted.
+
+### Changed
+
+- Partner programs can refuse credit for website visits that came from paid ads or social media, for partners who may not bid on your brand or post on social networks.
+
 ## [0.69.11] - 2026-11-01
 
 ### Fixed

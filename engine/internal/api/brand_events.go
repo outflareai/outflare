@@ -116,7 +116,10 @@ func (s *Server) ingestBrandEvents(w http.ResponseWriter, r *http.Request) {
 	var batch string
 	receipts := make([]eventReceipt, len(env.items))
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&batch); err != nil {
+		// The POST is one batch: what its events write carries it, so it
+		// can be undone in one step (batches.go).
+		var err error
+		if batch, err = startBatch(ctx, tx, &a.principal, a.WorkspaceID, a.Brand, batchEvents, env.source, "", ""); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `INSERT INTO event_inbox (workspace_id, brand_id, batch_id, position, source, message_id, raw,
@@ -265,6 +268,10 @@ func (s *Server) processInboxChunk(ctx context.Context, ws, brand string) (int, 
 				order = append(order, row.batch)
 			}
 			start := time.Now()
+			// What the event writes carries its batch.
+			if err := inBatch(ctx, tx, row.batch); err != nil {
+				return err
+			}
 			out, err := s.processInboxRow(ctx, tx, ws, brand, c, defs, row, now, &b.totals)
 			if err != nil {
 				if ctx.Err() != nil {

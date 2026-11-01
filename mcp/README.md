@@ -257,6 +257,8 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `delete_record` | Erase a person or company for good, with their activity, for an erasure request; optionally never contact them again |
 | `soft_delete_record`, `delete_field_value`, `delete_record_identity`, `delete_record_link`, `delete_customer_event` | Delete a person or company (with their identities, links and events), a wrong field value, identity or link, or a product event such as a test payment: hidden everywhere at once and restorable for 7 days, then purged |
 | `list_recently_deleted`, `get_deletion`, `restore_deletion` | See what was deleted in the last 7 days and restore it as it was, without firing rules, journeys, webhooks or emails again |
+| `list_merges`, `undo_merge` | See a brand's merges and undo one: every row the merge moved goes back to the merged record, without firing anything |
+| `list_batches`, `preview_batch_undo`, `undo_batch` | See a brand's import and ingest batches, preview what undoing one would remove and what changed since, and undo it (only what's untouched, or everything), restorable for 7 days |
 | `add_record_identity`, `close_record_identity` | Add, verify or change an email, phone or id (`replaces` for a changed email), or remove one |
 | `link_records`, `end_record_link` | Link two records, such as partner_of, or end a link |
 | `create_record_type`, `update_record_type`, `create_field`, `update_field` | Add or change record types and fields in the shared catalog |

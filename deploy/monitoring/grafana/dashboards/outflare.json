@@ -9593,6 +9593,130 @@
           "legendFormat": "{{status}}"
         }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Merges undone and batch undos",
+      "description": "Merges undone (unmerges) and import or ingest batches undone per hour, by mode and outcome. Normal is rare and small; refused unmerges are merges too old to undo or with a later merge to undo first. failed batch undos changed nothing (job.dead for batches.undo in the log) and fire OutflareBatchUndoFailing.",
+      "id": 471,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 749
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_undo_unmerges_total{job=\"$job\"}[1h]))",
+          "legendFormat": "unmerge {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (mode, outcome) (increase(outflare_undo_batches_total{job=\"$job\"}[1h]))",
+          "legendFormat": "batch {{mode}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rows reverted by undos, and batch undo time",
+      "description": "Rows moved back, removed or put back per hour by unmerges and batch undos, and the 95th percentile time to undo one batch. Normal is a few rows and well under a minute; a batch of tens of thousands takes longer and runs in a job.",
+      "id": 472,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 749
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (increase(outflare_undo_rows_reverted_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} rows",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_undo_batch_seconds_bucket{job=\"$job\"}[1h])))",
+          "legendFormat": "p95 batch undo (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

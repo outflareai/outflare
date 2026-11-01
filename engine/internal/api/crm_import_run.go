@@ -234,6 +234,15 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 	if err != nil {
 		return crmImportView{}, err
 	}
+	// The import is one batch (batches.go), with the import's id: every
+	// step marks what it writes with it. It belongs to the brand its
+	// records are made in: the workspace's first, as add does.
+	if _, err := startBatch(ctx, tx, &a.principal, a.WorkspaceID, "", batchCRMImport, connector, "", id); err != nil {
+		return crmImportView{}, err
+	}
+	if err := inBatch(ctx, tx, ""); err != nil {
+		return crmImportView{}, err
+	}
 	if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobCRMImport, WorkspaceID: &a.WorkspaceID, Payload: map[string]string{"import_id": id},
 		MaxAttempts: 5, IdempotencyKey: id + ":0"}); err != nil {
 		return crmImportView{}, err
@@ -248,6 +257,7 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMImport, s.crmImportJob)
+	q.Handle(jobBatchUndo, s.batchUndoJob)
 	q.Handle(jobEventsProcess, s.eventsProcessJob)
 	q.Handle(jobPrivacyExport, s.privacyExportJob)
 	if s.inboundEmail != nil {
@@ -803,6 +813,12 @@ func (r *crmRun) batch(ctx context.Context, op *crmObjectPlan, res *crmObjectRes
 	sum, counts := r.sum, *res
 	sum.Warnings = slices.Clone(r.sum.Warnings)
 	err := pgx.BeginFunc(ctx, r.s.pool, func(tx pgx.Tx) error {
+		// What the import writes carries it, as a batch (batches.go). An
+		// import from before batches existed has no batch row; marking is
+		// harmless then.
+		if err := inBatch(ctx, tx, r.id); err != nil {
+			return err
+		}
 		c, err := loadCatalog(ctx, tx, r.a.WorkspaceID, false)
 		if err != nil {
 			return err

@@ -222,6 +222,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var res leads.ImportResult
 	var listID *string
+	var batchID string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if listName != "" {
 			// Someone kept to some brands imports into their brands' lists.
@@ -250,7 +251,15 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 			}
 			listID = &id
 		}
+		// The import is one batch: what it writes carries it, so it can be
+		// undone in one step (batches.go). It belongs to the brand its
+		// people are made in: the workspace's first, as for every lead.
 		var err error
+		if len(unique) > 0 {
+			if batchID, err = startBatch(ctx, tx, &a.principal, a.WorkspaceID, "", batchCSVImport, "csv", listName, ""); err != nil {
+				return err
+			}
+		}
 		if res, err = leads.Import(ctx, tx, a.WorkspaceID, "csv", listID, unique); err != nil {
 			return err
 		}
@@ -264,7 +273,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "leads.imported", "lead_list", deref(listID), map[string]any{
 			"created": res.Created, "updated": res.Updated, "duplicates": res.Duplicates,
-			"suppressed": res.Suppressed, "failed": len(res.Errors),
+			"suppressed": res.Suppressed, "failed": len(res.Errors), "batch_id": batchID,
 		})
 	})
 	if s.allocError(w, r, err) {
@@ -272,7 +281,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"created": res.Created, "updated": res.Updated, "duplicates": res.Duplicates,
-		"suppressed": res.Suppressed, "errors": res.Errors, "list_id": listID,
+		"suppressed": res.Suppressed, "errors": res.Errors, "list_id": listID, "batch_id": nullIfEmpty(batchID),
 	})
 }
 

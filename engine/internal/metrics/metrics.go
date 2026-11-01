@@ -585,6 +585,25 @@ var (
 		Help: "How long past its 7 days the oldest deletion still waiting for the purge is, as of this process's last round.",
 	})
 
+	// Undo for bad data: unmerges and batch undos.
+	undoUnmerges = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "undo", Name: "unmerges_total",
+		Help: "Merges undone (undone), or refused (refused: not reversible, not the latest, already undone), by outcome.",
+	}, []string{"outcome"})
+	undoBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "undo", Name: "batches_total",
+		Help: "Import and ingest batches undone, by mode (untouched, everything) and outcome (undone, queued, failed).",
+	}, []string{"mode", "outcome"})
+	undoRowsReverted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "undo", Name: "rows_reverted_total",
+		Help: "Rows moved back, removed or put back by undos, by kind (unmerge, batch).",
+	}, []string{"kind"})
+	undoBatchSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "undo", Name: "batch_seconds",
+		Help:    "How long undoing one batch took.",
+		Buckets: []float64{0.05, 0.25, 1, 5, 15, 60, 300},
+	})
+
 	inboundPurged = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbound_email", Name: "raw_purged_total",
 		Help: "Raw inbound messages deleted after 30 days (their details stay).",
@@ -667,6 +686,7 @@ var own = []prometheus.Collector{
 	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
 	privacyExportsBuilt, privacyExportSeconds, privacyExportBytes, privacyExportsExpired,
 	recoveryDeleted, recoveryRestored, recoveryPurged, recoveryPurgeOverdue,
+	undoUnmerges, undoBatches, undoRowsReverted, undoBatchSeconds,
 	ratesFetched, ratesAge, receiptsConverted,
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	buildInfo,
@@ -1233,6 +1253,25 @@ func RecoveryPurged(kind string) { recoveryPurged.WithLabelValues(kind).Inc() }
 // SetRecoveryPurgeOverdue records how far past its 7 days the oldest
 // deletion waiting for the purge is.
 func SetRecoveryPurgeOverdue(d time.Duration) { recoveryPurgeOverdue.Set(max(d, 0).Seconds()) }
+
+// Unmerged counts a merge undone or refused.
+func Unmerged(outcome string) { undoUnmerges.WithLabelValues(outcome).Inc() }
+
+// BatchUndone counts a batch undo by mode and outcome (undone, queued,
+// failed), with how long it took when it ran.
+func BatchUndone(mode, outcome string, d time.Duration) {
+	undoBatches.WithLabelValues(mode, outcome).Inc()
+	if outcome == "undone" {
+		undoBatchSeconds.Observe(d.Seconds())
+	}
+}
+
+// UndoRowsReverted counts rows an undo moved back, removed or put back.
+func UndoRowsReverted(kind string, n int) {
+	if n > 0 {
+		undoRowsReverted.WithLabelValues(kind).Add(float64(n))
+	}
+}
 
 // RatesFetched counts one fetch of exchange rates, success or error, and
 // on success sets the newest rate's age.

@@ -15,6 +15,7 @@ import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent,
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
 import { RecentlyDeleted } from "./RecentlyDeleted";
+import { Batches, RecordMerges } from "./Undo";
 import { RecordPartners } from "./Partners";
 
 type Rec = Schemas["Record"];
@@ -28,7 +29,8 @@ type PrivacyExport = Schemas["PrivacyExport"];
 
 // People and Companies are the two built-in record types; the item part of
 // the URL picks the view: "" for people, "companies", "duplicates", "events"
-// (the brand's product events as received), "deleted" (Recently deleted,
+// (the brand's product events as received), "batches" (imports and sends
+// of events, each undoable in one step), "deleted" (Recently deleted,
 // restorable for 7 days), or a record's id.
 type View = "person" | "account";
 const viewOf = (open: string): View => (open === "companies" ? "account" : "person");
@@ -41,21 +43,23 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 export function People({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "batches" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (open === "batches") return <Batches ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "deleted"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "batches" | "deleted"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "deleted" ? v : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "batches" || v === "deleted" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
         <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
         <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
+        <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
         <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
       </TabsList>
     </Tabs>
@@ -410,6 +414,7 @@ function RecordPage({ ws, id, cat, canManage, onOpen, go }: { ws: string; id: st
           {people && <Consents key={`c${tick}`} ws={ws} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
           {rec.brand_id && !rec.merged_into && <PrivacyExports key={`p${tick}`} brand={rec.brand_id} record={id} canManage={canManage} />}
+          {rec.brand_id && <RecordMerges key={`m${tick}`} brand={rec.brand_id} record={id} canManage={canManage} onOpen={onOpen} onChange={changed} />}
         </div>
         <div className="space-y-4 lg:col-span-2">
           <Tabs value={section} onValueChange={(v) => setSection(v as typeof section)}>

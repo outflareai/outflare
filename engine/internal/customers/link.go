@@ -3,6 +3,8 @@ package customers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -153,7 +155,7 @@ func EnsurePeople(ctx context.Context, tx pgx.Tx, workspaceID, origin, via strin
 // ids is nil, up to limit) their person record, and points their activity
 // at it. It returns how many leads it linked.
 func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string, limit int) (int, error) {
-	rows, err := tx.Query(ctx, `SELECT id::text, email, first_name, last_name, title, linkedin_url, source FROM leads
+	rows, err := tx.Query(ctx, `SELECT id::text, email, first_name, last_name, title, linkedin_url, source, COALESCE(batch_id::text, '') FROM leads
 		WHERE workspace_id = $1 AND record_id IS NULL AND ($2::uuid[] IS NULL OR id = ANY($2))
 		ORDER BY id LIMIT $3 FOR UPDATE SKIP LOCKED`, workspaceID, ids, limit)
 	if err != nil {
@@ -162,12 +164,20 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 	type lead struct{ id, email string }
 	var leads []lead
 	var people []Person
+	// Leads an import batch made link under that batch, so the people they
+	// become carry it too (undo a batch).
+	batches := map[string][]string{}
+	var order []string
 	for rows.Next() {
-		var id, email, first, last, title, linkedin, source string
-		if err := rows.Scan(&id, &email, &first, &last, &title, &linkedin, &source); err != nil {
+		var id, email, first, last, title, linkedin, source, batch string
+		if err := rows.Scan(&id, &email, &first, &last, &title, &linkedin, &source, &batch); err != nil {
 			rows.Close()
 			return 0, err
 		}
+		if _, ok := batches[batch]; !ok {
+			order = append(order, batch)
+		}
+		batches[batch] = append(batches[batch], id)
 		leads = append(leads, lead{id, strings.ToLower(strings.TrimSpace(email))})
 		people = append(people, Person{Email: email, Name: strings.TrimSpace(first + " " + last), Attributes: map[string]any{
 			"first_name": first, "last_name": last, "job_title": title, "linkedin_url": linkedin}, Via: source})
@@ -178,6 +188,29 @@ func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string,
 	}
 	if len(leads) == 0 {
 		return 0, nil
+	}
+	if len(order) > 1 {
+		total := 0
+		for _, b := range order {
+			n, err := LinkLeads(ctx, tx, workspaceID, batches[b], len(batches[b]))
+			if err != nil {
+				return 0, err
+			}
+			total += n
+		}
+		return total, nil
+	}
+	if b := order[0]; b != "" {
+		var prev string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('outflare.batch_id', true), '')`).Scan(&prev); err != nil {
+			return 0, err
+		}
+		if prev != b {
+			if _, err := tx.Exec(ctx, `SELECT set_config('outflare.batch_id', $1, true)`, b); err != nil {
+				return 0, err
+			}
+			defer func() { _, _ = tx.Exec(ctx, `SELECT set_config('outflare.batch_id', $1, true)`, prev) }()
+		}
 	}
 	owners, err := EnsurePeople(ctx, tx, workspaceID, "prospect", "lead", people)
 	if err != nil {
@@ -349,18 +382,87 @@ var Owned = []Ref{
 // in or were referred to, keeps the row it has for the record kept. A journey both are in keeps
 // the kept record's run; the other's ends with exit_reason "merged".
 func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) (map[string]int, error) {
+	moved, _, err := follow(ctx, tx, workspaceID, fromID, intoID, false)
+	return moved, err
+}
+
+// Moved is the rows of one table a merge moved to the record kept: the
+// table, the column that changed, and each row's primary key as moved (a
+// JSON array of objects), so Unfollow can move exactly those back.
+type Moved struct {
+	Table, Column string
+	Keys          json.RawMessage
+}
+
+// FollowRows is Follow that also returns which rows moved, for the merge
+// ledger (unmerge).
+func FollowRows(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) (map[string]int, []Moved, error) {
+	return follow(ctx, tx, workspaceID, fromID, intoID, true)
+}
+
+// primaryKey returns a table's primary key columns, in order.
+func primaryKey(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	var cols []string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(a.attname::text ORDER BY array_position(i.indkey::int2[], a.attnum)), '{}')
+		FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+		WHERE i.indrelid = to_regclass($1) AND i.indisprimary`, table).Scan(&cols)
+	if err == nil && len(cols) == 0 {
+		err = fmt.Errorf("customers: %s has no primary key", table)
+	}
+	return cols, err
+}
+
+// Unfollow moves the rows a merge moved (FollowRows) from the record kept
+// back to the merged one. Rows that point somewhere else since, or are
+// gone, are left alone. It returns how many moved back, by table.
+func Unfollow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string, moved []Moved) (map[string]int, error) {
+	back := map[string]int{}
+	for _, m := range moved {
+		if !slices.Contains(Follows, Ref{m.Table, m.Column}) {
+			return nil, fmt.Errorf("customers: %s.%s is not a column records follow", m.Table, m.Column)
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, m.Table).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
+		pk, err := primaryKey(ctx, tx, m.Table)
+		if err != nil {
+			return nil, err
+		}
+		quoted := make([]string, len(pk))
+		for i, c := range pk {
+			quoted[i] = "x." + pgx.Identifier{c}.Sanitize()
+		}
+		table, col := pgx.Identifier{m.Table}.Sanitize(), pgx.Identifier{m.Column}.Sanitize()
+		lhs := strings.ReplaceAll(strings.Join(quoted, ", "), "x.", "t.")
+		tag, err := tx.Exec(ctx, `UPDATE `+table+` t SET `+col+` = $1 WHERE t.workspace_id = $3 AND t.`+col+` = $2
+			AND (`+lhs+`) IN (SELECT `+strings.Join(quoted, ", ")+` FROM jsonb_populate_recordset(NULL::`+table+`, $4::jsonb) x)`,
+			fromID, intoID, workspaceID, string(m.Keys))
+		if err != nil {
+			return nil, err
+		}
+		back[m.Table] += int(tag.RowsAffected())
+	}
+	return back, nil
+}
+
+func follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string, ledger bool) (map[string]int, []Moved, error) {
 	moved := map[string]int{}
+	var rows []Moved
 	if _, err := tx.Exec(ctx, `UPDATE journey_runs f SET status = 'exited', exit_reason = 'merged', finished_at = now(), next_at = NULL, updated_at = now()
 		WHERE f.workspace_id = $3 AND f.record_id = $1 AND f.status = 'active'
 		  AND EXISTS (SELECT 1 FROM journey_runs k WHERE k.journey_id = f.journey_id AND k.record_id = $2 AND k.status = 'active')`, fromID, intoID, workspaceID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, r := range Follows {
 		// A table a newer migration adds may not exist yet: its column is
 		// listed here first so a rollback to this version still moves it.
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, r.Table).Scan(&exists); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !exists {
 			continue
@@ -377,11 +479,32 @@ func Follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string) 
 		if r.Table == "rule_firings" {
 			sql += ` AND NOT EXISTS (SELECT 1 FROM rule_firings o WHERE o.rule_id = rule_firings.rule_id AND o.record_id = $2 AND o.episode_key = rule_firings.episode_key)`
 		}
-		tag, err := tx.Exec(ctx, sql, fromID, intoID, workspaceID)
-		if err != nil {
-			return nil, err
+		if !ledger {
+			tag, err := tx.Exec(ctx, sql, fromID, intoID, workspaceID)
+			if err != nil {
+				return nil, nil, err
+			}
+			moved[r.Table] += int(tag.RowsAffected())
+			continue
 		}
-		moved[r.Table] += int(tag.RowsAffected())
+		pk, err := primaryKey(ctx, tx, r.Table)
+		if err != nil {
+			return nil, nil, err
+		}
+		pairs := make([]string, len(pk))
+		for i, c := range pk {
+			pairs[i] = `'` + c + `', ` + r.Table + `.` + pgx.Identifier{c}.Sanitize()
+		}
+		var n int
+		var keys []byte
+		if err := tx.QueryRow(ctx, `WITH m AS (`+sql+` RETURNING jsonb_build_object(`+strings.Join(pairs, ", ")+`) AS k)
+			SELECT count(*), COALESCE(jsonb_agg(k), '[]') FROM m`, fromID, intoID, workspaceID).Scan(&n, &keys); err != nil {
+			return nil, nil, err
+		}
+		moved[r.Table] += n
+		if n > 0 {
+			rows = append(rows, Moved{Table: r.Table, Column: r.Column, Keys: keys})
+		}
 	}
-	return moved, nil
+	return moved, rows, nil
 }

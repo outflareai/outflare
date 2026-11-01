@@ -202,6 +202,33 @@ Bad data can be deleted and, for 7 days, brought back as it was: the recovery wi
 - **Erasure is permanent.** For a request to erase someone's data, use Erase permanently on the record's page, `DELETE /v1/workspaces/{ws}/records/{record}` or `delete_record`: it is final at once, also for a record in Recently deleted (its deletions go with it), and `suppress=true` adds their emails to the do-not-contact list so a later import or sync can't bring them back.
 - **On record.** `record.soft_deleted`, `field_value.deleted`, `identity.deleted`, `relationship.deleted`, `customer_event.deleted`, `deletion.restored` and `deletion.purged` are in the audit log; `record.soft_deleted` and `deletion.restored` are also webhook events. A privacy export includes what is in Recently deleted, since it is still held.
 
+## Undoing a merge or a batch
+
+A wrong merge or a bad import can be undone in one step.
+
+### Undoing a merge
+
+- **Where.** A record's page lists its merges under Merges, with Undo merge; `GET /v1/brands/{brand}/merges?record=` and `POST /v1/brands/{brand}/merges/{merge}/undo` (MCP `list_merges`, `undo_merge`). Reading needs `customers.read`, undoing `customers.manage`.
+- **What goes back.** The merged record is a record of its own again (not merged, and not archived unless it was before). Every row the merge moved goes back to it: its emails and ids, links, product events, consents, emails, replies, meetings, deals, list places, journey runs, payments and the rest. The copies of its identities and links on the kept record go; the fields the merge filled on the kept record go back to what they were; other records whose reference fields the merge pointed at the kept record point at the merged one again; and the duplicate pair is open again. Billing fields and first and last touch are worked out again for both.
+- **What stays.** Whatever reached the kept record after the merge stays there. A field changed since the merge keeps its new value (the answer lists it as `changed`), and an identity someone else holds now stays closed (`taken`). A journey the merged record left because the kept one was already in it stays ended.
+- **Chained merges undo newest first.** After A was merged into B and then B into C, A into B can't be undone until B into C is: it answers 409 `merge_not_latest`. `undoable` on each merge says whether it can be undone now.
+- **Older merges.** A merge made before Outflare kept a record of what merges move can't be undone: 409 `merge_not_reversible`. Split those records by hand.
+- **Fires nothing.** No rule, journey, email or webhook is sent for the rows that move back. `record.unmerged` is in the audit log and is a webhook event, as `record.merged` is.
+
+### Undoing a batch
+
+- **What a batch is.** Every CSV import of leads, every CRM import and every send of product events to a brand (`POST /v1/brands/{brand}/events`, whose answer has its `batch_id`) is a *batch*. Everything it writes carries it: the people and companies it creates, field values it sets (their history), emails and ids, links, product events, list places and leads. Data written before batches existed carries none, so it can't be undone this way. A batch belongs to the brand its records are made in (for CSV and CRM imports, the workspace's first brand, where they make people today), and undoing it never touches another brand's data.
+- **Where.** People → Imports lists a brand's batches with what each made; `GET /v1/brands/{brand}/batches` (MCP `list_batches`). Undo… shows the preview first.
+- **The preview** (`GET .../batches/{batch}/undo-preview`, `preview_batch_undo`) counts what the batch made, and lists what changed since: records someone else edited, emailed, that have payments or other activity since, records merged since, fields it set that were changed since, and leads already in a sequence. It says what each way of undoing would do.
+- **You choose each time** (`POST .../batches/{batch}/undo` with `mode`, `undo_batch`):
+  - **Undo only what's untouched** (`untouched`) removes the records nobody changed since, with their identities, links, events and list places; removes what the batch added to other records; puts back field values it set (only while they still hold its value); and removes the leads it made that no sequence used. The changed records stay, with what the batch put on them, listed in the preview so you can remove them by hand.
+  - **Undo everything** (`everything`) also removes the changed records.
+  - Neither undoes a record merged since (undo the merge first), a field someone changed since (the batch's value is already gone) or a lead already in a sequence: emails already sent can't be unsent. Their history stays, and on the timeline an email sent to someone an undone batch made carries `detail.undone_batch_id`.
+- **Restorable for 7 days.** Everything an undo removes is one deletion of kind `batch` in Recently deleted, restored in one step; then the batch can be undone again. After 7 days the records it removed are erased.
+- **Large batches** (over 2,000 rows) are undone in the background: the answer is 202 and the batch's `undo.status` goes `queued`, then `done` or `failed` (a failed undo changes nothing; try again). Undoing twice answers 409 `batch_already_undone`, or `batch_undo_running` while it runs.
+- **Someone's edits** are changes made by a person or an API token (field history with an actor); fields Outflare works out itself (billing, first and last touch, a lead's details) don't count as an edit.
+- **Fires nothing.** No rule, journey, email or webhook is sent for what it removes or puts back. `batch.undone` is in the audit log and is a webhook event.
+
 ## Scopes
 
 | Scope | Allows | Roles |

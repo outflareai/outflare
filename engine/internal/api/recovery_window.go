@@ -69,6 +69,9 @@ const fieldValueRows = "attributes"
 var deletedTables = []string{
 	"record_identities", "record_relationships", "customer_events",
 	"attribution_conversions", "attribution_credits", "ad_conversion_sends",
+	// An undone batch's list places and leads (batches.go); a lead before
+	// what hangs off it.
+	"static_list_members", "leads", "lead_list_members", "lead_sources",
 }
 
 // rowID is each table's id, as text, over alias t.
@@ -79,6 +82,10 @@ var rowID = map[string]string{
 	"ad_conversion_sends":     "t.id::text",
 	"attribution_conversions": "t.event_id::text",
 	"attribution_credits":     "t.event_id::text || ':' || t.model || ':' || t.position::text",
+	"static_list_members":     "t.list_id::text || ':' || t.record_id::text",
+	"leads":                   "t.id::text",
+	"lead_list_members":       "t.list_id::text || ':' || t.lead_id::text",
+	"lead_sources":            "t.lead_id::text || ':' || t.provider",
 }
 
 func (s *Server) routesRecoveryWindow(mux *http.ServeMux) {
@@ -134,6 +141,7 @@ const deletionColumns = `d.id::text, d.brand_id::text, d.kind, d.record_id::text
 		WHEN 'identity' THEN (SELECT x.data->>'value' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'record_identities' LIMIT 1)
 		WHEN 'relationship' THEN (SELECT x.data->>'kind' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'record_relationships' LIMIT 1)
 		WHEN 'event' THEN (SELECT x.data->>'name' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'customer_events' LIMIT 1)
+		WHEN 'batch' THEN (SELECT CASE WHEN b.label <> '' THEN b.label ELSE replace(b.kind, '_', ' ') END FROM batches b WHERE b.id::text = d.target)
 	END, ''),
 	d.target, d.counts, d.actor_type, d.user_id::text, d.token_id::text, u.name, d.deleted_at, d.purge_after, d.restored_at, d.not_restored`
 
@@ -673,8 +681,8 @@ func (s *Server) listRecentlyDeleted(w http.ResponseWriter, r *http.Request) {
 	where := []string{"d.brand_id = $1", "d.workspace_id = $2", "d.restored_at IS NULL", "d.purge_after > now()", "(d.deleted_at, d.id::text) < ($3, $4)"}
 	args := []any{a.Brand, a.WorkspaceID, beforeAt, beforeID}
 	if v := q.Get("kind"); v != "" {
-		if !slices.Contains([]string{deletedRecord, deletedFieldValue, deletedIdentity, deletedRelationship, deletedEvent}, v) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is record, field_value, identity, relationship or event")
+		if !slices.Contains([]string{deletedRecord, deletedFieldValue, deletedIdentity, deletedRelationship, deletedEvent, deletedBatch}, v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is record, field_value, identity, relationship, event or batch")
 			return
 		}
 		args = append(args, v)
@@ -845,6 +853,9 @@ func (s *Server) restoreDeletion(w http.ResponseWriter, r *http.Request) {
 // back, by table, and what couldn't, with why. A row that can't come back
 // stays in the deletion.
 func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec *string) (map[string]int, []notRestored, error) {
+	if kind == deletedBatch {
+		return restoreBatchRows(ctx, tx, a, id)
+	}
 	res := map[string]int{}
 	var failed []notRestored
 	if kind == deletedRecord && rec != nil {
@@ -949,20 +960,7 @@ func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec
 			}
 		}
 	}
-	// Inbox rows get their link to a restored event back.
-	if _, err := tx.Exec(ctx, `WITH back AS (
-			UPDATE event_inbox e SET customer_event_id = (x.data->>'customer_event_id')::uuid
-			FROM deleted_rows x WHERE x.deletion_id = $1 AND x.source_table = 'event_inbox' AND e.id = (x.data->>'id')::uuid
-				AND e.workspace_id = $2 AND e.customer_event_id IS NULL
-				AND EXISTS (SELECT 1 FROM customer_events c WHERE c.id = (x.data->>'customer_event_id')::uuid)
-			RETURNING x.id)
-		DELETE FROM deleted_rows WHERE id IN (SELECT id FROM back)`, id, a.WorkspaceID); err != nil {
-		return nil, nil, err
-	}
-	// Links whose event came back, or whose inbox row is gone, are done.
-	if _, err := tx.Exec(ctx, `DELETE FROM deleted_rows x WHERE x.deletion_id = $1 AND x.source_table = 'event_inbox'
-		AND (EXISTS (SELECT 1 FROM customer_events c WHERE c.id = (x.data->>'customer_event_id')::uuid)
-			OR NOT EXISTS (SELECT 1 FROM event_inbox e WHERE e.id = (x.data->>'id')::uuid))`, id); err != nil {
+	if err := relinkInbox(ctx, tx, a.WorkspaceID, id); err != nil {
 		return nil, nil, err
 	}
 	for r := range payments {
@@ -971,6 +969,25 @@ func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec
 		}
 	}
 	return res, failed, nil
+}
+
+// relinkInbox gives inbox rows their link to a restored event back, and
+// drops the links that are done.
+func relinkInbox(ctx context.Context, tx pgx.Tx, ws, id string) error {
+	if _, err := tx.Exec(ctx, `WITH back AS (
+			UPDATE event_inbox e SET customer_event_id = (x.data->>'customer_event_id')::uuid
+			FROM deleted_rows x WHERE x.deletion_id = $1 AND x.source_table = 'event_inbox' AND e.id = (x.data->>'id')::uuid
+				AND e.workspace_id = $2 AND e.customer_event_id IS NULL
+				AND EXISTS (SELECT 1 FROM customer_events c WHERE c.id = (x.data->>'customer_event_id')::uuid)
+			RETURNING x.id)
+		DELETE FROM deleted_rows WHERE id IN (SELECT id FROM back)`, id, ws); err != nil {
+		return err
+	}
+	// Links whose event came back, or whose inbox row is gone, are done.
+	_, err := tx.Exec(ctx, `DELETE FROM deleted_rows x WHERE x.deletion_id = $1 AND x.source_table = 'event_inbox'
+		AND (EXISTS (SELECT 1 FROM customer_events c WHERE c.id = (x.data->>'customer_event_id')::uuid)
+			OR NOT EXISTS (SELECT 1 FROM event_inbox e WHERE e.id = (x.data->>'id')::uuid))`, id)
+	return err
 }
 
 // restorableColumns are the columns of table a restore writes: the ones
@@ -1182,6 +1199,11 @@ func (s *Server) purgeRound(ctx context.Context) (int, error) {
 		for _, d := range list {
 			if d.kind == deletedRecord && !d.restored && d.rec != nil {
 				if err := purgeRecord(ctx, tx, d.ws, d.id, *d.rec); err != nil {
+					return err
+				}
+			}
+			if d.kind == deletedBatch && !d.restored {
+				if err := purgeBatchRecords(ctx, tx, d.ws, d.id); err != nil {
 					return err
 				}
 			}

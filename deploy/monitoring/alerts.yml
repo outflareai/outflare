@@ -445,6 +445,15 @@ groups:
         annotations:
           summary: "Deleted customer data has stayed over 6 hours past its 7 days in Recently deleted: the purge is failing or can't keep up (deletion.purge_failed in the engine log; Recovery window purge panel in the event inbox row). Data people deleted is kept longer than promised until it catches up."
 
+      - alert: OutflareBatchUndoFailing
+        # A large batch undo runs in a job; when it fails it changes
+        # nothing and the batch shows undo.status failed.
+        expr: sum(increase(outflare_undo_batches_total{outcome="failed"}[1h])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "An import or ingest batch undo failed in the background in the last hour and changed nothing (job.dead for batches.undo in the engine log, with the batch id; Merges undone and batch undos panel). The person who asked sees undo failed on the batch and has to try again."
+
       - alert: OutflareSemanticSearchNoPgvector
         # Workspaces have meaning-based search on, but the database can't
         # store vectors, so it does nothing for them.

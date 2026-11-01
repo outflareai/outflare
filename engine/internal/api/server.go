@@ -455,6 +455,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesBrandEvents(mux)
 	s.routesPrivacyExports(mux)
 	s.routesRecoveryWindow(mux)
+	s.routesUnmerge(mux)
+	s.routesBatches(mux)
 	s.routesCatalog(mux)
 	s.routesRecords(mux)
 	s.routesCustomerEvents(mux)

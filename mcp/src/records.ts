@@ -326,7 +326,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "Restore one with restore_deletion.",
       inputSchema: {
         brand: brandRef,
-        kind: z.enum(["record", "field_value", "identity", "relationship", "event"]).optional(),
+        kind: z.enum(["record", "field_value", "identity", "relationship", "event", "batch"]).optional(),
         record: id.optional().describe("Only deletions about this record."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
@@ -346,6 +346,57 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     },
     ({ brand, deletion }) =>
       call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/recently-deleted/{deletion}", { params: { path: { brand: b, deletion } } }))),
+  );
+
+  server.registerTool(
+    "list_merges",
+    {
+      title: "List merges",
+      description:
+        "A brand's merges, newest first: which record was kept (into_id), which was merged into it (from_id) and what moved. undoable " +
+        "says whether undo_merge would undo it now.",
+      inputSchema: {
+        brand: brandRef,
+        record: id.optional().describe("Only merges this record was kept or merged in."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/merges", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "list_batches",
+    {
+      title: "List import and ingest batches",
+      description:
+        "A brand's batches, newest first: CSV imports of leads (csv_import), CRM imports (crm_import) and sends of product events (events), " +
+        "with what each made that is still here and whether it was undone. A bad one can be undone in one step: preview_batch_undo, then undo_batch.",
+      inputSchema: {
+        brand: brandRef,
+        kind: z.enum(["csv_import", "crm_import", "events"]).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/batches", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "preview_batch_undo",
+    {
+      title: "Preview undoing a batch",
+      description:
+        "What a batch made, what changed since (records someone edited, emailed, paid or had other activity on; records merged since; fields " +
+        "changed since; leads already in a sequence) with those items, and what each mode would undo: untouched (only what nobody changed) or " +
+        "everything (changed records too). Show this to the user and let them choose before undo_batch.",
+      inputSchema: { brand: brandRef, batch: id.describe("The batch's id, from list_batches, an import's batch_id or a send's batch_id.") },
+      annotations: read,
+    },
+    ({ brand, batch }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/batches/{batch}/undo-preview", { params: { path: { brand: b, batch } } }))),
   );
 
   if (readOnly) return;
@@ -841,6 +892,37 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     },
     ({ brand, deletion }) =>
       call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/recently-deleted/{deletion}/restore", { params: { path: { brand: b, deletion } } }))),
+  );
+
+  server.registerTool(
+    "undo_merge",
+    {
+      title: "Undo a merge",
+      description:
+        "Unmerges (merge id from list_merges): the merged record is its own again and every row the merge moved goes back to it; what came " +
+        "to the kept record later stays there, and a field changed since keeps its new value. Nothing fires (no rule, journey or email). " +
+        "Undo chained merges newest first (merge_not_latest otherwise); merges from before Outflare kept what merges move can't be undone " +
+        "(merge_not_reversible). Only when the user asked.",
+      inputSchema: { brand: brandRef, merge: id },
+      annotations: recoverable,
+    },
+    ({ brand, merge }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/merges/{merge}/undo", { params: { path: { brand: b, merge } } }))),
+  );
+
+  server.registerTool(
+    "undo_batch",
+    {
+      title: "Undo an import or ingest batch",
+      description:
+        "Rolls back a batch in the mode the user chose after preview_batch_undo: untouched (only what nobody changed since; changed records " +
+        "stay) or everything (changed records go too). Records it created go with their identities, links and events, what it added to other " +
+        "records is removed, fields it set go back, and leads no sequence used go. All of it is one deletion in Recently deleted, restorable " +
+        "with restore_deletion for 7 days. Emails already sent stay. A large batch runs in the background: follow undo.status with list_batches.",
+      inputSchema: { brand: brandRef, batch: id, mode: z.enum(["untouched", "everything"]) },
+      annotations: recoverable,
+    },
+    ({ brand, batch, mode }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/batches/{batch}/undo", { params: { path: { brand: b, batch } }, body: { mode } }))),
   );
 
   server.registerTool(

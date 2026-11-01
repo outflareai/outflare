@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
+	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -462,7 +464,8 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 // code, each program by its own window and first or last rule. When
 // several programs could take it, the latest credited visit wins.
 func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow, error) {
-	rows, err := c.tx.Query(ctx, `SELECT s.started_at, m.id::text, m.program_id::text, p.credit_window_days, p.credit_model
+	rows, err := c.tx.Query(ctx, `SELECT s.started_at, m.id::text, m.program_id::text, p.credit_window_days, p.credit_model,
+		       p.block_ad_clicks, p.block_social_clicks, s.click_ids, s.referrer_host
 		FROM site_sessions s
 		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref)
 		JOIN partner_programs p ON p.id = m.program_id
@@ -480,11 +483,17 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 	progs := map[string]*prog{}
 	for rows.Next() {
 		var at time.Time
-		var mid, pid, model string
+		var mid, pid, model, refHost string
 		var window int
-		if err := rows.Scan(&at, &mid, &pid, &window, &model); err != nil {
+		var blockAds, blockSocial bool
+		var clicks map[string]string
+		if err := rows.Scan(&at, &mid, &pid, &window, &model, &blockAds, &blockSocial, &clicks, &refHost); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		// A program can refuse visits from paid ads or social media.
+		if ad, social := clickSources(clicks, refHost); blockAds && ad || blockSocial && social {
+			continue
 		}
 		if progs[pid] == nil {
 			progs[pid] = &prog{window: window, model: model}
@@ -505,6 +514,20 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		return nil, nil
 	}
 	return optMembership(c.tx.QueryRow(ctx, `SELECT `+membershipCols+` WHERE m.id = $1`, best.MembershipID))
+}
+
+// clickSources reports whether a visit came from a paid ad click (an ad
+// network's click id that proves payment) and whether it came from social
+// media (fbclid, which Facebook adds to every outbound link, or a social
+// network as referrer).
+func clickSources(clicks map[string]string, refHost string) (ad, social bool) {
+	for k := range clicks {
+		if c, ok := adtrack.ClickIDOf(k); ok {
+			ad = ad || c.Paid && c.Channel == "paid_ads"
+			social = social || k == "fbclid"
+		}
+	}
+	return ad, social || attribution.SocialReferrer(refHost)
 }
 
 type referralRow struct {

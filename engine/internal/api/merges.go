@@ -146,10 +146,14 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		return res, recordConflict{"merge_refused", "both records have their own user id, so they are two accounts in your product and are never merged; link them as the same human instead"}
 	}
 
+	// What the merge changes, written down so it can be undone (unmerge).
+	var led mergeLedger
+	fromArchived := from.Archived
+
 	// Identities: close each on from and give into the same one, keeping
 	// when it was first seen and whether it was verified.
 	rows, err := tx.Query(ctx, `UPDATE record_identities SET valid_to = now(), closed_reason = 'merged'
-		WHERE record_id = $1 AND valid_to IS NULL RETURNING namespace, value, verified, verified_at, properties, source, valid_from`, from.ID)
+		WHERE record_id = $1 AND valid_to IS NULL RETURNING namespace, value, verified, verified_at, properties, source, valid_from, id::text`, from.ID)
 	if err != nil {
 		return res, err
 	}
@@ -160,27 +164,35 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		properties       map[string]any
 		source           string
 		validFrom        time.Time
+		id               string
 	}
 	ids, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (moved, error) {
 		var m moved
-		err := row.Scan(&m.namespace, &m.value, &m.verified, &m.verifiedAt, &m.properties, &m.source, &m.validFrom)
+		err := row.Scan(&m.namespace, &m.value, &m.verified, &m.verifiedAt, &m.properties, &m.source, &m.validFrom, &m.id)
 		return m, err
 	})
 	if err != nil {
 		return res, err
 	}
 	for _, m := range ids {
-		tag, err := tx.Exec(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, properties, source, valid_from, created_by)
+		led.identClosed = append(led.identClosed, m.id)
+		var id string
+		var inserted bool
+		err := tx.QueryRow(ctx, `INSERT INTO record_identities (workspace_id, record_id, namespace, value, verified, verified_at, properties, source, valid_from, created_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (record_id, namespace, value) WHERE valid_to IS NULL
 			DO UPDATE SET verified = record_identities.verified OR EXCLUDED.verified,
 				verified_at = COALESCE(record_identities.verified_at, EXCLUDED.verified_at),
-				valid_from = LEAST(record_identities.valid_from, EXCLUDED.valid_from)`,
-			a.WorkspaceID, into.ID, m.namespace, m.value, m.verified, m.verifiedAt, m.properties, m.source, m.validFrom, nullIfEmpty(a.ActorID))
+				valid_from = LEAST(record_identities.valid_from, EXCLUDED.valid_from)
+			RETURNING id::text, xmax = 0`,
+			a.WorkspaceID, into.ID, m.namespace, m.value, m.verified, m.verifiedAt, m.properties, m.source, m.validFrom, nullIfEmpty(a.ActorID)).Scan(&id, &inserted)
 		if err != nil {
 			return res, claimError(err, m.namespace)
 		}
-		res.Identities += int(tag.RowsAffected())
+		if inserted {
+			led.identAdded = append(led.identAdded, id)
+		}
+		res.Identities++
 	}
 
 	// Attributes: into keeps its own unless from's came from a source that
@@ -204,6 +216,7 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		}
 		next, src := from.Attributes[key], from.AttributeSources[key]
 		prev, had := into.Attributes[key]
+		prevSource := into.AttributeSources[key]
 		switch {
 		case f.Multiple && had:
 			list, _ := prev.([]any)
@@ -220,6 +233,7 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 			continue
 		}
 		into.Attributes[key], into.AttributeSources[key] = next, src
+		led.fields = append(led.fields, ledgerField{Key: key, Prev: prev, Next: next, Had: had, PrevSource: prevSource})
 		if err := attributeChanged(ctx, tx, a, into.ID, key, prev, next, had, src); err != nil {
 			return res, err
 		}
@@ -230,6 +244,7 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		}
 		res.Attributes++
 	}
+	intoName := into.Name
 	if into.Name == "" && from.Name != "" {
 		if err := attributeChanged(ctx, tx, a, into.ID, "name", into.Name, from.Name, true, "manual"); err != nil {
 			return res, err
@@ -254,31 +269,43 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		return res, err
 	}
 	for _, p := range pointers {
-		if err := repoint(ctx, tx, a, p.id, p.field, from.ID, into.ID); err != nil {
+		prev, next, changed, err := repoint(ctx, tx, a, p.id, p.field, from.ID, into.ID)
+		if err != nil {
 			return res, err
+		}
+		if changed {
+			led.pointers = append(led.pointers, ledgerPointer{Record: p.id, Key: p.field, Prev: prev, Next: next})
 		}
 		res.Relationships++
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO record_relationships (workspace_id, from_id, to_id, kind, properties, valid_from, created_by)
+	rows, err = tx.Query(ctx, `INSERT INTO record_relationships (workspace_id, from_id, to_id, kind, properties, valid_from, created_by)
 		SELECT workspace_id, CASE WHEN from_id = $1 THEN $2 ELSE from_id END, CASE WHEN to_id = $1 THEN $2 ELSE to_id END, kind, properties, valid_from, $3
 		FROM record_relationships
 		WHERE (from_id = $1 OR to_id = $1) AND valid_to IS NULL AND field_key IS NULL
 			AND CASE WHEN from_id = $1 THEN to_id ELSE from_id END <> $2
-		ON CONFLICT DO NOTHING`, from.ID, into.ID, nullIfEmpty(a.ActorID))
+		ON CONFLICT DO NOTHING RETURNING id::text`, from.ID, into.ID, nullIfEmpty(a.ActorID))
 	if err != nil {
 		return res, err
 	}
-	res.Relationships += int(tag.RowsAffected())
-	if _, err := tx.Exec(ctx, `UPDATE record_relationships SET valid_to = now() WHERE (from_id = $1 OR to_id = $1) AND valid_to IS NULL`, from.ID); err != nil {
+	if led.linkAdded, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		return res, err
+	}
+	res.Relationships += len(led.linkAdded)
+	rows, err = tx.Query(ctx, `UPDATE record_relationships SET valid_to = now() WHERE (from_id = $1 OR to_id = $1) AND valid_to IS NULL RETURNING id::text`, from.ID)
+	if err != nil {
+		return res, err
+	}
+	if led.linkClosed, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
 		return res, err
 	}
 
 	// Events, consents and everything Outflare sent or heard from the
 	// person follow them.
-	follow, err := customers.Follow(ctx, tx, a.WorkspaceID, from.ID, into.ID)
+	follow, followed, err := customers.FollowRows(ctx, tx, a.WorkspaceID, from.ID, into.ID)
 	if err != nil {
 		return res, err
 	}
+	led.follows = followed
 	res.Events, res.Consents, res.Subscriptions = follow["customer_events"], follow["consents"], follow["payment_subscriptions"]
 	res.Activity = follow["leads"] + follow["messages"] + follow["inbound_messages"] + follow["meetings"] + follow["deals"] + follow["emails"] + follow["email_broadcast_recipients"] + follow["journey_runs"]
 
@@ -291,7 +318,11 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 		return res, err
 	}
 	// Earlier merges into from now lead to into.
-	if _, err := tx.Exec(ctx, `UPDATE records SET merged_into = $2 WHERE merged_into = $1`, from.ID, into.ID); err != nil {
+	rows, err = tx.Query(ctx, `UPDATE records SET merged_into = $2 WHERE merged_into = $1 RETURNING id::text`, from.ID, into.ID)
+	if err != nil {
+		return res, err
+	}
+	if led.mergedInto, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
 		return res, err
 	}
 	// Billing fields are worked out again from both people's payments, not
@@ -309,8 +340,17 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 	}
 
 	// The pair is settled; from's other pairs are asked again about into.
-	if _, err := tx.Exec(ctx, `UPDATE record_merge_candidates SET status = 'merged', decided_by = $2, decided_at = now()
-		WHERE (record_a = $1 OR record_b = $1) AND status IN ('open', 'blocked')`, from.ID, nullIfEmpty(a.ActorID)); err != nil {
+	rows, err = tx.Query(ctx, `WITH was AS (SELECT id, status FROM record_merge_candidates
+			WHERE (record_a = $1 OR record_b = $1) AND status IN ('open', 'blocked') FOR UPDATE)
+		UPDATE record_merge_candidates c SET status = 'merged', decided_by = $2, decided_at = now()
+		FROM was WHERE c.id = was.id RETURNING c.id::text, was.status`, from.ID, nullIfEmpty(a.ActorID))
+	if err != nil {
+		return res, err
+	}
+	if led.candidates, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (ledgerCandidate, error) {
+		var c ledgerCandidate
+		return c, row.Scan(&c.ID, &c.Status)
+	}); err != nil {
 		return res, err
 	}
 	rows, err = tx.Query(ctx, `SELECT namespace, value FROM record_identities WHERE record_id = $1 AND valid_to IS NULL AND namespace = ANY($2)`, into.ID, duplicateNamespaces)
@@ -333,12 +373,18 @@ func mergeRecords(ctx context.Context, tx pgx.Tx, a *access, c *catalog, intoID,
 	}
 
 	summary, _ := json.Marshal(res)
-	if _, err := tx.Exec(ctx, `INSERT INTO record_merges (workspace_id, into_id, from_id, moved, merged_by, request_id) VALUES ($1, $2, $3, $4, $5, $6)`,
-		a.WorkspaceID, into.ID, from.ID, string(summary), nullIfEmpty(a.ActorID), RequestID(ctx)); err != nil {
+	var mergeID string
+	if err := tx.QueryRow(ctx, `INSERT INTO record_merges (workspace_id, into_id, from_id, moved, merged_by, request_id, reversible, snapshot)
+		VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id::text`,
+		a.WorkspaceID, into.ID, from.ID, string(summary), nullIfEmpty(a.ActorID), RequestID(ctx),
+		map[string]any{"from_archived": fromArchived, "into_name": intoName, "name": into.Name}).Scan(&mergeID); err != nil {
+		return res, err
+	}
+	if err := led.save(ctx, tx, a.WorkspaceID, mergeID); err != nil {
 		return res, err
 	}
 	return res, record(ctx, tx, &a.principal, a.WorkspaceID, "record.merged", "record", into.ID, map[string]any{
-		"type": into.Type, "from_id": from.ID, "identities": res.Identities, "attributes": res.Attributes,
+		"type": into.Type, "from_id": from.ID, "merge_id": mergeID, "identities": res.Identities, "attributes": res.Attributes,
 		"relationships": res.Relationships, "events": res.Events, "consents": res.Consents,
 		"subscriptions": res.Subscriptions, "activity": res.Activity,
 	})
@@ -354,11 +400,12 @@ func asList(v any) []any {
 	return []any{v}
 }
 
-// repoint changes a record's reference field from one record to another.
-func repoint(ctx context.Context, tx pgx.Tx, a *access, id, field, from, to string) error {
+// repoint changes a record's reference field from one record to another,
+// and returns the field's value before and after, and whether it changed.
+func repoint(ctx context.Context, tx pgx.Tx, a *access, id, field, from, to string) (any, any, bool, error) {
 	var attrs map[string]any
 	if err := tx.QueryRow(ctx, `SELECT attributes FROM records WHERE id = $1 FOR UPDATE`, id).Scan(&attrs); err != nil {
-		return err
+		return nil, nil, false, err
 	}
 	prev, had := attrs[field]
 	var next any
@@ -377,16 +424,16 @@ func repoint(ctx context.Context, tx pgx.Tx, a *access, id, field, from, to stri
 		}
 		next = list
 	default:
-		return nil
+		return nil, nil, false, nil
 	}
 	attrs[field] = next
 	if err := attributeChanged(ctx, tx, a, id, field, prev, next, had, "manual"); err != nil {
-		return err
+		return nil, nil, false, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE records SET attributes = $2, version = version + 1, updated_at = now() WHERE id = $1`, id, attrs); err != nil {
-		return err
+		return nil, nil, false, err
 	}
-	return syncReferences(ctx, tx, a, id, field, next)
+	return prev, next, true, syncReferences(ctx, tx, a, id, field, next)
 }
 
 // ---- Handlers ----

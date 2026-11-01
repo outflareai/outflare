@@ -171,9 +171,13 @@ type partnerProgramView struct {
 	LeadExpiryDays *int `json:"lead_expiry_days"`
 	// URLParams are query parameters besides ref and via that carry a
 	// partner's code on the website, such as aff for links made elsewhere.
-	URLParams []string  `json:"url_params"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	URLParams []string `json:"url_params"`
+	// BlockAdClicks and BlockSocialClicks: a website visit with a ref that
+	// came from a paid ad click, or from social media, doesn't credit.
+	BlockAdClicks     bool      `json:"block_ad_clicks"`
+	BlockSocialClicks bool      `json:"block_social_clicks"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 const partnerProgramSelect = `
@@ -182,7 +186,8 @@ const partnerProgramSelect = `
 	       p.payout_term_days, p.payout_methods, p.payout_tokens, p.terms_url, p.sales_source, p.postback_hint, p.portal_enabled, p.portal_subdomain, p.portal, p.default_group_id::text,
 	       (SELECT count(*) FROM partner_memberships m WHERE m.program_id = p.id)::int,
 	       COALESCE((SELECT i.connector FROM partner_imports i WHERE i.program_id = p.id AND i.workspace_id = p.workspace_id AND i.status = 'done'
-	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.url_params, p.created_at, p.updated_at
+	                 ORDER BY i.created_at DESC LIMIT 1), ''), p.switched_over_at, p.lead_expiry_days, p.url_params,
+	       p.block_ad_clicks, p.block_social_clicks, p.created_at, p.updated_at
 	FROM partner_programs p WHERE p.workspace_id = $1`
 
 func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
@@ -191,7 +196,8 @@ func scanPartnerProgram(row pgx.Row) (partnerProgramView, error) {
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Kind, &v.Status, &v.BrandID, &v.LandingURL, &v.Currency, &v.CreditWindowDays, &v.CreditModel,
 		&v.CodesWin, &v.BlockSelfReferrals, &v.HoldDays, &v.AutoApprove, &v.AutoAccept, &v.PayBrowserSignups, &v.MinPayoutCents,
 		&v.PayoutTermDays, &v.PayoutMethods, &v.PayoutTokens, &v.TermsURL, &v.SalesSource, &v.PostbackHint,
-		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.URLParams, &v.CreatedAt, &v.UpdatedAt)
+		&v.PortalEnabled, &v.PortalSubdomain, &portal, &v.DefaultGroupID, &v.Partners, &v.ImportedFrom, &v.SwitchedOverAt, &v.LeadExpiryDays, &v.URLParams,
+		&v.BlockAdClicks, &v.BlockSocialClicks, &v.CreatedAt, &v.UpdatedAt)
 	if err == nil {
 		v.Portal = portalFor(v.Kind, portal)
 	}
@@ -345,6 +351,8 @@ type partnerProgramInput struct {
 	Rules              *[]partnerRuleIn `json:"rules"`
 	LeadExpiryDays     optional[int]    `json:"lead_expiry_days"`
 	URLParams          *[]string        `json:"url_params"`
+	BlockAdClicks      *bool            `json:"block_ad_clicks"`
+	BlockSocialClicks  *bool            `json:"block_social_clicks"`
 }
 
 var (
@@ -573,6 +581,10 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if _, err := tx.Exec(ctx, `UPDATE partner_programs SET block_ad_clicks = COALESCE($2, false), block_social_clicks = COALESCE($3, false)
+			WHERE id = $1`, id, in.BlockAdClicks, in.BlockSocialClicks); err != nil {
+			return err
+		}
 		rules := p.Rules
 		if in.Rules != nil {
 			if rules, err = checkPartnerRules(*in.Rules, nil, nil); err != nil {
@@ -696,6 +708,19 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			changed = append(changed, "url_params")
+		}
+		if in.BlockAdClicks != nil || in.BlockSocialClicks != nil {
+			if _, err := tx.Exec(ctx, `UPDATE partner_programs SET block_ad_clicks = COALESCE($3, block_ad_clicks),
+				block_social_clicks = COALESCE($4, block_social_clicks) WHERE workspace_id = $1 AND id = $2`,
+				a.WorkspaceID, cur.ID, in.BlockAdClicks, in.BlockSocialClicks); err != nil {
+				return err
+			}
+			if in.BlockAdClicks != nil {
+				changed = append(changed, "block_ad_clicks")
+			}
+			if in.BlockSocialClicks != nil {
+				changed = append(changed, "block_social_clicks")
+			}
 		}
 		slices.Sort(changed)
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.updated", "partner_program", cur.ID,

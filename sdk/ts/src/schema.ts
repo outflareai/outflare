@@ -17543,6 +17543,170 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/merges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List merges
+         * @description Scope: customers.read. The brand's merges, newest first: which record was kept (into_id), which was merged
+         *     into it (from_id) and what moved. undoable says whether POST .../merges/{merge}/undo would undo it now.
+         */
+        get: operations["listMerges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/merges/{merge}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                merge: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo a merge
+         * @description Scope: customers.manage. Unmerges: the merged record is a record of its own again (no longer merged or
+         *     archived), every row the merge moved goes back to it (identities, links, events, consents, emails, list
+         *     places and the rest), and the kept record's fields the merge filled go back to what they were. What was
+         *     added to the kept record after the merge stays there, and a field changed since the merge keeps its new
+         *     value (listed in not_restored as changed). Nothing fires: no rule, journey or email; record.unmerged is
+         *     recorded (also a webhook event). 409 merge_not_reversible for a merge made before Outflare kept what merges
+         *     move; 409 merge_not_latest while a later merge involves either record (undo the newest first); 409
+         *     merge_already_undone.
+         */
+        post: operations["undoMerge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List import and ingest batches
+         * @description Scope: customers.read. The brand's batches, newest first: CSV imports of leads (csv_import), CRM imports
+         *     (crm_import) and sends of product events (events). Everything a batch writes carries it, so it can be undone
+         *     in one step (GET .../undo-preview, then POST .../undo). counts is what it made that is still here.
+         */
+        get: operations["listBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/batches/{batch}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a batch
+         * @description Scope: customers.read. One batch, with what it made and whether (and how) it was undone.
+         */
+        get: operations["getBatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/batches/{batch}/undo-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Preview undoing a batch
+         * @description Scope: customers.read. What the batch made, what changed since (records someone else edited, emailed, paid
+         *     or had other activity on; records merged since; fields changed since; leads already in a sequence), with
+         *     the changed items (up to 200), and what each mode would undo. untouched undoes only what nobody changed
+         *     since; everything takes the changed records too. Neither undoes a merged record, a field changed since or a
+         *     lead in a sequence: those are listed with removed_by_everything false.
+         */
+        get: operations["previewBatchUndo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/batches/{batch}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo a batch
+         * @description Scope: customers.manage. Undoes the batch in the mode you choose: untouched (what nobody changed since) or
+         *     everything (changed records too). Records it created are deleted with their identities, links, events and
+         *     list places; what it added to other records (identities, links, events, list places) is removed; fields it
+         *     set go back to their earlier value while they still hold its value; leads it created go unless a sequence
+         *     used them. It is all one deletion of kind batch in Recently deleted, restorable for 7 days in one step.
+         *     Emails already sent stay, and the timeline marks them as from an undone batch (detail.undone_batch_id).
+         *     Nothing fires for what it removes; batch.undone is recorded (also a webhook event). A large batch (over
+         *     2,000 rows) is undone in the background: 202 with the batch, whose undo.status goes queued, then done or
+         *     failed. 409 batch_already_undone; 409 batch_undo_running.
+         */
+        post: operations["undoBatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/brands/{brand}": {
         parameters: {
             query?: never;
@@ -24971,6 +25135,40 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "record.unmerged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A merge was undone: the merged record is a record of its own again and every row the merge moved went back to it. The target is that record; data has merge_id, into_id (the record that had been kept), from_id, brand_id, restored (rows by table) and not_restored (how many couldn't go back). */
+        post: operations["webhook_record_unmerged"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "batch.undone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** An import or ingest batch was undone, into Recently deleted (restorable for 7 days). The target is the batch; data has kind (csv_import, crm_import, events), mode (untouched or everything), brand_id, deletion_id and counts (what was removed or put back, what was kept, and what had changed since, by kind). Nothing is sent for what it removed. */
+        post: operations["webhook_batch_undone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "brand.created": {
         parameters: {
             query?: never;
@@ -27077,7 +27275,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -28725,6 +28923,10 @@ export interface components {
             lead_expiry_days: number | null;
             /** @description Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made on another platform. */
             url_params: string[];
+            /** @description A website visit with a partner's ref that came from a paid ad click (it carries an ad network's click id, such as gclid) doesn't credit the partner. */
+            block_ad_clicks: boolean;
+            /** @description A website visit with a partner's ref that came from social media (fbclid, or a social network as referrer) doesn't credit the partner. */
+            block_social_clicks: boolean;
             terms_url: string;
             /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only. */
             sales_source: string;
@@ -28915,6 +29117,10 @@ export interface components {
             lead_expiry_days?: number | null;
             /** @description Extra query parameters carrying a partner's code, such as aff or fpr; not ref, via, utm_…, of… or an ad click id. [] for none. */
             url_params?: string[];
+            /** @description Visits from paid ad clicks don't credit partners. false when left out on create. */
+            block_ad_clicks?: boolean;
+            /** @description Visits from social media don't credit partners. false when left out on create. */
+            block_social_clicks?: boolean;
             terms_url?: string;
             /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. "" for none. */
             sales_source?: string;
@@ -37383,6 +37589,11 @@ export interface components {
             list_id?: string;
         };
         LeadImportResult: {
+            /**
+             * Format: uuid
+             * @description The import's batch: GET /v1/brands/{brand}/batches/{batch} shows it, and it can be undone in one step.
+             */
+            batch_id?: string | null;
             created: number;
             updated: number;
             /** @description Rows merged into an earlier row with the same email. */
@@ -39716,16 +39927,16 @@ export interface components {
             /** Format: uuid */
             brand_id: string;
             /** @enum {string} */
-            kind: "record" | "field_value" | "identity" | "relationship" | "event";
+            kind: "record" | "field_value" | "identity" | "relationship" | "event" | "batch";
             /**
              * Format: uuid
-             * @description The record it is about; null for an event of nobody known.
+             * @description The record it is about; null for an event of nobody known, and for an undone batch.
              */
             record_id: string | null;
             record_type: string | null;
-            /** @description What was deleted, as people know it: the record's name, the field's key, the identity's value, the link's kind or the event's name. */
+            /** @description What was deleted, as people know it: the record's name, the field's key, the identity's value, the link's kind, the event's name, or an undone batch's list or kind. */
             label: string;
-            /** @description The id of what was deleted, or the field's key. */
+            /** @description The id of what was deleted, the field's key, or an undone batch's id. */
             target: string;
             /** @description Rows it holds, by table, as deleted (journey_runs_ended: journeys that ended). */
             counts: {
@@ -39764,6 +39975,141 @@ export interface components {
             };
             /** @enum {string} */
             outcome: "restored" | "partly_restored" | "not_restored";
+        };
+        /** @description One merge of a record into another. */
+        Merge: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /**
+             * Format: uuid
+             * @description The record kept.
+             */
+            into_id: string;
+            /**
+             * Format: uuid
+             * @description The record merged into it.
+             */
+            from_id: string;
+            /** @description What moved: identities, attributes, relationships, events, consents, subscriptions, activity. */
+            moved: {
+                [key: string]: number;
+            };
+            /**
+             * Format: uuid
+             * @description The actor who merged; null for Outflare itself.
+             */
+            merged_by: string | null;
+            /** Format: date-time */
+            merged_at: string;
+            /** @description False for a merge made before Outflare kept what merges move: it can't be undone. */
+            reversible: boolean;
+            /** Format: date-time */
+            undone_at: string | null;
+            /** @description Whether undoing it would work now: reversible, not undone, and no later merge involves either record. */
+            undoable: boolean;
+        };
+        Unmerge: {
+            merge: components["schemas"]["Merge"];
+            /** @description Rows that went back to the merged record, by table, and fields put back (fields, references). */
+            restored: {
+                [key: string]: number;
+            };
+            /** @description What couldn't go back: a field changed since the merge (changed), or an identity or link someone else holds now (taken). */
+            not_restored: {
+                table: string;
+                id: string;
+                /** @enum {string} */
+                reason: "taken" | "gone" | "changed" | "record_deleted";
+            }[];
+        };
+        /** @description One import or ingest batch. */
+        Batch: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /**
+             * @description A CSV import of leads, a CRM import (same id as the CRM import) or one send of product events (same id as the send's batch_id).
+             * @enum {string}
+             */
+            kind: "csv_import" | "crm_import" | "events";
+            /** @description csv, the CRM connector, or the events' source label. */
+            source: string;
+            /** @description The list a CSV went into, or empty. */
+            label: string;
+            /** @description What it made that is still here: records, field_values, identities, relationships, events, list_memberships, leads. */
+            counts: {
+                [key: string]: number;
+            };
+            created_by: {
+                actor_type: string;
+                /** Format: uuid */
+                user_id: string | null;
+                /** Format: uuid */
+                token_id: string | null;
+                name: string | null;
+            };
+            /** Format: date-time */
+            created_at: string;
+            undo: {
+                /**
+                 * @description null until it is undone.
+                 * @enum {string|null}
+                 */
+                status: "queued" | "running" | "done" | "failed" | null;
+                /** @enum {string|null} */
+                mode: "untouched" | "everything" | null;
+                /** Format: date-time */
+                undone_at: string | null;
+                /**
+                 * Format: uuid
+                 * @description The deletion in Recently deleted that holds what the undo removed; restore it to bring the batch back.
+                 */
+                deletion_id: string | null;
+                /** @description What the undo removed or put back by table (records, attributes for field values, ...), records_kept, and changed_<kind> for what had changed since. */
+                counts: {
+                    [key: string]: number;
+                };
+                error: string | null;
+            };
+        };
+        BatchChangedItem: {
+            /** @enum {string} */
+            kind: "edited" | "emailed" | "paid" | "activity" | "merged" | "field_changed" | "lead_in_sequence";
+            /** Format: uuid */
+            record_id: string | null;
+            /** Format: uuid */
+            lead_id: string | null;
+            /** @description The field, for field_changed. */
+            field: string | null;
+            /** @description Whether undoing everything removes it. False for a merged record, a field changed since and a lead in a sequence: remove those by hand. */
+            removed_by_everything: boolean;
+        };
+        BatchUndoPreview: {
+            batch: components["schemas"]["Batch"];
+            /** @description What the batch made that is still here, by kind. */
+            made: {
+                [key: string]: number;
+            };
+            /** @description What changed since, by kind. */
+            changed_counts: {
+                [key: string]: number;
+            };
+            changed: components["schemas"]["BatchChangedItem"][];
+            /** @description True when there are more changed items than the 200 listed. */
+            changed_truncated: boolean;
+            /** @description What undoing only what's untouched would do: records removed and kept, field_values put back, leads removed. */
+            untouched: {
+                [key: string]: number;
+            };
+            /** @description The same for undoing everything. */
+            everything: {
+                [key: string]: number;
+            };
+            /** @description Whether POST .../undo would run in the background (202). */
+            runs_in_job: boolean;
         };
         /** @description One event, or a batch. */
         CustomerEventsInput: {
@@ -74417,7 +74763,7 @@ export interface operations {
     listRecentlyDeleted: {
         parameters: {
             query?: {
-                kind?: "record" | "field_value" | "identity" | "relationship" | "event";
+                kind?: "record" | "field_value" | "identity" | "relationship" | "event" | "batch";
                 /** @description Only deletions about this record. */
                 record?: string;
                 limit?: number;
@@ -74520,6 +74866,235 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             410: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listMerges: {
+        parameters: {
+            query?: {
+                /** @description Only merges this record was kept or merged in. */
+                record?: string;
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merges, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Merge"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    undoMerge: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                merge: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The merge, undone, with what went back. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unmerge"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBatches: {
+        parameters: {
+            query?: {
+                kind?: "csv_import" | "crm_import" | "events";
+                limit?: number;
+                before?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Batches, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Batch"][];
+                        next_before: string | null;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The batch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    previewBatchUndo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The preview. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchUndoPreview"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    undoBatch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    mode: "untouched" | "everything";
+                };
+            };
+        };
+        responses: {
+            /** @description The batch, undone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"];
+                };
+            };
+            /** @description Queued (a large batch, undone in the background), or held in a mission. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Batch"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -87592,6 +88167,50 @@ export interface operations {
         };
     };
     webhook_deletion_restored: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_record_unmerged: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_batch_undone: {
         parameters: {
             query?: never;
             header?: never;

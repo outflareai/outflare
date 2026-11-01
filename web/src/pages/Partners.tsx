@@ -859,6 +859,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
   const [tokens, setTokens] = useState(p.payout_tokens.join(", "));
   const [leadDays, setLeadDays] = useState(p.lead_expiry_days === null ? "" : String(p.lead_expiry_days));
   const [urlParams, setURLParams] = useState(p.url_params.join(", "));
+  const [blockAds, setBlockAds] = useState(p.block_ad_clicks);
+  const [blockSocial, setBlockSocial] = useState(p.block_social_clicks);
   const [salesSource, setSalesSource] = useState(p.sales_source);
   const [postback, setPostback] = useState("");
   const [busy, setBusy] = useState(false);
@@ -873,7 +875,7 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
       body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
         payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
         lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays),
-        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) },
+        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), block_ad_clicks: blockAds, block_social_clicks: blockSocial },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -941,6 +943,12 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
               hint="Besides ref and via: parameters that carry a partner's code on your website, such as those of links made on another platform. Comma separated." />
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Approve rewards on their own when the hold ends
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={blockAds} onChange={(e) => setBlockAds(e.target.checked)} /> Don't credit website visits from paid ads (partners bidding on your brand)
+            </label>
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={blockSocial} onChange={(e) => setBlockSocial(e.target.checked)} /> Don't credit website visits from social media
             </label>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={blockSelf} onChange={(e) => setBlockSelf(e.target.checked)} /> Block self-referrals: a partner's own sign-ups and purchases earn them nothing

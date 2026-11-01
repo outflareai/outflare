@@ -23124,7 +23124,7 @@ paths:
         it goes for good.
       tags: [records]
       parameters:
-        - { name: kind, in: query, schema: { type: string, enum: [record, field_value, identity, relationship, event] } }
+        - { name: kind, in: query, schema: { type: string, enum: [record, field_value, identity, relationship, event, batch] } }
         - { name: record, in: query, description: "Only deletions about this record.", schema: { type: string, format: uuid } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: before, in: query, schema: { type: string } }
@@ -23191,6 +23191,189 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "410": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/merges:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listMerges
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List merges
+      description: |
+        Scope: customers.read. The brand's merges, newest first: which record was kept (into_id), which was merged
+        into it (from_id) and what moved. undoable says whether POST .../merges/{merge}/undo would undo it now.
+      tags: [records]
+      parameters:
+        - { name: record, in: query, description: "Only merges this record was kept or merged in.", schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Merges, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Merge" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/merges/{merge}/undo:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: merge, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: undoMerge
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Undo a merge
+      description: |
+        Scope: customers.manage. Unmerges: the merged record is a record of its own again (no longer merged or
+        archived), every row the merge moved goes back to it (identities, links, events, consents, emails, list
+        places and the rest), and the kept record's fields the merge filled go back to what they were. What was
+        added to the kept record after the merge stays there, and a field changed since the merge keeps its new
+        value (listed in not_restored as changed). Nothing fires: no rule, journey or email; record.unmerged is
+        recorded (also a webhook event). 409 merge_not_reversible for a merge made before Outflare kept what merges
+        move; 409 merge_not_latest while a later merge involves either record (undo the newest first); 409
+        merge_already_undone.
+      tags: [records]
+      responses:
+        "200":
+          description: The merge, undone, with what went back.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Unmerge" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/batches:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listBatches
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: List import and ingest batches
+      description: |
+        Scope: customers.read. The brand's batches, newest first: CSV imports of leads (csv_import), CRM imports
+        (crm_import) and sends of product events (events). Everything a batch writes carries it, so it can be undone
+        in one step (GET .../undo-preview, then POST .../undo). counts is what it made that is still here.
+      tags: [records]
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [csv_import, crm_import, events] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: before, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Batches, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_before, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Batch" } }
+                  next_before: { type: [string, "null"] }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/batches/{batch}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: batch, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBatch
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Read a batch
+      description: "Scope: customers.read. One batch, with what it made and whether (and how) it was undone."
+      tags: [records]
+      responses:
+        "200":
+          description: The batch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/batches/{batch}/undo-preview:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: batch, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: previewBatchUndo
+      x-outflare-access: { scope: customers.read, brand: true }
+      summary: Preview undoing a batch
+      description: |
+        Scope: customers.read. What the batch made, what changed since (records someone else edited, emailed, paid
+        or had other activity on; records merged since; fields changed since; leads already in a sequence), with
+        the changed items (up to 200), and what each mode would undo. untouched undoes only what nobody changed
+        since; everything takes the changed records too. Neither undoes a merged record, a field changed since or a
+        lead in a sequence: those are listed with removed_by_everything false.
+      tags: [records]
+      responses:
+        "200":
+          description: The preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchUndoPreview" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/batches/{batch}/undo:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: batch, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: undoBatch
+      x-outflare-access: { scope: customers.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Undo a batch
+      description: |
+        Scope: customers.manage. Undoes the batch in the mode you choose: untouched (what nobody changed since) or
+        everything (changed records too). Records it created are deleted with their identities, links, events and
+        list places; what it added to other records (identities, links, events, list places) is removed; fields it
+        set go back to their earlier value while they still hold its value; leads it created go unless a sequence
+        used them. It is all one deletion of kind batch in Recently deleted, restorable for 7 days in one step.
+        Emails already sent stay, and the timeline marks them as from an undone batch (detail.undone_batch_id).
+        Nothing fires for what it removes; batch.undone is recorded (also a webhook event). A large batch (over
+        2,000 rows) is undone in the background: 202 with the batch, whose undo.status goes queued, then done or
+        failed. 409 batch_already_undone; 409 batch_undo_running.
+      tags: [records]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [untouched, everything] }
+      responses:
+        "200":
+          description: The batch, undone.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "202":
+          description: Queued (a large batch, undone in the background), or held in a mission.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Batch" }
+                  - { $ref: "#/components/schemas/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/brands/{brand}:
     parameters:
@@ -33918,6 +34101,30 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  record.unmerged:
+    post:
+      operationId: webhook_record_unmerged
+      summary: "A merge was undone: the merged record is a record of its own again and every row the merge moved went back to it. The target is that record; data has merge_id, into_id (the record that had been kept), from_id, brand_id, restored (rows by table) and not_restored (how many couldn't go back)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  batch.undone:
+    post:
+      operationId: webhook_batch_undone
+      summary: "An import or ingest batch was undone, into Recently deleted (restorable for 7 days). The target is the batch; data has kind (csv_import, crm_import, events), mode (untouched or everything), brand_id, deletion_id and counts (what was removed or put back, what was kept, and what had changed since, by kind). Nothing is sent for what it removed."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   brand.created:
     post:
       operationId: webhook_brand_created
@@ -36179,7 +36386,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, record.unmerged, batch.undone, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -37447,7 +37654,7 @@ components:
       type: object
       required: [id, name, slug, kind, status, brand_id, landing_url, currency, credit_window_days, credit_model, codes_win, block_self_referrals, hold_days,
         auto_approve, auto_accept, pay_browser_signups, min_payout_cents, payout_term_days, payout_methods, payout_tokens, terms_url, sales_source, postback_hint, portal_enabled, portal_subdomain, portal, portal_url, rules, groups,
-        partners, imported_from, switched_over_at, lead_expiry_days, url_params, created_at, updated_at]
+        partners, imported_from, switched_over_at, lead_expiry_days, url_params, block_ad_clicks, block_social_clicks, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -37471,6 +37678,8 @@ components:
         payout_tokens: { type: array, items: { type: string }, description: "The crypto tokens partners choose from, such as USDC on Base; empty allows any." }
         lead_expiry_days: { type: [integer, "null"], description: "A referred customer who hasn't bought within this many days of being referred no longer credits the partner (reason lead_expired). null: leads never expire." }
         url_params: { type: array, items: { type: string }, description: "Query parameters besides ref and via that carry a partner's code on the website, such as aff for links made on another platform." }
+        block_ad_clicks: { type: boolean, description: "A website visit with a partner's ref that came from a paid ad click (it carries an ad network's click id, such as gclid) doesn't credit the partner." }
+        block_social_clicks: { type: boolean, description: "A website visit with a partner's ref that came from social media (fbclid, or a social network as referrer) doesn't credit the partner." }
         terms_url: { type: string }
         sales_source: { type: string, description: "A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only." }
         postback_hint: { type: string, description: "The start of the postback URL's secret; '' when there is none." }
@@ -37615,6 +37824,8 @@ components:
         payout_tokens: { type: array, maxItems: 20, items: { type: string, maxLength: 40 }, description: "Crypto tokens, such as USDC on Base; empty allows any." }
         lead_expiry_days: { type: [integer, "null"], minimum: 1, maximum: 3650, description: "Days a referred lead has to buy before it stops crediting the partner; null never expires." }
         url_params: { type: array, maxItems: 5, items: { type: string, pattern: "^[a-z][a-z0-9_]{0,31}$" }, description: "Extra query parameters carrying a partner's code, such as aff or fpr; not ref, via, utm_…, of… or an ad click id. [] for none." }
+        block_ad_clicks: { type: boolean, description: "Visits from paid ad clicks don't credit partners. false when left out on create." }
+        block_social_clicks: { type: boolean, description: "Visits from social media don't credit partners. false when left out on create." }
         terms_url: { type: string, maxLength: 2000 }
         sales_source: { type: string, description: "A billing connector's id (stripe): its synced payments and refunds become partner sales too. \"\" for none." }
         rules: { type: array, maxItems: 50, items: { $ref: "#/components/schemas/PartnerRuleInput" }, description: "Create only: the preset's rules when left out." }
@@ -44265,6 +44476,7 @@ components:
       type: object
       required: [created, updated, duplicates, suppressed, errors, list_id]
       properties:
+        batch_id: { type: [string, "null"], format: uuid, description: "The import's batch: GET /v1/brands/{brand}/batches/{batch} shows it, and it can be undone in one step." }
         created: { type: integer }
         updated: { type: integer }
         duplicates: { type: integer, description: Rows merged into an earlier row with the same email. }
@@ -46086,11 +46298,11 @@ components:
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: string, format: uuid }
-        kind: { type: string, enum: [record, field_value, identity, relationship, event] }
-        record_id: { type: [string, "null"], format: uuid, description: "The record it is about; null for an event of nobody known." }
+        kind: { type: string, enum: [record, field_value, identity, relationship, event, batch] }
+        record_id: { type: [string, "null"], format: uuid, description: "The record it is about; null for an event of nobody known, and for an undone batch." }
         record_type: { type: [string, "null"] }
-        label: { type: string, description: "What was deleted, as people know it: the record's name, the field's key, the identity's value, the link's kind or the event's name." }
-        target: { type: string, description: "The id of what was deleted, or the field's key." }
+        label: { type: string, description: "What was deleted, as people know it: the record's name, the field's key, the identity's value, the link's kind, the event's name, or an undone batch's list or kind." }
+        target: { type: string, description: "The id of what was deleted, the field's key, or an undone batch's id." }
         counts: { type: object, additionalProperties: { type: integer }, description: "Rows it holds, by table, as deleted (journey_runs_ended: journeys that ended)." }
         deleted_by:
           type: object
@@ -46121,6 +46333,88 @@ components:
           properties:
             restored: { type: object, additionalProperties: { type: integer }, description: "Rows that came back, by table." }
             outcome: { type: string, enum: [restored, partly_restored, not_restored] }
+    Merge:
+      type: object
+      description: One merge of a record into another.
+      required: [id, brand_id, into_id, from_id, moved, merged_by, merged_at, reversible, undone_at, undoable]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: [string, "null"], format: uuid }
+        into_id: { type: string, format: uuid, description: The record kept. }
+        from_id: { type: string, format: uuid, description: The record merged into it. }
+        moved: { type: object, additionalProperties: { type: integer }, description: "What moved: identities, attributes, relationships, events, consents, subscriptions, activity." }
+        merged_by: { type: [string, "null"], format: uuid, description: "The actor who merged; null for Outflare itself." }
+        merged_at: { type: string, format: date-time }
+        reversible: { type: boolean, description: "False for a merge made before Outflare kept what merges move: it can't be undone." }
+        undone_at: { type: [string, "null"], format: date-time }
+        undoable: { type: boolean, description: "Whether undoing it would work now: reversible, not undone, and no later merge involves either record." }
+    Unmerge:
+      type: object
+      required: [merge, restored, not_restored]
+      properties:
+        merge: { $ref: "#/components/schemas/Merge" }
+        restored: { type: object, additionalProperties: { type: integer }, description: "Rows that went back to the merged record, by table, and fields put back (fields, references)." }
+        not_restored:
+          type: array
+          description: "What couldn't go back: a field changed since the merge (changed), or an identity or link someone else holds now (taken)."
+          items:
+            type: object
+            required: [table, id, reason]
+            properties:
+              table: { type: string }
+              id: { type: string }
+              reason: { type: string, enum: [taken, gone, changed, record_deleted] }
+    Batch:
+      type: object
+      description: One import or ingest batch.
+      required: [id, brand_id, kind, source, label, counts, created_by, created_at, undo]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        kind: { type: string, enum: [csv_import, crm_import, events], description: "A CSV import of leads, a CRM import (same id as the CRM import) or one send of product events (same id as the send's batch_id)." }
+        source: { type: string, description: "csv, the CRM connector, or the events' source label." }
+        label: { type: string, description: "The list a CSV went into, or empty." }
+        counts: { type: object, additionalProperties: { type: integer }, description: "What it made that is still here: records, field_values, identities, relationships, events, list_memberships, leads." }
+        created_by:
+          type: object
+          required: [actor_type, user_id, token_id, name]
+          properties:
+            actor_type: { type: string }
+            user_id: { type: [string, "null"], format: uuid }
+            token_id: { type: [string, "null"], format: uuid }
+            name: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        undo:
+          type: object
+          required: [status, mode, undone_at, deletion_id, counts, error]
+          properties:
+            status: { type: [string, "null"], enum: [queued, running, done, failed, null], description: "null until it is undone." }
+            mode: { type: [string, "null"], enum: [untouched, everything, null] }
+            undone_at: { type: [string, "null"], format: date-time }
+            deletion_id: { type: [string, "null"], format: uuid, description: "The deletion in Recently deleted that holds what the undo removed; restore it to bring the batch back." }
+            counts: { type: object, additionalProperties: { type: integer }, description: "What the undo removed or put back by table (records, attributes for field values, ...), records_kept, and changed_<kind> for what had changed since." }
+            error: { type: [string, "null"] }
+    BatchChangedItem:
+      type: object
+      required: [kind, record_id, lead_id, field, removed_by_everything]
+      properties:
+        kind: { type: string, enum: [edited, emailed, paid, activity, merged, field_changed, lead_in_sequence] }
+        record_id: { type: [string, "null"], format: uuid }
+        lead_id: { type: [string, "null"], format: uuid }
+        field: { type: [string, "null"], description: "The field, for field_changed." }
+        removed_by_everything: { type: boolean, description: "Whether undoing everything removes it. False for a merged record, a field changed since and a lead in a sequence: remove those by hand." }
+    BatchUndoPreview:
+      type: object
+      required: [batch, made, changed_counts, changed, changed_truncated, untouched, everything, runs_in_job]
+      properties:
+        batch: { $ref: "#/components/schemas/Batch" }
+        made: { type: object, additionalProperties: { type: integer }, description: "What the batch made that is still here, by kind." }
+        changed_counts: { type: object, additionalProperties: { type: integer }, description: "What changed since, by kind." }
+        changed: { type: array, items: { $ref: "#/components/schemas/BatchChangedItem" } }
+        changed_truncated: { type: boolean, description: "True when there are more changed items than the 200 listed." }
+        untouched: { type: object, additionalProperties: { type: integer }, description: "What undoing only what's untouched would do: records removed and kept, field_values put back, leads removed." }
+        everything: { type: object, additionalProperties: { type: integer }, description: "The same for undoing everything." }
+        runs_in_job: { type: boolean, description: "Whether POST .../undo would run in the background (202)." }
     CustomerEventsInput:
       type: object
       additionalProperties: true

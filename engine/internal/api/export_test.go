@@ -14,6 +14,14 @@ func SetCRMImportSizes(page, batch int, step time.Duration) func() {
 	return func() { crmImportPage, crmImportBatch, crmImportStep = p, b, s }
 }
 
+// SetUndoInline sets how many rows a batch undo does in the request
+// before it runs in a job, and returns a func that puts it back.
+func SetUndoInline(n int) func() {
+	old := undoInline
+	undoInline = n
+	return func() { undoInline = old }
+}
+
 // SyncPayments runs one payment sync now, as its job would.
 func (s *Server) SyncPayments(ctx context.Context, ws, id string) error {
 	return s.syncPayments(ctx, ws, id)

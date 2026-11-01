@@ -229,17 +229,26 @@ func TestScheduledJobWaits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// The job records when it ran, so the check doesn't depend on how long
+	// the setup below takes: a slow runner can take longer than run_at's
+	// head start just to enqueue the job and start the worker.
 	var ran atomic.Bool
+	var ranAt atomic.Int64
 	q := newQueue(pool)
-	q.Handle("later", func(ctx context.Context, j jobs.Job) error { ran.Store(true); return nil })
-	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "later", RunAt: time.Now().Add(400 * time.Millisecond)})
+	q.Handle("later", func(ctx context.Context, j jobs.Job) error {
+		ranAt.Store(time.Now().UnixMicro())
+		ran.Store(true)
+		return nil
+	})
+	runAt := time.Now().Add(400 * time.Millisecond)
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "later", RunAt: runAt})
 	go q.Run(ctx, 1)
 
-	time.Sleep(200 * time.Millisecond)
-	if ran.Load() {
-		t.Fatal("job ran before run_at")
-	}
 	waitFor(t, ran.Load)
+	// Postgres keeps microseconds, so compare at that precision.
+	if got, want := ranAt.Load(), runAt.UnixMicro(); got < want {
+		t.Fatalf("job ran %v before run_at", time.Duration(want-got)*time.Microsecond)
+	}
 }
 
 func TestEnqueueInRolledBackTxLeavesNoJob(t *testing.T) {

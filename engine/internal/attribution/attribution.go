@@ -198,6 +198,13 @@ func byHost(host string) (Touch, bool) {
 	return Touch{}, false
 }
 
+// SocialReferrer reports whether a referrer host is a social network
+// (Reddit included), as Classify sees it.
+func SocialReferrer(host string) bool {
+	t, ok := byHost(host)
+	return ok && (t.Channel == "organic_social" || t.Channel == "reddit")
+}
+
 func cleanHost(h string) string {
 	h = strings.ToLower(strings.TrimSpace(h))
 	if strings.Contains(h, "://") {

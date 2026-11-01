@@ -1214,7 +1214,11 @@ var timelineBranches = map[string]string{
 		FROM consents k WHERE k.record_id = ANY($2)`,
 	"message": `SELECT 'message', m.id::text, COALESCE(m.sent_at, m.created_at), COALESCE(m.subject, ''),
 			jsonb_build_object('direction', 'out', 'status', m.status, 'sequence_id', m.sequence_id, 'step', m.step_position,
-				'mailbox_id', m.mailbox_id, 'lead_id', m.lead_id), 'outreach', m.record_id
+				'mailbox_id', m.mailbox_id, 'lead_id', m.lead_id,
+				-- Sent to someone an undone batch made: the email stays, marked.
+				'undone_batch_id', COALESCE(
+					(SELECT b.id FROM leads ld JOIN batches b ON b.id = ld.batch_id WHERE ld.id = m.lead_id AND b.undone_at IS NOT NULL),
+					(SELECT b.id FROM records rr JOIN batches b ON b.id = rr.batch_id WHERE rr.id = m.record_id AND b.undone_at IS NOT NULL))), 'outreach', m.record_id
 		FROM messages m LEFT JOIN sequences q ON q.id = m.sequence_id
 		WHERE m.workspace_id = $1 AND m.record_id = ANY($2) {brand:q.brand_id}
 		UNION ALL

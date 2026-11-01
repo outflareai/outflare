@@ -5373,7 +5373,9 @@ class Operations(_Mixin):
         ws: str | None = None,
         auto_accept: bool | None = None,
         auto_approve: bool | None = None,
+        block_ad_clicks: bool | None = None,
         block_self_referrals: bool | None = None,
+        block_social_clicks: bool | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -5416,7 +5418,9 @@ class Operations(_Mixin):
             body={
                 "auto_accept": auto_accept,
                 "auto_approve": auto_approve,
+                "block_ad_clicks": block_ad_clicks,
                 "block_self_referrals": block_self_referrals,
+                "block_social_clicks": block_social_clicks,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,
@@ -9549,6 +9553,24 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/backlinks/summary",
             path={"ws": ws},
             query={"brand": brand, "site_id": site_id},
+        )
+
+    def get_batch(
+        self,
+        brand: str,
+        batch: str,
+    ) -> Any:
+        """Read a batch.
+
+        Scope: customers.read. One batch, with what it made and whether (and how) it was undone.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/batches/{batch}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/batches/{batch}",
+            path={"brand": brand, "batch": batch},
         )
 
     def get_brand(
@@ -15033,6 +15055,32 @@ class Operations(_Mixin):
             },
         )
 
+    def list_batches(
+        self,
+        brand: str,
+        *,
+        kind: Literal["csv_import", "crm_import", "events"] | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List import and ingest batches.
+
+        Scope: customers.read. The brand's batches, newest first: CSV imports of leads (csv_import), CRM imports
+        (crm_import) and sends of product events (events). Everything a batch writes carries it, so it can be undone
+        in one step (GET .../undo-preview, then POST .../undo). counts is what it made that is still here.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/batches
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/batches",
+            path={"brand": brand},
+            query={"kind": kind, "limit": limit, "before": before, "cursor": cursor, "fields": fields},
+        )
+
     def list_brand_events(
         self,
         brand: str,
@@ -18064,6 +18112,31 @@ class Operations(_Mixin):
             },
         )
 
+    def list_merges(
+        self,
+        brand: str,
+        *,
+        record: str | None = None,
+        limit: int | None = None,
+        before: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List merges.
+
+        Scope: customers.read. The brand's merges, newest first: which record was kept (into_id), which was merged
+        into it (from_id) and what moved. undoable says whether POST .../merges/{merge}/undo would undo it now.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/merges
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/merges",
+            path={"brand": brand},
+            query={"record": record, "limit": limit, "before": before, "cursor": cursor, "fields": fields},
+        )
+
     def list_messages(
         self,
         *,
@@ -18842,7 +18915,7 @@ class Operations(_Mixin):
         self,
         brand: str,
         *,
-        kind: Literal["record", "field_value", "identity", "relationship", "event"] | None = None,
+        kind: Literal["record", "field_value", "identity", "relationship", "event", "batch"] | None = None,
         record: str | None = None,
         limit: int | None = None,
         before: str | None = None,
@@ -21220,6 +21293,28 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/allocation/plan",
             path={"ws": ws},
+        )
+
+    def preview_batch_undo(
+        self,
+        brand: str,
+        batch: str,
+    ) -> Any:
+        """Preview undoing a batch.
+
+        Scope: customers.read. What the batch made, what changed since (records someone else edited, emailed, paid
+        or had other activity on; records merged since; fields changed since; leads already in a sequence), with
+        the changed items (up to 200), and what each mode would undo. untouched undoes only what nobody changed
+        since; everything takes the changed records too. Neither undoes a merged record, a field changed since or a
+        lead in a sequence: those are listed with removed_by_everything false.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/batches/{batch}/undo-preview
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/batches/{batch}/undo-preview",
+            path={"brand": brand, "batch": batch},
         )
 
     def preview_data_network(
@@ -26142,6 +26237,67 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def undo_batch(
+        self,
+        brand: str,
+        batch: str,
+        *,
+        mode: Literal["untouched", "everything"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Undo a batch.
+
+        Scope: customers.manage. Undoes the batch in the mode you choose: untouched (what nobody changed since) or
+        everything (changed records too). Records it created are deleted with their identities, links, events and
+        list places; what it added to other records (identities, links, events, list places) is removed; fields it
+        set go back to their earlier value while they still hold its value; leads it created go unless a sequence
+        used them. It is all one deletion of kind batch in Recently deleted, restorable for 7 days in one step.
+        Emails already sent stay, and the timeline marks them as from an undone batch (detail.undone_batch_id).
+        Nothing fires for what it removes; batch.undone is recorded (also a webhook event). A large batch (over
+        2,000 rows) is undone in the background: 202 with the batch, whose undo.status goes queued, then done or
+        failed. 409 batch_already_undone; 409 batch_undo_running.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/batches/{batch}/undo
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/batches/{batch}/undo",
+            path={"brand": brand, "batch": batch},
+            body={"mode": mode},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def undo_merge(
+        self,
+        brand: str,
+        merge: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Undo a merge.
+
+        Scope: customers.manage. Unmerges: the merged record is a record of its own again (no longer merged or
+        archived), every row the merge moved goes back to it (identities, links, events, consents, emails, list
+        places and the rest), and the kept record's fields the merge filled go back to what they were. What was
+        added to the kept record after the merge stays there, and a field changed since the merge keeps its new
+        value (listed in not_restored as changed). Nothing fires: no rule, journey or email; record.unmerged is
+        recorded (also a webhook event). 409 merge_not_reversible for a merge made before Outflare kept what merges
+        move; 409 merge_not_latest while a later merge involves either record (undo the newest first); 409
+        merge_already_undone.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/merges/{merge}/undo
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/merges/{merge}/undo",
+            path={"brand": brand, "merge": merge},
+            idempotency_key=idempotency_key,
+        )
+
     def unlink_ai_device(
         self,
         id: str,
@@ -29399,7 +29555,9 @@ class Operations(_Mixin):
         ws: str | None = None,
         auto_accept: bool | None = None,
         auto_approve: bool | None = None,
+        block_ad_clicks: bool | None = None,
         block_self_referrals: bool | None = None,
+        block_social_clicks: bool | None = None,
         brand: str | None = None,
         codes_win: bool | None = None,
         credit_model: Literal["first", "last"] | None = None,
@@ -29438,7 +29596,9 @@ class Operations(_Mixin):
             body={
                 "auto_accept": auto_accept,
                 "auto_approve": auto_approve,
+                "block_ad_clicks": block_ad_clicks,
                 "block_self_referrals": block_self_referrals,
+                "block_social_clicks": block_social_clicks,
                 "brand": brand,
                 "codes_win": codes_win,
                 "credit_model": credit_model,
