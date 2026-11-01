@@ -17,6 +17,8 @@ export const roleGroups: RoleGroup[] = [
       { label: "Mailboxes and domains", help: "Sending mailboxes and their set-up", read: "mailboxes.read", manage: "mailboxes.manage" },
       { label: "Inbox", help: "Replies and conversations", read: "inbox.read", manage: "inbox.manage" },
       { label: "Lifecycle email", help: "Templates, broadcasts and journeys", read: "emails.read", manage: "emails.manage" },
+      { label: "Coverage", help: "Placements, publishers and maintenance tasks", read: "coverage.read", manage: "coverage.manage" },
+      { label: "Coverage finance", help: "Agreements, invoices and payments", read: "coverage.finance.read", manage: "coverage.finance.manage" },
       { label: "SEO", help: "Sites, crawls and experiments", read: "seo.read", manage: "seo.manage" },
       { label: "Social", help: "Watches and drafted posts", read: "social.read", manage: "social.manage" },
       { label: "Partners", help: "Referral, affiliate and influencer programs, rewards and payouts", read: "partners.read", manage: "partners.manage" },
@@ -27,6 +29,7 @@ export const roleGroups: RoleGroup[] = [
       { label: "Infrastructure", help: "Plans for domains and mailboxes", read: "infrastructure.read", manage: "infrastructure.manage" },
     ],
     toggles: [
+      { label: "Approve coverage agreements", help: "Record approval of commercial terms", scope: "coverage.approve" },
       { label: "Edit company and brand context", help: "What Outflare knows about the business", scope: "context.manage" },
       { label: "Send email", help: "Send lifecycle and transactional email", scope: "emails.send" },
       { label: "Post to social accounts", help: "Approve a drafted post so it goes out", scope: "social.post" },

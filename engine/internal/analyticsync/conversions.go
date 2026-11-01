@@ -47,7 +47,7 @@ func (s *Syncer) syncConversions(ctx context.Context, o *connectors.Opened, r co
 	rows, runErr := r.PageConversions(cctx, o.Client, o.Creds, connectors.PageConversionQuery{Site: site, From: day(from), To: day(yesterday), Events: events})
 	cancel()
 	if runErr == nil {
-		n, err := s.storeConversions(ctx, ws, id, site, from, yesterday, backfill, rows)
+		n, err := s.storeConversions(ctx, ws, id, site, p.Host, from, yesterday, backfill, rows, isOutcomeReader(o.Connector))
 		if err != nil {
 			return out, err
 		}
@@ -108,7 +108,7 @@ func (s *Syncer) syncConversions(ctx context.Context, o *connectors.Opened, r co
 // storeConversions replaces the site's rows for the days read. A backfill
 // also drops older days, which counted other events; rows past 16 months
 // go either way.
-func (s *Syncer) storeConversions(ctx context.Context, ws, id, site string, from, to time.Time, backfill bool, rows []connectors.PageConversionRow) (int, error) {
+func (s *Syncer) storeConversions(ctx context.Context, ws, id, site, host string, from, to time.Time, backfill bool, rows []connectors.PageConversionRow, outcomesOnly bool) (int, error) {
 	type key struct{ day, host, path string }
 	seen := make(map[key]bool, len(rows))
 	copyRows := make([][]any, 0, len(rows))
@@ -135,6 +135,29 @@ func (s *Syncer) storeConversions(ctx context.Context, ws, id, site string, from
 		if _, err := tx.Exec(ctx, `DELETE FROM page_conversions WHERE integration_id = $1 AND site = $2 AND (day BETWEEN $3 AND $4 OR day < $5)`, id, site, from, to, oldest); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `DELETE FROM search_ga4_outcomes WHERE workspace_id=$1 AND integration_id=$2 AND site=$3 AND (day BETWEEN $4 AND $5 OR day < $6)`, ws, id, site, from, to, oldest); err != nil {
+			return err
+		}
+		var brand *string
+		if err := tx.QueryRow(ctx, `SELECT analytics_site_brand($1,$2,$3,$4)`, ws, id, site, host).Scan(&brand); err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+		outcomes := [][]any{}
+		for _, x := range rows {
+			d, e := time.Parse(time.DateOnly, x.Day)
+			if e != nil || d.Before(from) || d.After(to) {
+				continue
+			}
+			for _, v := range x.Outcomes {
+				outcomes = append(outcomes, []any{ws, brand, id, site, d, x.Host, x.Path, v.Source, v.Sessions, v.Conversions, v.RevenueMicros, v.Currency})
+			}
+		}
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"search_ga4_outcomes"}, []string{"workspace_id", "brand_id", "integration_id", "site", "day", "host", "path", "source", "sessions", "conversions", "revenue_micros", "currency"}, pgx.CopyFromRows(outcomes)); err != nil {
+			return err
+		}
+		if outcomesOnly {
+			return nil
+		}
 		_, err := tx.CopyFrom(ctx, pgx.Identifier{"page_conversions"},
 			[]string{"workspace_id", "integration_id", "site", "day", "host", "path", "sessions", "visitors", "conversions", "search_sessions", "search_conversions"},
 			pgx.CopyFromRows(copyRows))
@@ -144,4 +167,20 @@ func (s *Syncer) storeConversions(ctx context.Context, ws, id, site string, from
 		return 0, dbError{err}
 	}
 	return len(copyRows), nil
+}
+
+// Adapt collection scheduling without treating GA4 key-event counts as
+// converted sessions in the existing PostHog conversion-rate reports.
+type outcomeAdapter struct {
+	connectors.AnalyticsReader
+	reader connectors.LandingOutcomeReader
+}
+
+func (a outcomeAdapter) PageConversions(ctx context.Context, c *connectors.Client, creds connectors.Creds, q connectors.PageConversionQuery) ([]connectors.PageConversionRow, error) {
+	q.Events = nil
+	return a.reader.LandingOutcomes(ctx, c, creds, q)
+}
+func isOutcomeReader(c connectors.Connector) bool {
+	_, ok := c.(connectors.LandingOutcomeReader)
+	return ok
 }

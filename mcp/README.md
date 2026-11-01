@@ -520,3 +520,74 @@ To try it by hand, run the [MCP Inspector](https://github.com/modelcontextprotoc
 | `act_on_review_request_campaign` | Launch, schedule, pause, resume, archive or duplicate. |
 | `test_review_request_campaign` | Send a test without consuming frequency limits. |
 | `list_review_requests` | Request history and send/click reports. |
+
+### Coverage
+
+Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for fields and choices.
+
+| Tools | Purpose |
+| --- | --- |
+| `list_coverage_publishers`, `get_coverage_publishers`, `create_coverage_publishers`, `update_coverage_publishers` | Manage publishers through the brand-scoped API. |
+| `list_coverage_placements`, `get_coverage_placements`, `create_coverage_placements`, `update_coverage_placements` | Manage placements through the brand-scoped API. |
+| `list_coverage_agreements`, `get_coverage_agreements`, `create_coverage_agreements`, `update_coverage_agreements` | Manage agreements through the brand-scoped API. |
+| `list_coverage_deliverables`, `get_coverage_deliverables`, `create_coverage_deliverables`, `update_coverage_deliverables` | Manage deliverables through the brand-scoped API. |
+| `list_coverage_invoices`, `get_coverage_invoices`, `create_coverage_invoices`, `update_coverage_invoices` | Manage invoices through the brand-scoped API. |
+| `list_coverage_payments`, `get_coverage_payments`, `create_coverage_payments` | Manage payments through the brand-scoped API. |
+| `list_coverage_rates`, `get_coverage_rates`, `create_coverage_rates`, `update_coverage_rates` | Manage rates through the brand-scoped API. |
+| `list_coverage_budgets`, `get_coverage_budgets`, `create_coverage_budgets`, `update_coverage_budgets` | Manage budgets through the brand-scoped API. |
+| `list_coverage_tasks`, `get_coverage_tasks`, `create_coverage_tasks`, `update_coverage_tasks` | Manage tasks through the brand-scoped API. |
+| `list_coverage_candidates`, `get_coverage_candidates`, `create_coverage_candidates`, `update_coverage_candidates` | Manage candidates through the brand-scoped API. |
+| `list_coverage_views`, `get_coverage_views`, `create_coverage_views`, `update_coverage_views` | Manage views through the brand-scoped API. |
+| `get_coverage_schema` | Read fields, choices and required references. |
+| `get_coverage_reports` | Read coverage growth and health. |
+| `get_coverage_finance_report` | Read commitments, invoices and payments per currency. |
+| `get_coverage_history` | Read record activity. |
+| `get_coverage_observations` | Read page and backlink evidence. |
+| `check_coverage_placement` | Queue a polite page check. |
+| `reconcile_coverage_discovery` | Review existing discoveries without duplicates. |
+| `confirm_coverage_candidate` | Create or reuse a placement from a discovery. |
+| `import_coverage_placements` | Preview and import up to 200 rows. |
+| `review_coverage_accuracy` | Queue a version-cited Knowledge accuracy review with the workspace model. |
+
+Coverage CRUD tools also cover `rules`, `finance_tasks`, `documents` and `delivery_reports`. Finance resources require their separate scopes. Delivery counts are nullable; unknown is different from zero. `review_coverage_accuracy` accepts `purpose` for classification and reviewable outreach drafts. `check_coverage_placement` accepts the explicit connected reader; it uses the workspace connection and budget.
+
+| Tool | Use |
+| --- | --- |
+| `list_coverage_report_snapshots` | List immutable reports for a brand. |
+| `get_coverage_report_snapshot` | Read the original period, definitions and computed values. |
+| `create_coverage_report_snapshot` | Save the computed report without allowing supplied totals. |
+
+`get_coverage_reports` accepts `from`, `to` and the same placement filter group as the list API. Retention uses evidence within seven days of each 30/90/180-day milestone, only after that window has elapsed. Missing milestone evidence remains unverified.
+
+| Tool | Use |
+| --- | --- |
+| `extract_coverage_document_terms` | Queue quoted commercial suggestions for review, using the workspace AI connection. |
+| `get_coverage_attributed_outcomes` | Read deduplicated publisher referral sessions and recorded attribution; also requires analytics read permission. |
+
+Placements can opt into `monitor_accuracy`. Scheduled reviews run no more often than daily, reuse unchanged page text and published Knowledge versions, and respect the workspace AI budget. They create review work and never send outreach. Discovery reconciliation processes at most 2,000 unseen source records per call; continue while `has_more` is true.
+
+### Search insights
+
+These tools use a brand UUID and an SEO site UUID belonging to that brand.
+
+| Tool | Purpose |
+| --- | --- |
+| `get_search_insights` | Opportunities, CTR curves, content decay, country/device segments, groups, forecasts, completeness, trend breaks, GA4 attribution, AI referrals, migrations and CrUX history |
+| `list_search_groups`, `save_search_group`, `delete_search_group` | Saved URL-rule content groups and query-rule topics; OR rules, overlapping groups |
+| `list_search_migrations`, `save_search_migration`, `delete_search_migration` | Same-brand source/target sites, go-live date and redirect mappings |
+| `refresh_search_insights` | Queue the official Google update feed, optionally CrUX history using the workspace's own connection |
+
+Click upside, forecasts, migration risk and query-level GA4 allocation are
+estimates. Landing-page GA4 outcomes, assistant referrals and CrUX field values
+are measured. Never add overlapping groups or page/query attribution rows.
+See [the implementation notes](../changes/search-insights.md) for collection
+limits, required history and interpretation.
+
+Search work uses `get_search_workspace`, `save_search_work` and
+`create_search_work_fix`. Save definitions with `save_search_report`, generate
+snapshots with `run_search_report`, and read them with `get_search_report_run`.
+`save_search_schedule` creates, edits or pauses explicit timezone-aware daily
+or weekly collection. `delete_search_report` removes its snapshots;
+`delete_search_schedule` keeps collection history. These writes are excluded
+from read-only sessions. `refresh_search_insights` is one-time collection;
+it does not implicitly create a recurring schedule.

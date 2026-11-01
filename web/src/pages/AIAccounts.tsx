@@ -3,10 +3,12 @@
 // see everyone's, and the money on them. People add accounts by hand for
 // now; receipts, Outflare for desktop and admin keys fill them in later.
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AIAccount, AIAccountInput, AIProvider, Member } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Logo, PageHeader, toast } from "../ui";
+import { useBrand } from "@/lib/brand";
+import { AccountBrandPicker, BrandAssignment } from "./AIAccountBrands";
 import type { Tab } from "@/lib/paths";
 import { DataTable } from "@/components/data-table";
 import { AILogo, providerLabel } from "@/components/ai-logo";
@@ -19,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeopleView, SpendView, TimelineView, UsageView } from "./AIAccountsViews";
 import { ReceiptsView } from "./AIAccountsReceipts";
 import { ComputersView } from "./AIAccountsComputers";
+import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
 
 type Props = {
   ws: string;
@@ -67,6 +70,10 @@ const monthly = (list: AIAccount[]) => list.filter(companyPaid).reduce((n, a) =>
 type View = "accounts" | "spend" | "people" | "timeline" | "usage" | "computers" | "receipts";
 
 export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSetUp, go }: Props) {
+  const { brands, byId, loaded: brandsLoaded } = useBrand(ws);
+  const [brandFilter, setBrandFilter] = useState("all");
+  const [assigning, setAssigning] = useState<AIAccount | null>(null);
+  const prompted = useRef(new Set<string>());
   const [accounts, setAccounts] = useState<AIAccount[] | null>(null);
   const [error, setError] = useState("");
   const [provider, setProvider] = useState<AIProvider | "">("");
@@ -83,14 +90,27 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
     { id: "receipts", label: "Receipts" },
   ];
 
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ai-accounts", { params: { path: { ws }, query: everyone ? {} : { mine: true } } });
-    if (error) setError(errorMessage(error));
-    setAccounts(data?.data ?? []);
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/ai-accounts", { params: { path: { ws }, query: { brand: "all", ...(everyone ? {} : { mine: true }) } }, signal });
+      if (signal?.aborted) return;
+      if (error) { setError(errorMessage(error)); setAccounts((current) => current ?? []); return; }
+      setError("");
+      setAccounts(data?.data ?? []);
+    } catch (error) {
+      if (!signal?.aborted) { setError(errorMessage(error)); setAccounts((current) => current ?? []); }
+    }
   }, [ws, everyone]);
+  useVisibleRefresh(load);
+
+  const needsAssignment = (accounts ?? []).filter(a => !a.cancelled && !(a.brand_ids ?? []).length && (manageAll || (canAdd && a.members.some(m => m.user_id === me))));
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!brandsLoaded || view !== "accounts" || editing || assigning) return;
+    const next = needsAssignment.find(a => !prompted.current.has(a.id));
+    if (next) { prompted.current.add(next.id); setAssigning(next); }
+  }, [accounts, brandsLoaded, view, editing, assigning, manageAll, me, canAdd]);
+  const forBrands = (accounts ?? []).filter(a => brandFilter === "all" || (brandFilter === "none" ? !(a.brand_ids ?? []).length : (a.brand_ids ?? []).includes(brandFilter)));
+  const brandNames = (a: AIAccount) => (a.brand_ids ?? []).map(id => byId(id)?.name ?? "Assigned brand").join(", ");
 
   // The AI account Outflare itself uses, on the workspace's own keys.
   const [outflare, setOutflare] = useState<OutflareAI | null>(null);
@@ -101,10 +121,10 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
 
   const counts = useMemo(() => {
     const c: Partial<Record<AIProvider, number>> = {};
-    for (const a of accounts ?? []) c[a.provider] = (c[a.provider] ?? 0) + 1;
+    for (const a of forBrands) c[a.provider] = (c[a.provider] ?? 0) + 1;
     return c;
-  }, [accounts]);
-  const shown = (accounts ?? []).filter((a) => !provider || a.provider === provider);
+  }, [accounts, brandFilter]);
+  const shown = forBrands.filter((a) => !provider || a.provider === provider);
   const left = (accounts ?? []).filter((a) => a.owner_left && !a.cancelled);
   const total = monthly(shown);
 
@@ -116,6 +136,17 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
         action={canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}
       />
       <ErrorText>{error}</ErrorText>
+      {view !== "computers" && view !== "receipts" && <label className="flex items-center gap-3 text-[13px]">Report scope
+        <select className={field} value={brandFilter} onChange={e => { const value = e.target.value; setBrandFilter(value); track("ui.ai_account_report_scope_changed", { scope: value === "all" ? "workspace" : value === "none" ? "unassigned" : "brand", ...(value !== "all" && value !== "none" ? { brand_id: value } : {}) }); }}>
+          <option value="all">Workspace — all brands</option><option value="none">Needs brand assignment</option>
+          {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </label>}
+      {view !== "computers" && view !== "receipts" && <p className="text-[12px] text-muted-foreground">Shared subscriptions count once in workspace totals. Brand views show the whole subscription’s price and usage.</p>}
+      {needsAssignment.length > 0 && <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px]">
+        {needsAssignment.length} subscription{needsAssignment.length === 1 ? " needs" : "s need"} brand assignment. No brand is chosen automatically.{" "}
+        <button className="underline underline-offset-2" onClick={() => setAssigning(needsAssignment[0])}>Choose brands</button>
+      </div>}
       {left.length > 0 && seeAll && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px]">
           {left.length === 1 ? "One account belongs" : `${left.length} accounts belong`} to people who left the workspace: cancel {left.length === 1 ? "it" : "them"} or hand {left.length === 1 ? "it" : "them"} to someone.{" "}
@@ -132,17 +163,17 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
       {accounts === null ? (
         <Loading />
       ) : view === "spend" ? (
-        <SpendView accounts={accounts} open={setEditing} />
+        <SpendView accounts={forBrands} open={setEditing} />
       ) : view === "people" ? (
-        <PeopleView accounts={accounts} open={setEditing} />
+        <PeopleView accounts={forBrands} open={setEditing} />
       ) : view === "timeline" ? (
-        <TimelineView accounts={accounts} open={setEditing} />
+        <TimelineView accounts={forBrands} open={setEditing} />
       ) : view === "usage" ? (
-        <UsageView accounts={accounts} />
+        <UsageView accounts={forBrands} />
       ) : view === "computers" ? (
         <ComputersView ws={ws} me={me} seeAll={seeAll} manageAll={manageAll} />
       ) : view === "receipts" ? (
-        <ReceiptsView ws={ws} accounts={accounts} canSetUp={canSetUp} seeSpend={seeSpend} manageAll={manageAll} open={setEditing} reload={load} />
+        <ReceiptsView ws={ws} accounts={forBrands} canSetUp={canSetUp} seeSpend={seeSpend} manageAll={manageAll} open={setEditing} reload={load} />
       ) : accounts.length === 0 ? (
         <Empty title={everyone ? "No AI accounts yet" : "You have no AI accounts yet"} action={canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}>
           Add the Claude, ChatGPT, Cursor or Copilot plans and API accounts you pay for, with what they cost and when they renew.
@@ -167,7 +198,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
               <span className="font-medium text-foreground tabular-nums">{usd(Math.round(total))}</span> a month on the company-paid plans shown, before usage.
             </p>
           )}
-          {outflare && !provider && (
+          {outflare && !provider && brandFilter === "all" && (
             <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2.5 text-[13px]">
               <span className="inline-flex size-7 items-center justify-center rounded-md border bg-background"><Logo markOnly className="[&_svg]:h-3.5" /></span>
               <div className="min-w-0 flex-1">
@@ -193,6 +224,8 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
                 <div className="min-w-0 space-y-0.5">
                   <div className="font-medium">{a.name} {a.owner_left && <Badge tone="amber">Owner left</Badge>}</div>
                   <div className="truncate text-[12px] text-muted-foreground">{a.account_email ?? providerLabel(a.provider)} · {price(a)}</div>
+                  <div className="text-[12px] text-muted-foreground">{brandNames(a) || "Needs brand assignment"}</div>
+                  {(a.reporting_devices ?? []).map((d) => <div key={d.id} className="text-[12px] text-muted-foreground">{d.name} · {d.user_name} · {d.user_email}</div>)}
                 </div>
               </div>
             )}
@@ -209,6 +242,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
                   </div>
                 ),
               },
+              { id: "brands", header: "Brands", accessorFn: a => brandNames(a), cell: ({ row: { original: a } }) => (a.brand_ids ?? []).length ? <span>{brandNames(a)}</span> : <Badge tone="amber">Needs brand assignment</Badge> },
               { id: "email", header: "Account email", accessorFn: (a) => a.account_email ?? "", cell: ({ row: { original: a } }) => <span className="text-muted-foreground">{a.account_email ?? "—"}</span> },
               {
                 id: "people", header: "Belongs to", accessorFn: (a) => owners(a).map((m) => m.name).join(", "),
@@ -221,17 +255,32 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
                 ),
               },
               {
+                id: "devices", header: "Reported by", accessorFn: (a) => (a.reporting_devices ?? []).map((d) => `${d.name} ${d.user_name} ${d.user_email}`).join(" "),
+                cell: ({ row: { original: a } }) => a.reporting_devices?.length ? <div className="space-y-2">{a.reporting_devices.map((d) => (
+                  <div key={d.id}>
+                    <button className="text-left underline underline-offset-2" title={`Last reported ${readAgo(d.last_reported_at)}`}
+                      onClick={(e) => { e.stopPropagation(); setView("computers"); track("ui.ai_accounts_view_opened", { view: "computers" }); }}>{d.name}</button>
+                    {d.unlinked && <span className="ml-1 text-[12px] text-muted-foreground">(unlinked)</span>}
+                    <a className="block text-[12px] text-muted-foreground hover:underline" href={`mailto:${d.user_email}`}
+                      onClick={(e) => { e.stopPropagation(); track("ui.ai_device_owner_opened", { user_id: d.user_id }); }}>
+                      <span className="block">{d.user_name}</span><span className="block">{d.user_email}</span>
+                    </a>
+                  </div>
+                ))}</div> : <span className="text-muted-foreground">No device report</span>,
+              },
+              {
                 id: "usage", header: "Usage", accessorFn: (a) => binding(a)?.used_percent ?? -1,
                 cell: ({ row: { original: a } }) => <UsageCell account={a} />,
               },
               { id: "renews", header: "Renews", accessorFn: (a) => (a.cancelled ? "9999" : a.renews_on ?? "9998"), cell: ({ row: { original: a } }) => renewal(a) },
               { id: "price", header: "Price", accessorFn: (a) => a.price_cents ?? -1, cell: ({ row: { original: a } }) => price(a) },
               { id: "paid", header: "Paid by", accessorFn: (a) => a.paid_by, cell: ({ row: { original: a } }) => (a.paid_by === "person" ? <Badge tone="blue">Person</Badge> : <span className="text-muted-foreground">Company</span>) },
-              { id: "resets", header: "Resets left", accessorFn: (a) => a.resets_available ?? -1, cell: ({ row: { original: a } }) => (a.resets_available == null ? <span className="text-muted-foreground">—</span> : <span className="tabular-nums">{a.resets_available}</span>) },
+              { id: "resets", header: "Resets left", accessorFn: (a) => a.resets_available ?? -1, cell: ({ row: { original: a } }) => (a.resets_available == null ? <span className="text-muted-foreground" title="The provider has not reported reset-credit availability">Not reported</span> : <span className="tabular-nums">{a.resets_available}</span>) },
             ]}
           />
         </>
       )}
+      {assigning && <BrandAssignment key={assigning.id} ws={ws} account={assigning} onClose={() => setAssigning(null)} onSaved={() => { setAssigning(null); void load(); }} />}
       {editing && (
         <AccountSheet
           ws={ws}
@@ -274,6 +323,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 type Person = { user_id: string; name: string; email: string; role: "owner" | "user"; left?: boolean };
 
 function AccountSheet({ ws, me, account, manageAll, canEdit, onClose, onSaved }: { ws: string; me: string; account: AIAccount | null; manageAll: boolean; canEdit: boolean; onClose: () => void; onSaved: () => void }) {
+  const [selectedBrands, setSelectedBrands] = useState<string[]>(account?.brand_ids ?? []);
   const [providerID, setProviderID] = useState<AIProvider>(account?.provider ?? "claude");
   const [name, setName] = useState(account?.name ?? "");
   const [email, setEmail] = useState(account?.account_email ?? "");
@@ -306,10 +356,11 @@ function AccountSheet({ ws, me, account, manageAll, canEdit, onClose, onSaved }:
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    if (!selectedBrands.length) return setError("Choose at least one brand for this subscription.");
     const cents = dollars.trim() === "" ? undefined : Math.round(Number(dollars) * 100);
     if (cents !== undefined && (!Number.isFinite(cents) || cents < 0)) return setError("The price must be a number of dollars, such as 20 or 19.99.");
     const body: AIAccountInput = {
-      provider: providerID, name, account_email: email, plan, paid_by: paidBy, billing_cycle: cycle as AIAccountInput["billing_cycle"], renews_on: renews,
+      brand_ids: selectedBrands, provider: providerID, name, account_email: email, plan, paid_by: paidBy, billing_cycle: cycle as AIAccountInput["billing_cycle"], renews_on: renews,
       ...(seats ? { seats: Number(seats) } : {}),
       ...(cents !== undefined ? { price_cents: cents } : {}),
       ...(resets ? { resets_available: Number(resets) } : {}),
@@ -345,6 +396,7 @@ function AccountSheet({ ws, me, account, manageAll, canEdit, onClose, onSaved }:
         </SheetHeader>
         <form onSubmit={submit} className="space-y-5 px-4 pb-6 text-[13px]">
           <fieldset disabled={!canEdit || busy} className="space-y-5">
+            <AccountBrandPicker ws={ws} selected={selectedBrands} onChange={setSelectedBrands} />
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 block sm:col-span-1">
                 <span className={label}>AI tool</span>
@@ -400,7 +452,7 @@ function AccountSheet({ ws, me, account, manageAll, canEdit, onClose, onSaved }:
               <label className="block">
                 <span className={label}>Resets left</span>
                 <input className={`${field} w-full`} type="number" min={0} max={1000} placeholder="Unknown" value={resets} onChange={(e) => setResets(e.target.value)} />
-                <span className="mt-1 block text-[12px] text-muted-foreground">Banked resets, such as Codex's.</span>
+                <span className="mt-1 block text-[12px] text-muted-foreground">Available reset credits reported by Claude or Codex.</span>
               </label>
             </div>
 

@@ -31,7 +31,7 @@ const (
 	searchBackDays   = 14
 	searchKeepDays   = 486
 	// searchRowsPerDay caps the page and query rows kept for one day.
-	searchRowsPerDay = 5000
+	searchRowsPerDay = 50000
 	// URL Inspection allows about 2,000 calls a day per property; runs
 	// are six hours apart, so each run inspects at most inspectPerRun and
 	// a URL is inspected again after reinspectAfter.
@@ -97,7 +97,38 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 	floor := yesterday.AddDate(0, 0, -(searchKeepDays - 1))
 	var runErr error
 	oldest, newest := st.oldest, st.newest
-	for _, d := range searchDays(st, yesterday) {
+	days := searchDays(st, yesterday)
+	// Existing installations already backfilled page/query history. Give new
+	// segment/completeness collection its own backfill cursor so upgrades also
+	// acquire history rather than collecting only four recent days forever.
+	if _, ok := r.(connectors.SearchDetailsReader); ok {
+		var detailOldest *time.Time
+		if err := s.Pool.QueryRow(ctx, `SELECT min(day) FROM search_completeness WHERE workspace_id=$1 AND integration_id=$2 AND site=$3`, ws, id, site).Scan(&detailOldest); err != nil {
+			return out, dbError{err}
+		}
+		seen := map[string]bool{}
+		for _, d := range days {
+			seen[day(d)] = true
+		}
+		n := 14
+		anchor := today.AddDate(0, 0, -2)
+		if detailOldest == nil {
+			n = 28
+		} else {
+			anchor = *detailOldest
+		}
+		for i := 1; i <= n; i++ {
+			d := anchor.AddDate(0, 0, -i)
+			if d.Before(floor) {
+				break
+			}
+			if !seen[day(d)] {
+				days = append(days, d)
+				seen[day(d)] = true
+			}
+		}
+	}
+	for _, d := range days {
 		res.Calls++
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		rows, err := r.SearchRows(cctx, o.Client, o.Creds, site, day(d), searchRowsPerDay)
@@ -109,6 +140,21 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 		n, err := s.storeSearchDay(ctx, ws, id, site, host, d, rows)
 		if err != nil {
 			return out, err
+		}
+		// Collect independent totals and country/device rows only from readers
+		// that support them. Keep a failed collection retryable with the sync.
+		if detailed, ok := r.(connectors.SearchDetailsReader); ok && !d.After(today.AddDate(0, 0, -3)) {
+			res.Calls += 2
+			dc, stop := context.WithTimeout(ctx, 2*time.Minute)
+			detail, readErr := detailed.SearchDetails(dc, o.Client, o.Creds, site, day(d), searchRowsPerDay)
+			stop()
+			if readErr != nil {
+				runErr = readErr
+				break
+			}
+			if err := s.storeSearchDetails(ctx, ws, id, site, host, d, rows, detail); err != nil {
+				return out, err
+			}
 		}
 		out.Days++
 		out.Rows += n
@@ -173,6 +219,9 @@ func (s *Syncer) syncSearch(ctx context.Context, o *connectors.Opened, r connect
 	// The indexability report of the property's SEO sites takes today's
 	// numbers once a day.
 	if out.Days > 0 || out.Inspected > 0 {
+		if err := s.queueSearchUpdateContext(ctx, ws, host, today); err != nil {
+			return out, dbError{err}
+		}
 		if err := s.queueIndexability(ctx, ws, host, today); err != nil {
 			return out, dbError{err}
 		}

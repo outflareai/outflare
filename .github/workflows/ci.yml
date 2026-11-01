@@ -298,6 +298,10 @@ jobs:
       - name: SDK types match api/openapi.yaml
         run: pnpm --filter @outflare/sdk generate && git diff --exit-code sdk/ts/src/schema.ts
       - run: pnpm -r build
+      - name: Browser for subscription brand checks
+        run: pnpm --filter @outflare/web exec playwright install chromium --only-shell
+      - name: Subscription brand assignment and workspace switching
+        run: pnpm --filter @outflare/web test:ai-account-brands
       - run: pnpm --filter @outflare/sdk test
       - run: pnpm --filter @outflare/mcp test
       # The Go key scan reads TypeScript too, and runs here because a

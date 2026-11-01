@@ -12,6 +12,7 @@ import (
 // (identities, links, history) go with the record itself.
 var Erased = []Ref{
 	{"review_requests", "record_id"},
+	{"coverage_publishers", "record_id"},
 	{"customer_events", "record_id"}, {"consents", "record_id"},
 	// The events as sent, kept in the event inbox.
 	{"event_inbox", "record_id"},
@@ -47,6 +48,7 @@ var Erased = []Ref{
 // must not be contacted again. A test fails when a Follows column is in
 // neither list.
 var Kept = []Ref{
+	{"coverage_placements", "contact_record_id"},
 	// What partners earned and were paid: see erasedPartner.
 	{"partner_memberships", "record_id"}, {"partner_rewards", "recipient_id"},
 	{"customer_events", "account_id"}, {"deals", "record_id"}, {"payment_subscriptions", "record_id"},

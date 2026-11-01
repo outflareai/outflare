@@ -165,6 +165,7 @@ type Device struct {
 	WorkspaceID   string     `json:"-"`
 	UserID        string     `json:"user_id"`
 	UserName      string     `json:"user_name"`
+	UserEmail     string     `json:"user_email"`
 	Name          string     `json:"name"`
 	Platform      string     `json:"platform"`
 	AppVersion    string     `json:"app_version"`
@@ -231,7 +232,7 @@ func Authenticate(ctx context.Context, q Querier, token string) (Device, error) 
 // List returns the workspace's linked computers, newest first: one
 // person's when userID is set, else everyone's.
 func List(ctx context.Context, q Querier, workspaceID, userID string) ([]Device, error) {
-	rows, err := q.Query(ctx, `SELECT d.id::text, d.user_id::text, u.name, d.name, d.platform, d.app_version, d.status, d.last_error_code,
+	rows, err := q.Query(ctx, `SELECT d.id::text, d.user_id::text, u.name, u.email, d.name, d.platform, d.app_version, d.status, d.last_error_code,
 			d.last_report_at, coalesce(d.last_report_at, d.created_at) < now() - make_interval(secs => $3), d.created_at
 		FROM ai_devices d JOIN users u ON u.id = d.user_id
 		WHERE d.workspace_id = $1 AND d.unlinked_at IS NULL AND ($2 = '' OR d.user_id::text = $2)
@@ -241,7 +242,7 @@ func List(ctx context.Context, q Querier, workspaceID, userID string) ([]Device,
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Device, error) {
 		var d Device
-		err := row.Scan(&d.ID, &d.UserID, &d.UserName, &d.Name, &d.Platform, &d.AppVersion, &d.Status, &d.LastErrorCode,
+		err := row.Scan(&d.ID, &d.UserID, &d.UserName, &d.UserEmail, &d.Name, &d.Platform, &d.AppVersion, &d.Status, &d.LastErrorCode,
 			&d.LastReportAt, &d.Silent, &d.CreatedAt)
 		return d, err
 	})

@@ -111,15 +111,18 @@ export function useBrand(ws?: string) {
   useEffect(() => {
     if (ws && ws !== state.ws) void loadBrands(ws);
   }, [ws]);
-  const current = s.brands.find((b) => b.handle === s.brand);
+  // Never render the previous workspace's brands during the first frame
+  // before this workspace's loading effect has reset the shared store.
+  const brands = !ws || s.ws === ws ? s.brands : [];
+  const current = brands.find((b) => b.handle === s.brand);
   return {
     brand: current,
     // The query to add to list calls: { brand: "repocket" } or {}.
     query: (current ? { brand: current.handle } : {}) as { brand?: string },
-    brands: s.brands,
-    active: s.brands.filter((b) => b.status === "active"),
-    byId: (id?: string | null) => (id ? s.brands.find((b) => b.id === id) : undefined),
-    loaded: s.loaded,
-    reload: () => loadBrands(s.ws),
+    brands,
+    active: brands.filter((b) => b.status === "active"),
+    byId: (id?: string | null) => (id ? brands.find((b) => b.id === id) : undefined),
+    loaded: (!ws || s.ws === ws) && s.loaded,
+    reload: () => loadBrands(ws ?? s.ws),
   };
 }

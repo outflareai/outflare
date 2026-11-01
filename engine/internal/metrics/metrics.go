@@ -454,7 +454,9 @@ var (
 
 	// News watch: saved news searches run through the workspace's own
 	// web search connection.
-	newsRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+	coverageReviews = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
+	coverageChecks  = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
+	newsRuns        = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "news", Name: "search_runs_total",
 		Help: "News search runs, by purpose (topic, coverage) and outcome (success, connector_needed, usage_limit_reached, connector_error, internal).",
 	}, []string{"purpose", "outcome"})
@@ -659,7 +661,7 @@ var own = []prometheus.Collector{
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
-	newsRuns, newsFound, newsReads, storyAIRuns,
+	coverageChecks, coverageReviews, newsRuns, newsFound, newsReads, storyAIRuns,
 	automationRuns, automationLag,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
 	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
@@ -1272,3 +1274,8 @@ func DesktopDevices(reporting, silent int64) {
 
 // DesktopPurged counts usage readings deleted after 90 days.
 func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }
+
+// CoverageCheck records a bounded page-check outcome.
+func CoverageCheck(health string) { coverageChecks.WithLabelValues(health).Inc() }
+
+func CoverageReview(status string) { coverageReviews.WithLabelValues(status).Inc() }

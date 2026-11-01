@@ -387,10 +387,10 @@ func (s SearchConsole) SearchRows(ctx context.Context, cl *c.Client, creds c.Cre
 	}
 	u := cl.Base("google_search_console", searchSearch) + "/webmasters/v3/sites/" + url.PathEscape(site) + "/searchAnalytics/query"
 	out := []c.SearchRow{}
-	for len(out) < limit {
-		n := min(searchPage, limit-len(out))
+	for offset := 0; offset < limit; {
+		n := min(searchPage, limit-offset)
 		body := map[string]any{"startDate": day, "endDate": day, "dimensions": []string{"page", "query"},
-			"rowLimit": n, "startRow": len(out), "dataState": "all"}
+			"rowLimit": n, "startRow": offset, "dataState": "all"}
 		var resp struct {
 			Rows []gscRow `json:"rows"`
 		}
@@ -402,6 +402,7 @@ func (s SearchConsole) SearchRows(ctx context.Context, cl *c.Client, creds c.Cre
 				out = append(out, c.SearchRow{Page: r.Keys[0], Query: r.Keys[1], Clicks: r.Clicks, Impressions: r.Impressions, CTR: r.CTR, Position: r.Position})
 			}
 		}
+		offset += len(resp.Rows)
 		if len(resp.Rows) < n {
 			break
 		}
@@ -488,6 +489,40 @@ func (SearchConsole) Sitemaps(ctx context.Context, cl *c.Client, creds c.Creds, 
 			x.Indexed += n(ct.Indexed)
 		}
 		out = append(out, x)
+	}
+	return out, nil
+}
+
+func (s SearchConsole) SearchDetails(ctx context.Context, cl *c.Client, creds c.Creds, site, day string, limit int) (c.SearchDetails, error) {
+	out := c.SearchDetails{Segments: []c.SearchSegment{}}
+	u := cl.Base("google_search_console", searchSearch) + "/webmasters/v3/sites/" + url.PathEscape(site) + "/searchAnalytics/query"
+	var totals struct {
+		Rows []gscRow `json:"rows"`
+	}
+	if err := newCall(cl, "Google Search Console").bearer(creds["access_token"]).post(ctx, u, map[string]any{"startDate": day, "endDate": day, "dataState": "final", "rowLimit": 1}, &totals); err != nil {
+		return out, err
+	}
+	for _, x := range totals.Rows {
+		out.Clicks += x.Clicks
+		out.Impressions += x.Impressions
+	}
+	for offset := 0; offset < limit; {
+		n := min(searchPage, limit-offset)
+		var resp struct {
+			Rows []gscRow `json:"rows"`
+		}
+		if err := newCall(cl, "Google Search Console").bearer(creds["access_token"]).post(ctx, u, map[string]any{"startDate": day, "endDate": day, "dataState": "final", "dimensions": []string{"page", "country", "device"}, "rowLimit": n, "startRow": offset}, &resp); err != nil {
+			return out, err
+		}
+		for _, x := range resp.Rows {
+			if len(x.Keys) == 3 {
+				out.Segments = append(out.Segments, c.SearchSegment{Page: x.Keys[0], Country: x.Keys[1], Device: x.Keys[2], Clicks: x.Clicks, Impressions: x.Impressions, Position: x.Position})
+			}
+		}
+		if len(resp.Rows) < n {
+			break
+		}
+		offset += len(resp.Rows)
 	}
 	return out, nil
 }

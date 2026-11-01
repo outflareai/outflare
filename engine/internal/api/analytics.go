@@ -351,6 +351,9 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, q := range []string{
 				`DELETE FROM page_conversions WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`DELETE FROM search_ga4_outcomes WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`DELETE FROM search_segments WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`DELETE FROM search_completeness WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 				`DELETE FROM page_conversion_syncs WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
 			} {
 				if _, err := tx.Exec(r.Context(), q, a.WorkspaceID, o.ID, id); err != nil {

@@ -226,6 +226,14 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		for _, table := range []string{"search_segments", "search_ga4_outcomes"} {
+			if _, e := tx.Exec(r.Context(), `UPDATE `+table+` SET brand_id=analytics_site_brand($1,$2,$3,host) WHERE workspace_id=$1 AND integration_id=$2 AND site=$3`, a.WorkspaceID, id, req.Site); e != nil {
+				return e
+			}
+		}
+		if _, e := tx.Exec(r.Context(), `UPDATE search_completeness SET brand_id=analytics_site_brand($1,$2,$3,COALESCE((SELECT host FROM search_syncs WHERE workspace_id=$1 AND integration_id=$2 AND site=$3),'')) WHERE workspace_id=$1 AND integration_id=$2 AND site=$3`, a.WorkspaceID, id, req.Site); e != nil {
+			return e
+		}
 		mode := ref
 		if mode == "" {
 			mode = "auto"

@@ -923,3 +923,30 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Review invitation batches are failing repeatedly. Inspect reviews.dispatch jobs and email configuration."
+
+      - alert: OutflareCoverageChecksOverdue
+        expr: max(outflare_jobs_oldest_due_seconds{kind=~"coverage[.](check|review|extract)"}) > 900
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Coverage checks are over fifteen minutes late; inspect coverage.check workers and scheduler errors."
+      - alert: OutflareCoverageChecksFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind=~"coverage[.](check|review|extract)",outcome="dead"}[30m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Coverage checks exhausted retries; inspect dead coverage.check jobs."
+      - alert: OutflareCoveragePagesUnreachable
+        expr: sum(rate(outflare_coverage_checks_total{health="unreachable"}[1h])) / sum(rate(outflare_coverage_checks_total[1h])) > 0.5 and sum(increase(outflare_coverage_checks_total[1h])) > 20
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most Coverage pages are unreachable; inspect DNS, network access and page-reader results."
+
+      - alert: OutflareCoverageReviewsFailing
+        expr: sum(increase(outflare_coverage_reviews_total{status="review_failed"}[1h])) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Coverage accuracy reviews are failing; inspect workspace model responses and coverage.review logs."

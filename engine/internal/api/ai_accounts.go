@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -84,7 +85,11 @@ func (x aiAccountAccess) shown(acc aiaccounts.Account) aiaccounts.Account {
 func (s *Server) listAIAccounts(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	x := aiAccess(a)
-	f := aiaccounts.Filter{Provider: r.URL.Query().Get("provider")}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	f := aiaccounts.Filter{Provider: r.URL.Query().Get("provider"), BrandID: sel.id, AllowedBrands: sel.in, ViewerID: x.me}
 	if !x.seeAll || r.URL.Query().Get("mine") == "true" {
 		if x.me == "" {
 			writeJSON(w, http.StatusOK, map[string]any{"data": []aiaccounts.Account{}})
@@ -106,7 +111,7 @@ func (s *Server) listAIAccounts(w http.ResponseWriter, r *http.Request) {
 // visibleAIAccount loads an account the caller may see, or writes 404.
 func (s *Server) visibleAIAccount(w http.ResponseWriter, r *http.Request, x aiAccountAccess) (aiaccounts.Account, bool) {
 	acc, err := aiaccounts.Get(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, r.PathValue("id"))
-	if errors.Is(err, aiaccounts.ErrNotFound) || (err == nil && !x.seeAll && !x.member(acc)) {
+	if errors.Is(err, aiaccounts.ErrNotFound) || (err == nil && (!x.seeAll && !x.member(acc) || !aiAccountBrandVisible(accessFrom(r.Context()), x, acc))) {
 		writeError(w, r, http.StatusNotFound, "not_found", aiaccounts.ErrNotFound.Error())
 		return acc, false
 	}
@@ -127,7 +132,7 @@ func (s *Server) getAIAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func aiAccountProps(acc aiaccounts.Account) map[string]any {
-	return map[string]any{"provider": acc.Provider, "paid_by": acc.PaidBy, "members": len(acc.Members), "cancelled": acc.Cancelled}
+	return map[string]any{"provider": acc.Provider, "paid_by": acc.PaidBy, "members": len(acc.Members), "cancelled": acc.Cancelled, "brands": len(acc.BrandIDs)}
 }
 
 func (s *Server) createAIAccount(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +153,10 @@ func (s *Server) createAIAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only add AI accounts you belong to: put yourself in members, or ask someone with ai_accounts.manage")
 		return
 	}
+	if !aiAccountBrandWrite(w, r, a, in.BrandIDs, nil) {
+		return
+	}
+
 	var acc aiaccounts.Account
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		id, err := aiaccounts.Create(r.Context(), tx, a.WorkspaceID, in, nullIfEmpty(x.me))
@@ -158,7 +167,7 @@ func (s *Server) createAIAccount(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "ai_account.created", "ai_account", id,
-			map[string]any{"provider": acc.Provider, "name": acc.Name}, aiAccountProps(acc))
+			map[string]any{"provider": acc.Provider, "name": acc.Name, "brand_ids": acc.BrandIDs}, aiAccountProps(acc))
 	})
 	if s.aiAccountWriteFailed(w, r, err) {
 		return
@@ -185,11 +194,21 @@ func (s *Server) updateAIAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	// A full editor may echo shared assignments it is not changing. Keep
+	// those mappings untouched; changing them still needs every brand's access.
+	if in.BrandIDs != nil && slices.Equal(*in.BrandIDs, cur.BrandIDs) {
+		in.BrandIDs = nil
+	}
+
 	if !x.manageAll && in.Members != nil && !aiaccounts.HasMember(*in.Members, x.me) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can't take yourself off an AI account: ask someone with ai_accounts.manage")
 		return
 	}
 	var acc aiaccounts.Account
+	if !aiAccountBrandWrite(w, r, a, in.BrandIDs, cur.BrandIDs) {
+		return
+	}
+
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		if err := aiaccounts.Update(r.Context(), tx, a.WorkspaceID, cur.ID, in); err != nil {
 			return err
@@ -199,7 +218,7 @@ func (s *Server) updateAIAccount(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "ai_account.updated", "ai_account", cur.ID,
-			map[string]any{"provider": acc.Provider, "name": acc.Name}, aiAccountProps(acc))
+			map[string]any{"provider": acc.Provider, "name": acc.Name, "brand_ids": acc.BrandIDs}, aiAccountProps(acc))
 	})
 	if s.aiAccountWriteFailed(w, r, err) {
 		return
@@ -224,7 +243,7 @@ func (s *Server) deleteAIAccount(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "ai_account.deleted", "ai_account", cur.ID,
-			map[string]any{"provider": acc.Provider, "name": acc.Name}, aiAccountProps(acc))
+			map[string]any{"provider": acc.Provider, "name": acc.Name, "brand_ids": acc.BrandIDs}, aiAccountProps(acc))
 	})
 	if s.aiAccountWriteFailed(w, r, err) {
 		return
@@ -239,7 +258,7 @@ func (s *Server) aiAccountWriteFailed(w http.ResponseWriter, r *http.Request, er
 		return false
 	case errors.Is(err, aiaccounts.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", err.Error())
-	case errors.Is(err, aiaccounts.ErrNotMember):
+	case errors.Is(err, aiaccounts.ErrNotMember), errors.Is(err, aiaccounts.ErrInvalidBrand):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 	default:
 		s.internal(w, r, err)
@@ -279,4 +298,36 @@ func (s *Server) getOutflareAIAccount(w http.ResponseWriter, r *http.Request) {
 		calls, cents = calls+p.Calls, cents+p.CostCents
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"month": from.Format("2006-01"), "calls": calls, "cost_cents": cents, "providers": list})
+}
+
+// Unassigned accounts need their reporter/owner to choose a brand. Restricted
+// callers never gain access to other brands by switching to the workspace report.
+func aiAccountBrandVisible(a *access, x aiAccountAccess, account aiaccounts.Account) bool {
+	if a.Brands == nil {
+		return true
+	}
+	if len(account.BrandIDs) == 0 {
+		return x.member(account)
+	}
+	for _, id := range account.BrandIDs {
+		if a.sees(&id) {
+			return true
+		}
+	}
+	return false
+}
+
+func aiAccountBrandWrite(w http.ResponseWriter, r *http.Request, a *access, proposed *[]string, previous []string) bool {
+	if proposed == nil {
+		return true
+	}
+	for _, ids := range [][]string{*proposed, previous} {
+		for _, id := range ids {
+			if !a.writes(&id) {
+				writeError(w, r, http.StatusForbidden, "forbidden", "you can only assign accounts to brands you can manage")
+				return false
+			}
+		}
+	}
+	return true
 }

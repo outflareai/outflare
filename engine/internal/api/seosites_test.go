@@ -700,11 +700,22 @@ func TestSEOSiteCrawlSettings(t *testing.T) {
 	// A scheduled crawl that failed is tried again the same day, at any
 	// hour, after a wait that grows with each failure.
 	owner.must(200, "PATCH", base+"/seo-sites/"+other, map[string]any{"schedule_hour": (now + 12) % 24})
+	// The crawl workers started above run the scheduled crawl too, so wait
+	// for it to finish before failing it: a run still queued or running
+	// could be finished by a worker after the update, or before it.
 	fail := func() {
 		t.Helper()
-		if _, err := e.pool.Exec(context.Background(), `UPDATE crawl_runs SET status = 'failed', reason = 'site_errors', finished_at = now() - interval '20 minutes'
-			WHERE site_id = $1 AND status IN ('queued', 'running')`, other); err != nil {
-			t.Fatal(err)
+		waitUntil(t, func() bool {
+			var n int
+			if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM crawl_runs WHERE site_id = $1 AND status IN ('queued', 'running')`, other).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n == 0
+		})
+		tag, err := e.pool.Exec(context.Background(), `UPDATE crawl_runs SET status = 'failed', reason = 'site_errors', finished_at = now() - interval '20 minutes'
+			WHERE id = (SELECT id FROM crawl_runs WHERE site_id = $1 ORDER BY created_at DESC LIMIT 1)`, other)
+		if err != nil || tag.RowsAffected() != 1 {
+			t.Fatalf("fail the latest crawl: %v (%d rows)", err, tag.RowsAffected())
 		}
 	}
 	fail()

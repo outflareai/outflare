@@ -1,3 +1,4 @@
+import { SearchDashboard } from "./pages/SearchDashboard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@outflare/sdk";
@@ -90,6 +91,7 @@ import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
 import { LinkBuilding } from "./pages/LinkBuilding";
 import { LinkAutopilot } from "./pages/LinkAutopilot";
+import { Coverage } from "./pages/Coverage";
 import { News } from "./pages/News";
 import { Stories } from "./pages/Stories";
 import { Warmup } from "./pages/Warmup";
@@ -562,7 +564,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "experiments" && <Experiments key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "seo-overview" && <SEOOverview key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "audits" && <SiteAudits key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(s) => setItem(s || undefined)} go={setTab} />}
-        {ready && ws && tab === "keywords" && <Keywords key={ws.id} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "search-insights" && <SearchDashboard key={ws.id} ws={ws.id} go={setTab} initialSite={item} canManage={can("seo.manage")} />}
+        {ready && ws && tab === "keywords" && <Keywords key={ws.id} ws={ws.id} go={setTab} canManage={can("seo.manage")} />}
         {ready && ws && tab === "ai-visibility" && <AIVisibility key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
@@ -601,6 +604,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <LinkAutopilot key={ws.id} ws={ws.id} canManage={can("missions.run")} go={setTab} />
           </CloudPage>
         )}
+        {ready && ws && tab === "coverage" && <Coverage key={ws.id} ws={ws.id} myId={me.user.id ?? ""} can={can} go={setTab} />}
         {ready && ws && tab === "news" && <News key={ws.id} ws={ws.id} canManage={can("seo.manage")} canLists={can("customers.manage")} go={setTab} />}
         {ready && ws && tab === "stories" && <Stories key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
@@ -630,7 +634,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-usage" && <AIUsage key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-accounts" && canOpen(ws, "ai-accounts") && (
-              <AIAccounts key={ws.id} ws={ws.id} me={me.user.id ?? ""} canAdd={can("my_ai_accounts.manage") || can("ai_accounts.manage")} seeAll={can("ai_accounts.read") || can("ai_accounts.manage")} manageAll={can("ai_accounts.manage")} seeSpend={can("ai_spend.read")} canSetUp={can("workspace.manage")} go={setTab} />
+              <AIAccounts key={`${ws.id}:${me.user.id}:${(ws.brand_ids ?? []).join(",")}:${can("ai_accounts.read")}:${can("ai_accounts.manage")}:${can("ai_spend.read")}`} ws={ws.id} me={me.user.id ?? ""} canAdd={can("my_ai_accounts.manage") || can("ai_accounts.manage")} seeAll={can("ai_accounts.read") || can("ai_accounts.manage")} manageAll={can("ai_accounts.manage")} seeSpend={can("ai_spend.read")} canSetUp={can("workspace.manage")} go={setTab} />
             )}
             {ready && ws && tab === "webhooks" && <Webhooks key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} />}
             {ready && ws && tab === "tokens" && can("tokens.manage") && <Tokens key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}

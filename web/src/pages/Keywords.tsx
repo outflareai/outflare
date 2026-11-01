@@ -14,7 +14,7 @@ import type { Tab } from "../App";
 // clicks and positions by page and by query, the keyword each page
 // targets, how Google indexed the pages, and the sitemaps it read.
 
-type Props = { ws: string; go: (tab: Tab, item?: string) => void };
+type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
 type Section = "pages" | "queries" | "alerts" | "targets" | "rankings" | "conversions" | "links" | "cannibalisation" | "indexing" | "sitemaps";
 const sections: Record<Section, string> = { pages: "Pages", queries: "Queries", alerts: "Drops", targets: "Targets", rankings: "Rankings", conversions: "Conversions", links: "Internal links", cannibalisation: "Cannibalisation", indexing: "Indexing", sitemaps: "Sitemaps" };
 
@@ -60,7 +60,7 @@ export function Keywords({ ws, go }: Props) {
     <PageHeader
       title="Keywords"
       description="What Google shows each page for and how often people click, from your own Search Console, with how Google indexed the pages. Agents use get_site_search and get_site_indexing."
-      action={sites && <SitePicker sites={sites} site={site} onChange={setSite} />}
+      action={<div className="flex gap-2"><Button variant="ghost" onClick={()=>go("search-insights",site)}>Search insights</Button>{sites && <SitePicker sites={sites} site={site} onChange={setSite} />}</div>}
     />
   );
   if (error) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
@@ -78,7 +78,7 @@ export function Keywords({ ws, go }: Props) {
     <div className="space-y-6">
       {header}
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-        <TabsList className="h-8">
+        <TabsList className="h-auto flex-wrap">
           {(Object.keys(sections) as Section[]).map((s) => <TabsTrigger key={s} value={s}>{sections[s]}</TabsTrigger>)}
         </TabsList>
       </Tabs>

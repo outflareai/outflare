@@ -29,8 +29,8 @@ export function ConnectComputer({ workspaces, onDone }: { workspaces: Ws[]; onDo
 
   if (linked) {
     return (
-      <CenteredForm title="Computer linked" subtitle={`${linked.name} now reports your AI usage. You can close this tab; Outflare for desktop carries on by itself.`}>
-        <a href={`/${linked.slug}/settings/ai-accounts`} className="block text-center text-[13px] underline" onClick={onDone}>Open AI accounts</a>
+      <CenteredForm title="Computer linked" subtitle={`${linked.name} now reports your AI usage. Choose the brands your subscriptions serve next. Nothing is assigned automatically.`}>
+        <a href={`/${linked.slug}/settings/ai-accounts`} className="block text-center text-[13px] underline" onClick={onDone}>Choose subscription brands</a>
       </CenteredForm>
     );
   }
@@ -43,11 +43,13 @@ export function ConnectComputer({ workspaces, onDone }: { workspaces: Ws[]; onDo
     setBusy(false);
     if (error) return setError(errorMessage(error));
     track("ui.ai_device_link_approved");
-    setLinked({ name: (data as { name: string }).name, slug: usable.find((w) => w.id === ws)!.slug });
+    const slug = usable.find(w => w.id === ws)!.slug;
+    setLinked({ name: (data as { name: string }).name, slug });
+    location.assign(`/${encodeURIComponent(slug)}/ai-accounts`);
   }
 
   return (
-    <CenteredForm title="Link this computer" subtitle="Outflare for desktop reads how much of each limit your AI tools have used and when they reset. Only those numbers reach Outflare.">
+    <CenteredForm title="Link this computer" subtitle="Outflare for desktop reports your local AI account emails, plans and usage to the workspace you choose. Provider credentials and conversations stay on your computer.">
       <form onSubmit={approve} className="space-y-4">
         <label className="block text-[13px]">
           <span className="mb-1.5 block font-medium">Code shown in the app</span>

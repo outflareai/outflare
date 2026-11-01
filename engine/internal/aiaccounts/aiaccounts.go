@@ -80,11 +80,26 @@ type Account struct {
 	// OwnerLeft: nobody who owns it is still in the workspace.
 	OwnerLeft bool     `json:"owner_left"`
 	Members   []Member `json:"members"`
+	BrandIDs  []string `json:"brand_ids"`
 	// Usage is the latest reading of each limit window from Outflare for
 	// desktop, in the last week; empty when no computer reads it.
-	Usage     []UsageWindow `json:"usage"`
-	CreatedAt time.Time     `json:"created_at"`
-	UpdatedAt time.Time     `json:"updated_at"`
+	Usage            []UsageWindow     `json:"usage"`
+	ReportingDevices []ReportingDevice `json:"reporting_devices"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+}
+
+// ReportingDevice identifies the computer and authenticated workspace
+// person behind a reading, independently of a potentially shared AI login.
+type ReportingDevice struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Platform       string    `json:"platform"`
+	UserID         string    `json:"user_id"`
+	UserName       string    `json:"user_name"`
+	UserEmail      string    `json:"user_email"`
+	LastReportedAt time.Time `json:"last_reported_at"`
+	Unlinked       bool      `json:"unlinked"`
 }
 
 // UsageWindow is one usage limit as last read: kind (five_hour, weekly,
@@ -112,6 +127,7 @@ type Input struct {
 	ResetsAvailable *int           `json:"resets_available"`
 	Cancelled       *bool          `json:"cancelled"`
 	Members         *[]MemberInput `json:"members"`
+	BrandIDs        *[]string      `json:"brand_ids"`
 }
 
 // MemberInput puts a person on an account.
@@ -124,6 +140,9 @@ type MemberInput struct {
 // email, turns empty optional text into a clear, and gives members the
 // owner role by default. create requires provider and name.
 func (in *Input) Validate(create bool) error {
+	if err := validateBrands(in.BrandIDs); err != nil {
+		return err
+	}
 	if create && (in.Provider == nil || in.Name == nil) {
 		return errors.New("provider and name are required")
 	}
@@ -206,16 +225,20 @@ type Querier interface {
 // Filter narrows List.
 type Filter struct {
 	// UserID keeps the accounts this person belongs to.
-	UserID   string
-	Provider string
+	UserID        string
+	Provider      string
+	BrandID       string
+	AllowedBrands []string
+	ViewerID      string
 }
 
 const columns = `a.id, a.provider, a.name, a.account_email, a.plan, a.seats, a.paid_by, a.billing_cycle,
-	a.renews_on::text, a.price_cents, a.resets_available, a.cancelled_at IS NOT NULL, a.created_at, a.updated_at`
+	a.renews_on::text, a.price_cents, a.resets_available, a.cancelled_at IS NOT NULL, a.created_at, a.updated_at,
+ ARRAY(SELECT ab.brand_id::text FROM ai_account_brands ab WHERE ab.workspace_id=a.workspace_id AND ab.account_id=a.id ORDER BY ab.brand_id)`
 
 func scan(row pgx.Row, a *Account) error {
 	return row.Scan(&a.ID, &a.Provider, &a.Name, &a.AccountEmail, &a.Plan, &a.Seats, &a.PaidBy, &a.BillingCycle,
-		&a.RenewsOn, &a.PriceCents, &a.ResetsAvailable, &a.Cancelled, &a.CreatedAt, &a.UpdatedAt)
+		&a.RenewsOn, &a.PriceCents, &a.ResetsAvailable, &a.Cancelled, &a.CreatedAt, &a.UpdatedAt, &a.BrandIDs)
 }
 
 // List returns the workspace's accounts, by provider then name, with their
@@ -223,9 +246,14 @@ func scan(row pgx.Row, a *Account) error {
 func List(ctx context.Context, q Querier, workspaceID string, f Filter) ([]Account, error) {
 	rows, err := q.Query(ctx, `SELECT `+columns+` FROM ai_accounts a
 		WHERE a.workspace_id = $1
-		  AND ($2 = '' OR EXISTS (SELECT 1 FROM ai_account_members m WHERE m.account_id = a.id AND m.user_id::text = $2))
+		  AND ($2 = '' OR EXISTS (SELECT 1 FROM ai_account_members m WHERE m.workspace_id=$1 AND m.account_id = a.id AND m.user_id::text = $2))
 		  AND ($3 = '' OR a.provider = $3)
-		ORDER BY array_position($4::text[], a.provider), lower(a.name), a.id`, workspaceID, f.UserID, f.Provider, Providers)
+          AND ($5 = '' OR ($5 = 'none' AND NOT EXISTS (SELECT 1 FROM ai_account_brands b WHERE b.workspace_id=$1 AND b.account_id=a.id))
+               OR EXISTS (SELECT 1 FROM ai_account_brands b WHERE b.workspace_id=$1 AND b.account_id=a.id AND b.brand_id::text=$5))
+          AND ($6::uuid[] IS NULL OR EXISTS (SELECT 1 FROM ai_account_brands b WHERE b.workspace_id=$1 AND b.account_id=a.id AND b.brand_id=ANY($6::uuid[]))
+               OR (NOT EXISTS (SELECT 1 FROM ai_account_brands b WHERE b.workspace_id=$1 AND b.account_id=a.id)
+                   AND EXISTS (SELECT 1 FROM ai_account_members m WHERE m.workspace_id=$1 AND m.account_id=a.id AND m.user_id::text=$7)))
+		ORDER BY array_position($4::text[], a.provider), lower(a.name), a.id`, workspaceID, f.UserID, f.Provider, Providers, f.BrandID, f.AllowedBrands, f.ViewerID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +267,10 @@ func List(ctx context.Context, q Querier, workspaceID string, f Filter) ([]Accou
 	if err := addMembers(ctx, q, workspaceID, list); err != nil {
 		return nil, err
 	}
-	return list, addUsage(ctx, q, workspaceID, list)
+	if err := addUsage(ctx, q, workspaceID, list); err != nil {
+		return nil, err
+	}
+	return list, addReportingDevices(ctx, q, workspaceID, list)
 }
 
 // Get returns one account with its members.
@@ -257,6 +288,9 @@ func Get(ctx context.Context, q Querier, workspaceID, id string) (Account, error
 		return a, err
 	}
 	if err := addUsage(ctx, q, workspaceID, list); err != nil {
+		return a, err
+	}
+	if err := addReportingDevices(ctx, q, workspaceID, list); err != nil {
 		return a, err
 	}
 	return list[0], nil
@@ -290,6 +324,41 @@ func addUsage(ctx context.Context, q Querier, workspaceID string, list []Account
 			return err
 		}
 		list[at[id]].Usage = append(list[at[id]].Usage, w)
+	}
+	return rows.Err()
+}
+
+func addReportingDevices(ctx context.Context, q Querier, workspaceID string, list []Account) error {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]string, len(list))
+	at := make(map[string]int, len(list))
+	for i := range list {
+		ids[i], at[list[i].ID] = list[i].ID, i
+		list[i].ReportingDevices = []ReportingDevice{}
+	}
+	rows, err := q.Query(ctx, `SELECT r.account_id::text, d.id::text, d.name, d.platform,
+        d.user_id::text, u.name, u.email, max(r.observed_at), d.unlinked_at IS NOT NULL
+        FROM ai_usage_readings r
+        JOIN ai_devices d ON d.id = r.device_id AND d.workspace_id = r.workspace_id
+        JOIN users u ON u.id = d.user_id
+        WHERE r.workspace_id = $1 AND r.account_id = ANY($2::text[]::uuid[])
+            AND r.observed_at > now() - interval '7 days'
+        GROUP BY r.account_id, d.id, u.id
+        ORDER BY r.account_id, max(r.observed_at) DESC, d.id`, workspaceID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var account string
+		var d ReportingDevice
+		if err := rows.Scan(&account, &d.ID, &d.Name, &d.Platform, &d.UserID, &d.UserName,
+			&d.UserEmail, &d.LastReportedAt, &d.Unlinked); err != nil {
+			return err
+		}
+		list[at[account]].ReportingDevices = append(list[at[account]].ReportingDevices, d)
 	}
 	return rows.Err()
 }
@@ -384,6 +453,12 @@ func Create(ctx context.Context, tx pgx.Tx, workspaceID string, in Input, create
 			return "", err
 		}
 	}
+	if in.BrandIDs != nil {
+		if err := setBrands(ctx, tx, workspaceID, id, *in.BrandIDs); err != nil {
+			return "", err
+		}
+	}
+
 	return id, nil
 }
 
@@ -438,8 +513,14 @@ func Update(ctx context.Context, tx pgx.Tx, workspaceID, id string, in Input) er
 		return ErrNotFound
 	}
 	if in.Members != nil {
-		return setMembers(ctx, tx, workspaceID, id, *in.Members)
+		if err := setMembers(ctx, tx, workspaceID, id, *in.Members); err != nil {
+			return err
+		}
 	}
+	if in.BrandIDs != nil {
+		return setBrands(ctx, tx, workspaceID, id, *in.BrandIDs)
+	}
+
 	return nil
 }
 

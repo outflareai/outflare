@@ -450,3 +450,19 @@ test("reddit tools: guide, campaign prompt, actions and the report; read-only le
   assert.ok(names.includes("get_reddit_report") && names.includes("preflight_reddit_drafts"));
   assert.ok(!names.includes("place_reddit_action") && !names.includes("approve_reddit_action"));
 });
+
+test("search insights retain brand routing, model assumptions and write permissions", async () => {
+  const { client, calls } = await connect(() => [200, { report: "forecast", status: "ready", data: [], notes: [], summary: {} }]);
+  await client.callTool({ name: "get_search_insights", arguments: { brand: WS, site: SEQ, report: "forecast", weeks: 12, growth: .2, currency: "EUR", order_value: 25 } });
+  assert.equal(calls[0].url.pathname, `/v1/brands/${WS}/seo-sites/${SEQ}/insights`);
+  assert.equal(calls[0].url.searchParams.get("currency"), "EUR");
+  assert.equal(calls[0].url.searchParams.get("growth"), "0.2");
+  await client.callTool({ name: "refresh_search_insights", arguments: { brand: WS, site: SEQ } });
+  assert.equal(calls[1].method, "POST");
+  assert.deepEqual(JSON.parse(calls[1].body), {}); // public update feed needs no API key
+  const readOnly = await connect(() => [200, {}], { readOnly: true });
+  const names = (await readOnly.client.listTools()).tools.map((t) => t.name);
+  assert.ok(names.includes("get_search_insights") && names.includes("list_search_groups") && names.includes("get_search_workspace") && names.includes("get_search_report_run"));
+  assert.ok(!names.includes("save_search_work") && !names.includes("save_search_schedule") && !names.includes("run_search_report"));
+  assert.ok(!names.includes("save_search_group") && !names.includes("refresh_search_insights"));
+});

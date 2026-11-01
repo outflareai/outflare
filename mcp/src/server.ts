@@ -1,3 +1,4 @@
+import { registerSearchInsightTools } from "./search-insights.js";
 // The Outflare MCP server: one tool per thing an agent does in a workspace.
 // Every tool calls the public REST API through @outflare/sdk, so an agent is
 // held to the same API token scopes, send policy and audit log as a person.
@@ -7,6 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { OutflareError, ok, type MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { registerCoverageTools } from "./coverage.js";
 import { registerBrandTools } from "./brands.js";
 import { registerSetupTools } from "./setup.js";
 import { registerQueryTools } from "./query.js";
@@ -312,10 +314,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   registerAIAccountTools(server, gtm, () => ws, readOnly, call);
   registerABTestTools(server, gtm, () => ws, readOnly, call, withBrand);
   registerRedditTools(server, gtm, () => ws, readOnly, call);
+  registerCoverageTools(server, gtm, readOnly, call);
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);
   registerQueryTools(server, gtm, () => ws, readOnly, call);
+  registerSearchInsightTools(server, gtm, readOnly, call);
 
   // Reading.
 

@@ -191,6 +191,10 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
+- `OutflareCoverageChecksFailing`: a Coverage check exhausted its retries.
+- `OutflareCoveragePagesUnreachable`: most recent Coverage page reads could not reach their site.
+
 `deploy/monitoring/alerts.yml` has rules for:
 
 - the server not answering
@@ -299,3 +303,7 @@ An extension registers its own Prometheus collectors with `Host.Metrics()`, so t
 - **OutflareReviewRequestsFailing**: review invitation batches repeatedly retry or die.
 
 The Review invitations dashboard row shows dispatch results, due-job delay and batch duration, using the common job metrics.
+
+- `OutflareCoverageReviewsFailing`: repeated Coverage AI review failures need provider or response investigation.
+
+Coverage records page outcomes in `outflare_coverage_checks_total{health}` and accuracy outcomes in `outflare_coverage_reviews_total{status}`. Page checks, accuracy reviews and commercial extraction use the shared job duration, backlog and error metrics. Fixed accuracy schedules reuse unchanged analyses before calling a model.

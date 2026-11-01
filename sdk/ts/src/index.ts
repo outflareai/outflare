@@ -215,6 +215,7 @@ export type AdAccount = Schemas["AdAccount"];
 export type AIProvider = Schemas["AIProvider"];
 export type AIAccount = Schemas["AIAccount"];
 export type AIAccountMember = Schemas["AIAccountMember"];
+export type AIAccountDevice = Schemas["AIAccountDevice"];
 export type AIAccountInput = Schemas["AIAccountInput"];
 export type AIReceipt = Schemas["AIReceipt"];
 export type AIDevice = Schemas["AIDevice"];
@@ -643,3 +644,16 @@ export function flagsBootstrapTag(decisions: Pick<FlagDecisions, "flags"> & { pa
   );
   return `<script type="application/json" id="outflare-flags">${json}</script>`;
 }
+
+export type SearchInsightReport = Schemas["SearchInsightReport"];
+export type SearchInsightRow = Schemas["SearchInsightRow"];
+export type SearchGroup = Schemas["SearchGroup"];
+export type SearchMigration = Schemas["SearchMigration"];
+
+export type SearchViewFilters = Schemas["SearchViewFilters"];
+export type SearchWorkItem = Schemas["SearchWorkItem"];
+export type SearchSavedReport = Schemas["SearchSavedReport"];
+export type SearchReportRun = Schemas["SearchReportRun"];
+export type SearchCollectionSchedule = Schemas["SearchCollectionSchedule"];
+export type SearchCollectionRun = Schemas["SearchCollectionRun"];
+export type SearchWorkspace = Schemas["SearchWorkspace"];

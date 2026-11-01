@@ -84,13 +84,32 @@ export function page(name: string) {
 export type UiEvent =
   | "ui.review_view_opened" // review module subview selected
   | "ui.review_campaign_step_opened" // review campaign editor step selected
+  | "ui.coverage_view_opened"
+  | "ui.coverage_exported"
+  | "ui.coverage_filters_changed"
+
+  | "ui.search_workspace_opened"
+  | "ui.search_finding_opened"
+  | "ui.search_report_run"
+  | "ui.search_report_saved"
+  | "ui.search_collection_queued"
+  | "ui.search_schedule_changed"
+  | "ui.search_workspace_deleted"
+  | "ui.search_work_saved"
+  | "ui.search_fix_created"
+  | "ui.search_insight_report_selected"
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render
   | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup, brand_dns; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email; groups for brand_dns)
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
+  | "ui.ai_account_brand_assignment_opened"
+  | "ui.ai_account_brand_assignment_deferred"
+  | "ui.ai_account_report_scope_changed"
+  | "ui.ai_account_brand_selected" // explicit subscription brand choice
   | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
   | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
+  | "ui.ai_device_owner_opened" // linked device owner opened (user_id)
   | "ui.ai_device_link_approved" // a computer linked to Outflare for desktop from /connect/computer
   | "ui.copied" // a copy button
   | "ui.data_network_previewed" // the owner opened what joining the data network would share (addresses)

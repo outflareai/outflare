@@ -57,12 +57,14 @@ export const tabNames: Record<Tab, string> = {
   audits: "Site audits",
   fixes: "Fixes",
   experiments: "Experiments",
+  "search-insights": "Search insights",
   keywords: "Keywords",
   "ai-visibility": "AI visibility",
   backlinks: "Backlinks",
   competitors: "Competitors",
   "link-building": "Link building",
   "link-autopilot": "Link autopilot",
+  coverage: "Coverage",
   news: "News watch",
   stories: "Stories",
   reddit: "Reddit",
@@ -153,6 +155,7 @@ export const tabBlurbs: Record<Tab, string> = {
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
   "link-autopilot": "An aim of new live links a month and a budget; Outflare's agent runs the link building playbooks toward it, and you approve each change.",
+  coverage: "Publisher relationships, mentions, placements and ongoing maintenance.",
   news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
   stories: "Press releases with a source behind every number and only quotes your experts approved, checked before a person approves them.",
   allocation: "Which mailbox sends for which sequence, and which sequences are short of mailboxes.",
@@ -170,6 +173,7 @@ export const tabBlurbs: Record<Tab, string> = {
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",
   fixes: "Everything worth fixing, one ticket per problem, written up by your AI model and reviewed by you.",
+  "search-insights": "Investigate search performance, organise work, save report snapshots and schedule data collection.",
   keywords: "What Google shows each page for, the keyword each page targets, where it ranks, pages that compete for one search, and how Google indexed them, from your Search Console.",
   backlinks: "Who links to your sites, what you gained and lost, and which links are worth getting back.",
   "ai-visibility": "How often AI assistants name each brand against its competitors, whether they get its facts right, and which AI crawlers read its sites.",
@@ -285,10 +289,10 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
-  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
+  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
@@ -309,7 +313,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "news", "stories", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -932,6 +936,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return item
         ? { title: "One site and its latest crawl", path: "/v1/workspaces/{ws}/seo-sites/{site}", params: { ...base, site: item }, ask: "What are the worst issues on this site, and which URL templates cause them?", scope: "seo.read" }
         : { title: "Sites OutflareBot audits", path: "/v1/workspaces/{ws}/seo-sites", params: base, mcp: "list_seo_sites", ask: "Which of my sites has the lowest health score, and what should I fix first?", scope: "seo.read" };
+    case "search-insights":
+      return { title: "Search workspace", path: "/v1/brands/{brand}/seo-sites/{site}/insights/workspace", params: { brand: "{brand}", site: item ?? "{site}" }, mcp: "get_search_workspace", ask: "Which search findings should we act on, and did the latest collections succeed?", scope: "seo.read" };
     case "keywords":
       return { title: "Sites, then GET .../seo-sites/{site}/search for each one's pages and queries", path: "/v1/workspaces/{ws}/seo-sites", params: base, mcp: "get_site_search", ask: "Which pages get the most search impressions but few clicks, and what should I change on them?", scope: "seo.read" };
     case "ai-visibility":
@@ -942,6 +948,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "link-building":
       return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
+    case "coverage":
+      return { title: "Brand coverage", path: "/v1/workspaces/{ws}/brands", params: base, scope: "coverage.read", ask: "Find this brand, then use its coverage API to review placements, outstanding work and publisher relationships." };
     case "news":
       return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
     case "stories":

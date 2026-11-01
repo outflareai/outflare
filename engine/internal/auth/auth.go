@@ -86,9 +86,14 @@ const (
 	ScopeMissionsApprove = "missions.approve"
 	// SEO: sites, ownership checks and crawls. Managing is adding sites and
 	// starting crawls, which visit the site as OutflareBot.
-	ScopeSEORead      = "seo.read"
-	ScopeSEOManage    = "seo.manage"
-	ScopeWebhooksRead = "webhooks.read"
+	ScopeCoverageRead          = "coverage.read"
+	ScopeCoverageManage        = "coverage.manage"
+	ScopeCoverageFinanceRead   = "coverage.finance.read"
+	ScopeCoverageFinanceManage = "coverage.finance.manage"
+	ScopeCoverageApprove       = "coverage.approve"
+	ScopeSEORead               = "seo.read"
+	ScopeSEOManage             = "seo.manage"
+	ScopeWebhooksRead          = "webhooks.read"
 	// Managing webhooks is registering URLs that receive workspace events
 	// (lead emails and replies included), so it is for admins by default.
 	ScopeWebhooksManage = "webhooks.manage"
@@ -169,6 +174,7 @@ var AllScopes = []string{
 	ScopeMissionsRead,
 	ScopeMissionsRun,
 	ScopeMissionsApprove,
+	ScopeCoverageRead, ScopeCoverageManage, ScopeCoverageFinanceRead, ScopeCoverageFinanceManage, ScopeCoverageApprove,
 	ScopeSEORead,
 	ScopeSEOManage,
 	ScopeWebhooksRead,
@@ -202,14 +208,14 @@ const (
 // PersonOnly are scopes that only a signed-in person uses: taking
 // someone's access away and changing roles. No API token or connected app
 // ever holds them.
-var PersonOnly = []string{ScopeMembersRemove, ScopeRolesManage}
+var PersonOnly = []string{ScopeMembersRemove, ScopeRolesManage, ScopeCoverageApprove}
 
 var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
-	RoleViewer:   {ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
+	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,

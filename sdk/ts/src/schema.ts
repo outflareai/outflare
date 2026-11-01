@@ -21408,6 +21408,936 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/coverage/placements/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Review external claims against published brand Knowledge
+         * @description Queues a review through the workspace model and budget. Requires a successful page observation. Results cite Knowledge versions; later changes make an assessment stale.
+         */
+        post: operations["reviewCoverageAccuracy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** getCoverageSchema */
+        get: operations["getCoverageSchema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** getCoverageReports */
+        get: operations["getCoverageReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/finance-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** getCoverageFinanceReport */
+        get: operations["getCoverageFinanceReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/{resource}/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                resource: string;
+            };
+            cookie?: never;
+        };
+        /** getCoverageHistory */
+        get: operations["getCoverageHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/placements/{id}/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** getCoverageObservations */
+        get: operations["getCoverageObservations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/placements/{id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** checkCoveragePlacement */
+        post: operations["checkCoveragePlacement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/agreements/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** approveCoverageAgreement */
+        post: operations["approveCoverageAgreement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/discovery/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** reconcileCoverageDiscovery */
+        post: operations["reconcileCoverageDiscovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/candidates/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** confirmCoverageCandidate */
+        post: operations["confirmCoverageCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** importCoveragePlacements */
+        post: operations["importCoveragePlacements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/publishers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List publishers */
+        get: operations["listCoveragePublishers"];
+        put?: never;
+        /** Create publishers */
+        post: operations["createCoveragePublishers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/publishers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get publishers */
+        get: operations["getCoveragePublishers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update publishers using its current version */
+        patch: operations["updateCoveragePublishers"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/agreements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List agreements */
+        get: operations["listCoverageAgreements"];
+        put?: never;
+        /** Create agreements */
+        post: operations["createCoverageAgreements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/agreements/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get agreements */
+        get: operations["getCoverageAgreements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update agreements using its current version */
+        patch: operations["updateCoverageAgreements"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/placements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List placements */
+        get: operations["listCoveragePlacements"];
+        put?: never;
+        /** Create placements */
+        post: operations["createCoveragePlacements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/placements/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get placements */
+        get: operations["getCoveragePlacements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update placements using its current version */
+        patch: operations["updateCoveragePlacements"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/deliverables": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List deliverables */
+        get: operations["listCoverageDeliverables"];
+        put?: never;
+        /** Create deliverables */
+        post: operations["createCoverageDeliverables"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/deliverables/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get deliverables */
+        get: operations["getCoverageDeliverables"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update deliverables using its current version */
+        patch: operations["updateCoverageDeliverables"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List invoices */
+        get: operations["listCoverageInvoices"];
+        put?: never;
+        /** Create invoices */
+        post: operations["createCoverageInvoices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/invoices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get invoices */
+        get: operations["getCoverageInvoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update invoices using its current version */
+        patch: operations["updateCoverageInvoices"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List payments */
+        get: operations["listCoveragePayments"];
+        put?: never;
+        /** Create payments */
+        post: operations["createCoveragePayments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/payments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get payments */
+        get: operations["getCoveragePayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List rates */
+        get: operations["listCoverageRates"];
+        put?: never;
+        /** Create rates */
+        post: operations["createCoverageRates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/rates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get rates */
+        get: operations["getCoverageRates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update rates using its current version */
+        patch: operations["updateCoverageRates"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List budgets */
+        get: operations["listCoverageBudgets"];
+        put?: never;
+        /** Create budgets */
+        post: operations["createCoverageBudgets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get budgets */
+        get: operations["getCoverageBudgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update budgets using its current version */
+        patch: operations["updateCoverageBudgets"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List tasks */
+        get: operations["listCoverageTasks"];
+        put?: never;
+        /** Create tasks */
+        post: operations["createCoverageTasks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get tasks */
+        get: operations["getCoverageTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update tasks using its current version */
+        patch: operations["updateCoverageTasks"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List candidates */
+        get: operations["listCoverageCandidates"];
+        put?: never;
+        /** Create candidates */
+        post: operations["createCoverageCandidates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/candidates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get candidates */
+        get: operations["getCoverageCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update candidates using its current version */
+        patch: operations["updateCoverageCandidates"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List views */
+        get: operations["listCoverageViews"];
+        put?: never;
+        /** Create views */
+        post: operations["createCoverageViews"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/views/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get views */
+        get: operations["getCoverageViews"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update views using its current version */
+        patch: operations["updateCoverageViews"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List rules */
+        get: operations["listCoverageRules"];
+        put?: never;
+        /** Create rules */
+        post: operations["createCoverageRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get rules */
+        get: operations["getCoverageRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update rules using its current version */
+        patch: operations["updateCoverageRules"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/finance_tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List finance tasks */
+        get: operations["listCoverageFinanceTasks"];
+        put?: never;
+        /** Create finance tasks */
+        post: operations["createCoverageFinanceTasks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/finance_tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get finance tasks */
+        get: operations["getCoverageFinanceTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update finance tasks using its current version */
+        patch: operations["updateCoverageFinanceTasks"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List documents */
+        get: operations["listCoverageDocuments"];
+        put?: never;
+        /** Create documents */
+        post: operations["createCoverageDocuments"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/documents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get documents */
+        get: operations["getCoverageDocuments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update documents using its current version */
+        patch: operations["updateCoverageDocuments"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/delivery_reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List delivery reports */
+        get: operations["listCoverageDeliveryReports"];
+        put?: never;
+        /** Create delivery reports */
+        post: operations["createCoverageDeliveryReports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/delivery_reports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get delivery reports */
+        get: operations["getCoverageDeliveryReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update delivery reports using its current version */
+        patch: operations["updateCoverageDeliveryReports"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/report-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /** List immutable Coverage report snapshots */
+        get: operations["listCoverageReportSnapshots"];
+        put?: never;
+        /** Save an immutable report with its period, filters and measurement definitions */
+        post: operations["createCoverageReportSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/report-snapshots/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read a saved Coverage report snapshot */
+        get: operations["getCoverageReportSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/documents/{id}/extract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extract quoted draft agreement terms from saved document text */
+        post: operations["extractCoverageDocumentTerms"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/outcomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read observed publisher referrals and recorded conversion attribution
+         * @description Also requires analytics.read. Counts each publisher website once across placements; keeps recorded attribution separate from source-reported delivery.
+         */
+        get: operations["getCoverageAttributedOutcomes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/review-requests/settings": {
         parameters: {
             query?: never;
@@ -21549,6 +22479,315 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        /** Analyse SEO opportunities, trends, segments, forecasts and stored field data */
+        get: operations["getSearchInsights"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/search-groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        /** List saved search-groups */
+        get: operations["listSearchGroups"];
+        put?: never;
+        /** Create or replace a saved search-groups */
+        post: operations["saveSearchGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/search-groups/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a saved search-groups */
+        delete: operations["deleteSearchGroup"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/search-migrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        /** List saved search-migrations */
+        get: operations["listSearchMigrations"];
+        put?: never;
+        /** Create or replace a saved search-migrations */
+        post: operations["saveSearchMigration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/search-migrations/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a saved search-migrations */
+        delete: operations["deleteSearchMigration"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue Core Web Vitals history and official Google update collection */
+        post: operations["refreshSearchInsights"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        /** Read saved work, reports, schedules and collection activity */
+        get: operations["getSearchWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/report-runs/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        /** Read one immutable report snapshot */
+        get: operations["getSearchReportRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save or update a verified finding with tags and work status */
+        post: operations["saveSearchWorkItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/items/{item}/fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create or return the shared fix for a saved finding */
+        post: operations["createSearchWorkFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save an editable report definition and tags */
+        post: operations["saveSearchReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate a report snapshot and retain success or failure history */
+        post: operations["runSearchReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set up or pause a timezone-aware data collection schedule */
+        post: operations["saveSearchSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete saved reports */
+        delete: operations["deleteSearchReport"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/seo-sites/{site}/insights/schedules/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete saved schedules */
+        delete: operations["deleteSearchSchedule"];
         options?: never;
         head?: never;
         patch?: never;
@@ -25126,6 +26365,176 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "coverage_record.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record created. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record updated. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.imported": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record imported. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_imported"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.check_queued": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record check_queued. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_check_queued"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.checked": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record checked. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_checked"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.review_queued": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record review_queued. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_review_queued"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.reviewed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record reviewed. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_reviewed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.approved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record approved. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_approved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.discovered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record discovered. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_discovered"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "coverage_record.confirmed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record confirmed. Read the target through its permissioned API. */
+        post: operations["webhook_coverage_record_confirmed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "workspace.updated": {
         parameters: {
             query?: never;
@@ -25163,19 +26572,242 @@ export interface webhooks {
 }
 export interface components {
     schemas: {
-        ReviewDestination: {
-            platform: string;
-            url: string;
+        SearchViewFilters: {
+            report?: string;
+            from?: string;
+            to?: string;
+            country?: string;
+            device?: string;
+            group_id?: string;
+            bucket?: string;
+            migration_id?: string;
+            integration_id?: string;
+            currency?: string;
+            threshold?: number;
+            weeks?: number;
+            growth?: number;
+            conversion_rate?: number;
+            order_value?: number;
         };
-        ReviewRequestSettings: {
-            from: string;
-            reply_to: string;
+        SearchWorkItem: {
+            id: string;
+            report: string;
+            key: string;
+            page?: string;
+            query?: string;
+            title: string;
+            recommendation: string;
+            tags: string[];
             /** @enum {string} */
-            frequency: "interval" | "once" | "unlimited";
-            interval_days: number;
+            status: "open" | "in_progress" | "done" | "dismissed";
+            note: string;
+            fix_id: string | null;
+            created_at: string;
+            updated_at: string;
+            evidence: components["schemas"]["SearchInsightRow"];
+        };
+        SearchSavedReport: {
+            id: string;
+            name: string;
+            tags: string[];
+            filters: components["schemas"]["SearchViewFilters"];
+            created_at: string;
+            updated_at: string;
+            latest_run: components["schemas"]["SearchReportRun"] | null;
+        };
+        SearchReportRun: {
+            id: string;
+            report_id: string;
+            report_name: string;
+            status: string;
+            error: string;
+            created_at: string;
+            /** Format: date-time */
+            completed_at: string | null;
+            filters: components["schemas"]["SearchViewFilters"];
+            result: components["schemas"]["SearchInsightReport"] | null;
+        };
+        SearchCollectionSchedule: {
+            id: string;
+            name: string;
+            integration_id: string;
+            page: string;
+            device: string;
             /** @enum {string} */
-            frequency_scope: "brand" | "platform";
-            destinations: components["schemas"]["ReviewDestination"][];
+            frequency: "off" | "daily" | "weekly";
+            weekday: number;
+            hour: number;
+            timezone: string;
+            /** Format: date-time */
+            next_run_at: string | null;
+            revision: number;
+            created_at: string;
+        };
+        SearchCollectionRun: {
+            id: string;
+            kind: string;
+            status: string;
+            attempts: number;
+            max_attempts: number;
+            error: string;
+            run_at: string;
+            created_at: string;
+            updated_at: string;
+            page: string;
+            device: string;
+            integration_id: string;
+            schedule_id: string;
+        };
+        SearchWorkspace: {
+            items: components["schemas"]["SearchWorkItem"][];
+            reports: components["schemas"]["SearchSavedReport"][];
+            schedules: components["schemas"]["SearchCollectionSchedule"][];
+            activity: components["schemas"]["SearchCollectionRun"][];
+            report_runs: components["schemas"]["SearchReportRun"][];
+            search_source: components["schemas"]["SearchSource"] | null;
+            updated_at: string;
+        };
+        SearchInsightRow: {
+            key: string;
+            page?: string;
+            query?: string;
+            date?: string;
+            country?: string;
+            device?: string;
+            status?: string;
+            detail?: string;
+            source?: string;
+            target?: string;
+            metric?: string;
+            clicks?: number;
+            impressions?: number;
+            ctr?: number;
+            position?: number;
+            expected_ctr?: number;
+            missed_clicks?: number;
+            potential_clicks?: number;
+            before?: number;
+            after?: number;
+            change?: number;
+            score?: number;
+            lower?: number;
+            upper?: number;
+            sessions?: number;
+            conversions?: number;
+            share?: number;
+            value?: number;
+            good_share?: number;
+            values?: {
+                date: string;
+                value: number;
+            }[];
+            /** Format: int64 */
+            revenue_micros?: number;
+            currency?: string;
+        };
+        SearchInsightReport: {
+            /** @enum {string} */
+            report: "opportunities" | "ctr" | "decay" | "segments" | "groups" | "forecast" | "completeness" | "changes" | "attribution" | "ai-referrals" | "migrations" | "vitals";
+            from?: string;
+            to?: string;
+            status: string;
+            notes: string[];
+            data: components["schemas"]["SearchInsightRow"][];
+            source?: components["schemas"]["SearchSource"] | null;
+            summary: {
+                [key: string]: number;
+            };
+        };
+        SearchGroup: {
+            id?: string;
+            name: string;
+            /** @enum {string} */
+            kind: "content" | "topic";
+            rules: {
+                /** @enum {string} */
+                operator: "prefix" | "contains" | "regex" | "equals";
+                value: string;
+            }[];
+        };
+        SearchMigration: {
+            id?: string;
+            name: string;
+            /** Format: uuid */
+            target_site_id: string;
+            /** Format: date */
+            go_live: string;
+            mappings: {
+                /** Format: uri */
+                source: string;
+                /** Format: uri */
+                target: string;
+            }[];
+        };
+        ReviewRequestList: {
+            data: components["schemas"]["ReviewRequest"][];
+            next: string;
+            report: components["schemas"]["ReviewRequestReport"];
+        };
+        ReviewRequestReport: {
+            total: number;
+            sent: number;
+            delivered: number;
+            clicked: number;
+            skipped: number;
+            failed: number;
+            pending: number;
+            platforms: {
+                platform: string;
+                clickers: number;
+            }[];
+        };
+        ReviewRequest: {
+            id: string;
+            record_id: string;
+            customer: string;
+            campaign_id: string;
+            campaign: string;
+            platforms: string[];
+            status: string;
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            clicked_at: string | null;
+            email_id: string | null;
+        };
+        ReviewRequestPreview: {
+            total: number;
+            eligible: number;
+            excluded: {
+                [key: string]: number;
+            };
+        };
+        ReviewRequestCatalog: {
+            settings: components["schemas"]["ReviewRequestSettings"];
+            platforms: components["schemas"]["ReviewRequestPlatform"][];
+        };
+        ReviewRequestPlatform: {
+            id: string;
+            name: string;
+            invitation: boolean;
+            monitoring: boolean;
+            note: string;
+        };
+        ReviewRequestCampaign: {
+            stats?: {
+                [key: string]: number;
+            };
+            id: string;
+            brand_id: string;
+            status: string;
+            config: components["schemas"]["ReviewCampaignConfig"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            send_at: string | null;
         };
         ReviewCampaignConfig: {
             name: string;
@@ -25196,71 +26828,19 @@ export interface components {
                 match?: "all" | "any";
             };
         };
-        ReviewRequestCampaign: {
-            stats?: {
-                [key: string]: number;
-            };
-            id: string;
-            brand_id: string;
-            status: string;
-            config: components["schemas"]["ReviewCampaignConfig"];
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            send_at: string | null;
+        ReviewRequestSettings: {
+            from: string;
+            reply_to: string;
+            /** @enum {string} */
+            frequency: "interval" | "once" | "unlimited";
+            interval_days: number;
+            /** @enum {string} */
+            frequency_scope: "brand" | "platform";
+            destinations: components["schemas"]["ReviewDestination"][];
         };
-        ReviewRequestPlatform: {
-            id: string;
-            name: string;
-            invitation: boolean;
-            monitoring: boolean;
-            note: string;
-        };
-        ReviewRequestCatalog: {
-            settings: components["schemas"]["ReviewRequestSettings"];
-            platforms: components["schemas"]["ReviewRequestPlatform"][];
-        };
-        ReviewRequestPreview: {
-            total: number;
-            eligible: number;
-            excluded: {
-                [key: string]: number;
-            };
-        };
-        ReviewRequest: {
-            id: string;
-            record_id: string;
-            customer: string;
-            campaign_id: string;
-            campaign: string;
-            platforms: string[];
-            status: string;
-            reason: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            sent_at: string | null;
-            /** Format: date-time */
-            clicked_at: string | null;
-            email_id: string | null;
-        };
-        ReviewRequestReport: {
-            total: number;
-            sent: number;
-            delivered: number;
-            clicked: number;
-            skipped: number;
-            failed: number;
-            pending: number;
-            platforms: {
-                platform: string;
-                clickers: number;
-            }[];
-        };
-        ReviewRequestList: {
-            data: components["schemas"]["ReviewRequest"][];
-            next: string;
-            report: components["schemas"]["ReviewRequestReport"];
+        ReviewDestination: {
+            platform: string;
+            url: string;
         };
         ErrorCode: {
             /** @example idempotency_in_progress */
@@ -25497,7 +27077,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -26590,13 +28170,31 @@ export interface components {
             cancelled: boolean;
             /** @description Nobody who owns it is still in the workspace. */
             owner_left: boolean;
+            /** @description Explicit brand assignments. Empty means awaiting assignment; never inferred from the browser selection. */
+            brand_ids: string[];
             members: components["schemas"]["AIAccountMember"][];
             /** @description The latest reading of each limit window from Outflare for desktop, in the last week. Empty when no computer reads this account. */
             usage: components["schemas"]["AIUsageWindow"][];
+            /** @description Computers that reported this account in the last week, and the person who linked each computer. */
+            reporting_devices: components["schemas"]["AIAccountDevice"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AIAccountDevice: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @enum {string} */
+            platform: "macos" | "windows" | "linux";
+            /** Format: uuid */
+            user_id: string;
+            user_name: string;
+            user_email: string;
+            /** Format: date-time */
+            last_reported_at: string;
+            unlinked: boolean;
         };
         AIUsageWindow: {
             /**
@@ -26625,6 +28223,7 @@ export interface components {
             /** Format: uuid */
             user_id: string;
             user_name: string;
+            user_email: string;
             /** @example Ana's MacBook */
             name: string;
             /** @enum {string} */
@@ -26699,6 +28298,8 @@ export interface components {
             price_cents?: number;
             resets_available?: number;
             cancelled?: boolean;
+            /** @description Explicit assignments to brands in this workspace. Omitted preserves existing assignments; empty clears them. */
+            brand_ids?: string[];
             members?: {
                 /** Format: uuid */
                 user_id: string;
@@ -34276,7 +35877,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "journeys" | "pr_stories";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "coverage_review" | "journeys" | "pr_stories";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -35127,7 +36728,7 @@ export interface components {
             invites: number;
         };
         /** @enum {string} */
-        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
+        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "missions.read" | "missions.run" | "missions.approve" | "coverage.read" | "coverage.manage" | "coverage.finance.read" | "coverage.finance.manage" | "coverage.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage";
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -40020,6 +41621,1299 @@ export interface components {
             }[];
             plans: components["schemas"]["InfraPlan"][];
             suppliers: string[];
+        };
+        CoveragePublishersInput: {
+            /** Format: uuid */
+            record_id: string;
+            domain: string;
+            /** @default publisher */
+            category: string;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "paused" | "archived";
+            /** @default  */
+            notes: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            relationship_status: "new" | "introduced" | "active" | "dormant" | "do_not_contact";
+        };
+        CoveragePublishersUpdate: {
+            version: number;
+            /** Format: uuid */
+            record_id?: string;
+            domain?: string;
+            /** @default publisher */
+            category: string;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "paused" | "archived";
+            /** @default  */
+            notes: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            relationship_status: "new" | "introduced" | "active" | "dormant" | "do_not_contact";
+        };
+        CoveragePublishers: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            record_id: string;
+            domain: string;
+            /** @default publisher */
+            category: string;
+            /** Format: uuid */
+            owner_id: string | null;
+            /**
+             * @default active
+             * @enum {string}
+             */
+            status: "active" | "paused" | "archived";
+            /** @default  */
+            notes: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            relationship_status: "new" | "introduced" | "active" | "dormant" | "do_not_contact";
+        };
+        CoverageAgreementsInput: {
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** Format: uuid */
+            deal_id?: string | null;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "proposed" | "active" | "completed" | "cancelled";
+            /** Format: date */
+            starts_on?: string | null;
+            /** Format: date */
+            ends_on?: string | null;
+            /** Format: date */
+            renewal_on?: string | null;
+            /** Format: date */
+            notice_on?: string | null;
+            /** @default  */
+            terms: string;
+            /** Format: uuid */
+            owner_id?: string | null;
+        };
+        CoverageAgreementsUpdate: {
+            version: number;
+            /** Format: uuid */
+            publisher_id?: string;
+            title?: string;
+            /** Format: uuid */
+            deal_id?: string | null;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "proposed" | "active" | "completed" | "cancelled";
+            /** Format: date */
+            starts_on?: string | null;
+            /** Format: date */
+            ends_on?: string | null;
+            /** Format: date */
+            renewal_on?: string | null;
+            /** Format: date */
+            notice_on?: string | null;
+            /** @default  */
+            terms: string;
+            /** Format: uuid */
+            owner_id?: string | null;
+        };
+        CoverageAgreements: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** Format: uuid */
+            deal_id: string | null;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "proposed" | "active" | "completed" | "cancelled";
+            /** Format: date */
+            starts_on: string | null;
+            /** Format: date */
+            ends_on: string | null;
+            /** Format: date */
+            renewal_on: string | null;
+            /** Format: date */
+            notice_on: string | null;
+            /** @default  */
+            terms: string;
+            /** Format: uuid */
+            owner_id: string | null;
+            approved_version: number | null;
+            approved_by: string | null;
+            approved_at: string | null;
+        };
+        CoveragePlacementsInput: {
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** @default  */
+            url: string;
+            /** @default  */
+            inventory: string;
+            /** @default  */
+            target_url: string;
+            /**
+             * @default blog
+             * @enum {string}
+             */
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            /**
+             * @default identified
+             * @enum {string}
+             */
+            stage: "identified" | "contacting" | "discussing" | "agreed" | "awaiting_publication" | "live" | "declined" | "cancelled" | "archived";
+            /** Format: uuid */
+            contact_record_id?: string | null;
+            /** Format: uuid */
+            agreement_id?: string | null;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            expected_on?: string | null;
+            /** Format: date */
+            published_on?: string | null;
+            /** Format: date */
+            expires_on?: string | null;
+            /** @default false */
+            expected_link: boolean;
+            /** @default  */
+            expected_mention: string;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            sentiment: "positive" | "neutral" | "negative" | "mixed" | "unknown";
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+            /** @default true */
+            monitor: boolean;
+            /** @description Opt in to scheduled accuracy review using the workspace AI connection, at most daily. Unchanged page text and Knowledge versions reuse the prior result. */
+            monitor_accuracy?: boolean;
+            /** @default 168 */
+            check_every_hours: number;
+            /**
+             * @default any
+             * @enum {string}
+             */
+            expected_rel: "any" | "follow" | "nofollow" | "sponsored" | "ugc";
+            /**
+             * @default native
+             * @enum {string}
+             */
+            reader: "native" | "connected";
+            /** @default  */
+            campaign: string;
+            /** @default  */
+            market: string;
+            /** @default  */
+            language: string;
+            /** @default false */
+            baseline: boolean;
+        };
+        CoveragePlacementsUpdate: {
+            version: number;
+            /** Format: uuid */
+            publisher_id?: string;
+            title?: string;
+            /** @default  */
+            url: string;
+            /** @default  */
+            inventory: string;
+            /** @default  */
+            target_url: string;
+            /**
+             * @default blog
+             * @enum {string}
+             */
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            /**
+             * @default identified
+             * @enum {string}
+             */
+            stage: "identified" | "contacting" | "discussing" | "agreed" | "awaiting_publication" | "live" | "declined" | "cancelled" | "archived";
+            /** Format: uuid */
+            contact_record_id?: string | null;
+            /** Format: uuid */
+            agreement_id?: string | null;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            expected_on?: string | null;
+            /** Format: date */
+            published_on?: string | null;
+            /** Format: date */
+            expires_on?: string | null;
+            /** @default false */
+            expected_link: boolean;
+            /** @default  */
+            expected_mention: string;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            sentiment: "positive" | "neutral" | "negative" | "mixed" | "unknown";
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+            /** @default true */
+            monitor: boolean;
+            /** @description Opt in to scheduled accuracy review using the workspace AI connection, at most daily. Unchanged page text and Knowledge versions reuse the prior result. */
+            monitor_accuracy?: boolean;
+            /** @default 168 */
+            check_every_hours: number;
+            /**
+             * @default any
+             * @enum {string}
+             */
+            expected_rel: "any" | "follow" | "nofollow" | "sponsored" | "ugc";
+            /**
+             * @default native
+             * @enum {string}
+             */
+            reader: "native" | "connected";
+            /** @default  */
+            campaign: string;
+            /** @default  */
+            market: string;
+            /** @default  */
+            language: string;
+            /** @default false */
+            baseline: boolean;
+        };
+        CoveragePlacements: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** @default  */
+            url: string;
+            /** @default  */
+            inventory: string;
+            /** @default  */
+            target_url: string;
+            /**
+             * @default blog
+             * @enum {string}
+             */
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            /**
+             * @default identified
+             * @enum {string}
+             */
+            stage: "identified" | "contacting" | "discussing" | "agreed" | "awaiting_publication" | "live" | "declined" | "cancelled" | "archived";
+            /** Format: uuid */
+            contact_record_id: string | null;
+            /** Format: uuid */
+            agreement_id: string | null;
+            /** Format: uuid */
+            owner_id: string | null;
+            /** Format: date */
+            expected_on: string | null;
+            /** Format: date */
+            published_on: string | null;
+            /** Format: date */
+            expires_on: string | null;
+            /** @default false */
+            expected_link: boolean;
+            /** @default  */
+            expected_mention: string;
+            /**
+             * @default unknown
+             * @enum {string}
+             */
+            sentiment: "positive" | "neutral" | "negative" | "mixed" | "unknown";
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+            /** @default true */
+            monitor: boolean;
+            /** @description Opt in to scheduled accuracy review using the workspace AI connection, at most daily. Unchanged page text and Knowledge versions reuse the prior result. */
+            monitor_accuracy?: boolean;
+            /** @default 168 */
+            check_every_hours: number;
+            /** Format: date-time */
+            first_verified_at: string | null;
+            /** Format: date-time */
+            last_verified_at: string | null;
+            /** Format: date-time */
+            last_check_at: string | null;
+            health: string;
+            /**
+             * @default any
+             * @enum {string}
+             */
+            expected_rel: "any" | "follow" | "nofollow" | "sponsored" | "ugc";
+            /**
+             * @default native
+             * @enum {string}
+             */
+            reader: "native" | "connected";
+            /** @default  */
+            campaign: string;
+            /** @default  */
+            market: string;
+            /** @default  */
+            language: string;
+            /** @default false */
+            baseline: boolean;
+        };
+        CoverageDeliverablesInput: {
+            /** Format: uuid */
+            agreement_id: string;
+            /** Format: uuid */
+            placement_id?: string | null;
+            title: string;
+            /** @default 1 */
+            quantity: number;
+            /** @default 0 */
+            accepted_quantity: number;
+            /** @default placement */
+            unit: string;
+            /** Format: date */
+            due_on?: string | null;
+            /** @default 0 */
+            allocation_minor: number;
+            /** @default  */
+            evidence: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "partial" | "accepted" | "cancelled";
+        };
+        CoverageDeliverablesUpdate: {
+            version: number;
+            /** Format: uuid */
+            agreement_id?: string;
+            /** Format: uuid */
+            placement_id?: string | null;
+            title?: string;
+            /** @default 1 */
+            quantity: number;
+            /** @default 0 */
+            accepted_quantity: number;
+            /** @default placement */
+            unit: string;
+            /** Format: date */
+            due_on?: string | null;
+            /** @default 0 */
+            allocation_minor: number;
+            /** @default  */
+            evidence: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "partial" | "accepted" | "cancelled";
+        };
+        CoverageDeliverables: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            agreement_id: string;
+            /** Format: uuid */
+            placement_id: string | null;
+            title: string;
+            /** @default 1 */
+            quantity: number;
+            /** @default 0 */
+            accepted_quantity: number;
+            /** @default placement */
+            unit: string;
+            /** Format: date */
+            due_on: string | null;
+            /** @default 0 */
+            allocation_minor: number;
+            /** @default  */
+            evidence: string;
+            /**
+             * @default pending
+             * @enum {string}
+             */
+            status: "pending" | "partial" | "accepted" | "cancelled";
+        };
+        CoverageInvoicesInput: {
+            /** Format: uuid */
+            agreement_id: string;
+            title: string;
+            reference: string;
+            /**
+             * @default invoice
+             * @enum {string}
+             */
+            kind: "invoice" | "credit";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            issued_on?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "received" | "disputed" | "void";
+            /** @default  */
+            notes: string;
+        };
+        CoverageInvoicesUpdate: {
+            version: number;
+            /** Format: uuid */
+            agreement_id?: string;
+            title?: string;
+            reference?: string;
+            /**
+             * @default invoice
+             * @enum {string}
+             */
+            kind: "invoice" | "credit";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            issued_on?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "received" | "disputed" | "void";
+            /** @default  */
+            notes: string;
+        };
+        CoverageInvoices: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            agreement_id: string;
+            title: string;
+            reference: string;
+            /**
+             * @default invoice
+             * @enum {string}
+             */
+            kind: "invoice" | "credit";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            issued_on: string | null;
+            /** Format: date */
+            due_on: string | null;
+            /**
+             * @default draft
+             * @enum {string}
+             */
+            status: "draft" | "received" | "disputed" | "void";
+            /** @default  */
+            notes: string;
+        };
+        CoveragePaymentsInput: {
+            /** Format: uuid */
+            invoice_id: string;
+            title: string;
+            reference: string;
+            /**
+             * @default payment
+             * @enum {string}
+             */
+            kind: "payment" | "reversal";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            paid_on: string;
+            /** @default  */
+            notes: string;
+        };
+        CoveragePaymentsUpdate: {
+            version: number;
+            /** Format: uuid */
+            invoice_id?: string;
+            title?: string;
+            reference?: string;
+            /**
+             * @default payment
+             * @enum {string}
+             */
+            kind: "payment" | "reversal";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            paid_on?: string;
+            /** @default  */
+            notes: string;
+        };
+        CoveragePayments: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            invoice_id: string;
+            title: string;
+            reference: string;
+            /**
+             * @default payment
+             * @enum {string}
+             */
+            kind: "payment" | "reversal";
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            paid_on: string;
+            /** @default  */
+            notes: string;
+        };
+        CoverageRatesInput: {
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** @default placement */
+            unit: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** @default 1 */
+            minimum_quantity: number;
+            /** Format: date */
+            valid_until?: string | null;
+            /**
+             * @default published
+             * @enum {string}
+             */
+            status: "published" | "negotiated" | "expired";
+            /** @default  */
+            notes: string;
+        };
+        CoverageRatesUpdate: {
+            version: number;
+            /** Format: uuid */
+            publisher_id?: string;
+            title?: string;
+            /** @default placement */
+            unit: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** @default 1 */
+            minimum_quantity: number;
+            /** Format: date */
+            valid_until?: string | null;
+            /**
+             * @default published
+             * @enum {string}
+             */
+            status: "published" | "negotiated" | "expired";
+            /** @default  */
+            notes: string;
+        };
+        CoverageRates: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            publisher_id: string;
+            title: string;
+            /** @default placement */
+            unit: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** @default 1 */
+            minimum_quantity: number;
+            /** Format: date */
+            valid_until: string | null;
+            /**
+             * @default published
+             * @enum {string}
+             */
+            status: "published" | "negotiated" | "expired";
+            /** @default  */
+            notes: string;
+        };
+        CoverageBudgetsInput: {
+            title: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+        };
+        CoverageBudgetsUpdate: {
+            version: number;
+            title?: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            starts_on?: string;
+            /** Format: date */
+            ends_on?: string;
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+        };
+        CoverageBudgets: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /** @default USD */
+            currency: string;
+            /** @default 0 */
+            amount_minor: number;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            /** @default  */
+            tags: string;
+            /** @default  */
+            notes: string;
+        };
+        CoverageTasksInput: {
+            /** Format: uuid */
+            placement_id?: string | null;
+            /** Format: uuid */
+            publisher_id?: string | null;
+            title: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "urgent" | "high" | "normal" | "low";
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /** Format: date */
+            snooze_until?: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageTasksUpdate: {
+            version: number;
+            /** Format: uuid */
+            placement_id?: string | null;
+            /** Format: uuid */
+            publisher_id?: string | null;
+            title?: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "urgent" | "high" | "normal" | "low";
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /** Format: date */
+            snooze_until?: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageTasks: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            placement_id: string | null;
+            /** Format: uuid */
+            publisher_id: string | null;
+            title: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "urgent" | "high" | "normal" | "low";
+            /** Format: uuid */
+            owner_id: string | null;
+            /** Format: date */
+            due_on: string | null;
+            /** Format: date */
+            snooze_until: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageCandidatesInput: {
+            url: string;
+            title: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            /** @default  */
+            source_id: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            status: "new" | "confirmed" | "dismissed";
+            /** @default  */
+            notes: string;
+        };
+        CoverageCandidatesUpdate: {
+            version: number;
+            url?: string;
+            title?: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            /** @default  */
+            source_id: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            status: "new" | "confirmed" | "dismissed";
+            /** @default  */
+            notes: string;
+        };
+        CoverageCandidates: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            url: string;
+            title: string;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            /** @default  */
+            source_id: string;
+            /**
+             * @default new
+             * @enum {string}
+             */
+            status: "new" | "confirmed" | "dismissed";
+            /** @default  */
+            notes: string;
+        };
+        CoverageViewsInput: {
+            title: string;
+            /**
+             * @default placements
+             * @enum {string}
+             */
+            section: "placements" | "publishers" | "tasks" | "agreements" | "candidates";
+            /** @default {} */
+            filters: string;
+            /**
+             * @default private
+             * @enum {string}
+             */
+            visibility: "private" | "team";
+        };
+        CoverageViewsUpdate: {
+            version: number;
+            title?: string;
+            /**
+             * @default placements
+             * @enum {string}
+             */
+            section: "placements" | "publishers" | "tasks" | "agreements" | "candidates";
+            /** @default {} */
+            filters: string;
+            /**
+             * @default private
+             * @enum {string}
+             */
+            visibility: "private" | "team";
+        };
+        CoverageViews: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /**
+             * @default placements
+             * @enum {string}
+             */
+            section: "placements" | "publishers" | "tasks" | "agreements" | "candidates";
+            /** @default {} */
+            filters: string;
+            /**
+             * @default private
+             * @enum {string}
+             */
+            visibility: "private" | "team";
+        };
+        CoverageRulesInput: {
+            title: string;
+            /**
+             * @default first_live
+             * @enum {string}
+             */
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            /** @default true */
+            enabled: boolean;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** @default  */
+            notes: string;
+        };
+        CoverageRulesUpdate: {
+            version: number;
+            title?: string;
+            /**
+             * @default first_live
+             * @enum {string}
+             */
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            /** @default true */
+            enabled: boolean;
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** @default  */
+            notes: string;
+        };
+        CoverageRules: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /**
+             * @default first_live
+             * @enum {string}
+             */
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            /** @default true */
+            enabled: boolean;
+            /** Format: uuid */
+            owner_id: string | null;
+            /** @default  */
+            notes: string;
+        };
+        CoverageFinanceTasksInput: {
+            title: string;
+            /** Format: uuid */
+            agreement_id?: string | null;
+            /** Format: uuid */
+            invoice_id?: string | null;
+            /** Format: uuid */
+            publisher_id?: string | null;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "renewal_due" | "notice_due" | "invoice_due" | "delivery_overdue";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "normal" | "urgent" | "high" | "low";
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /** Format: date */
+            snooze_until?: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageFinanceTasksUpdate: {
+            version: number;
+            title?: string;
+            /** Format: uuid */
+            agreement_id?: string | null;
+            /** Format: uuid */
+            invoice_id?: string | null;
+            /** Format: uuid */
+            publisher_id?: string | null;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "renewal_due" | "notice_due" | "invoice_due" | "delivery_overdue";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "normal" | "urgent" | "high" | "low";
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: date */
+            due_on?: string | null;
+            /** Format: date */
+            snooze_until?: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageFinanceTasks: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /** Format: uuid */
+            agreement_id: string | null;
+            /** Format: uuid */
+            invoice_id: string | null;
+            /** Format: uuid */
+            publisher_id: string | null;
+            /**
+             * @default manual
+             * @enum {string}
+             */
+            reason: "manual" | "renewal_due" | "notice_due" | "invoice_due" | "delivery_overdue";
+            /**
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "in_progress" | "snoozed" | "resolved" | "dismissed";
+            /**
+             * @default normal
+             * @enum {string}
+             */
+            priority: "normal" | "urgent" | "high" | "low";
+            /** Format: uuid */
+            owner_id: string | null;
+            /** Format: date */
+            due_on: string | null;
+            /** Format: date */
+            snooze_until: string | null;
+            /** @default  */
+            evidence: string;
+            /** @default  */
+            resolution: string;
+        };
+        CoverageDocumentsInput: {
+            title: string;
+            /** Format: uuid */
+            agreement_id: string;
+            /**
+             * @default contract
+             * @enum {string}
+             */
+            kind: "contract" | "invoice" | "media_kit" | "creative" | "delivery" | "other";
+            url: string;
+            /** @default  */
+            notes: string;
+            /** @default  */
+            source_text: string;
+        };
+        CoverageDocumentsUpdate: {
+            version: number;
+            title?: string;
+            /** Format: uuid */
+            agreement_id?: string;
+            /**
+             * @default contract
+             * @enum {string}
+             */
+            kind: "contract" | "invoice" | "media_kit" | "creative" | "delivery" | "other";
+            url?: string;
+            /** @default  */
+            notes: string;
+            /** @default  */
+            source_text: string;
+        };
+        CoverageDocuments: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /** Format: uuid */
+            agreement_id: string;
+            /**
+             * @default contract
+             * @enum {string}
+             */
+            kind: "contract" | "invoice" | "media_kit" | "creative" | "delivery" | "other";
+            url: string;
+            /** @default  */
+            notes: string;
+            /** @default  */
+            source_text: string;
+            extraction?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            extracted_at?: string | null;
+        };
+        CoverageDeliveryReportsInput: {
+            title: string;
+            /** Format: uuid */
+            placement_id: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            source: string;
+            evidence: string;
+            impressions?: number | null;
+            clicks?: number | null;
+            sessions?: number | null;
+            leads?: number | null;
+            conversions?: number | null;
+            /** @default  */
+            notes: string;
+        };
+        CoverageDeliveryReportsUpdate: {
+            version: number;
+            title?: string;
+            /** Format: uuid */
+            placement_id?: string;
+            /** Format: date */
+            starts_on?: string;
+            /** Format: date */
+            ends_on?: string;
+            source?: string;
+            evidence?: string;
+            impressions?: number | null;
+            clicks?: number | null;
+            sessions?: number | null;
+            leads?: number | null;
+            conversions?: number | null;
+            /** @default  */
+            notes: string;
+        };
+        CoverageDeliveryReports: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            title: string;
+            /** Format: uuid */
+            placement_id: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            source: string;
+            evidence: string;
+            impressions: number | null;
+            clicks: number | null;
+            sessions: number | null;
+            leads: number | null;
+            conversions: number | null;
+            /** @default  */
+            notes: string;
         };
     };
     responses: {
@@ -48605,6 +51499,8 @@ export interface operations {
     listAIAccounts: {
         parameters: {
             query?: {
+                /** @description Explicit brand filter: id or handle, none for unassigned, or all for the workspace report. */
+                brand?: string;
                 provider?: components["schemas"]["AIProvider"];
                 /** @description true keeps only the accounts you belong to. */
                 mine?: boolean;
@@ -78704,6 +81600,2445 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    reviewCoverageAccuracy: {
+        parameters: {
+            query?: {
+                /** @description Manual assistance only. Outreach outputs are drafts and never send a message. */
+                purpose?: "accuracy" | "classification" | "thank_you" | "link_request" | "correction" | "follow_up";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued or held for mission approval. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageSchema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageReports: {
+        parameters: {
+            query?: {
+                /** @description YYYY-MM-DD; maximum two years. */
+                from?: string;
+                /** @description YYYY-MM-DD; maximum two years. */
+                to?: string;
+                /** @description Coverage placement filter group JSON. Historical segmentation uses current metadata. */
+                filters?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageFinanceReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                resource: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageObservations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    checkCoveragePlacement: {
+        parameters: {
+            query?: {
+                /** @description Native polite fetching, or the brand's own connected page reader (Geonode). Connected reads use the connection budget and never fall back to another account. */
+                reader?: "native" | "connected";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued or held for approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    approveCoverageAgreement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    version: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageAgreements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reconcileCoverageDiscovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: number;
+                        processed?: number;
+                        /** @description Another bounded batch may remain; call again to continue. */
+                        has_more?: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    confirmCoverageCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    publisher_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePlacements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    importCoveragePlacements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    rows: components["schemas"]["CoveragePlacementsInput"][];
+                    commit: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoveragePublishers: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoveragePublishers"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoveragePublishers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePublishersInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePublishers"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoveragePublishers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePublishers"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoveragePublishers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePublishersUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePublishers"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageAgreements: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageAgreements"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageAgreements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageAgreementsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageAgreements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageAgreements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageAgreements"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageAgreements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageAgreementsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageAgreements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoveragePlacements: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoveragePlacements"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoveragePlacements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePlacementsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePlacements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoveragePlacements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePlacements"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoveragePlacements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePlacementsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePlacements"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageDeliverables: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageDeliverables"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageDeliverables: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDeliverablesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliverables"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageDeliverables: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliverables"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageDeliverables: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDeliverablesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliverables"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageInvoices: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageInvoices"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageInvoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageInvoicesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageInvoices"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageInvoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageInvoices"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageInvoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageInvoicesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageInvoices"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoveragePayments: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoveragePayments"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoveragePayments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePaymentsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePayments"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoveragePayments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoveragePayments"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageRates: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageRates"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageRates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageRatesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRates"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageRates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRates"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageRates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageRatesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRates"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageBudgets: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageBudgets"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageBudgetsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageBudgets"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageBudgets"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageBudgets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageBudgetsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageBudgets"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageTasks: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageTasks"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageTasksInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageTasks"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageTasks"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageTasksUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageTasks"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageCandidates: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageCandidates"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageCandidatesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageCandidates"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageCandidates"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageCandidatesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageCandidates"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageViews: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageViews"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageViews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageViewsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageViews"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageViews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageViews"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageViews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageViewsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageViews"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageRules: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageRules"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageRulesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRules"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRules"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageRulesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageRules"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageFinanceTasks: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageFinanceTasks"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageFinanceTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageFinanceTasksInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageFinanceTasks"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageFinanceTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageFinanceTasks"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageFinanceTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageFinanceTasksUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageFinanceTasks"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageDocuments: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageDocuments"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDocumentsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDocuments"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDocuments"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDocumentsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDocuments"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageDeliveryReports: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                offset?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageDeliveryReports"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                        next_offset: number | null;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageDeliveryReports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDeliveryReportsInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliveryReports"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageDeliveryReports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliveryReports"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageDeliveryReports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageDeliveryReportsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageDeliveryReports"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageReportSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageReportSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                    from?: string;
+                    to?: string;
+                    filters?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageReportSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    extractCoverageDocumentTerms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued or held for mission approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    } | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageAttributedOutcomes: {
+        parameters: {
+            query?: {
+                /** @description YYYY-MM-DD; maximum two years. */
+                from?: string;
+                /** @description YYYY-MM-DD; maximum two years. */
+                to?: string;
+                /** @description An existing Outflare attribution model key; defaults to the workspace model. */
+                model?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getReviewRequestSettings: {
         parameters: {
             query?: never;
@@ -78963,6 +84298,501 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ReviewRequestList"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSearchInsights: {
+        parameters: {
+            query?: {
+                report?: "opportunities" | "ctr" | "decay" | "segments" | "groups" | "forecast" | "completeness" | "changes" | "attribution" | "ai-referrals" | "migrations" | "vitals";
+                from?: string;
+                to?: string;
+                country?: string;
+                device?: string;
+                group_id?: string;
+                bucket?: string;
+                migration_id?: string;
+                integration_id?: string;
+                threshold?: number;
+                weeks?: number;
+                growth?: number;
+                conversion_rate?: number;
+                currency?: string;
+                order_value?: number;
+            };
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchInsightReport"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSearchGroups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SearchGroup"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSearchGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchGroup"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchGroup"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSearchGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listSearchMigrations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SearchMigration"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSearchMigration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchMigration"];
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchMigration"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSearchMigration: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshSearchInsights: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    integration_id?: string;
+                    page?: string;
+                    /** @enum {string} */
+                    device?: "PHONE" | "DESKTOP" | "TABLET";
+                };
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getSearchWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchWorkspace"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSearchReportRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchReportRun"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSearchWorkItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    report: string;
+                    key: string;
+                    tags?: string[];
+                    /** @enum {string} */
+                    status?: "open" | "in_progress" | "done" | "dismissed";
+                    note?: string;
+                    filters?: components["schemas"]["SearchViewFilters"];
+                };
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchWorkItem"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createSearchWorkFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchWorkItem"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSearchReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id?: string;
+                    name: string;
+                    tags?: string[];
+                    filters: components["schemas"]["SearchViewFilters"];
+                };
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchSavedReport"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runSearchReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchReportRun"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    saveSearchSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    id?: string;
+                    name: string;
+                    integration_id?: string;
+                    page?: string;
+                    device?: string;
+                    /** @enum {string} */
+                    frequency: "off" | "daily" | "weekly";
+                    weekday: number;
+                    hour: number;
+                    timezone: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchCollectionSchedule"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSearchReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteSearchSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                site: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };
@@ -83554,6 +89384,226 @@ export interface operations {
         };
     };
     webhook_partner_payout_canceled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_updated: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_imported: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_check_queued: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_checked: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_review_queued: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_reviewed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_approved: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_discovered: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_confirmed: {
         parameters: {
             query?: never;
             header?: never;

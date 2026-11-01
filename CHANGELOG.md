@@ -6,6 +6,106 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-01
+
+### Added
+
+- Search insights: find traffic opportunities and declines, inspect forecasts, GA4 outcomes and page experience, then save tagged work, create fixes and experiments, keep report snapshots, and schedule data collection with visible run history and failures.
+
+### Fixed
+
+- The changes from v0.68.0, which didn't pass the release checks, are now published.
+
+## [0.68.0] - 2026-10-31
+
+### Changed
+
+- Choose the brands an AI subscription serves explicitly. Discovered subscriptions await assignment, and the workspace report shows all subscriptions with brand labels and filters without counting shared subscriptions twice.
+
+### Fixed
+
+- The changes from v0.67.10, which didn't pass the release checks, are now published.
+
+## [0.67.10] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.8, which didn't pass the release checks, are now published.
+
+## [0.67.9] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.7, which didn't pass the release checks, are now published.
+
+## [0.67.8] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.5, which didn't pass the release checks, are now published.
+
+## [0.67.7] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.5, which didn't pass the release checks, are now published.
+
+## [0.67.6] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.3, which didn't pass the release checks, are now published.
+
+## [0.67.5] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.3, which didn't pass the release checks, are now published.
+
+## [0.67.4] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.1, which didn't pass the release checks, are now published.
+
+## [0.67.3] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.1, which didn't pass the release checks, are now published.
+
+## [0.67.2] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.67.0, which didn't pass the release checks, are now published.
+
+## [0.67.1] - 2026-10-31
+
+### Fixed
+
+- The changes from v0.66.0, which didn't pass the release checks, are now published.
+
+## [0.67.0] - 2026-10-31
+
+### Added
+
+- Coverage brings earned mentions, paid placements, backlinks and publisher relationships together with CRM context, commercial records and growth reports. Discover placements, monitor page and link changes, and use optional AI assistance to review accuracy against published Knowledge and prepare follow-up drafts.
+
+### Fixed
+
+- The changes from v0.66.0, which didn't pass the release checks, are now published.
+
+## [0.66.0] - 2026-10-31
+
+### Changed
+
+- AI accounts shows the computers reporting each account and who linked each computer, including the person's name and email. Claude reset credits are read automatically when Claude exposes them, alongside Codex's available resets.
+
+### Fixed
+
+- Outflare for desktop detects separate Claude Code profiles and Claude desktop accounts on Mac, adds new account emails without replacing earlier accounts, keeps previous accounts visible with their last-checked time, and detects login changes within seconds. New readings reach the portal without waiting for other tools, and the portal refreshes automatically.
+
 ## [0.65.0] - 2026-10-31
 
 ### Added

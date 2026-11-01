@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -210,7 +211,7 @@ func TestPageExtraction(t *testing.T) {
 	if !slices.Equal(p.H1, []string{"Simple pricing"}) || p.Images != 4 || p.ImagesNoAlt != 1 {
 		t.Errorf("h1/images: %v %d %d", p.H1, p.Images, p.ImagesNoAlt)
 	}
-	if len(p.Links) != 2 || p.Links[0] != (Link{"https://www.example.com/en/plans", "See plans", true}) || p.Links[1].Anchor != "Partner" {
+	if len(p.Links) != 2 || !reflect.DeepEqual(p.Links[0], Link{URL: "https://www.example.com/en/plans", Anchor: "See plans", Nofollow: true, Rel: []string{"nofollow"}}) || p.Links[1].Anchor != "Partner" {
 		t.Errorf("links: %+v", p.Links)
 	}
 	// Script and style text is not counted; the same words hash the same.

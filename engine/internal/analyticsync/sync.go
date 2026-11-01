@@ -318,6 +318,9 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 		`DELETE FROM analytics_daily WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM analytics_syncs WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM search_daily WHERE integration_id = $1 AND site = ANY($2)`,
+		`DELETE FROM search_segments WHERE integration_id = $1 AND site = ANY($2)`,
+		`DELETE FROM search_completeness WHERE integration_id = $1 AND site = ANY($2)`,
+		`DELETE FROM search_ga4_outcomes WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM search_syncs WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM url_inspections WHERE integration_id = $1 AND site = ANY($2)`,
 		`DELETE FROM search_sitemaps WHERE integration_id = $1 AND site = ANY($2)`,
@@ -338,6 +341,9 @@ func (s *Syncer) SyncOnce(ctx context.Context, ws, integrationID string) (Result
 		}
 		if pc, ok := reader.(connectors.PageConversionReader); ok && err == nil {
 			_, err = s.syncConversions(ctx, o, pc, p, &res)
+		}
+		if ga, ok := reader.(connectors.LandingOutcomeReader); ok && err == nil {
+			_, err = s.syncConversions(ctx, o, outcomeAdapter{AnalyticsReader: reader, reader: ga}, p, &res)
 		}
 		if err == nil {
 			continue

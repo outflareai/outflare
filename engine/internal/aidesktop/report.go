@@ -154,7 +154,7 @@ func Apply(ctx context.Context, tx pgx.Tx, d Device, r Report) ([]Applied, error
 		version = d.AppVersion
 	}
 	if _, err := tx.Exec(ctx, `UPDATE ai_devices SET status = $2, last_error_code = $3, app_version = $4, last_report_at = now()
-		WHERE id::text = $1`, d.ID, r.Status, firstErr, version); err != nil {
+		WHERE workspace_id = $5 AND id::text = $1`, d.ID, r.Status, firstErr, version, d.WorkspaceID); err != nil {
 		return nil, err
 	}
 	off, err := SourcesOff(ctx, tx)

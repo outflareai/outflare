@@ -68,3 +68,22 @@ type SearchConsoleReader interface {
 	// Sitemaps lists the site's sitemaps.
 	Sitemaps(ctx context.Context, c *Client, creds Creds, site string) ([]SitemapStatus, error)
 }
+
+// SearchDetailsReader provides independent totals and page/country/device rows.
+// Totals are property-wide; they must not be labelled as host-specific totals.
+type SearchDetailsReader interface {
+	SearchDetails(context.Context, *Client, Creds, string, string, int) (SearchDetails, error)
+}
+type SearchSegment struct {
+	Page        string
+	Country     string
+	Device      string
+	Clicks      float64
+	Impressions float64
+	Position    float64
+}
+type SearchDetails struct {
+	Clicks      float64
+	Impressions float64
+	Segments    []SearchSegment
+}

@@ -32,6 +32,7 @@ type PageConversionRow struct {
 	Conversions       int
 	SearchSessions    int
 	SearchConversions int
+	Outcomes          []SearchOutcome
 }
 
 // PageConversionReader reads visits and conversions by landing page.
@@ -49,3 +50,19 @@ var eventName = regexp.MustCompile(`^[A-Za-z0-9_$.:/ -]{1,200}$`)
 // digits, spaces and _ $ . : / -, up to 200 characters. Names outside it
 // are refused rather than escaped, so they are safe to place in a query.
 func ValidEventName(name string) bool { return eventName.MatchString(name) }
+
+// SearchOutcome is GA4 landing-page/source attribution, not query attribution.
+type SearchOutcome struct {
+	Source        string
+	Sessions      int
+	Conversions   int
+	RevenueMicros int64
+	Currency      string
+}
+
+// LandingOutcomeReader reports event counts and money by source. It is separate
+// from PageConversionReader, whose conversions are distinct converted sessions.
+type LandingOutcomeReader interface {
+	AnalyticsReader
+	LandingOutcomes(context.Context, *Client, Creds, PageConversionQuery) ([]PageConversionRow, error)
+}

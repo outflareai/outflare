@@ -47,6 +47,7 @@ func Available() []c.Connector {
 	out = append(out, models.All()...)
 	out = append(out, analytics.All()...)
 	out = append(out, seo.All()...)
+	out = append(out, seo.CrUX{})
 	out = append(out, emailsend.All()...)
 	out = append(out, payments.All()...)
 	out = append(out, partnerapps.All()...)

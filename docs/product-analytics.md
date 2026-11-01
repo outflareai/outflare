@@ -103,6 +103,11 @@ The server records every action, whoever takes it (the web app, an API token, th
 | `ui.ai_cost_notice_accepted` | Connecting an AI model, the person ticked that their provider bills them and that the spend is theirs to manage, with `connector` and `via` (`api_key` or `oauth`). |
 | `ui.connect_for_opened`, `ui.connect_for_returned` | A page asked for a service it needs (Geonode on Social, Brands or Site audits) and the person clicked its Connect button (`connector`, `from`), then came back to that page from Connectors, with `connected` saying whether they connected it. |
 | `ui.indexability_filtered` | A site's indexability report filtered by `filter` (`verdict` or `issue`), with `value` the verdict or issue id, or `all` when cleared. |
+| `ui.search_insight_report_selected` | Someone selected a Search insights report, with only the report enum in `report`; never query text, rules, URLs or brand names. |
+| `search_group.saved`, `search_group.deleted`, `search_migration.saved`, `search_migration.deleted` | Saved analysis configuration changed (audit actions), scoped by brand and site IDs. |
+| `search_insights.refresh_requested` | A person or agent queued field data or official Google update collection (audit action), with brand, site and connection IDs. |
+| `search_vitals.synced`, `search_vitals.sync_failed` | A queued CrUX history read stored field measurements (`site_id`, `rows`) or failed with a connector error code. No page URLs are emitted. |
+| `search_updates.synced`, `search_updates.sync_failed` | Official Google ranking-update context was collected or its public feed failed. |
 | `digest.skipped` | A scheduled digest had nothing to say, so none was made. |
 | `digest.email_failed` | A digest should have been emailed but couldn't be (no provider or sender, an unverified domain, or nobody to send to), with `error_code` `not_configured`. |
 | `digest.schedule_failed` | The loop that schedules digests hit an error. |
@@ -228,6 +233,7 @@ The server records every action, whoever takes it (the web app, an API token, th
 | `ui.kit_export_opened`, `ui.kit_downloaded`, `ui.kit_file_chosen` | Kit files: the export panel opened on a journey (`status`), an exported kit file downloaded (`journeys`, `rules`, `inputs`: counts), and a kit file picked from disk on the Playbooks page. Each export, preview and apply is an `api.called` event (`exportKit`, `previewKitFile`, `applyKitFile`); applying records `kit.applied` with `source: file` and no `kit_id`, since a file's id is whatever its author wrote. |
 | `ui.automation_map_node_picked`, `ui.automation_map_flag_opened`, `ui.automation_map_filtered`, `ui.automation_map_person_picked` | The automation map: a card picked to light up what it sets off and what sets it off (`kind`), a flag shown on the map (`flag`: `loop`, `overlap`, `unheard` or `never_fires`), the map switched between everything and only what's live (`show`) or narrowed to what touches a sequence, list or tag (`touches`: its kind), and a person picked to light up what they reached. Loading it is an `api.called` event for `getAutomationMap`. |
 | `ui.rule_trigger_picked`, `ui.rule_followup_picked` | The rule card: its sentence switched to another kind of trigger (`kind`), and "When this fires, do…" picked a first step for a new journey (`kind`). Saving, activating and dry-running a rule are API calls (`rule.created`, `rule.updated`, `rule.activated`, `api.called` for `simulateRule`). |
+| `ui.ai_account_brand_selected`, `ui.ai_account_brand_assignment_opened`, `ui.ai_account_brand_assignment_deferred`, `ui.ai_account_report_scope_changed` | An explicit subscription brand choice (`brand_id`, `selected`), assignment opened/deferred (`account_id`), or report scope changed (`scope`: workspace, unassigned, brand; optional `brand_id`). Saving is the audited `ai_account.updated` action. |
 | `ui.ai_accounts_view_opened`, `ui.ai_accounts_example_shown` | A view of AI accounts opened (`view`: accounts, spend, people, timeline, usage), or the example usage data turned on. |
 | `ui.command_run`, `ui.copied`, `ui.dialog_answered` | Command palette commands, copy buttons, and the answer to a confirm dialog. |
 | `ui.docs_opened` | A link to a guide on outflare.ai, from the All tools page (`tab`, `from`). |
@@ -249,3 +255,17 @@ Event properties carry ids, codes, counts and durations only: never names, email
 Cookies: PostHog stores an anonymous id in a first-party cookie on your domain. If your visitors are in the EU or UK and you treat that as needing consent, put the app behind your own consent banner or leave this off.
 
 Review requests: `review_request_settings.updated`, `review_campaign.created`, `review_campaign.updated`, `review_campaign.launched`, `review_campaign.paused`, `review_campaign.resumed`, `review_campaign.archived`, `review_campaign.duplicated`, `review_request.queued`, `review_request.skipped`, `review_request.failed`. Browser navigation: `ui.review_view_opened`, `ui.review_campaign_step_opened`. Customer timeline events retain request outcomes with campaign/request IDs; delivery and click events use the existing lifecycle email events.
+
+Coverage records emit `coverage_record.created`, `coverage_record.updated`, `coverage_record.imported`, `coverage_record.confirmed`, `coverage_record.approved`, `coverage_record.check_queued` and `coverage_record.checked`. Discovery emits `coverage_discovery.reconciled`; scheduler failures emit `coverage.scheduler_failed`. Browser navigation and exports emit `ui.coverage_view_opened` and `ui.coverage_exported`, with only resource names and counts.
+
+Coverage also emits `coverage_record.discovered`, `coverage_record.review_queued` and `coverage_record.reviewed`; provider and model failures emit `coverage.check_failed` and `coverage.review_failed` with bounded error codes. Saved-view/filter interactions use `ui.coverage_filters_changed`. Commercial maintenance tasks, report snapshots, delivery reports and document links use the same audited create/update events. Outbound drafts are review results, never sends.
+
+Search workspace browser events: `ui.search_workspace_opened` (area),
+`ui.search_finding_opened` (report), `ui.search_work_saved` (status/count/tag_count),
+`ui.search_fix_created` (report), `ui.search_report_saved` (report),
+`ui.search_report_run` (status), `ui.search_collection_queued` (kind),
+`ui.search_schedule_changed` (frequency), `ui.search_workspace_deleted` (kind).
+No tag values, notes, query strings or page URLs are included. Server writes
+record `search_work.saved`, `search_work.fix_created`, `search_report.saved`,
+`search_report.ran`, `search_report.deleted`, `search_schedule.saved` and
+`search_schedule.deleted` as audited workspace actions with brand/site context.

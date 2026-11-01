@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -147,6 +148,41 @@ type FixPage struct {
 func FixContext(ctx context.Context, q Querier, ws, siteID, rule, group string) (string, []FixPage, error) {
 	pages := []FixPage{}
 	switch rule {
+	case "search_recommendation":
+		var page, title, recommendation string
+		if err := q.QueryRow(ctx, `SELECT page,title,recommendation FROM search_insight_items WHERE workspace_id=$1 AND site_id=$2 AND id::text=$3`, ws, siteID, group).Scan(&page, &title, &recommendation); err != nil {
+			return "", pages, err
+		}
+		if page != "" {
+			pages = append(pages, FixPage{URL: page, Detail: recommendation})
+		}
+		return title + ": " + recommendation, pages, nil
+	case "web_vitals_regressed":
+		parts := strings.Split(group, "|")
+		if len(parts) != 3 {
+			return group, pages, nil
+		}
+		rows, e := q.Query(ctx, `SELECT day::text,p75 FROM search_vitals WHERE workspace_id=$1 AND site_id=$2 AND page=$3 AND device=$4 AND metric=$5 ORDER BY day DESC LIMIT 2`, ws, siteID, parts[0], parts[1], parts[2])
+		if e != nil {
+			return "", pages, e
+		}
+		detail := parts[2] + " on " + parts[1]
+		for rows.Next() {
+			var day string
+			var value float64
+			if e = rows.Scan(&day, &value); e != nil {
+				rows.Close()
+				return "", pages, e
+			}
+			detail += fmt.Sprintf("; %s p75 %.3f", day, value)
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return "", pages, e
+		}
+		pages = append(pages, FixPage{URL: parts[0], Detail: detail})
+		return "the page " + parts[0] + ": " + detail, pages, nil
 	case "keyword_cannibalised":
 		var host, brand string
 		if err := q.QueryRow(ctx, `SELECT s.host, COALESCE(b.name, '') FROM seo_sites s LEFT JOIN brands b ON b.id = s.brand_id

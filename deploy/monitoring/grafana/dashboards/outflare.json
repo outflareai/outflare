@@ -3495,7 +3495,7 @@
         {
           "refId": "A",
           "expr": "sum by (level, period) (increase(outflare_connection_limits_alerts_total{job=\"$job\"}[1h]))",
-          "legendFormat": "{{level}}% \u00b7 {{period}}",
+          "legendFormat": "{{level}}% · {{period}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -7206,7 +7206,7 @@
     {
       "type": "timeseries",
       "title": "Paid ad landings, by how they were tracked",
-      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads \u2192 Tracking templates).",
+      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads → Tracking templates).",
       "id": 144,
       "datasource": {
         "type": "prometheus",
@@ -9501,6 +9501,98 @@
           "placement": "bottom"
         }
       }
+    },
+    {
+      "id": 467,
+      "type": "timeseries",
+      "title": "Coverage checks",
+      "description": "Observed availability; blocked and unreachable reads need investigation when sustained.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 733
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (health) (rate(outflare_coverage_checks_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{health}}{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 468,
+      "type": "timeseries",
+      "title": "Coverage job backlog",
+      "description": "Checks normally begin within a few minutes. A rising age means workers need attention.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 733
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "max(outflare_jobs_oldest_due_seconds{kind=~\"coverage[.](check|review|extract)\"})",
+          "refId": "A",
+          "legendFormat": "{{health}}{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 469,
+      "type": "timeseries",
+      "title": "Coverage worker failures",
+      "description": "Retries can occur on transient database errors; dead jobs need investigation.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 733
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=~\"coverage[.](check|review|extract)\",outcome=~\"retried|dead\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{health}}{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 470,
+      "type": "timeseries",
+      "title": "Coverage accuracy review results",
+      "description": "Reviewed is a completed assessment. Missing Knowledge or model connections need workspace configuration; review failures need investigation.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 741
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(outflare_coverage_reviews_total[5m]))",
+          "refId": "A",
+          "legendFormat": "{{status}}"
+        }
+      ]
     }
   ]
 }

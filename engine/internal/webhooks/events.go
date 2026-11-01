@@ -255,6 +255,17 @@ var Catalog = []Event{
 	{"partner_payout.created", "partners", "A payout is due: a partner's approved cash, fees and adjustments were gathered. Pay it from your own account or payout tool, then mark it paid. data has partner_id, program_id, amount_cents, currency and rewards."},
 	{"partner_payout.paid", "partners", "A payout was marked paid. data has partner_id, program_id, amount_cents, currency, reference and reward_ids, the rewards it paid."},
 	{"partner_payout.canceled", "partners", "A due payout was canceled and its rewards went back into the partner's balance."},
+	// Coverage
+	{"coverage_record.created", "coverage", "A Coverage record was created. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.updated", "coverage", "A Coverage record was updated. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.imported", "coverage", "A Coverage record was imported. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.check_queued", "coverage", "A Coverage record was check queued. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.checked", "coverage", "A Coverage record was checked. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.review_queued", "coverage", "A Coverage record was review queued. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.reviewed", "coverage", "A Coverage record was reviewed. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.approved", "coverage", "A Coverage record was approved. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.discovered", "coverage", "A Coverage record was discovered. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.confirmed", "coverage", "A Coverage record was confirmed. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
 	// Workspace
 	{"workspace.updated", "workspace", "The workspace was renamed or its slug (its name in URLs) changed. data has the new and previous values."},
 	// Webhooks

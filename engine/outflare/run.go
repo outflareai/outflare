@@ -81,6 +81,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/ranks"
 	"github.com/outflareai/outflare/engine/internal/research"
 	"github.com/outflareai/outflare/engine/internal/rules"
+	"github.com/outflareai/outflare/engine/internal/searchinsights"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sending"
 	"github.com/outflareai/outflare/engine/internal/seointel"
@@ -283,6 +284,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	results.Register(queue)
 	analyticsSync := &analyticsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	analyticsSync.Register(queue)
+	(&searchinsights.Service{Pool: pool, Store: integrations, Log: log}).Register(queue)
 	seoSync := &seosync.Syncer{Pool: pool, Store: integrations, Log: log}
 	seoSync.Register(queue)
 	rankChecks := &ranks.Service{Pool: pool, Store: integrations, Log: log}

@@ -55,9 +55,10 @@ type Page struct {
 
 // Link is one link on a page.
 type Link struct {
-	URL      string `json:"url"`
-	Anchor   string `json:"anchor"`
-	Nofollow bool   `json:"nofollow"`
+	URL      string   `json:"url"`
+	Anchor   string   `json:"anchor"`
+	Nofollow bool     `json:"nofollow"`
+	Rel      []string `json:"rel"`
 }
 
 // Hreflang is one <link rel="alternate" hreflang> of a page.
@@ -318,7 +319,7 @@ func ParsePage(base *url.URL, body []byte) Page {
 				nf = true
 			}
 		}
-		p.Links = append(p.Links, Link{URL: u, Anchor: clip(squash(l.anchor.String()), maxAnchor), Nofollow: nf})
+		p.Links = append(p.Links, Link{URL: u, Anchor: clip(squash(l.anchor.String()), maxAnchor), Nofollow: nf, Rel: strings.Fields(l.rel)})
 	}
 	words := strings.FieldsFunc(text.String(), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
 	p.WordCount = len(words)

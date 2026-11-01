@@ -2,13 +2,15 @@
 // which read AI usage and report it. People see and unlink their own;
 // admins see everyone's.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { AIDevice } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, Loading, toast } from "../ui";
 import { Switch } from "@/components/ui/switch";
 import { DataTable } from "@/components/data-table";
 import { readAgo } from "@/lib/aiAccounts";
+import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
+import { track } from "@/lib/analytics";
 
 const platforms: Record<string, string> = { macos: "Mac", windows: "Windows", linux: "Linux" };
 
@@ -33,15 +35,19 @@ function state(d: AIDevice) {
 export function ComputersView({ ws, me, seeAll, manageAll }: { ws: string; me: string; seeAll: boolean; manageAll: boolean }) {
   const [list, setList] = useState<AIDevice[] | null>(null);
   const [error, setError] = useState("");
-  const [everyone, setEveryone] = useState(false);
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ai-devices", { params: { path: { ws }, query: everyone ? { everyone: true } : {} } });
-    if (error) setError(errorMessage(error));
-    setList(data?.data ?? []);
+  const [everyone, setEveryone] = useState(seeAll);
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/ai-devices", { params: { path: { ws }, query: everyone ? { everyone: true } : {} }, signal });
+      if (signal?.aborted) return;
+      if (error) { setError(errorMessage(error)); setList((current) => current ?? []); return; }
+      setError("");
+      setList(data?.data ?? []);
+    } catch (error) {
+      if (!signal?.aborted) { setError(errorMessage(error)); setList((current) => current ?? []); }
+    }
   }, [ws, everyone]);
-  useEffect(() => {
-    load();
-  }, [load]);
+  useVisibleRefresh(load);
 
   async function unlink(d: AIDevice) {
     const own = d.user_id === me;
@@ -81,17 +87,26 @@ export function ComputersView({ ws, me, seeAll, manageAll }: { ws: string; me: s
             <div className="space-y-0.5">
               <div className="font-medium">{d.name} {state(d)}</div>
               <div className="text-[12px] text-muted-foreground">{platforms[d.platform]} · {d.last_report_at ? readAgo(d.last_report_at) : "never reported"}</div>
+              <div className="text-[12px] text-muted-foreground">{d.user_name} · {d.user_email}</div>
             </div>
           )}
           columns={[
             {
-              id: "name", header: "Computer", accessorFn: (d) => `${d.name} ${d.user_name}`,
+              id: "name", header: "Computer", accessorFn: (d) => `${d.name} ${d.user_name} ${d.user_email}`,
               cell: ({ row: { original: d } }) => (
                 <div>
                   <div className="font-medium">{d.name}</div>
                   <div className="text-[12px] text-muted-foreground">{platforms[d.platform]} · app {d.app_version}{everyone ? ` · ${d.user_name}` : ""}</div>
                 </div>
               ),
+            },
+            {
+              id: "owner", header: "Linked by", accessorFn: (d) => `${d.user_name} ${d.user_email}`,
+              cell: ({ row: { original: d } }) => <a className="block hover:underline" href={`mailto:${d.user_email}`}
+                onClick={() => track("ui.ai_device_owner_opened", { user_id: d.user_id })}>
+                <span className="block font-medium">{d.user_name}</span>
+                <span className="block text-[12px] text-muted-foreground">{d.user_email}</span>
+              </a>,
             },
             {
               id: "state", header: "State", accessorFn: (d) => (d.silent ? 3 : d.status === "broken" ? 2 : d.status === "attention" ? 1 : 0),

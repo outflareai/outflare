@@ -1250,6 +1250,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_coverage_agreement(
+        self,
+        brand: str,
+        id: str,
+        *,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """approveCoverageAgreement.
+
+        Needs: the coverage.approve scope.
+        POST /v1/brands/{brand}/coverage/agreements/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/agreements/{id}/approve",
+            path={"brand": brand, "id": id},
+            body={"version": version},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def approve_infra_plan(
         self,
         id: str,
@@ -2231,6 +2254,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def check_coverage_placement(
+        self,
+        brand: str,
+        id: str,
+        *,
+        reader: Literal["native", "connected"] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """checkCoveragePlacement.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/placements/{id}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/placements/{id}/check",
+            path={"brand": brand, "id": id},
+            query={"reader": reader},
+            idempotency_key=idempotency_key,
+        )
+
     def check_deploy_target(
         self,
         target: str,
@@ -2710,6 +2754,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def confirm_coverage_candidate(
+        self,
+        brand: str,
+        id: str,
+        *,
+        publisher_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """confirmCoverageCandidate.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/candidates/{id}/confirm
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/candidates/{id}/confirm",
+            path={"brand": brand, "id": id},
+            body={"publisher_id": publisher_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def confirm_password_reset(
         self,
         *,
@@ -2835,6 +2902,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         account_email: str | None = None,
         billing_cycle: Literal["monthly", "yearly", "prepaid", "usage", ""] | None = None,
+        brand_ids: list[str] | None = None,
         cancelled: bool | None = None,
         members: list[dict[str, Any]] | None = None,
         name: str | None = None,
@@ -2864,6 +2932,7 @@ class Operations(_Mixin):
             body={
                 "account_email": account_email,
                 "billing_cycle": billing_cycle,
+                "brand_ids": brand_ids,
                 "cancelled": cancelled,
                 "members": members,
                 "name": name,
@@ -3143,6 +3212,644 @@ class Operations(_Mixin):
                 "value_unit": value_unit,
                 "key": key,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_agreements(
+        self,
+        brand: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        deal_id: str | None = None,
+        ends_on: str | None = None,
+        notice_on: str | None = None,
+        owner_id: str | None = None,
+        publisher_id: str,
+        renewal_on: str | None = None,
+        starts_on: str | None = None,
+        status: Literal["draft", "proposed", "active", "completed", "cancelled"] | None = None,
+        terms: str | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create agreements.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/agreements
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/agreements",
+            path={"brand": brand},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "deal_id": deal_id,
+                "ends_on": ends_on,
+                "notice_on": notice_on,
+                "owner_id": owner_id,
+                "publisher_id": publisher_id,
+                "renewal_on": renewal_on,
+                "starts_on": starts_on,
+                "status": status,
+                "terms": terms,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_budgets(
+        self,
+        brand: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        ends_on: str,
+        notes: str | None = None,
+        starts_on: str,
+        tags: str | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create budgets.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/budgets
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/budgets",
+            path={"brand": brand},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "ends_on": ends_on,
+                "notes": notes,
+                "starts_on": starts_on,
+                "tags": tags,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_candidates(
+        self,
+        brand: str,
+        *,
+        notes: str | None = None,
+        source: Literal["manual", "news", "backlinks", "link_prospects", "import"] | None = None,
+        source_id: str | None = None,
+        status: Literal["new", "confirmed", "dismissed"] | None = None,
+        title: str,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create candidates.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/candidates
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/candidates",
+            path={"brand": brand},
+            body={
+                "notes": notes,
+                "source": source,
+                "source_id": source_id,
+                "status": status,
+                "title": title,
+                "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_deliverables(
+        self,
+        brand: str,
+        *,
+        accepted_quantity: float | None = None,
+        agreement_id: str,
+        allocation_minor: int | None = None,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        placement_id: str | None = None,
+        quantity: float | None = None,
+        status: Literal["pending", "partial", "accepted", "cancelled"] | None = None,
+        title: str,
+        unit: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create deliverables.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/deliverables
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/deliverables",
+            path={"brand": brand},
+            body={
+                "accepted_quantity": accepted_quantity,
+                "agreement_id": agreement_id,
+                "allocation_minor": allocation_minor,
+                "due_on": due_on,
+                "evidence": evidence,
+                "placement_id": placement_id,
+                "quantity": quantity,
+                "status": status,
+                "title": title,
+                "unit": unit,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_delivery_reports(
+        self,
+        brand: str,
+        *,
+        clicks: int | None = None,
+        conversions: int | None = None,
+        ends_on: str,
+        evidence: str,
+        impressions: int | None = None,
+        leads: int | None = None,
+        notes: str | None = None,
+        placement_id: str,
+        sessions: int | None = None,
+        source: str,
+        starts_on: str,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create delivery reports.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/delivery_reports
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/delivery_reports",
+            path={"brand": brand},
+            body={
+                "clicks": clicks,
+                "conversions": conversions,
+                "ends_on": ends_on,
+                "evidence": evidence,
+                "impressions": impressions,
+                "leads": leads,
+                "notes": notes,
+                "placement_id": placement_id,
+                "sessions": sessions,
+                "source": source,
+                "starts_on": starts_on,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_documents(
+        self,
+        brand: str,
+        *,
+        agreement_id: str,
+        kind: Literal["contract", "invoice", "media_kit", "creative", "delivery", "other"] | None = None,
+        notes: str | None = None,
+        source_text: str | None = None,
+        title: str,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create documents.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/documents
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/documents",
+            path={"brand": brand},
+            body={
+                "agreement_id": agreement_id,
+                "kind": kind,
+                "notes": notes,
+                "source_text": source_text,
+                "title": title,
+                "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_finance_tasks(
+        self,
+        brand: str,
+        *,
+        agreement_id: str | None = None,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        invoice_id: str | None = None,
+        owner_id: str | None = None,
+        priority: Literal["normal", "urgent", "high", "low"] | None = None,
+        publisher_id: str | None = None,
+        reason: Literal["manual", "renewal_due", "notice_due", "invoice_due", "delivery_overdue"] | None = None,
+        resolution: str | None = None,
+        snooze_until: str | None = None,
+        status: Literal["open", "in_progress", "snoozed", "resolved", "dismissed"] | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create finance tasks.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/finance_tasks
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/finance_tasks",
+            path={"brand": brand},
+            body={
+                "agreement_id": agreement_id,
+                "due_on": due_on,
+                "evidence": evidence,
+                "invoice_id": invoice_id,
+                "owner_id": owner_id,
+                "priority": priority,
+                "publisher_id": publisher_id,
+                "reason": reason,
+                "resolution": resolution,
+                "snooze_until": snooze_until,
+                "status": status,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_invoices(
+        self,
+        brand: str,
+        *,
+        agreement_id: str,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        due_on: str | None = None,
+        issued_on: str | None = None,
+        kind: Literal["invoice", "credit"] | None = None,
+        notes: str | None = None,
+        reference: str,
+        status: Literal["draft", "received", "disputed", "void"] | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create invoices.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/invoices
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/invoices",
+            path={"brand": brand},
+            body={
+                "agreement_id": agreement_id,
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "due_on": due_on,
+                "issued_on": issued_on,
+                "kind": kind,
+                "notes": notes,
+                "reference": reference,
+                "status": status,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_payments(
+        self,
+        brand: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        invoice_id: str,
+        kind: Literal["payment", "reversal"] | None = None,
+        notes: str | None = None,
+        paid_on: str,
+        reference: str,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create payments.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/payments
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/payments",
+            path={"brand": brand},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "invoice_id": invoice_id,
+                "kind": kind,
+                "notes": notes,
+                "paid_on": paid_on,
+                "reference": reference,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_placements(
+        self,
+        brand: str,
+        *,
+        agreement_id: str | None = None,
+        arrangement: Literal["earned", "paid", "exchange", "affiliate", "unknown"] | None = None,
+        baseline: bool | None = None,
+        campaign: str | None = None,
+        check_every_hours: int | None = None,
+        contact_record_id: str | None = None,
+        expected_link: bool | None = None,
+        expected_mention: str | None = None,
+        expected_on: str | None = None,
+        expected_rel: Literal["any", "follow", "nofollow", "sponsored", "ugc"] | None = None,
+        expires_on: str | None = None,
+        inventory: str | None = None,
+        kind: str | None = None,
+        language: str | None = None,
+        market: str | None = None,
+        monitor: bool | None = None,
+        monitor_accuracy: bool | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        published_on: str | None = None,
+        publisher_id: str,
+        reader: Literal["native", "connected"] | None = None,
+        sentiment: Literal["positive", "neutral", "negative", "mixed", "unknown"] | None = None,
+        stage: str | None = None,
+        tags: str | None = None,
+        target_url: str | None = None,
+        title: str,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create placements.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/placements
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/placements",
+            path={"brand": brand},
+            body={
+                "agreement_id": agreement_id,
+                "arrangement": arrangement,
+                "baseline": baseline,
+                "campaign": campaign,
+                "check_every_hours": check_every_hours,
+                "contact_record_id": contact_record_id,
+                "expected_link": expected_link,
+                "expected_mention": expected_mention,
+                "expected_on": expected_on,
+                "expected_rel": expected_rel,
+                "expires_on": expires_on,
+                "inventory": inventory,
+                "kind": kind,
+                "language": language,
+                "market": market,
+                "monitor": monitor,
+                "monitor_accuracy": monitor_accuracy,
+                "notes": notes,
+                "owner_id": owner_id,
+                "published_on": published_on,
+                "publisher_id": publisher_id,
+                "reader": reader,
+                "sentiment": sentiment,
+                "stage": stage,
+                "tags": tags,
+                "target_url": target_url,
+                "title": title,
+                "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_publishers(
+        self,
+        brand: str,
+        *,
+        category: str | None = None,
+        domain: str,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        record_id: str,
+        relationship_status: Literal["new", "introduced", "active", "dormant", "do_not_contact"] | None = None,
+        status: Literal["active", "paused", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create publishers.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/publishers
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/publishers",
+            path={"brand": brand},
+            body={
+                "category": category,
+                "domain": domain,
+                "notes": notes,
+                "owner_id": owner_id,
+                "record_id": record_id,
+                "relationship_status": relationship_status,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_rates(
+        self,
+        brand: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        minimum_quantity: float | None = None,
+        notes: str | None = None,
+        publisher_id: str,
+        status: Literal["published", "negotiated", "expired"] | None = None,
+        title: str,
+        unit: str | None = None,
+        valid_until: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create rates.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/rates
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/rates",
+            path={"brand": brand},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "minimum_quantity": minimum_quantity,
+                "notes": notes,
+                "publisher_id": publisher_id,
+                "status": status,
+                "title": title,
+                "unit": unit,
+                "valid_until": valid_until,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_report_snapshot(
+        self,
+        brand: str,
+        *,
+        filters: str | None = None,
+        from_: str | None = None,
+        title: str,
+        to: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save an immutable report with its period, filters and measurement definitions.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/report-snapshots
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/report-snapshots",
+            path={"brand": brand},
+            body={"filters": filters, "from": from_, "title": title, "to": to},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_rules(
+        self,
+        brand: str,
+        *,
+        enabled: bool | None = None,
+        kind: str | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create rules.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/rules
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/rules",
+            path={"brand": brand},
+            body={"enabled": enabled, "kind": kind, "notes": notes, "owner_id": owner_id, "title": title},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_tasks(
+        self,
+        brand: str,
+        *,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        owner_id: str | None = None,
+        placement_id: str | None = None,
+        priority: Literal["urgent", "high", "normal", "low"] | None = None,
+        publisher_id: str | None = None,
+        reason: str | None = None,
+        resolution: str | None = None,
+        snooze_until: str | None = None,
+        status: Literal["open", "in_progress", "snoozed", "resolved", "dismissed"] | None = None,
+        title: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create tasks.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/tasks
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/tasks",
+            path={"brand": brand},
+            body={
+                "due_on": due_on,
+                "evidence": evidence,
+                "owner_id": owner_id,
+                "placement_id": placement_id,
+                "priority": priority,
+                "publisher_id": publisher_id,
+                "reason": reason,
+                "resolution": resolution,
+                "snooze_until": snooze_until,
+                "status": status,
+                "title": title,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_coverage_views(
+        self,
+        brand: str,
+        *,
+        filters: str | None = None,
+        section: Literal["placements", "publishers", "tasks", "agreements", "candidates"] | None = None,
+        title: str,
+        visibility: Literal["private", "team"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create views.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/views
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/views",
+            path={"brand": brand},
+            body={"filters": filters, "section": section, "title": title, "visibility": visibility},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5214,6 +5921,26 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_search_work_fix(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create or return the shared fix for a saved finding.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/items/{item}/fix
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/items/{item}/fix",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
     def create_sender(
         self,
         *,
@@ -6738,6 +7465,86 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_search_group(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a saved search-groups.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/brands/{brand}/seo-sites/{site}/search-groups/{item}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/seo-sites/{site}/search-groups/{item}",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_search_migration(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a saved search-migrations.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/brands/{brand}/seo-sites/{site}/search-migrations/{item}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/seo-sites/{site}/search-migrations/{item}",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_search_report(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete saved reports.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_search_schedule(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete saved schedules.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/brands/{brand}/seo-sites/{site}/insights/schedules/{item}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/schedules/{item}",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_sender(
         self,
         id: str,
@@ -7769,6 +8576,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/partner-payouts/export",
             path={"ws": ws},
             query={"brand": brand, "status": status, "program": program},
+        )
+
+    def extract_coverage_document_terms(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Extract quoted draft agreement terms from saved document text.
+
+        Needs: the coverage.finance.manage scope.
+        POST /v1/brands/{brand}/coverage/documents/{id}/extract
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/documents/{id}/extract",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
         )
 
     def find_knowledge_passages(
@@ -9123,6 +9949,367 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/site-keys/{id}/cookie-policy",
             path={"id": id, "ws": ws},
             query={"format": format, "version": version},
+        )
+
+    def get_coverage_agreements(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get agreements.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/agreements/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/agreements/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_attributed_outcomes(
+        self,
+        brand: str,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+    ) -> Any:
+        """Read observed publisher referrals and recorded conversion attribution.
+
+        Also requires analytics.read. Counts each publisher website once across placements; keeps recorded attribution separate from source-reported delivery.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/outcomes
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/outcomes",
+            path={"brand": brand},
+            query={"from": from_, "to": to, "model": model},
+        )
+
+    def get_coverage_budgets(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get budgets.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/budgets/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/budgets/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_candidates(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get candidates.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/candidates/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/candidates/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_deliverables(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get deliverables.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/deliverables/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/deliverables/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_delivery_reports(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get delivery reports.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/delivery_reports/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/delivery_reports/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_documents(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get documents.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/documents/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/documents/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_finance_report(
+        self,
+        brand: str,
+    ) -> Any:
+        """getCoverageFinanceReport.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/finance-report
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/finance-report",
+            path={"brand": brand},
+        )
+
+    def get_coverage_finance_tasks(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get finance tasks.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/finance_tasks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/finance_tasks/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_history(
+        self,
+        brand: str,
+        id: str,
+        resource: str,
+    ) -> Any:
+        """getCoverageHistory.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/{resource}/{id}/history
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/{resource}/{id}/history",
+            path={"brand": brand, "id": id, "resource": resource},
+        )
+
+    def get_coverage_invoices(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get invoices.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/invoices/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/invoices/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_observations(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """getCoverageObservations.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/placements/{id}/observations
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/placements/{id}/observations",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_payments(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get payments.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/payments/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/payments/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_placements(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get placements.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/placements/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/placements/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_publishers(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get publishers.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/publishers/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/publishers/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_rates(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get rates.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/rates/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/rates/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_report_snapshot(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Read a saved Coverage report snapshot.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/report-snapshots/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/report-snapshots/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_reports(
+        self,
+        brand: str,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+        filters: str | None = None,
+    ) -> Any:
+        """getCoverageReports.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/reports
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/reports",
+            path={"brand": brand},
+            query={"from": from_, "to": to, "filters": filters},
+        )
+
+    def get_coverage_rules(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get rules.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/rules/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/rules/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_schema(
+        self,
+        brand: str,
+    ) -> Any:
+        """getCoverageSchema.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/schema
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/schema",
+            path={"brand": brand},
+        )
+
+    def get_coverage_tasks(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get tasks.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/tasks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/tasks/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_coverage_views(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get views.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/views/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/views/{id}",
+            path={"brand": brand, "id": id},
         )
 
     def get_crawl(
@@ -11194,6 +12381,88 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_search_insights(
+        self,
+        brand: str,
+        site: str,
+        *,
+        report: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        country: str | None = None,
+        device: str | None = None,
+        group_id: str | None = None,
+        bucket: str | None = None,
+        migration_id: str | None = None,
+        integration_id: str | None = None,
+        threshold: float | None = None,
+        weeks: float | None = None,
+        growth: float | None = None,
+        conversion_rate: float | None = None,
+        currency: str | None = None,
+        order_value: float | None = None,
+    ) -> Any:
+        """Analyse SEO opportunities, trends, segments, forecasts and stored field data.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/seo-sites/{site}/insights
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/seo-sites/{site}/insights",
+            path={"brand": brand, "site": site},
+            query={
+                "report": report,
+                "from": from_,
+                "to": to,
+                "country": country,
+                "device": device,
+                "group_id": group_id,
+                "bucket": bucket,
+                "migration_id": migration_id,
+                "integration_id": integration_id,
+                "threshold": threshold,
+                "weeks": weeks,
+                "growth": growth,
+                "conversion_rate": conversion_rate,
+                "currency": currency,
+                "order_value": order_value,
+            },
+        )
+
+    def get_search_report_run(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+    ) -> Any:
+        """Read one immutable report snapshot.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/seo-sites/{site}/insights/report-runs/{item}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/report-runs/{item}",
+            path={"brand": brand, "site": site, "item": item},
+        )
+
+    def get_search_workspace(
+        self,
+        brand: str,
+        site: str,
+    ) -> Any:
+        """Read saved work, reports, schedules and collection activity.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/seo-sites/{site}/insights/workspace
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/workspace",
+            path={"brand": brand, "site": site},
+        )
+
     def get_semantic_search(
         self,
         *,
@@ -12461,6 +13730,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def import_coverage_placements(
+        self,
+        brand: str,
+        *,
+        commit: bool,
+        rows: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """importCoveragePlacements.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/import
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/import",
+            path={"brand": brand},
+            body={"commit": commit, "rows": rows},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def import_leads(
         self,
         *,
@@ -13107,6 +14399,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand: str | None = None,
         provider: Literal["claude", "chatgpt", "cursor", "copilot", "anthropic_api", "openai_api"] | None = None,
         mine: bool | None = None,
     ) -> Any:
@@ -13124,7 +14417,7 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/ai-accounts",
             path={"ws": ws},
-            query={"provider": provider, "mine": mine},
+            query={"brand": brand, "provider": provider, "mine": mine},
         )
 
     def list_ai_cohorts(
@@ -14051,6 +15344,681 @@ class Operations(_Mixin):
                 "offset": offset,
                 "fields": fields,
                 "cursor": cursor,
+            },
+        )
+
+    def list_coverage_agreements(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List agreements.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/agreements
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/agreements",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_budgets(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List budgets.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/budgets
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/budgets",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_candidates(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List candidates.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/candidates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/candidates",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_deliverables(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List deliverables.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/deliverables
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/deliverables",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_delivery_reports(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List delivery reports.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/delivery_reports
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/delivery_reports",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_documents(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List documents.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/documents
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/documents",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_finance_tasks(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List finance tasks.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/finance_tasks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/finance_tasks",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_invoices(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List invoices.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/invoices
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/invoices",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_payments(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List payments.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/payments
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/payments",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_placements(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List placements.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/placements
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/placements",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_publishers(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List publishers.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/publishers
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/publishers",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_rates(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List rates.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/coverage/rates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/rates",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_report_snapshots(
+        self,
+        brand: str,
+    ) -> Any:
+        """List immutable Coverage report snapshots.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/report-snapshots
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/report-snapshots",
+            path={"brand": brand},
+        )
+
+    def list_coverage_rules(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List rules.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/rules
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/rules",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_tasks(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List tasks.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/tasks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/tasks",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_coverage_views(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+        status: str | None = None,
+        stage: str | None = None,
+        kind: str | None = None,
+        arrangement: str | None = None,
+        publisher_id: str | None = None,
+        placement_id: str | None = None,
+        agreement_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: str | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List views.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/coverage/views
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/coverage/views",
+            path={"brand": brand},
+            query={
+                "q": q,
+                "status": status,
+                "stage": stage,
+                "kind": kind,
+                "arrangement": arrangement,
+                "publisher_id": publisher_id,
+                "placement_id": placement_id,
+                "agreement_id": agreement_id,
+                "limit": limit,
+                "offset": offset,
+                "filters": filters,
+                "cursor": cursor,
+                "fields": fields,
             },
         )
 
@@ -17394,6 +19362,38 @@ class Operations(_Mixin):
             query={"brand": brand, "status": status},
         )
 
+    def list_search_groups(
+        self,
+        brand: str,
+        site: str,
+    ) -> Any:
+        """List saved search-groups.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/seo-sites/{site}/search-groups
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/seo-sites/{site}/search-groups",
+            path={"brand": brand, "site": site},
+        )
+
+    def list_search_migrations(
+        self,
+        brand: str,
+        site: str,
+    ) -> Any:
+        """List saved search-migrations.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/seo-sites/{site}/search-migrations
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/seo-sites/{site}/search-migrations",
+            path={"brand": brand, "site": site},
+        )
+
     def list_sender_matches(
         self,
         *,
@@ -20010,6 +22010,24 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reconcile_coverage_discovery(
+        self,
+        brand: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """reconcileCoverageDiscovery.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/discovery/reconcile
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/discovery/reconcile",
+            path={"brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
     def record_consent(
         self,
         record: str,
@@ -20148,6 +22166,31 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/infra-plans/{id}/refresh",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def refresh_search_insights(
+        self,
+        brand: str,
+        site: str,
+        *,
+        device: Literal["PHONE", "DESKTOP", "TABLET"] | None = None,
+        integration_id: str | None = None,
+        page: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Queue Core Web Vitals history and official Google update collection.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/refresh
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/refresh",
+            path={"brand": brand, "site": site},
+            body={"device": device, "integration_id": integration_id, "page": page},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -21130,6 +23173,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def review_coverage_accuracy(
+        self,
+        brand: str,
+        id: str,
+        *,
+        purpose: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Review external claims against published brand Knowledge.
+
+        Queues a review through the workspace model and budget. Requires a successful page observation. Results cite Knowledge versions; later changes make an assessment stale.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/coverage/placements/{id}/review
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/coverage/placements/{id}/review",
+            path={"brand": brand, "id": id},
+            query={"purpose": purpose},
+            idempotency_key=idempotency_key,
+        )
+
     def review_fix_ticket(
         self,
         ticket: str,
@@ -21521,6 +23587,174 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/query",
             path={"ws": ws},
             body={"limit": limit, "sql": sql},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def run_search_report(
+        self,
+        brand: str,
+        site: str,
+        item: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Generate a report snapshot and retain success or failure history.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}/run
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/reports/{item}/run",
+            path={"brand": brand, "site": site, "item": item},
+            idempotency_key=idempotency_key,
+        )
+
+    def save_search_group(
+        self,
+        brand: str,
+        site: str,
+        *,
+        id: str | None = None,
+        kind: Literal["content", "topic"],
+        name: str,
+        rules: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create or replace a saved search-groups.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/search-groups
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/search-groups",
+            path={"brand": brand, "site": site},
+            body={"id": id, "kind": kind, "name": name, "rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def save_search_migration(
+        self,
+        brand: str,
+        site: str,
+        *,
+        go_live: str,
+        id: str | None = None,
+        mappings: list[dict[str, Any]],
+        name: str,
+        target_site_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create or replace a saved search-migrations.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/search-migrations
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/search-migrations",
+            path={"brand": brand, "site": site},
+            body={"go_live": go_live, "id": id, "mappings": mappings, "name": name, "target_site_id": target_site_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def save_search_report(
+        self,
+        brand: str,
+        site: str,
+        *,
+        filters: dict[str, Any],
+        id: str | None = None,
+        name: str,
+        tags: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save an editable report definition and tags.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/reports
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/reports",
+            path={"brand": brand, "site": site},
+            body={"filters": filters, "id": id, "name": name, "tags": tags},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def save_search_schedule(
+        self,
+        brand: str,
+        site: str,
+        *,
+        device: str | None = None,
+        frequency: Literal["off", "daily", "weekly"],
+        hour: int,
+        id: str | None = None,
+        integration_id: str | None = None,
+        name: str,
+        page: str | None = None,
+        timezone: str,
+        weekday: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set up or pause a timezone-aware data collection schedule.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/schedules
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/schedules",
+            path={"brand": brand, "site": site},
+            body={
+                "device": device,
+                "frequency": frequency,
+                "hour": hour,
+                "id": id,
+                "integration_id": integration_id,
+                "name": name,
+                "page": page,
+                "timezone": timezone,
+                "weekday": weekday,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def save_search_work_item(
+        self,
+        brand: str,
+        site: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        key: str,
+        note: str | None = None,
+        report: str,
+        status: Literal["open", "in_progress", "done", "dismissed"] | None = None,
+        tags: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save or update a verified finding with tags and work status.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/seo-sites/{site}/insights/items
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/seo-sites/{site}/insights/items",
+            path={"brand": brand, "site": site},
+            body={"filters": filters, "key": key, "note": note, "report": report, "status": status, "tags": tags},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -24127,6 +26361,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         account_email: str | None = None,
         billing_cycle: Literal["monthly", "yearly", "prepaid", "usage", ""] | None = None,
+        brand_ids: list[str] | None = None,
         cancelled: bool | None = None,
         members: list[dict[str, Any]] | None = None,
         name: str | None = None,
@@ -24156,6 +26391,7 @@ class Operations(_Mixin):
             body={
                 "account_email": account_email,
                 "billing_cycle": billing_cycle,
+                "brand_ids": brand_ids,
                 "cancelled": cancelled,
                 "members": members,
                 "name": name,
@@ -24951,6 +27187,628 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/coverage/{coverage}",
             path={"coverage": coverage, "ws": ws},
             body={"linked": linked, "status": status, "story_id": story_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_agreements(
+        self,
+        brand: str,
+        id: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        deal_id: str | None = None,
+        ends_on: str | None = None,
+        notice_on: str | None = None,
+        owner_id: str | None = None,
+        publisher_id: str | None = None,
+        renewal_on: str | None = None,
+        starts_on: str | None = None,
+        status: Literal["draft", "proposed", "active", "completed", "cancelled"] | None = None,
+        terms: str | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update agreements using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/agreements/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/agreements/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "deal_id": deal_id,
+                "ends_on": ends_on,
+                "notice_on": notice_on,
+                "owner_id": owner_id,
+                "publisher_id": publisher_id,
+                "renewal_on": renewal_on,
+                "starts_on": starts_on,
+                "status": status,
+                "terms": terms,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_budgets(
+        self,
+        brand: str,
+        id: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        ends_on: str | None = None,
+        notes: str | None = None,
+        starts_on: str | None = None,
+        tags: str | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update budgets using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/budgets/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/budgets/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "ends_on": ends_on,
+                "notes": notes,
+                "starts_on": starts_on,
+                "tags": tags,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_candidates(
+        self,
+        brand: str,
+        id: str,
+        *,
+        notes: str | None = None,
+        source: Literal["manual", "news", "backlinks", "link_prospects", "import"] | None = None,
+        source_id: str | None = None,
+        status: Literal["new", "confirmed", "dismissed"] | None = None,
+        title: str | None = None,
+        url: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update candidates using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/candidates/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/candidates/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "notes": notes,
+                "source": source,
+                "source_id": source_id,
+                "status": status,
+                "title": title,
+                "url": url,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_deliverables(
+        self,
+        brand: str,
+        id: str,
+        *,
+        accepted_quantity: float | None = None,
+        agreement_id: str | None = None,
+        allocation_minor: int | None = None,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        placement_id: str | None = None,
+        quantity: float | None = None,
+        status: Literal["pending", "partial", "accepted", "cancelled"] | None = None,
+        title: str | None = None,
+        unit: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update deliverables using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/deliverables/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/deliverables/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "accepted_quantity": accepted_quantity,
+                "agreement_id": agreement_id,
+                "allocation_minor": allocation_minor,
+                "due_on": due_on,
+                "evidence": evidence,
+                "placement_id": placement_id,
+                "quantity": quantity,
+                "status": status,
+                "title": title,
+                "unit": unit,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_delivery_reports(
+        self,
+        brand: str,
+        id: str,
+        *,
+        clicks: int | None = None,
+        conversions: int | None = None,
+        ends_on: str | None = None,
+        evidence: str | None = None,
+        impressions: int | None = None,
+        leads: int | None = None,
+        notes: str | None = None,
+        placement_id: str | None = None,
+        sessions: int | None = None,
+        source: str | None = None,
+        starts_on: str | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update delivery reports using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/delivery_reports/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/delivery_reports/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "clicks": clicks,
+                "conversions": conversions,
+                "ends_on": ends_on,
+                "evidence": evidence,
+                "impressions": impressions,
+                "leads": leads,
+                "notes": notes,
+                "placement_id": placement_id,
+                "sessions": sessions,
+                "source": source,
+                "starts_on": starts_on,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_documents(
+        self,
+        brand: str,
+        id: str,
+        *,
+        agreement_id: str | None = None,
+        kind: Literal["contract", "invoice", "media_kit", "creative", "delivery", "other"] | None = None,
+        notes: str | None = None,
+        source_text: str | None = None,
+        title: str | None = None,
+        url: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update documents using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/documents/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/documents/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "agreement_id": agreement_id,
+                "kind": kind,
+                "notes": notes,
+                "source_text": source_text,
+                "title": title,
+                "url": url,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_finance_tasks(
+        self,
+        brand: str,
+        id: str,
+        *,
+        agreement_id: str | None = None,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        invoice_id: str | None = None,
+        owner_id: str | None = None,
+        priority: Literal["normal", "urgent", "high", "low"] | None = None,
+        publisher_id: str | None = None,
+        reason: Literal["manual", "renewal_due", "notice_due", "invoice_due", "delivery_overdue"] | None = None,
+        resolution: str | None = None,
+        snooze_until: str | None = None,
+        status: Literal["open", "in_progress", "snoozed", "resolved", "dismissed"] | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update finance tasks using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/finance_tasks/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/finance_tasks/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "agreement_id": agreement_id,
+                "due_on": due_on,
+                "evidence": evidence,
+                "invoice_id": invoice_id,
+                "owner_id": owner_id,
+                "priority": priority,
+                "publisher_id": publisher_id,
+                "reason": reason,
+                "resolution": resolution,
+                "snooze_until": snooze_until,
+                "status": status,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_invoices(
+        self,
+        brand: str,
+        id: str,
+        *,
+        agreement_id: str | None = None,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        due_on: str | None = None,
+        issued_on: str | None = None,
+        kind: Literal["invoice", "credit"] | None = None,
+        notes: str | None = None,
+        reference: str | None = None,
+        status: Literal["draft", "received", "disputed", "void"] | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update invoices using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/invoices/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/invoices/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "agreement_id": agreement_id,
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "due_on": due_on,
+                "issued_on": issued_on,
+                "kind": kind,
+                "notes": notes,
+                "reference": reference,
+                "status": status,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_placements(
+        self,
+        brand: str,
+        id: str,
+        *,
+        agreement_id: str | None = None,
+        arrangement: Literal["earned", "paid", "exchange", "affiliate", "unknown"] | None = None,
+        baseline: bool | None = None,
+        campaign: str | None = None,
+        check_every_hours: int | None = None,
+        contact_record_id: str | None = None,
+        expected_link: bool | None = None,
+        expected_mention: str | None = None,
+        expected_on: str | None = None,
+        expected_rel: Literal["any", "follow", "nofollow", "sponsored", "ugc"] | None = None,
+        expires_on: str | None = None,
+        inventory: str | None = None,
+        kind: str | None = None,
+        language: str | None = None,
+        market: str | None = None,
+        monitor: bool | None = None,
+        monitor_accuracy: bool | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        published_on: str | None = None,
+        publisher_id: str | None = None,
+        reader: Literal["native", "connected"] | None = None,
+        sentiment: Literal["positive", "neutral", "negative", "mixed", "unknown"] | None = None,
+        stage: str | None = None,
+        tags: str | None = None,
+        target_url: str | None = None,
+        title: str | None = None,
+        url: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update placements using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/placements/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/placements/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "agreement_id": agreement_id,
+                "arrangement": arrangement,
+                "baseline": baseline,
+                "campaign": campaign,
+                "check_every_hours": check_every_hours,
+                "contact_record_id": contact_record_id,
+                "expected_link": expected_link,
+                "expected_mention": expected_mention,
+                "expected_on": expected_on,
+                "expected_rel": expected_rel,
+                "expires_on": expires_on,
+                "inventory": inventory,
+                "kind": kind,
+                "language": language,
+                "market": market,
+                "monitor": monitor,
+                "monitor_accuracy": monitor_accuracy,
+                "notes": notes,
+                "owner_id": owner_id,
+                "published_on": published_on,
+                "publisher_id": publisher_id,
+                "reader": reader,
+                "sentiment": sentiment,
+                "stage": stage,
+                "tags": tags,
+                "target_url": target_url,
+                "title": title,
+                "url": url,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_publishers(
+        self,
+        brand: str,
+        id: str,
+        *,
+        category: str | None = None,
+        domain: str | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        record_id: str | None = None,
+        relationship_status: Literal["new", "introduced", "active", "dormant", "do_not_contact"] | None = None,
+        status: Literal["active", "paused", "archived"] | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update publishers using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/publishers/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/publishers/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "category": category,
+                "domain": domain,
+                "notes": notes,
+                "owner_id": owner_id,
+                "record_id": record_id,
+                "relationship_status": relationship_status,
+                "status": status,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_rates(
+        self,
+        brand: str,
+        id: str,
+        *,
+        amount_minor: int | None = None,
+        currency: str | None = None,
+        minimum_quantity: float | None = None,
+        notes: str | None = None,
+        publisher_id: str | None = None,
+        status: Literal["published", "negotiated", "expired"] | None = None,
+        title: str | None = None,
+        unit: str | None = None,
+        valid_until: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update rates using its current version.
+
+        Needs: the coverage.finance.manage scope.
+        PATCH /v1/brands/{brand}/coverage/rates/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/rates/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "minimum_quantity": minimum_quantity,
+                "notes": notes,
+                "publisher_id": publisher_id,
+                "status": status,
+                "title": title,
+                "unit": unit,
+                "valid_until": valid_until,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_rules(
+        self,
+        brand: str,
+        id: str,
+        *,
+        enabled: bool | None = None,
+        kind: str | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update rules using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/rules/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/rules/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "enabled": enabled,
+                "kind": kind,
+                "notes": notes,
+                "owner_id": owner_id,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_tasks(
+        self,
+        brand: str,
+        id: str,
+        *,
+        due_on: str | None = None,
+        evidence: str | None = None,
+        owner_id: str | None = None,
+        placement_id: str | None = None,
+        priority: Literal["urgent", "high", "normal", "low"] | None = None,
+        publisher_id: str | None = None,
+        reason: str | None = None,
+        resolution: str | None = None,
+        snooze_until: str | None = None,
+        status: Literal["open", "in_progress", "snoozed", "resolved", "dismissed"] | None = None,
+        title: str | None = None,
+        version: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update tasks using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/tasks/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/tasks/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "due_on": due_on,
+                "evidence": evidence,
+                "owner_id": owner_id,
+                "placement_id": placement_id,
+                "priority": priority,
+                "publisher_id": publisher_id,
+                "reason": reason,
+                "resolution": resolution,
+                "snooze_until": snooze_until,
+                "status": status,
+                "title": title,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_coverage_views(
+        self,
+        brand: str,
+        id: str,
+        *,
+        filters: str | None = None,
+        section: Literal["placements", "publishers", "tasks", "agreements", "candidates"] | None = None,
+        title: str | None = None,
+        version: int,
+        visibility: Literal["private", "team"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update views using its current version.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/coverage/views/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/coverage/views/{id}",
+            path={"brand": brand, "id": id},
+            body={"filters": filters, "section": section, "title": title, "version": version, "visibility": visibility},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
