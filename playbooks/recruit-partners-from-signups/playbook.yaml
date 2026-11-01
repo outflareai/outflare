@@ -57,7 +57,7 @@ steps:
   - say: For each one with an audience in the space, save their creator fields and add a partnership at Found with a suggested deal type, and a one-line reason.
     tools: [updateRecord, createRecord]
   - say: Draft a short, personal invite for each, from a real person at the brand, that says why them and what they'd get. Hold every send until a person approves it.
-    tools: [previewEmailTemplate, sendEmail]
+    tools: [previewBrandEmailTemplate, sendBrandEmail]
   - say: Move partnerships to Pitched when the invite goes out, and to Negotiating or Declined as replies come in.
     tools: [listInbox, updateRecord]
 guardrails:

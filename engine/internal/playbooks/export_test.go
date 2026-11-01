@@ -65,13 +65,19 @@ func TestKeyFor(t *testing.T) {
 }
 
 // A kit journey sends only the kit's own drafts, of the right purpose, and
-// never names workspace members.
+// never names workspace members, connections or keys, or another
+// workspace's channels and audiences except through its inputs.
 func TestKitFlowSteps(t *testing.T) {
 	k, _ := playbooks.GetKit("trial-activation")
 	b, _ := k.Marshal()
 	for _, c := range []struct{ from, to, want string }{
 		{"kind: email\n        template: activation-tip", "kind: transactional_email\n        template: activation-tip", "transactional email drafts"},
 		{"kind: alert\n", "kind: assign_owner\n        owner_id: 00000000-0000-4000-8000-000000000001\n", "workspace members"},
+		{"kind: alert\n", "kind: slack\n        channel: C0123456789\n", "channel is one of the kit's inputs"},
+		{"kind: alert\n", "kind: slack\n        channel: '{{nope}}'\n", "channel is one of the kit's inputs"},
+		{"kind: alert\n", "kind: webhook\n        url: https://example.com/hook\n        headers: {X-Key: abc}\n", "no headers"},
+		{"kind: alert\n", "kind: webhook\n        url: https://example.com/hook\n        auth: {type: header, name: Authorization}\n", "no auth"},
+		{"kind: alert\n", "kind: push_to_crm\n        connection_id: 00000000-0000-4000-8000-000000000001\n", "connection_id"},
 	} {
 		src := strings.Replace(string(b), c.from, c.to, 1)
 		if src == string(b) {

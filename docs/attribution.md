@@ -114,18 +114,36 @@ archived.
   currency, and the spend recorded against it in the cost ledger. Spend with
   no channel is `unallocated_cost`.
 - `GET /v1/workspaces/{ws}/attribution/campaigns?channel=`: the same per
-  source and campaign.
+  source and campaign. `tracking_campaign=` keeps one campaign link
+  campaign, and `split=content` splits each campaign by the visit's
+  `utm_content` (credit by the credited visit's), such as the sequence step
+  a link went out in.
 - `GET /v1/workspaces/{ws}/attribution/ads?level=`: the same per paid ad
   campaign, ad set or ad, by the network's ids the tracking template
   recorded, beside the platform's spend and conversion count
   ([paid-media.md](paid-media.md#what-each-campaign-brought)).
+- `GET /v1/workspaces/{ws}/attribution/customers`: for every channel, the
+  conversions credited to people who weren't a record yet when the credited
+  visit happened (cold) and to people who already were (warm), and revenue
+  from each person's first payment (new) and from later ones (repeat), net
+  of refunds. A refund counts as repeat when the person paid before it.
+- `GET /v1/workspaces/{ws}/attribution/cohorts`: lifetime value by first
+  channel. People whose first conversion fell in the period, grouped by its
+  first-touch credit, with how many have paid and everything they have paid
+  since, in total and per person. Always first touch, whatever `model`.
 - `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
 - `GET` and `PATCH /v1/workspaces/{ws}/attribution/settings`: the default
   model (built in or the workspace's own), `lookback_days` and
   `conversion_events`.
 
-Each takes `from`, `to`, `model` and `brand`. Reading needs
+Each takes `from`, `to`, `model`, `brand` and `match`. `match=identified`
+keeps only the visits the person was identified on (signed in, or named by
+a form or an identify call) and the credit on them: visits known only by
+the browser's cookie are left out, and so are conversions that matched
+nothing, for a deterministic-only view. Each credit in
+`.../conversions` says how its visit was matched (`matched_by`: `record`,
+`browser` or `none`). Reading needs
 `analytics.read`; changing settings `analytics.manage`. Paid ads read the
 same credits for ad-level results; the conversions each ad platform reports
 stay separate ([paid-media.md](paid-media.md)).
@@ -136,7 +154,9 @@ for anyone with `analytics.read`.
 
 A mission can aim at revenue, in whole US dollars. `revenue_attributed`
 counts payments credited, under the default model and net of refunds, to the
-campaign links of the mission's sequences. `revenue_deals` counts won deals
+campaign links of the mission's sequences and broadcasts, and to its social
+posts and replies (by each one's own `utm_content`, since their campaign is
+the account's or the watch's). `revenue_deals` counts won deals
 tagged with the mission. `revenue_referred` counts sales partners referred,
 less refunds, in the partner programs of the mission's brand (every program
 when it has no brand) since the mission started; imported history never
@@ -172,5 +192,6 @@ audit actions `attribution.settings_updated`, `attribution.model_created`,
 
 ## Not built yet
 
-- Credit goes to people, not to companies or deals, and every conversion
-  counts the same whether the person was new or already known.
+- Credit goes to people, not to companies or deals.
+- Identified visits don't say how the person was identified (a sign-in, a
+  form, an email link), only that they were.

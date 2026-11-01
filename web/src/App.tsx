@@ -623,7 +623,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "lists" && <Lists key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "lead-finder" && (
           <CloudPage feature={cloudFeature("lead-finder")!}>
-            <LeadFinder key={ws.id} ws={ws.id} canManage={writer} onConnectors={() => setTab("connectors")} onProfiles={() => setTab("ideal-customers")} />
+            <LeadFinder key={ws.id} ws={ws.id} canManage={writer} onConnectors={() => setTab("connectors")} onProfiles={() => setTab("ideal-customers")} onRates={() => setTab("outcomes")} />
           </CloudPage>
         )}
         {ready && ws && tab === "email-finder" && <EmailFinder key={ws.id} ws={ws.id} canManage={writer} />}

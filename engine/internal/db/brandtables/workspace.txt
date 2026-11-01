@@ -3,6 +3,7 @@
 # (plans/brands/README.md). Add a table here only when it can never hold
 # a brand's data.
 actors
+alert_mutes
 brands
 idempotency_keys
 invites

@@ -30,6 +30,7 @@ var aliases = map[string]string{
 	"vercel_ai_gateway":        "vercel",
 	"zoom_scheduler":           "zoom",
 	"cheapverifier":            "cheapinboxes",
+	"outlook_mail":             "outlook_calendar", // the Outlook mark
 }
 
 // Get returns the logo for a connector and whether it is the company's

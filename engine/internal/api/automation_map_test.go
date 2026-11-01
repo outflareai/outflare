@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestAutomationMap(t *testing.T) {
 	// Some history: a sign-up this week, and one person emailed by both
 	// journeys within the hour this week, on runs they entered long ago
 	// (a journey people entered lately isn't one that never starts).
-	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'signed_up', now())`, ws); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, kind, name, occurred_at) VALUES ($1, outflare_first_brand($1), 'track', 'signed_up', now())`, ws); err != nil {
 		t.Fatal(err)
 	}
 	rec, err := customers.EnsurePerson(ctx, e.pool, ws, "email", "ana@acme.example", true, "")
@@ -126,4 +127,56 @@ func TestAutomationMap(t *testing.T) {
 	// The map needs customers.read too.
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Emails only", "scopes": []string{"emails.read"}})["token"].(string)
 	(&client{t: t, h: e.h, bearer: tok}).must(403, "GET", base+"/automation-map", nil)
+}
+
+// The map shows what integration steps reach (a webhook by its host only),
+// the events wait-until paths wait for, and where events came from.
+func TestAutomationMapIntegrations(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+
+	jid := owner.must(201, "POST", base+"/journeys", map[string]any{"name": "Close the loop", "trigger": map[string]any{"kind": "event", "event": "trial.started"},
+		"steps": []map[string]any{
+			{"id": "wait", "kind": "wait_until", "timeout_seconds": 86400, "timeout_next": "tell", "paths": []any{
+				map[string]any{"id": "bought", "event": "order_completed", "next": "hook"},
+			}},
+			{"id": "hook", "kind": "webhook", "url": "https://hooks.example.com/catch/12345/secret-token?key=abc", "next": "tell"},
+			{"id": "tell", "kind": "slack", "channel": "C0123456789", "text": "{{person.email}} bought"},
+		}})["id"].(string)
+	for _, src := range []string{"stripe", "browser"} {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, source, occurred_at) VALUES ($1, 'track', 'order_completed', $2, now())`, ws, src); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := owner.must(200, "GET", base+"/automation-map", nil)
+	nodes := map[string]map[string]any{}
+	for _, n := range m["nodes"].([]any) {
+		n := n.(map[string]any)
+		nodes[n["id"].(string)] = n
+	}
+	edges := map[string]bool{}
+	for _, ed := range m["edges"].([]any) {
+		ed := ed.(map[string]any)
+		edges[ed["from"].(string)+" "+ed["kind"].(string)+" "+ed["to"].(string)] = true
+	}
+	j := "journey:" + jid
+	for _, want := range []string{
+		"event:order_completed waits_for " + j, j + " calls webhook:hooks.example.com", j + " posts slack:C0123456789",
+		"source:stripe records event:order_completed", "source:browser records event:order_completed",
+	} {
+		if !edges[want] {
+			t.Errorf("no link %q in %v", want, edges)
+		}
+	}
+	if nodes["source:stripe"]["label"] != "Stripe" || nodes["source:browser"]["label"] != "Website" || nodes["source:stripe"]["detail"] != "1 event in 30 days" {
+		t.Fatalf("sources: %v %v", nodes["source:stripe"], nodes["source:browser"])
+	}
+	// The webhook's path and query never reach the map: they can hold a token.
+	b, _ := json.Marshal(m)
+	if strings.Contains(string(b), "secret-token") || strings.Contains(string(b), "key=abc") {
+		t.Fatalf("the map shows the webhook's path: %s", b)
+	}
 }

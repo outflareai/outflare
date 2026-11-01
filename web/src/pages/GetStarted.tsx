@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
 import { hostedMcpUrl, useAgentApps, appLabels } from "@/lib/agentApps";
 import type { Tab } from "../App";
-import { ConnectDialog, ConnectorCard, startConnectorOAuth, takeConnectOutcome, authOption } from "./Connectors";
+import { ConnectDialog, ConnectorCard, startConnectorOAuth, takeConnectOutcome, authOption, builtIn } from "./Connectors";
 import { useSiteSetupAfterConnect } from "@/components/analytics-sites";
 import { setupPrompt } from "./ConnectAI";
 import { CommunityLinks } from "@/components/community-links";
@@ -561,7 +561,7 @@ function ConnectStep({ ws, pick, first = [], note, limit, more, onChange }: { ws
   // Ready-to-connect ones first, then the ones this server can't connect yet.
   const ready = (c: Connector) => c.status === "available" && c.configured;
   // One of each kind before a second of any, so a short list covers the most ground.
-  const all = catalog.filter((c) => c.auth !== "none" && c.status === "available" && pick(c)).sort((a, b) => Number(ready(b)) - Number(ready(a)) || b.connected - a.connected || rank(a) - rank(b));
+  const all = catalog.filter((c) => !builtIn(c) && c.status === "available" && pick(c)).sort((a, b) => Number(ready(b)) - Number(ready(a)) || b.connected - a.connected || rank(a) - rank(b));
   const nth = new Map(all.map((c) => [c.id, all.filter((x) => x.category === c.category).indexOf(c)]));
   const lead = (c: Connector) => (first.indexOf(c.id) + 1 || 99);
   let shown = all.sort((a, b) => Number(ready(b)) - Number(ready(a)) || lead(a) - lead(b) || nth.get(a.id)! - nth.get(b.id)! || rank(a) - rank(b));

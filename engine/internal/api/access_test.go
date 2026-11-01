@@ -126,6 +126,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	integrations := &connectors.Store{Pool: pool, Box: box, Registry: catalog.New(),
 		Client: &connectors.Client{BaseURLs: map[string]string{"zerobounce": zb.URL, "smartlead": sl.URL, "emailbison": eb.URL, "claude": cl.URL, "plausible": pl.URL, "dataforseo": dfs.URL, "geonode": gn.URL, "meta_ads": ma.URL, "google_ads": ga.URL}}}
 	send.Platforms = integrations
+	tokens.Integrations = integrations
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}
 	verifier := &verify.Service{Pool: pool, Store: integrations, Builtin: verifiers.Builtin{Resolver: dns}, Log: log}
 	finder := &emailfind.Service{Pool: pool, Verify: verifier, Resolver: dns, Log: log}

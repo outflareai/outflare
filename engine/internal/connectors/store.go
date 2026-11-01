@@ -59,16 +59,28 @@ type Store struct {
 	Client   *Client
 	// OAuth apps by connector id, for consent screens and token refresh.
 	OAuthApps map[string]OAuthApp
-	// Hooks run inside the transaction that connects or disconnects an
-	// integration, e.g. to queue a first sync or remove a webhook. An error
-	// rolls the change back. Register them before serving.
+	// Hooks run inside the transaction that connects, reconnects (replaces
+	// the credentials of) or disconnects an integration, e.g. to queue a
+	// first sync, read again with the new credentials or remove a webhook.
+	// An error rolls the change back. Register them before serving.
 	OnConnect    []func(ctx context.Context, tx pgx.Tx, i Integration) error
+	OnReconnect  []func(ctx context.Context, tx pgx.Tx, i Integration) error
 	OnDisconnect []func(ctx context.Context, tx pgx.Tx, i Integration) error
 }
 
 // Connected runs the OnConnect hooks.
 func (s *Store) Connected(ctx context.Context, tx pgx.Tx, i Integration) error {
 	for _, h := range s.OnConnect {
+		if err := h(ctx, tx, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Reconnected runs the OnReconnect hooks, after new credentials are stored.
+func (s *Store) Reconnected(ctx context.Context, tx pgx.Tx, i Integration) error {
+	for _, h := range s.OnReconnect {
 		if err := h(ctx, tx, i); err != nil {
 			return err
 		}

@@ -32,7 +32,6 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/senders":           "senders are the team's people and personas; their mailboxes carry the brand",
 	"/v1/workspaces/{ws}/connectors":        "the connector catalog with every connection",
 	"/v1/workspaces/{ws}/oauth-connections": "sign-ins held for the workspace",
-	"/v1/workspaces/{ws}/webhooks":          "webhook endpoints are set up for the workspace",
 	"/v1/workspaces/{ws}/spend":             "spend is the workspace's bill",
 	"/v1/workspaces/{ws}/spend-recurring":   "spend is the workspace's bill",
 	"/v1/workspaces/{ws}/ai-usage":          "AI spend is the workspace's bill",

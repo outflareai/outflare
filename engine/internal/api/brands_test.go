@@ -438,11 +438,14 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 		return id
 	}
 
-	// Webhooks: one for every brand, one for Geonode only.
+	// Webhooks: an endpoint belongs to one brand (brands step 4). Made
+	// without one it is the workspace's first brand's.
+	first := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
 	all := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/all", "events": []string{"sequence.*"}})
 	geo := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/geo", "events": []string{"sequence.*"}, "brand": "geonode"})
-	if all["brand_id"] != nil || geo["brand_id"] != geonode {
-		t.Fatalf("webhook brands: %v %v", all["brand_id"], geo["brand_id"])
+	rep := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/rep", "events": []string{"sequence.*"}, "brand": "repocket"})
+	if all["brand_id"] != first || geo["brand_id"] != geonode || rep["brand_id"] != repocket {
+		t.Fatalf("webhook brands: %v %v %v", all["brand_id"], geo["brand_id"], rep["brand_id"])
 	}
 	owner.must(400, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/x", "brand": "nope"})
 
@@ -541,20 +544,21 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	if len(feed) != 1 || feed[0].(map[string]any)["brand_id"] != geonode {
 		t.Fatalf("events feed: %v", feed)
 	}
-	deliveries := func(id string) int {
+	deliveries := func(brand, id string) int {
 		n := 0
-		for _, d := range owner.must(200, "GET", base+"/webhooks/"+id+"/deliveries", nil)["data"].([]any) {
+		for _, d := range owner.must(200, "GET", "/v1/brands/"+brand+"/webhooks/"+id+"/deliveries", nil)["data"].([]any) {
 			if d.(map[string]any)["event_type"] == "sequence.updated" {
 				n++
 			}
 		}
 		return n
 	}
-	if a, g := deliveries(all["id"].(string)), deliveries(geo["id"].(string)); a != 2 || g != 1 {
-		t.Fatalf("webhook deliveries: all %d, geonode %d", a, g)
+	if a, g, r := deliveries(first, all["id"].(string)), deliveries(geonode, geo["id"].(string)), deliveries(repocket, rep["id"].(string)); a != 0 || g != 1 || r != 1 {
+		t.Fatalf("webhook deliveries: first brand %d, geonode %d, repocket %d", a, g, r)
 	}
+	// Null moves it to the first brand: nothing is for every brand.
 	owner.must(200, "PATCH", base+"/webhooks/"+geo["id"].(string), map[string]any{"brand": nil})
-	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != nil {
+	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != first {
 		t.Fatalf("webhook brand cleared: %v", w)
 	}
 }

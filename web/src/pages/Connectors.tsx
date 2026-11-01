@@ -56,12 +56,14 @@ const credits = (n?: number) => (n === undefined ? "" : `${n.toLocaleString()} c
 
 // A connector's ways to connect: OAuth (sign in) and/or an API key.
 export const authOption = (def: Connector, method: "oauth2" | "api_key") => def.auth_options.find((o) => o.method === method);
+// Built in: nothing to connect, so it stays off the catalog.
+export const builtIn = (def: Connector) => def.auth_options.some((o) => o.method === "none");
 // Who the person signs in with: one Google or Microsoft account covers
 // several connectors.
 export const provider = (def: Connector) => (def.id.startsWith("google_") ? "Google" : def.id.startsWith("outlook_") ? "Microsoft" : def.name);
 export const signInWith = (def: Connector) => `Sign in with ${provider(def)}`;
 function howToConnect(def: Connector) {
-  const oauth = def.auth_methods.includes("oauth2"), key = def.auth_methods.includes("api_key");
+  const oauth = !!authOption(def, "oauth2"), key = !!authOption(def, "api_key");
   if (oauth && key) return def.id.startsWith("google_") ? "Google sign-in or service account key" : "Sign in or API key";
   return oauth ? signInWith(def) : "API key";
 }
@@ -69,10 +71,11 @@ function howToConnect(def: Connector) {
 // Sends the browser to a connector's sign-in page. back lands on that page
 // afterwards instead of Connectors: Get started, brand setup, or a page
 // that asked for a DNS record (Email providers, Site audits, Domains).
-// brand makes it that brand's own connection.
-export type ReturnPage = "get-started" | "setup" | "tracking" | "providers" | "audits" | "domains";
-export async function startConnectorOAuth(ws: string, def: Connector, back?: ReturnPage, brand?: string) {
-  const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize", { params: { path: { ws, connector: def.id }, query: { format: "json", ...(back ? { return: back } : {}), ...(brand ? { brand } : {}) } } });
+// brand makes it that brand's own connection. pool is where a mailbox
+// sign-in (Gmail, Outlook) puts the mailbox it adds.
+export type ReturnPage = "get-started" | "setup" | "tracking" | "providers" | "audits" | "domains" | "mailboxes";
+export async function startConnectorOAuth(ws: string, def: Connector, back?: ReturnPage, brand?: string, pool?: string) {
+  const { data, error } = await api.GET("/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize", { params: { path: { ws, connector: def.id }, query: { format: "json", ...(back ? { return: back } : {}), ...(brand ? { brand } : {}), ...(pool?.trim() ? { pool: pool.trim() } : {}) } } });
   if (error || !data) return toast(errorMessage(error), "error");
   location.assign((data as { url: string }).url);
 }
@@ -81,10 +84,11 @@ export async function startConnectorOAuth(ws: string, def: Connector, back?: Ret
 // toast and taken out of the URL. Gives the new connection's id.
 export function takeConnectOutcome(): string | null {
   const q = new URLSearchParams(location.search);
-  const ok = q.get("integration"), failed = q.get("connect_error");
+  const ok = q.get("integration"), failed = q.get("connect_error"), mailbox = q.get("mailbox");
   if (!ok && !failed) return null;
   history.replaceState(null, "", location.pathname);
   if (failed) toast(`Could not connect: ${failed}`, "error");
+  else if (mailbox) toast(`Connected ${mailbox}. Checking its sign-in now.`);
   else if (q.getAll("also").length) toast(`Connected, along with ${q.getAll("also").join(" and ")} from the same sign-in.`);
   else toast("Connected. It's ready to use.");
   return ok;
@@ -226,7 +230,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
   }
 
   const q = query.trim().toLowerCase();
-  const shown = (catalog ?? []).filter((c) => c.auth !== "none" && (!category || c.category === category) && (!q || `${c.name} ${c.summary} ${categoryLabel(c.category)}`.toLowerCase().includes(q)));
+  const shown = (catalog ?? []).filter((c) => !builtIn(c) && (!category || c.category === category) && (!q || `${c.name} ${c.summary} ${categoryLabel(c.category)}`.toLowerCase().includes(q)));
 
   return (
     <div className="space-y-8">
@@ -335,13 +339,13 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-[13px] font-semibold">Add a connector</h2>
-                <p className="text-[12px] text-muted-foreground">{plural(catalog.filter((c) => c.status === "available" && c.auth !== "none").length, "service")} ready to connect, more on the way.</p>
+                <p className="text-[12px] text-muted-foreground">{plural(catalog.filter((c) => c.status === "available" && !builtIn(c)).length, "service")} ready to connect, more on the way.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <input type="search" aria-label="Search connectors" placeholder="Search connectors…" className={`${field} w-56`} value={query} onChange={(e) => setQuery(e.target.value)} />
                 <select aria-label="Category" className={field} value={category} onChange={(e) => setCategory(e.target.value as ConnectorCategory | "")}>
                   <option value="">All categories</option>
-                  {categories.filter((c) => catalog.some((d) => d.category === c.id && d.auth !== "none")).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  {categories.filter((c) => catalog.some((d) => d.category === c.id && !builtIn(d))).map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
               </div>
             </div>

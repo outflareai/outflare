@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { KnowledgeAnswer, Mailbox, Member, SupportConversation, SupportCounts, SupportMailbox, SupportMessage } from "@outflare/sdk";
+import type { KnowledgeAnswer, Mailbox, Member, SupportArticle, SupportConversation, SupportCounts, SupportMailbox, SupportMessage } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, toast } from "../ui";
 import { Icon } from "../icons";
@@ -9,6 +9,7 @@ import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
 import { SupportForwarding } from "@/components/support-forwarding";
+import { SupportSLA } from "@/components/support-sla";
 
 // The support inbox: customers who write to a support mailbox, as
 // conversations the team works through. Folders on the left, the list in
@@ -17,12 +18,13 @@ import { SupportForwarding } from "@/components/support-forwarding";
 // in the same thread. Suggest a reply drafts one from knowledge customers
 // may be told, only when someone asks.
 
-type Folder = "mine" | "unassigned" | "open" | "pending" | "closed" | "all";
+type Folder = "mine" | "unassigned" | "overdue" | "open" | "pending" | "closed" | "all";
 type Team = { id: string; name: string };
 
 const folders: { id: Folder; label: string; hint: string; count: (c: SupportCounts) => number | undefined }[] = [
   { id: "mine", label: "Your inbox", hint: "Assigned to you and not closed", count: (c) => c.mine },
   { id: "unassigned", label: "Unassigned", hint: "Nobody has picked these up yet", count: (c) => c.unassigned },
+  { id: "overdue", label: "Overdue", hint: "Past the reply or resolution time you promised", count: (c) => c.overdue },
   { id: "open", label: "Open", hint: "Waiting on your team", count: (c) => c.open },
   { id: "pending", label: "Waiting on customer", hint: "You replied; it opens again when they write", count: (c) => c.pending },
   { id: "closed", label: "Closed", hint: "Done", count: () => undefined },
@@ -35,6 +37,8 @@ function query(f: Folder): Record<string, string> {
       return { assignee: "me", status: "all" };
     case "unassigned":
       return { assignee: "none", status: "open" };
+    case "overdue":
+      return { status: "all", sla: "overdue", sort: "due" };
     case "all":
       return { status: "all" };
     default:
@@ -103,6 +107,31 @@ function duration(seconds: number | null | undefined) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+// SlaChip says when the reply or the resolution is due, or how late it is.
+function SlaChip({ c, long = false }: { c: SupportConversation; long?: boolean }) {
+  const { sla } = c;
+  if (c.status === "closed") return null;
+  const now = Date.now();
+  const late = sla.reply_breached_at ?? sla.resolve_breached_at;
+  if (late) {
+    const what = sla.reply_breached_at ? "Reply" : "Resolution";
+    const due = (sla.reply_breached_at ? sla.reply_due_at : sla.resolve_due_at) ?? late;
+    return (
+      <span className="inline-flex shrink-0 items-center rounded bg-red-500/10 px-1 text-[11px] font-medium whitespace-nowrap text-red-700 dark:text-red-400" title={`${what} was due ${stamp(due)}`}>
+        {`${what === "Reply" ? "Reply" : "Resolve"} overdue ${long ? "by " : ""}${duration((now - Date.parse(due)) / 1000)}`}
+      </span>
+    );
+  }
+  const due = sla.reply_due_at ?? null;
+  if (!due) return null;
+  const left = (Date.parse(due) - now) / 1000;
+  return (
+    <span className={cn("inline-flex shrink-0 items-center rounded px-1 text-[11px] font-medium whitespace-nowrap", left < 3600 ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-muted-foreground")} title={`Reply due ${stamp(due)}`}>
+      {left <= 0 ? "Reply due now" : `Reply in ${duration(left)}`}
+    </span>
+  );
+}
+
 export function Support({
   ws,
   canManage,
@@ -127,7 +156,7 @@ export function Support({
   const [mailboxes, setMailboxes] = useState<SupportMailbox[] | null>(null);
   // Support addresses mail is forwarded to (Outflare Cloud).
   const [forwarding, setForwarding] = useState<string[] | null>(null);
-  const [stats, setStats] = useState<{ median_first_reply_seconds: number | null; median_resolution_seconds: number | null; conversations: number } | null>(null);
+  const [stats, setStats] = useState<{ median_first_reply_seconds: number | null; median_resolution_seconds: number | null; conversations: number; sla_missed?: number } | null>(null);
   const [error, setError] = useState("");
   const [settings, setSettings] = useState(false);
   const [tick, setTick] = useState(0);
@@ -168,7 +197,7 @@ export function Support({
 
   const setUp = mailboxes.length > 0 || forwarding.length > 0;
   if (settings || (!setUp && !list?.length)) {
-    return <Settings ws={ws} canSetUp={canSetUp} mailboxes={mailboxes} first={!setUp} onBack={setUp ? () => setSettings(false) : undefined} onChanged={refresh} go={go} />;
+    return <Settings ws={ws} canSetUp={canSetUp} canManage={canManage} mailboxes={mailboxes} first={!setUp} onBack={setUp ? () => setSettings(false) : undefined} onChanged={refresh} go={go} />;
   }
 
   return (
@@ -195,7 +224,7 @@ export function Support({
               className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left", folder === f.id ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
             >
               <span className="flex-1">{f.label}</span>
-              {counts && f.count(counts) ? <span className="text-[11px] tabular-nums">{f.count(counts)}</span> : null}
+              {counts && f.count(counts) ? <span className={cn("text-[11px] tabular-nums", f.id === "overdue" && "rounded-full bg-red-500/10 px-1.5 font-medium text-red-700 dark:text-red-400")}>{f.count(counts)}</span> : null}
             </button>
           ))}
         </div>
@@ -204,6 +233,9 @@ export function Support({
           <p className="flex justify-between"><span>Conversations</span><span className="tabular-nums text-foreground">{stats?.conversations ?? "–"}</span></p>
           <p className="flex justify-between" title="Median time from the customer's first email to your first reply"><span>First reply</span><span className="tabular-nums text-foreground">{duration(stats?.median_first_reply_seconds)}</span></p>
           <p className="flex justify-between" title="Median time from the first email to closing"><span>Time to close</span><span className="tabular-nums text-foreground">{duration(stats?.median_resolution_seconds)}</span></p>
+          {!!stats?.sla_missed && (
+            <p className="flex justify-between" title="Conversations that missed a response time at least once"><span>Missed SLA</span><span className="tabular-nums text-red-700 dark:text-red-400">{stats.sla_missed}</span></p>
+          )}
         </div>
       </nav>
 
@@ -225,7 +257,7 @@ export function Support({
         <ul className="flex-1 overflow-y-auto">
           {list?.length === 0 && (
             <li className="p-6 text-center text-[13px] text-muted-foreground">
-              {q ? "Nothing matches." : folder === "mine" ? "Nothing assigned to you. Pick one up from Unassigned." : folder === "open" ? "All caught up: nobody is waiting on you." : "No conversations here."}
+              {q ? "Nothing matches." : folder === "mine" ? "Nothing assigned to you. Pick one up from Unassigned." : folder === "open" ? "All caught up: nobody is waiting on you." : folder === "overdue" ? "Nothing overdue. Set response times in Support settings to track them." : "No conversations here."}
             </li>
           )}
           {list?.map((c) => (
@@ -246,6 +278,7 @@ export function Support({
                   <span className="line-clamp-2 text-xs text-muted-foreground">{c.last_from === "team" && <span className="text-foreground/70">You: </span>}{c.preview}</span>
                   <span className="mt-1 flex flex-wrap items-center gap-1.5">
                     {c.unread && <span className="size-2 rounded-full bg-blue-600" aria-label="Unread" />}
+                    <SlaChip c={c} />
                     {(folder === "all" || folder === "mine") && <Badge tone={statusTone[c.status]}>{statusLabel[c.status]}</Badge>}
                     {c.assignee && folder !== "mine" && <span className="text-[11px] text-muted-foreground">→ {c.assignee.id === myId ? "You" : c.assignee.name}</span>}
                     {c.tags.slice(0, 3).map((t) => <span key={t} className="rounded border bg-muted px-1 font-mono text-[10px] text-muted-foreground">{t}</span>)}
@@ -287,7 +320,9 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   const [busy, setBusy] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestion, setSuggestion] = useState<KnowledgeAnswer | null>(null);
+  const [articles, setArticles] = useState(false);
   const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
   const path = { ws, id };
 
   const load = useCallback(async () => {
@@ -341,6 +376,25 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
     if (after) toast("Sent and closed");
   }
 
+  // insertLink puts an article's title and page where the cursor is, on
+  // a line of its own, so the customer can read the rest there.
+  function insertLink(title: string, url: string, from: "suggested" | "search" | "suggestion") {
+    const el = box.current;
+    const at = el ? el.selectionEnd : body.length;
+    const before = body.slice(0, at).replace(/\s+$/, "");
+    const after = body.slice(at).replace(/^\s+/, "");
+    const line = `${title}: ${url}`;
+    const next = (before ? before + "\n\n" : "") + line + (after ? "\n\n" + after : "");
+    setMode("reply");
+    setBody(next);
+    track("ui.support_article_linked", { from });
+    requestAnimationFrame(() => {
+      const pos = (before ? before.length + 2 : 0) + line.length;
+      box.current?.focus();
+      box.current?.setSelectionRange(pos, pos);
+    });
+  }
+
   async function suggest() {
     setSuggesting(true);
     setSuggestion(null);
@@ -372,6 +426,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
             <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
               <span className={cn("size-1.5 shrink-0 rounded-full", { open: "bg-blue-600", pending: "bg-amber-500", closed: "bg-muted-foreground/50" }[conv.status])} />
               <span className="shrink-0 text-foreground/80">{statusLabel[conv.status]}</span>
+              <SlaChip c={conv} long />
               <span className="truncate">· {conv.contact.name ? `${conv.contact.name} · ` : ""}{conv.contact.email}</span>
             </p>
           </div>
@@ -401,7 +456,18 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
 
         {canManage && (
           <div className="border-t bg-background p-3">
-            {suggestion && <SuggestionNote s={suggestion} onConnectAI={() => go("ai")} onDismiss={() => setSuggestion(null)} onUse={(t) => { setMode("reply"); setBody(t); }} />}
+            {suggestion && (
+              <SuggestionNote
+                s={suggestion}
+                onConnectAI={() => go("ai")}
+                onDismiss={() => setSuggestion(null)}
+                onUse={(t) => { setMode("reply"); setBody(t); }}
+                onLink={(c) => c.url && insertLink(c.title, c.url, "suggestion")}
+              />
+            )}
+            {articles && mode === "reply" && (
+              <ArticlePicker ws={ws} id={id} onPick={(a, from) => { if (a.url) insertLink(a.title, a.url, from); setArticles(false); }} onClose={() => setArticles(false)} go={go} />
+            )}
             <div className={cn("rounded-lg border focus-within:ring-[3px] focus-within:ring-ring/40", mode === "note" && "border-amber-500/40 bg-amber-50/60 dark:bg-amber-500/5")}>
               <div className="flex items-center gap-1 border-b px-2 py-1.5" role="tablist" aria-label="Write">
                 {(["reply", "note"] as const).map((k) => (
@@ -429,6 +495,16 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                 {mode === "reply" && (
                   <button
                     type="button"
+                    onClick={() => setArticles((v) => !v)}
+                    aria-expanded={articles}
+                    className={cn("inline-flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground", articles && "bg-accent text-foreground")}
+                  >
+                    <Icon name="article" className="size-3.5" />Articles
+                  </button>
+                )}
+                {mode === "reply" && (
+                  <button
+                    type="button"
                     onClick={suggest}
                     disabled={suggesting}
                     className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-500/10 disabled:opacity-60 dark:text-violet-400"
@@ -438,6 +514,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                 )}
               </div>
               <textarea
+                ref={box}
                 aria-label={mode === "note" ? "Note" : "Reply"}
                 rows={4}
                 value={body}
@@ -496,7 +573,13 @@ function MessageView({ m, contact }: { m: SupportMessage; contact: SupportConver
   );
 }
 
-function SuggestionNote({ s, onUse, onDismiss, onConnectAI }: { s: KnowledgeAnswer; onUse: (text: string) => void; onDismiss: () => void; onConnectAI: () => void }) {
+function SuggestionNote({ s, onUse, onDismiss, onConnectAI, onLink }: {
+  s: KnowledgeAnswer;
+  onUse: (text: string) => void;
+  onDismiss: () => void;
+  onConnectAI: () => void;
+  onLink: (c: KnowledgeAnswer["citations"][number]) => void;
+}) {
   let text: ReactNode;
   if (s.ai.problem) {
     text = (
@@ -516,13 +599,102 @@ function SuggestionNote({ s, onUse, onDismiss, onConnectAI }: { s: KnowledgeAnsw
       <div className="min-w-0 flex-1 space-y-1">
         <p>{text}</p>
         {s.answered && s.citations.length > 0 && (
-          <p className="truncate text-muted-foreground">Sources: {s.citations.map((c) => c.title).join(", ")}</p>
+          <p className="text-muted-foreground">
+            Sources:{" "}
+            {s.citations.map((c, i) => (
+              <span key={c.chunk_id}>
+                {i > 0 && ", "}
+                {c.title}
+                {c.url && (
+                  <button type="button" className="ml-1 text-violet-700 underline dark:text-violet-400" onClick={() => onLink(c)} title={c.url}>add link</button>
+                )}
+              </span>
+            ))}
+          </p>
         )}
         {!s.answered && s.answer && !s.ai.problem && s.passages.length > 0 && (
           <button type="button" className="underline" onClick={() => onUse(s.answer ?? "")}>Use what it found anyway</button>
         )}
       </div>
       <button type="button" aria-label="Dismiss" onClick={onDismiss} className="text-muted-foreground hover:text-foreground"><Icon name="x" className="size-3.5" /></button>
+    </div>
+  );
+}
+
+// ArticlePicker finds help centre articles to link to: the best matches
+// for what the customer wrote, or a search.
+function ArticlePicker({ ws, id, onPick, onClose, go }: {
+  ws: string;
+  id: string;
+  onPick: (a: SupportArticle, from: "suggested" | "search") => void;
+  onClose: () => void;
+  go: (t: Tab) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [list, setList] = useState<SupportArticle[] | null>(null);
+  const [centre, setCentre] = useState<{ url: string } | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    const t = setTimeout(async () => {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/support/conversations/{id}/articles", {
+        params: { path: { ws, id }, query: q.trim() ? { q: q.trim() } : {} },
+      });
+      if (!live) return;
+      if (error) return setError(errorMessage(error));
+      setError("");
+      setList(data.data);
+      setCentre(data.help_centre);
+    }, q ? 250 : 0);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [ws, id, q]);
+  return (
+    <div className="mb-2 rounded-md border bg-background text-xs shadow-xs">
+      <div className="flex items-center gap-2 border-b px-2 py-1.5">
+        <Icon name="search" className="size-3.5 text-muted-foreground" />
+        <input
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && onClose()}
+          placeholder="Search your help centre…"
+          aria-label="Search articles"
+          className="min-w-0 flex-1 bg-transparent py-0.5 outline-none"
+        />
+        <button type="button" aria-label="Close" onClick={onClose} className="text-muted-foreground hover:text-foreground"><Icon name="x" className="size-3.5" /></button>
+      </div>
+      {error && <p className="px-3 py-2 text-destructive">{error}</p>}
+      {!centre && list && (
+        <p className="border-b bg-muted/40 px-3 py-1.5 text-muted-foreground">
+          No help centre is live, so there's nothing to link to yet.{" "}
+          <button type="button" className="underline" onClick={() => go("help-centre")}>Set one up</button>
+        </p>
+      )}
+      {list === null ? (
+        <p className="px-3 py-2 text-muted-foreground">Finding articles…</p>
+      ) : list.length === 0 ? (
+        <p className="px-3 py-2 text-muted-foreground">{q ? "No public article matches." : "No public article matches what they wrote. Search instead."}</p>
+      ) : (
+        <ul className="max-h-56 overflow-y-auto py-1">
+          {!q && <li className="px-3 pt-1 pb-0.5 text-[11px] text-muted-foreground">Suggested from their message</li>}
+          {list.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                disabled={!a.url}
+                onClick={() => onPick(a, q ? "search" : "suggested")}
+                className="block w-full px-3 py-1.5 text-left hover:bg-accent disabled:cursor-default disabled:hover:bg-transparent"
+              >
+                <span className="block truncate font-medium">{a.title}</span>
+                <span className="block truncate text-muted-foreground">{a.excerpt}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -630,6 +802,12 @@ function Details({
           <span>{conv.first_reply_at ? duration((Date.parse(conv.first_reply_at) - Date.parse(conv.first_message_at)) / 1000) + " after" : "Not yet"}</span>
         </p>
         {conv.closed_at && <p className="flex justify-between"><span className="text-muted-foreground">Closed</span><span title={stamp(conv.closed_at)}>{ago(conv.closed_at)}</span></p>}
+        {conv.status !== "closed" && conv.sla.reply_due_at && (
+          <p className="flex justify-between"><span className="text-muted-foreground">Reply due</span><span className={cn(conv.sla.reply_breached_at && "text-red-700 dark:text-red-400")} title={stamp(conv.sla.reply_due_at)}>{stamp(conv.sla.reply_due_at)}</span></p>
+        )}
+        {conv.status !== "closed" && conv.sla.resolve_due_at && (
+          <p className="flex justify-between"><span className="text-muted-foreground">Resolve by</span><span className={cn(conv.sla.resolve_breached_at && "text-red-700 dark:text-red-400")} title={stamp(conv.sla.resolve_due_at)}>{stamp(conv.sla.resolve_due_at)}</span></p>
+        )}
         {conv.via === "forwarding" ? (
           <>
             <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Wrote to</span><span className="truncate" title={conv.reply_from ?? undefined}>{conv.reply_from ?? "unknown"}</span></p>
@@ -662,6 +840,7 @@ function Details({
 function Settings({
   ws,
   canSetUp,
+  canManage,
   mailboxes,
   first,
   onBack,
@@ -670,6 +849,7 @@ function Settings({
 }: {
   ws: string;
   canSetUp: boolean;
+  canManage: boolean;
   mailboxes: SupportMailbox[];
   first: boolean;
   onBack?: () => void;
@@ -790,6 +970,7 @@ function Settings({
         <p className="text-[13px] text-muted-foreground">Ask someone who manages mailboxes to choose the support mailbox.</p>
       )}
       <SupportForwarding ws={ws} canSetUp={canSetUp} go={go} onChanged={onChanged} />
+      {!first && <SupportSLA ws={ws} canManage={canManage} onChanged={onChanged} />}
     </div>
   );
 }

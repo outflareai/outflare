@@ -89,7 +89,7 @@ func TestPlatformAccountsSyncReviewAndGuards(t *testing.T) {
 		t.Fatalf("platforms: %v", list)
 	}
 	p := list[0].(map[string]any)
-	if !strings.HasPrefix(p["name"].(string), "EmailBison") || p["control"] != "full" || p["awaiting_review"] != true || p["stale"] != false {
+	if !strings.HasPrefix(p["integration_name"].(string), "EmailBison") || p["control"] != "full" || p["awaiting_review"] != true || p["stale"] != false {
 		t.Fatalf("platform: %v", p)
 	}
 	att := owner.must(200, "GET", base+"/allocation/attention", nil)
@@ -129,7 +129,7 @@ func TestPlatformAccountsSyncReviewAndGuards(t *testing.T) {
 	if ana["has_login"] != false || len(ana["platforms"].([]any)) != 1 || ana["platforms"].([]any)[0].(map[string]any)["campaigns"] != 1.0 {
 		t.Fatalf("ana: %v", ana)
 	}
-	if asg := ana["assignment"].(map[string]any); asg["platform"] == nil || !strings.HasPrefix(asg["platform"].(string), "EmailBison") || asg["confirmed"] != true {
+	if asg := ana["assignment"].(map[string]any); asg["integration_name"] == nil || !strings.HasPrefix(asg["integration_name"].(string), "EmailBison") || asg["confirmed"] != true {
 		t.Fatalf("ana assignment: %v", asg)
 	}
 
@@ -200,7 +200,7 @@ func TestWarmupOnAConnectedSequencer(t *testing.T) {
 	if p := bo["platforms"].([]any)[0].(map[string]any); p["warmup_enabled"] != true {
 		t.Fatalf("Bo's platform entry: %v", p)
 	}
-	if w := owner.must(200, "GET", base+"/mailboxes/"+ana, nil)["warmup"].(map[string]any); w["enabled"] != false || w["provider"] != "outflare" {
+	if w := owner.must(200, "GET", base+"/mailboxes/"+ana, nil)["warmup"].(map[string]any); w["enabled"] != false || w["provider"] != nil {
 		t.Fatalf("Ana untouched: %v", w)
 	}
 	runJobs := func() {
@@ -232,15 +232,17 @@ func TestWarmupOnAConnectedSequencer(t *testing.T) {
 	// Ana warms up in EmailBison: Outflare asks EmailBison to turn it on,
 	// and says it is waiting until EmailBison shows it.
 	w := owner.must(200, "PATCH", base+"/mailboxes/"+ana, map[string]any{"warmup": map[string]any{"enabled": true, "provider": id}})["warmup"].(map[string]any)
-	if w["provider"] != id || w["waiting_on"] != "platform" || w["platform"].(map[string]any)["name"] == "" {
+	if w["provider"] != id || w["waiting_on"] != "platform" {
 		t.Fatalf("after choosing EmailBison: %v", w)
 	}
 	runJobs()
-	w = owner.must(200, "GET", base+"/mailboxes/"+ana, nil)["warmup"].(map[string]any)
-	if p := w["platform"].(map[string]any); w["waiting_on"] != nil || p["enabled"] != true || p["score"] != 98.0 {
-		t.Fatalf("after EmailBison turned it on: %v", w)
+	m := owner.must(200, "GET", base+"/mailboxes/"+ana, nil)
+	w = m["warmup"].(map[string]any)
+	// The sequencer's own view is its platforms entry.
+	if p := m["platforms"].([]any)[0].(map[string]any); w["waiting_on"] != nil || p["integration_id"] != id || p["warmup_enabled"] != true || p["warmup_score"] != 98.0 {
+		t.Fatalf("after EmailBison turned it on: %v %v", w, m["platforms"])
 	}
-	// Outflare doesn't run warm-up itself, so it can't take it over.
+	// Outflare doesn't run warm-up itself: a provider is a connected sequencer.
 	if code, _ := owner.do("PATCH", base+"/mailboxes/"+ana, map[string]any{"warmup": map[string]any{"provider": "outflare"}}); code != 400 {
 		t.Fatalf("moving to Outflare's warm-up: %d", code)
 	}
@@ -273,10 +275,10 @@ func TestWarmupOnAConnectedSequencer(t *testing.T) {
 	if res := owner.must(200, "POST", base+"/mailboxes/warmup", map[string]any{"enabled": true}); res["updated"] != 3.0 {
 		t.Fatalf("every mailbox: %v", res)
 	}
-	if w := owner.must(200, "GET", base+"/mailboxes/"+own, nil)["warmup"].(map[string]any); w["enabled"] != false || w["provider"] != "outflare" {
+	if w := owner.must(200, "GET", base+"/mailboxes/"+own, nil)["warmup"].(map[string]any); w["enabled"] != false || w["provider"] != nil {
 		t.Fatalf("mailbox in no sequencer: %v", w)
 	}
-	owner.must(200, "POST", base+"/mailboxes/warmup", map[string]any{"enabled": false, "provider": "outflare"})
+	owner.must(200, "POST", base+"/mailboxes/warmup", map[string]any{"enabled": false})
 	runJobs()
 
 	// All of EmailBison's mailboxes at once.

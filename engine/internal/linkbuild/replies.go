@@ -160,7 +160,8 @@ func applyReply(ctx context.Context, tx pgx.Tx, ws, pitchID, prospectID, inbound
 			ws, tag, map[bool]string{true: "amber", false: "gray"}[kind == "wants_payment" || kind == "wants_content"]); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE inbound_messages SET labels = CASE WHEN $3 = ANY(labels) THEN labels ELSE array_append(labels, $3) END,
+		if _, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = CASE WHEN $3 = ANY(tags) THEN tags ELSE array_append(tags, $3) END,
+				labels = CASE WHEN $3 = ANY(tags) THEN tags ELSE array_append(tags, $3) END,
 				needs_review = needs_review OR $4 WHERE id = $1 AND workspace_id = $2`,
 			inboundID, ws, tag, kind == "wants_payment" || kind == "wants_content"); err != nil {
 			return err

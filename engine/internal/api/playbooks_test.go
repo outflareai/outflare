@@ -62,7 +62,7 @@ func TestPlaybooks(t *testing.T) {
 	if !strings.Contains(ins, "for Northpeak") || !strings.Contains(ins, "{{first_win}}") || !strings.Contains(ins, "Guardrails:") {
 		t.Fatalf("instructions: %s", ins)
 	}
-	if !strings.Contains(m["plan"].(string), "1. Read the brand's context") || !strings.Contains(m["plan"].(string), "(createJourney)") {
+	if !strings.Contains(m["plan"].(string), "1. Read the brand's context") || !strings.Contains(m["plan"].(string), "(createBrandJourney)") {
 		t.Fatalf("plan: %s", m["plan"])
 	}
 	if n := owner.must(200, "GET", base+"/playbooks/welcome-new-signups", nil)["runs"]; n != float64(1) {

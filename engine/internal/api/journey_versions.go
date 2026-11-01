@@ -236,7 +236,7 @@ func (s *Server) updateJourneyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := journeyView{Trigger: d.Trigger, Entry: d.Entry, GoalEvent: d.GoalEvent, ExitEvents: d.ExitEvents, ExitConditions: d.ExitConditions,
-		EntryLimit: d.EntryLimit, ReentryAfterSeconds: d.ReentryAfterSeconds, Exclude: d.Exclude, Steps: d.Steps}
+		EntryLimit: d.EntryLimit, ReentryAfterSeconds: d.ReentryAfterSeconds, Exclude: d.Exclude, Steps: d.Steps, BrandID: cur.BrandID}
 	f := journeyFields{Trigger: in.Trigger, Entry: in.Entry, GoalEvent: in.GoalEvent, ExitEvents: in.ExitEvents, ExitConditions: in.ExitConditions,
 		EntryLimit: in.EntryLimit, ReentryAfter: in.ReentryAfter, Exclude: in.Exclude, Steps: in.Steps}
 	if !s.journeyApplied(w, r, s.applyJourney(r, a.WorkspaceID, f, &v)) {
@@ -346,10 +346,10 @@ func (s *Server) publishJourney(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing leads to "+strings.Join(lost, ", ")+"; link it from another step or remove it")
 		return
 	}
-	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, d.Steps, true)) {
+	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, cur.BrandID, d.Steps, true)) {
 		return
 	}
-	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, d.Steps)) {
+	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, cur.BrandID, d.Steps)) {
 		return
 	}
 	data := map[string]any{"runs": in.Runs, "from_version": cur.Version, "version": cur.Version + 1}

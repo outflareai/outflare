@@ -711,7 +711,8 @@ func suppress(ctx context.Context, x *act) (string, string, error) {
 func unsubscribeTopic(ctx context.Context, x *act) (string, string, error) {
 	if x.st.Topic != "" {
 		var ok bool
-		if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_topics WHERE workspace_id = $1 AND key = $2)`, x.ws, x.st.Topic).Scan(&ok); err != nil {
+		if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_topics t WHERE workspace_id = $1 AND key = $2
+			AND ($3::uuid IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '') IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '')::uuid = $3))`, x.ws, x.st.Topic, x.j.brandID).Scan(&ok); err != nil {
 			return "", "", err
 		}
 		if !ok {

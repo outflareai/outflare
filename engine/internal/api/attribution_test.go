@@ -154,3 +154,197 @@ func TestAttribution(t *testing.T) {
 		t.Fatal("no attribution.settings_updated event")
 	}
 }
+
+// A campaign splits by utm_content, such as the sequence step a link went
+// out in: visits from the sessions, credit from the credited visit's session.
+func TestAttributionCampaignsByContent(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	camp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', 'seq') RETURNING id::text`, ws)
+	now := time.Now()
+	session := func(content string) string {
+		return exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source, campaign, tracking_campaign_id, utm_content)
+			VALUES ($1, 'anon-'||$2, $3, 'outbound_email', 'outflare', 'outbound', $4, $2) RETURNING id::text`, ws, content, now.Add(-time.Hour), camp)
+	}
+	s1, s2 := session("step-1"), session("step-2")
+	session("step-2")
+	ev := exec(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'signed_up', $2) RETURNING id::text`, ws, now)
+	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at) VALUES ($1, $2, 'signed_up', $3) RETURNING event_id::text`, ev, ws, now)
+	exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, campaign, tracking_campaign_id, weight)
+		VALUES ($1, $2, 'last_non_direct', 0, $3, 'outbound_email', 'outflare', 'outbound', $4, 1) RETURNING event_id::text`, ev, ws, s2, camp)
+	_ = s1
+
+	rows := owner.must(200, "GET", base+"/attribution/campaigns?split=content&tracking_campaign="+camp, nil)["data"].([]any)
+	got := map[string][2]float64{}
+	for _, r := range rows {
+		m := r.(map[string]any)
+		got[m["content"].(string)] = [2]float64{m["visits"].(float64), m["conversions"].(float64)}
+	}
+	if len(got) != 2 || got["step-1"] != [2]float64{1, 0} || got["step-2"] != [2]float64{2, 1} {
+		t.Fatalf("by content = %v", rows)
+	}
+	// Without the split, one row for the campaign.
+	if rows := owner.must(200, "GET", base+"/attribution/campaigns?tracking_campaign="+camp, nil)["data"].([]any); len(rows) != 1 ||
+		rows[0].(map[string]any)["visits"] != 3.0 || rows[0].(map[string]any)["content"] != "" {
+		t.Fatalf("whole campaign = %v", rows)
+	}
+	owner.must(400, "GET", base+"/attribution/campaigns?split=step", nil)
+	owner.must(400, "GET", base+"/attribution/campaigns?tracking_campaign=nope", nil)
+}
+
+// match=identified keeps only visits the person was identified on, and the
+// credit on them; each credit says how its visit was matched.
+func TestAttributionIdentifiedOnly(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	now := time.Now()
+	known := exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2, 'anon-1', $3, 'seo', 'google') RETURNING id::text`,
+		ws, rec, now.Add(-2*time.Hour))
+	cookie := exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source) VALUES ($1, 'anon-2', $2, 'paid_ads', 'google') RETURNING id::text`,
+		ws, now.Add(-time.Hour))
+	conv := func(matched string) string {
+		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by) VALUES ($1, $2, $3, 'signed_up', $4, 1, $5) RETURNING event_id::text`,
+			ev, ws, rec, now, matched)
+		return ev
+	}
+	credit := func(ev string, pos int, session, channel string, weight float64) {
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight)
+			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', $6) RETURNING event_id::text`, ev, ws, pos, session, channel, weight)
+	}
+	both := conv("record")
+	credit(both, 0, known, "seo", 0.5)
+	credit(both, 1, cookie, "paid_ads", 0.5)
+	credit(conv("anonymous"), 0, cookie, "paid_ads", 1)
+
+	channels := func(q string) map[string][2]float64 {
+		t.Helper()
+		out := map[string][2]float64{}
+		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q, nil)["data"].([]any) {
+			m := r.(map[string]any)
+			out[m["channel"].(string)] = [2]float64{m["visits"].(float64), m["conversions"].(float64)}
+		}
+		return out
+	}
+	if all := channels(""); all["seo"] != [2]float64{1, 0.5} || all["paid_ads"] != [2]float64{1, 1.5} {
+		t.Fatalf("all = %v", all)
+	}
+	if id := channels("?match=identified"); id["seo"] != [2]float64{1, 0.5} || id["paid_ads"] != [2]float64{0, 0} {
+		t.Fatalf("identified = %v", id)
+	}
+	owner.must(400, "GET", base+"/attribution/channels?match=probable", nil)
+
+	list := owner.must(200, "GET", base+"/attribution/conversions?match=identified", nil)["data"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["event_id"] != both {
+		t.Fatalf("identified conversions = %v", list)
+	}
+	how := map[string]string{}
+	for _, c := range list[0].(map[string]any)["credits"].([]any) {
+		m := c.(map[string]any)
+		how[m["channel"].(string)] = m["matched_by"].(string)
+	}
+	if how["seo"] != "record" || how["paid_ads"] != "browser" {
+		t.Fatalf("credit matches = %v", how)
+	}
+	if n := len(owner.must(200, "GET", base+"/attribution/conversions", nil)["data"].([]any)); n != 2 {
+		t.Fatalf("all conversions = %d", n)
+	}
+}
+
+// Warm or cold, new or repeat, and lifetime value by first channel.
+func TestAttributionCustomersAndCohorts(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	now := time.Now()
+	// Wes was a lead long before his visit from search; Cy first came from an
+	// ad and became a record when he signed up.
+	wes := exec(`INSERT INTO records (workspace_id, record_type, name, created_at) VALUES ($1, 'person', 'Wes', $2) RETURNING id::text`, ws, now.AddDate(0, 0, -10))
+	cy := exec(`INSERT INTO records (workspace_id, record_type, name, created_at) VALUES ($1, 'person', 'Cy', $2) RETURNING id::text`, ws, now.Add(-30*time.Minute))
+	visit := func(rec, channel string, at time.Time) string {
+		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
+			ws, rec, at, channel)
+	}
+	wesVisit, cyVisit := visit(wes, "seo", now.Add(-48*time.Hour)), visit(cy, "paid_ads", now.Add(-time.Hour))
+	conv := func(rec, name string, at time.Time, value any, session string, touch time.Time, channel string) {
+		t.Helper()
+		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record') RETURNING event_id::text`, ev, ws, rec, name, at, value)
+		for _, m := range []string{"last_non_direct", "first_touch"} {
+			exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight)
+				VALUES ($1, $2, $3, 0, $4, $5, $6, 'google', 1) RETURNING event_id::text`, ev, ws, m, session, touch, channel)
+		}
+	}
+	conv(wes, "payment.succeeded", now.Add(-24*time.Hour), 5000, wesVisit, now.Add(-48*time.Hour), "seo")
+	conv(cy, "signed_up", now.Add(-30*time.Minute), nil, cyVisit, now.Add(-time.Hour), "paid_ads")
+	conv(cy, "payment.succeeded", now.Add(-20*time.Minute), 3000, cyVisit, now.Add(-time.Hour), "paid_ads")
+	conv(cy, "payment.succeeded", now.Add(-10*time.Minute), 2000, cyVisit, now.Add(-time.Hour), "paid_ads")
+
+	usd := func(v any) float64 {
+		for _, m := range v.([]any) {
+			if m.(map[string]any)["currency"] == "USD" {
+				return m.(map[string]any)["amount_cents"].(float64)
+			}
+		}
+		return 0
+	}
+	byChannel := func(path string) map[string]map[string]any {
+		t.Helper()
+		out := map[string]map[string]any{}
+		for _, r := range owner.must(200, "GET", base+path, nil)["data"].([]any) {
+			out[r.(map[string]any)["channel"].(string)] = r.(map[string]any)
+		}
+		return out
+	}
+	c := byChannel("/attribution/customers")
+	if seo := c["seo"]; seo["warm_conversions"] != 1.0 || seo["cold_conversions"] != 0.0 || usd(seo["new_revenue"]) != 5000 || usd(seo["repeat_revenue"]) != 0 {
+		t.Fatalf("seo = %v", seo)
+	}
+	if ads := c["paid_ads"]; ads["warm_conversions"] != 0.0 || ads["cold_conversions"] != 3.0 || usd(ads["new_revenue"]) != 3000 || usd(ads["repeat_revenue"]) != 2000 {
+		t.Fatalf("paid ads = %v", ads)
+	}
+	co := byChannel("/attribution/cohorts")
+	if seo := co["seo"]; seo["people"] != 1.0 || seo["customers"] != 1.0 || usd(seo["revenue"]) != 5000 || usd(seo["revenue_per_person"]) != 5000 {
+		t.Fatalf("seo cohort = %v", seo)
+	}
+	if ads := co["paid_ads"]; ads["people"] != 1.0 || usd(ads["revenue"]) != 5000 || len(co) != 2 {
+		t.Fatalf("cohorts = %v", co)
+	}
+	// A cohort is people whose first conversion was in the period.
+	old := now.AddDate(0, 0, -40).Format(time.DateOnly)
+	if got := owner.must(200, "GET", base+"/attribution/cohorts?from="+old+"&to="+old, nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("empty period = %v", got)
+	}
+}

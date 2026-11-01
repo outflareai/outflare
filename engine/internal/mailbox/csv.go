@@ -29,14 +29,19 @@ type Row struct {
 	IMAPPassword string
 	Pool         string
 	DailyLimit   int // 0 means default
-	// OAuth mailboxes have no password. They sign in through an admin
-	// connection or with their own refresh token.
-	ConnectionID *string
-	RefreshToken string
+	// OAuth mailboxes have no password. They sign in through a connection
+	// (IntegrationID: a google_mail or outlook_mail connection), or, for
+	// mailboxes connected before those, an admin connection or their own
+	// refresh token.
+	IntegrationID *string
+	ConnectionID  *string
+	RefreshToken  string
 }
 
 // OAuth reports whether the row signs in with OAuth.
-func (r *Row) OAuth() bool { return r.ConnectionID != nil || r.RefreshToken != "" }
+func (r *Row) OAuth() bool {
+	return r.IntegrationID != nil || r.ConnectionID != nil || r.RefreshToken != ""
+}
 
 // RowError reports a line that could not be imported.
 type RowError struct {

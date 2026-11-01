@@ -532,6 +532,9 @@ func (s *Server) updateIntegration(w http.ResponseWriter, r *http.Request) {
 			if err := s.integrations.Checked(r.Context(), tx, a.WorkspaceID, i.ID, &account, nil); err != nil {
 				return err
 			}
+			if err := s.integrations.Reconnected(r.Context(), tx, i); err != nil {
+				return err
+			}
 			changed = append(changed, "credentials")
 		}
 		if req.Config != nil {
@@ -579,6 +582,12 @@ func (s *Server) deleteIntegration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		if n, err := mailboxesUsing(r.Context(), tx, a.WorkspaceID, i.ID); err != nil || n > 0 {
+			if err == nil {
+				err = errMailboxesUseIt
+			}
+			return err
+		}
 		if err := s.integrations.Disconnecting(r.Context(), tx, i); err != nil {
 			return err
 		}
@@ -588,6 +597,10 @@ func (s *Server) deleteIntegration(w http.ResponseWriter, r *http.Request) {
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "integration.disconnected", "integration", i.ID,
 			map[string]any{"connector": i.Connector, "name": i.Name})
 	})
+	if errors.Is(err, errMailboxesUseIt) {
+		writeError(w, r, http.StatusConflict, "conflict", err.Error())
+		return
+	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -641,7 +654,9 @@ type integrationState struct {
 	Integration string `json:"i,omitempty"`
 	Name        string `json:"n,omitempty"`
 	// Set when the connection is a brand's own (?brand=).
-	Brand    string `json:"b,omitempty"`
+	Brand string `json:"b,omitempty"`
+	// The pool for the mailbox a mailbox sign-in adds (?pool=).
+	Pool     string `json:"o,omitempty"`
 	Verifier string `json:"v"`
 	Expires  int64  `json:"e"`
 }
@@ -670,6 +685,14 @@ func (s *Server) integrationAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "no OAuth connector by that id")
 		return
 	}
+	_, mail := s.mailSignIn(def.ID)
+	if mail {
+		// Signing in adds the mailbox, which needs what adding one needs.
+		if msg := mailboxRefusal(a); msg != "" {
+			writeError(w, r, http.StatusForbidden, "forbidden", msg)
+			return
+		}
+	}
 	app, ok := s.integrations.OAuthApps[def.ID]
 	if !ok {
 		msg := def.Name + " needs an OAuth app on this server: " + connectors.OAuthHint(def)
@@ -682,8 +705,15 @@ func (s *Server) integrationAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Only pages of the app's own are allowed, so the link can't send the
 	// browser anywhere else.
 	back := r.URL.Query().Get("return")
-	if !slices.Contains([]string{"get-started", "setup", "tracking", "providers", "audits", "domains"}, back) {
+	if !slices.Contains([]string{"get-started", "setup", "tracking", "providers", "audits", "domains", "mailboxes"}, back) {
 		back = ""
+	}
+	pool := ""
+	if mail {
+		pool = strings.TrimSpace(r.URL.Query().Get("pool"))
+		if back == "" {
+			back = "mailboxes"
+		}
 	}
 	var brand string
 	if ref := r.URL.Query().Get("brand"); ref != "" {
@@ -699,7 +729,7 @@ func (s *Server) integrationAuthorize(w http.ResponseWriter, r *http.Request) {
 		brand = id
 	}
 	st, _ := json.Marshal(integrationState{
-		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand,
+		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand, Pool: pool,
 		Verifier: newID() + newID(), Expires: time.Now().Add(15 * time.Minute).Unix(),
 	})
 	// The verifier rides inside the signed state; the state is sealed so the
@@ -822,6 +852,22 @@ func (s *Server) integrationCallback(w http.ResponseWriter, r *http.Request) {
 	actorType := st.ActorType
 	if actorType == "" {
 		actorType = "human"
+	}
+	if ms, ok := s.mailSignIn(def.ID); ok {
+		id, refused, err := s.finishMailSignIn(r.Context(), st, def, ms, creds, account, actorType, name)
+		switch {
+		case errors.Is(err, errRequestUsed):
+			fail("this link was already used or cancelled")
+		case isUnique(err):
+			fail("another connection is already named " + name)
+		case err != nil:
+			s.internal(w, r, err)
+		case refused != "":
+			fail(truncate("signed in, but the mailbox could not be added: "+refused, 300))
+		default:
+			done(url.Values{"integration": {id}, "mailbox": {account.Email}})
+		}
+		return
 	}
 	out, err := s.saveIntegration(r.Context(), &principal{ActorID: st.Actor, ActorType: actorType}, st.Workspace, def, connectors.AuthOAuth2, name, creds, account, "oauth", st.Request, st.share())
 	if errors.Is(err, errRequestUsed) {

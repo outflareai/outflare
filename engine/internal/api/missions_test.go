@@ -293,8 +293,8 @@ func TestMissionSpendAndMeetings(t *testing.T) {
 }
 
 // Revenue goals count in whole US dollars: payments credited to the
-// campaigns of the mission's sequences under the default model, or won
-// deals tagged with the mission.
+// campaigns of the mission's sequences, broadcasts and social posts under
+// the default model, or won deals tagged with the mission.
 func TestMissionRevenueGoals(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
@@ -330,6 +330,34 @@ func TestMissionRevenueGoals(t *testing.T) {
 			VALUES ($1, $2, $3, 0, 'outbound_email', $4, 1) RETURNING event_id::text`, ev, ws, model, campaign)
 	}
 	pay(4950, "USD", camp, "last_non_direct")
+	// A broadcast made in the mission counts the same way; a social post
+	// and a reply count by their own content tag, since their campaign is
+	// the account's or the watch's, shared with posts outside the mission.
+	tmpl := exec(`INSERT INTO email_templates (workspace_id, handle, name) VALUES ($1, 'launch', 'Launch') RETURNING id::text`, ws)
+	bc := exec(`INSERT INTO email_broadcasts (workspace_id, name, template_id, mission_id) VALUES ($1, 'Launch', $2, $3) RETURNING id::text`, ws, tmpl, attributed)
+	bcCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Launch', 'launch', 'code000003', 'lifecycle_email', 'outflare', 'email', 'email_broadcast', $2) RETURNING id::text`, ws, bc)
+	pay(1000, "USD", bcCamp, "last_non_direct")
+	acct := exec(`INSERT INTO social_accounts (workspace_id, channel, kind, external_id, name) VALUES ($1, 'linkedin', 'page', 'urn-1', 'Northpeak') RETURNING id::text`, ws)
+	exec(`INSERT INTO social_publications (workspace_id, account_id, channel, utm_content, mission_id) VALUES ($1, $2, 'linkedin', 'linkedin-mission', $3) RETURNING id::text`, ws, acct, attributed)
+	exec(`INSERT INTO social_actions (workspace_id, channel, type, utm_content, mission_id) VALUES ($1, 'reddit', 'reply', 'reddit-mission', $2) RETURNING id::text`, ws, attributed)
+	acctCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Northpeak', 'northpeak', 'code000004', 'organic_social', 'linkedin', 'social', 'social_account', $2) RETURNING id::text`, ws, acct)
+	watchCamp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES ($1, 'Watch', 'watch', 'code000005', 'reddit', 'reddit', 'social', 'social_watch', gen_random_uuid()::text) RETURNING id::text`, ws)
+	payVisit := func(minor int, campaign, content string) {
+		t.Helper()
+		ss := exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source, utm_content, tracking_campaign_id)
+			VALUES ($1, 'anon', now(), 'organic_social', 'linkedin', $2, $3) RETURNING id::text`, ws, content, campaign)
+		ev := exec(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'payment.succeeded', now()) RETURNING id::text`, ws)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at, value_minor, currency) VALUES ($1, $2, 'payment.succeeded', now(), $3, 'USD') RETURNING event_id::text`,
+			ev, ws, minor)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, tracking_campaign_id, weight)
+			VALUES ($1, $2, 'last_non_direct', 0, $3, 'organic_social', $4, 1) RETURNING event_id::text`, ev, ws, ss, campaign)
+	}
+	payVisit(700, acctCamp, "linkedin-mission")
+	payVisit(300, watchCamp, "reddit-mission")
+	payVisit(10000, acctCamp, "linkedin-other")
 	pay(10000, "USD", camp, "first_touch")
 	pay(10000, "EUR", camp, "last_non_direct")
 	pay(10000, "USD", otherCamp, "last_non_direct")
@@ -337,10 +365,10 @@ func TestMissionRevenueGoals(t *testing.T) {
 	exec(`INSERT INTO deals (workspace_id, mission_id, source, state, amount_cents, currency, attribution) VALUES ($1, $2, 'manual', 'open', 50000, 'USD', 'manual') RETURNING id::text`, ws, deals)
 
 	got := owner.must(200, "GET", base+"/missions/"+attributed, nil)["mission"].(map[string]any)
-	if p := got["progress"].(map[string]any); p["revenue_attributed_cents"] != 4950.0 || p["revenue_deals_cents"] != 0.0 {
+	if p := got["progress"].(map[string]any); p["revenue_attributed_cents"] != 6950.0 || p["revenue_deals_cents"] != 0.0 {
 		t.Fatalf("attributed progress: %v", p)
 	}
-	if g := got["goal"].(map[string]any); g["current"] != 49.0 || g["reached"] != true {
+	if g := got["goal"].(map[string]any); g["current"] != 69.0 || g["reached"] != true {
 		t.Fatalf("attributed goal: %v", g)
 	}
 	got = owner.must(200, "GET", base+"/missions/"+deals, nil)["mission"].(map[string]any)

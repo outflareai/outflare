@@ -51,8 +51,8 @@ func sendTransactional(ctx context.Context, x *act) (string, string, error) {
 		return "failed", "email can't be sent here", nil
 	}
 	var templateID, purpose string
-	err := x.tx.QueryRow(ctx, `SELECT id::text, purpose FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`,
-		x.ws, x.st.Template).Scan(&templateID, &purpose)
+	err := x.tx.QueryRow(ctx, `SELECT id::text, purpose FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)
+		AND ($3::uuid IS NULL OR brand_id = $3)`, x.ws, x.st.Template, x.j.brandID).Scan(&templateID, &purpose)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return "failed", "the template " + x.st.Template + " no longer exists", nil
@@ -110,7 +110,8 @@ func checkConsent(st Step) string {
 func setConsent(ctx context.Context, x *act) (string, string, error) {
 	if x.st.Topic != "" {
 		var ok bool
-		if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_topics WHERE workspace_id = $1 AND key = $2)`, x.ws, x.st.Topic).Scan(&ok); err != nil {
+		if err := x.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_topics t WHERE workspace_id = $1 AND key = $2
+			AND ($3::uuid IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '') IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '')::uuid = $3))`, x.ws, x.st.Topic, x.j.brandID).Scan(&ok); err != nil {
 			return "", "", err
 		}
 		if !ok {

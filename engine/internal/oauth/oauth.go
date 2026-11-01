@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 )
@@ -73,6 +74,10 @@ type Tokens struct {
 	Google    Client
 	Microsoft Client
 	HTTP      *http.Client
+	// Integrations opens the connections mailboxes sign in through (the
+	// google_mail and outlook_mail connectors). Nil until the connectors
+	// are set up.
+	Integrations *connectors.Store
 
 	mu    sync.Mutex
 	cache map[string]cached
@@ -116,6 +121,10 @@ func (t *Tokens) store(key string, r *tokenResponse) {
 
 // Token implements mailbox.TokenSource.
 func (t *Tokens) Token(ctx context.Context, req mailbox.TokenRequest) (string, string, error) {
+	if req.IntegrationID != nil {
+		tok, err := t.integrationToken(ctx, req.WorkspaceID, *req.IntegrationID, req.Email)
+		return tok, "", err
+	}
 	if req.ConnectionID != nil {
 		tok, err := t.connectionToken(ctx, req.WorkspaceID, *req.ConnectionID, req.Email)
 		return tok, "", err
@@ -152,6 +161,27 @@ func (t *Tokens) Token(ctx context.Context, req mailbox.TokenRequest) (string, s
 		rotated = r.RefreshToken
 	}
 	return r.AccessToken, rotated, nil
+}
+
+// integrationToken signs a mailbox in through its connection. Opening the
+// connection refreshes a sign-in's token and stores the new one, so a
+// rotated refresh token is kept by the connection, not the mailbox.
+func (t *Tokens) integrationToken(ctx context.Context, ws, id, email string) (string, error) {
+	if t.Integrations == nil {
+		return "", errors.New("connectors are not configured on this server")
+	}
+	o, err := t.Integrations.Open(ctx, t.Integrations.Pool, ws, id)
+	if errors.Is(err, connectors.ErrNotFound) {
+		return "", errors.New("the mailbox's connection was removed; connect the mailbox again")
+	}
+	if err != nil {
+		return "", err
+	}
+	ms, ok := o.Connector.(connectors.MailSignIn)
+	if !ok {
+		return "", fmt.Errorf("the %s connection cannot sign mailboxes in", o.Integration.Connector)
+	}
+	return ms.MailToken(ctx, o.Client, o.Integration.AuthMethod, o.Creds, email)
 }
 
 // Connection secrets, sealed in oauth_connections.secret.

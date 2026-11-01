@@ -10,6 +10,7 @@ import { ago, placementTone, plural } from "../format";
 import type { Tab } from "../App";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
+import { warmupScore } from "@/lib/warmup";
 
 type Tone = keyof typeof tones;
 
@@ -181,10 +182,11 @@ function Overview({ ws, canManage, onOpen, go }: Props) {
               {
                 id: "inbox",
                 header: "Warm-up score",
-                accessorFn: (m) => m.warmup.platform?.score ?? -1,
+                accessorFn: (m) => warmupScore(m) ?? -1,
                 meta: { align: "right", mono: true },
                 cell: ({ row: { original: m } }) => {
-                  const r = m.warmup.platform?.score == null ? null : m.warmup.platform.score / 100;
+                  const score = warmupScore(m);
+                  const r = score == null ? null : score / 100;
                   const t = placementTone(r);
                   return r === null ? <span className="text-muted-foreground">–</span> : <span className={t === "red" ? "text-red-600 dark:text-red-400" : t === "amber" ? "text-amber-700 dark:text-amber-400" : ""}>{Math.round(r * 100)}%</span>;
                 },

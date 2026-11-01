@@ -71,6 +71,16 @@ var brandOf = map[string]string{
 	"pr_expert":            `SELECT brand_id FROM pr_experts WHERE id = $1::uuid AND workspace_id = $2`,
 	"story_pitch":          `SELECT s.brand_id FROM story_pitches p JOIN stories s ON s.id = p.story_id WHERE p.id = $1::uuid AND p.workspace_id = $2`,
 	"saved_query":          `SELECT brand_id FROM saved_queries WHERE id = $1::uuid AND workspace_id = $2`,
+	// Activation (brands step 4): each belongs to one brand, so its events
+	// carry it and reach only that brand's webhook endpoints.
+	"record":          `SELECT brand_id FROM records WHERE id = $1::uuid AND workspace_id = $2`,
+	"rule":            `SELECT brand_id FROM rules WHERE id = $1::uuid AND workspace_id = $2`,
+	"journey":         `SELECT brand_id FROM journeys WHERE id = $1::uuid AND workspace_id = $2`,
+	"email":           `SELECT brand_id FROM emails WHERE id = $1::uuid AND workspace_id = $2`,
+	"email_broadcast": `SELECT brand_id FROM email_broadcasts WHERE id = $1::uuid AND workspace_id = $2`,
+	"email_template":  `SELECT brand_id FROM email_templates WHERE id = $1::uuid AND workspace_id = $2`,
+	"alert":           `SELECT brand_id FROM alerts WHERE id = $1::uuid AND workspace_id = $2`,
+	"webhook":         `SELECT brand_id FROM webhook_endpoints WHERE id = $1::uuid AND workspace_id = $2`,
 	// A domain's id is its name.
 	"domain": `SELECT brand_id FROM sending_domains WHERE domain = lower($1) AND workspace_id = $2`,
 }

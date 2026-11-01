@@ -23,26 +23,36 @@ import (
 
 func (s *Server) routesJourneys(mux *http.ServeMux) {
 	read, send, manage := auth.ScopeEmailsRead, auth.ScopeEmailsSend, auth.ScopeEmailsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys", s.inWorkspace(read, s.listJourneys))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/step-kinds", s.inWorkspace(read, s.listJourneyStepKinds))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/automation-map", s.inWorkspace(read, s.getAutomationMap))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys", s.inWorkspace(manage, s.createJourney))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}", s.inWorkspace(read, s.getJourney))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journeys/{id}", s.inWorkspace(manage, s.updateJourney))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/activate", s.inWorkspace(manage, s.activateJourney))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/pause", s.inWorkspace(manage, s.pauseJourney))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/archive", s.inWorkspace(manage, s.archiveJourney))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/versions", s.inWorkspace(read, s.listJourneyVersions))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.createJourneyDraft))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(read, s.getJourneyDraft))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.updateJourneyDraft))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/journeys/{id}/draft", s.inWorkspace(manage, s.discardJourneyDraft))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/publish", s.inWorkspace(manage, s.publishJourney))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/test", s.inWorkspace(read, s.testJourney))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(read, s.listJourneyRuns))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/runs", s.inWorkspace(send, s.addJourneyRun))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/runs/{run}", s.inWorkspace(read, s.getJourneyRun))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/{id}/runs/{run}/exit", s.inWorkspace(manage, s.exitJourneyRun))
+	mux.HandleFunc("GET /v1/brands/{brand}/automation-map", s.onBrand(read, s.getAutomationMap))
+	// What a random split's paths changed against its holdout: a report, so
+	// analytics.read, and on the brand only.
+	mux.HandleFunc("GET /v1/brands/{brand}/journeys/{id}/lift", s.onBrand(auth.ScopeAnalyticsRead, s.journeyLift))
+	// A journey belongs to one brand and enrols that brand's people only
+	// (brand_activation.go): served under the brand, and under the
+	// workspace until the contract step.
+	for _, b := range s.activationBases("journeys", s.inWorkspace) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listJourneys))
+		mux.HandleFunc("POST "+base, on(manage, s.createJourney))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getJourney))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateJourney))
+		mux.HandleFunc("POST "+base+"/{id}/activate", on(manage, s.activateJourney))
+		mux.HandleFunc("POST "+base+"/{id}/pause", on(manage, s.pauseJourney))
+		mux.HandleFunc("POST "+base+"/{id}/archive", on(manage, s.archiveJourney))
+		mux.HandleFunc("GET "+base+"/{id}/versions", on(read, s.listJourneyVersions))
+		mux.HandleFunc("POST "+base+"/{id}/draft", on(manage, s.createJourneyDraft))
+		mux.HandleFunc("GET "+base+"/{id}/draft", on(read, s.getJourneyDraft))
+		mux.HandleFunc("PATCH "+base+"/{id}/draft", on(manage, s.updateJourneyDraft))
+		mux.HandleFunc("DELETE "+base+"/{id}/draft", on(manage, s.discardJourneyDraft))
+		mux.HandleFunc("POST "+base+"/{id}/publish", on(manage, s.publishJourney))
+		mux.HandleFunc("POST "+base+"/{id}/test", on(read, s.testJourney))
+		mux.HandleFunc("GET "+base+"/{id}/runs", on(read, s.listJourneyRuns))
+		mux.HandleFunc("POST "+base+"/{id}/runs", on(send, s.addJourneyRun))
+		mux.HandleFunc("GET "+base+"/{id}/runs/{run}", on(read, s.getJourneyRun))
+		mux.HandleFunc("POST "+base+"/{id}/runs/{run}/exit", on(manage, s.exitJourneyRun))
+	}
 }
 
 type journeyTrigger struct {
@@ -171,7 +181,7 @@ func (s *Server) listJourneys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Archived journeys only when asked for.
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -199,7 +209,8 @@ func (s *Server) findJourney(w http.ResponseWriter, r *http.Request, ws, id stri
 		return nil, false
 	}
 	v, err := scanJourney(s.pool.QueryRow(r.Context(), journeySelect+` AND j.id = $2`, ws, id))
-	if errors.Is(err, pgx.ErrNoRows) {
+	// On a brand route only the route's brand's journeys are found.
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "journey not found")
 		return nil, false
 	}
@@ -311,6 +322,13 @@ func (f journeyFields) onlyLabels() bool {
 
 // applyJourney checks f and applies it to v.
 func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *journeyView) error {
+	// A journey belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.optionalBrand(r.Context(), accessFrom(r.Context()), f.BrandID, v.BrandID)
+	if err != nil {
+		return err
+	}
+	v.BrandID = brand
 	if f.Name != nil {
 		if n := strings.TrimSpace(*f.Name); n == "" || len(n) > 200 {
 			return errInvalid("name must be 1 to 200 characters")
@@ -322,12 +340,6 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 			return errInvalid("description must be at most 2,000 characters")
 		}
 		v.Description = *f.Description
-	}
-	if f.BrandID.Set {
-		if f.BrandID.Value != nil && !validUUID(*f.BrandID.Value) {
-			return errInvalid("brand_id must be a brand id")
-		}
-		v.BrandID = f.BrandID.Value
 	}
 	if f.Trigger != nil {
 		t := *f.Trigger
@@ -403,10 +415,10 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 		if msg := journeys.Check(*f.Steps); msg != "" {
 			return errInvalid(msg)
 		}
-		if err := s.checkJourneyTemplates(r, ws, *f.Steps, false); err != nil {
+		if err := s.checkJourneyTemplates(r, ws, v.BrandID, *f.Steps, false); err != nil {
 			return err
 		}
-		if err := s.checkJourneyActionRefs(r.Context(), ws, *f.Steps, false); err != nil {
+		if err := s.checkJourneyActionRefs(r.Context(), ws, v.BrandID, *f.Steps, false); err != nil {
 			return err
 		}
 		v.Steps = *f.Steps
@@ -415,13 +427,14 @@ func (s *Server) applyJourney(r *http.Request, ws string, f journeyFields, v *jo
 }
 
 // checkJourneyTemplates checks that every email step names a lifecycle
-// template that is not archived, and, to go live, that each is published.
-func (s *Server) checkJourneyTemplates(r *http.Request, ws string, steps []journeys.Step, live bool) error {
+// template of the journey's brand that is not archived, and, to go live,
+// that each is published.
+func (s *Server) checkJourneyTemplates(r *http.Request, ws string, brand *string, steps []journeys.Step, live bool) error {
 	for _, ref := range journeys.Templates(steps) {
 		var purpose, status, handle string
 		var published *int
 		err := s.pool.QueryRow(r.Context(), `SELECT purpose, status, handle, published_version FROM email_templates
-			WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, ws, ref).Scan(&purpose, &status, &handle, &published)
+			WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2) AND ($3::uuid IS NULL OR brand_id = $3)`, ws, ref, brand).Scan(&purpose, &status, &handle, &published)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			return errInvalid("template not found: " + truncate(ref, 63))
@@ -576,10 +589,10 @@ func (s *Server) activateJourney(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "add a step before activating the journey")
 		return
 	}
-	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, cur.Steps, true)) {
+	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, cur.BrandID, cur.Steps, true)) {
 		return
 	}
-	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, cur.Steps)) {
+	if !s.journeyApplied(w, r, s.checkJourneyRefs(r, a.WorkspaceID, cur.BrandID, cur.Steps)) {
 		return
 	}
 	if !s.journeyApplied(w, r, s.checkJourneyKeys(r, a.WorkspaceID, cur.ID, cur.Steps)) {
@@ -905,30 +918,35 @@ func (s *Server) listJourneyStepKinds(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkJourneyRefs checks, to go live, that the lists, journeys and
-// sequences action steps name are the workspace's: a static list, a
-// journey that isn't archived, a sequence that isn't archived.
-func (s *Server) checkJourneyRefs(r *http.Request, ws string, steps []journeys.Step) error {
+// sequences action steps name are the workspace's: a static list and a
+// journey that isn't archived, both of the journey's brand, and a
+// sequence that isn't archived, of that brand or shared (sequences move
+// to brands with outreach).
+func (s *Server) checkJourneyRefs(r *http.Request, ws string, brand *string, steps []journeys.Step) error {
 	for _, st := range steps {
 		var q, ref, what string
 		switch {
 		case st.ListID != "" && (st.Kind == "add_to_list" || st.Kind == "remove_from_list"):
-			q, ref, what = `SELECT EXISTS (SELECT 1 FROM smart_lists WHERE workspace_id = $1 AND id = $2 AND kind = 'static')`, st.ListID, "a static list"
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM smart_lists WHERE workspace_id = $1 AND id = $2 AND kind = 'static'
+				AND ($3::uuid IS NULL OR brand_id = $3))`, st.ListID, "a static list of the journey's brand"
 		case st.JourneyID != "" && (st.Kind == "enter_journey" || st.Kind == "exit_journey"):
-			q, ref, what = `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1 AND id = $2 AND status <> 'archived')`, st.JourneyID, "a journey"
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM journeys WHERE workspace_id = $1 AND id = $2 AND status <> 'archived'
+				AND ($3::uuid IS NULL OR brand_id = $3))`, st.JourneyID, "a journey of the journey's brand"
 		case st.SequenceID != "" && (st.Kind == "enroll_in_sequence" || st.Kind == "stop_sequences"):
-			q, ref, what = `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived')`, st.SequenceID, "a sequence"
+			q, ref, what = `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived'
+				AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3))`, st.SequenceID, "a sequence the journey's brand can use"
 		default:
 			continue
 		}
 		var ok bool
-		if err := s.pool.QueryRow(r.Context(), q, ws, ref).Scan(&ok); err != nil {
+		if err := s.pool.QueryRow(r.Context(), q, ws, ref, brand).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {
 			return errInvalid("step " + st.ID + ": " + ref + " is not " + what + " in this workspace")
 		}
 	}
-	return s.checkJourneyActionRefs(r.Context(), ws, steps, true)
+	return s.checkJourneyActionRefs(r.Context(), ws, brand, steps, true)
 }
 
 // checkExclusion checks an exclusion someone wants to save: its shape, and

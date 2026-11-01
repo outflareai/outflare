@@ -102,6 +102,29 @@ type gaqlRow struct {
 		ID   flexInt `json:"id"`
 		Name string  `json:"name"`
 	} `json:"conversionAction"`
+	AdGroup struct {
+		ID     flexInt `json:"id"`
+		Name   string  `json:"name"`
+		Status string  `json:"status"`
+	} `json:"adGroup"`
+	AdGroupAd struct {
+		Status string `json:"status"`
+		Ad     struct {
+			ID                  flexInt  `json:"id"`
+			Name                string   `json:"name"`
+			Type                string   `json:"type"`
+			FinalURLs           []string `json:"finalUrls"`
+			TrackingURLTemplate string   `json:"trackingUrlTemplate"`
+			ResponsiveSearchAd  struct {
+				Headlines    []struct{ Text string } `json:"headlines"`
+				Descriptions []struct{ Text string } `json:"descriptions"`
+			} `json:"responsiveSearchAd"`
+			ResponsiveDisplayAd struct {
+				Headlines    []struct{ Text string } `json:"headlines"`
+				Descriptions []struct{ Text string } `json:"descriptions"`
+			} `json:"responsiveDisplayAd"`
+		} `json:"ad"`
+	} `json:"adGroupAd"`
 	UserList struct {
 		ID   flexInt `json:"id"`
 		Name string  `json:"name"`
@@ -226,6 +249,93 @@ func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 		out = append(out, c.AdDay{CampaignID: fmt.Sprint(int64(r.Campaign.ID)), CampaignName: r.Campaign.Name, Date: r.Segments.Date,
 			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
 			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
+	}
+	return out, nil
+}
+
+// googleItems are the GAQL resources for each level below a campaign: the
+// resource, its id and name fields, and its parent's id field. An ad's id
+// is the ad's own ({creative} in a tracking template), not the ad group
+// and ad pair.
+var googleItems = map[string]struct{ from, id, name, parent string }{
+	c.AdLevelGroup: {"ad_group", "ad_group.id", "ad_group.name", "campaign.id"},
+	c.AdLevelAd:    {"ad_group_ad", "ad_group_ad.ad.id", "ad_group_ad.ad.name", "ad_group.id"},
+}
+
+// AdItems lists ad groups or ads, leaving out removed ones (their
+// numbers still sync while a report has them).
+func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	var q string
+	switch level {
+	case c.AdLevelGroup:
+		q = "SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED'"
+	case c.AdLevelAd:
+		q = "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.ad.tracking_url_template, " +
+			"ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, " +
+			"ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdItem, 0, len(rows))
+	for _, r := range rows {
+		if level == c.AdLevelGroup {
+			out = append(out, c.AdItem{ID: fmt.Sprint(int64(r.AdGroup.ID)), ParentID: fmt.Sprint(int64(r.Campaign.ID)), Name: r.AdGroup.Name,
+				Status: status(r.AdGroup.Status), ProviderStatus: r.AdGroup.Status})
+			continue
+		}
+		ad := r.AdGroupAd.Ad
+		text := func(lists ...[]struct{ Text string }) string {
+			for _, l := range lists {
+				if len(l) > 0 {
+					return l[0].Text
+				}
+			}
+			return ""
+		}
+		link := ""
+		if len(ad.FinalURLs) > 0 {
+			link = ad.FinalURLs[0]
+		}
+		headline := text(ad.ResponsiveSearchAd.Headlines, ad.ResponsiveDisplayAd.Headlines)
+		out = append(out, c.AdItem{ID: fmt.Sprint(int64(ad.ID)), ParentID: fmt.Sprint(int64(r.AdGroup.ID)), Name: firstText(ad.Name, headline),
+			Status: status(r.AdGroupAd.Status), ProviderStatus: r.AdGroupAd.Status,
+			Details: adDetails(map[string]string{
+				c.AdDetailType:     strings.ToLower(ad.Type),
+				c.AdDetailHeadline: headline,
+				c.AdDetailText:     text(ad.ResponsiveSearchAd.Descriptions, ad.ResponsiveDisplayAd.Descriptions),
+				c.AdDetailURL:      link,
+				c.AdDetailURLTags:  ad.TrackingURLTemplate,
+			})})
+	}
+	return out, nil
+}
+
+// AdItemDays reads each ad group's or ad's numbers per day.
+func (g GoogleAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	it, ok := googleItems[level]
+	if !ok {
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	q := fmt.Sprintf("SELECT %s, %s, %s, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM %s WHERE segments.date BETWEEN '%s' AND '%s'",
+		it.id, it.name, it.parent, it.from, mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdItemDay, 0, len(rows))
+	for _, r := range rows {
+		m := r.Metrics
+		d := c.AdItemDay{ID: fmt.Sprint(int64(r.AdGroup.ID)), ParentID: fmt.Sprint(int64(r.Campaign.ID)), Name: r.AdGroup.Name}
+		if level == c.AdLevelAd {
+			d = c.AdItemDay{ID: fmt.Sprint(int64(r.AdGroupAd.Ad.ID)), ParentID: fmt.Sprint(int64(r.AdGroup.ID)), Name: r.AdGroupAd.Ad.Name}
+		}
+		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.Segments.Date, int64(m.CostMicros), int64(m.Impressions), int64(m.Clicks)
+		d.Conversions, d.ConversionValueMicros = ptrF(float64(m.Conversions)), ptrI(c.Micros(float64(m.ConversionsValue)))
+		out = append(out, d)
 	}
 	return out, nil
 }

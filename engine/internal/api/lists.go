@@ -581,7 +581,14 @@ func (s *Server) listLeadListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID, v.ID}
+	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
 	where := ` JOIN lead_list_members m ON m.lead_id = l.id AND m.list_id = $2 WHERE l.workspace_id = $1`
+	more, msg := leadStateFilters(q, arg)
+	if msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
+		return
+	}
+	where += more
 	if x := strings.TrimSpace(q.Get("q")); x != "" {
 		args = append(args, "%"+escapeLike(strings.ToLower(x))+"%")
 		p := "$" + strconv.Itoa(len(args))
@@ -938,13 +945,14 @@ func (s *Server) previewLeadList(w http.ResponseWriter, r *http.Request) {
 // ---- Data providers ----
 
 type dataProviderView struct {
-	Connector    string             `json:"connector"`
-	Name         string             `json:"name"`
-	Summary      string             `json:"summary"`
-	Website      string             `json:"website"`
-	DocsURL      string             `json:"docs_url"`
-	KeyURL       string             `json:"key_url"` // where to find the API key
-	Auth         string             `json:"auth"`
+	Connector string `json:"connector"`
+	Name      string `json:"name"`
+	Summary   string `json:"summary"`
+	Website   string `json:"website"`
+	DocsURL   string `json:"docs_url"`
+	KeyURL    string `json:"key_url"` // where to find the API key
+	// Each way to connect, as in the connector catalog.
+	AuthOptions  []authOption       `json:"auth_options"`
 	Fields       []connectors.Field `json:"fields"`
 	Pricing      string             `json:"pricing"`
 	Status       string             `json:"status"` // available or planned
@@ -985,8 +993,9 @@ func (s *Server) listDataProviders(w http.ResponseWriter, r *http.Request) {
 		if fields == nil {
 			fields = []connectors.Field{}
 		}
+		opts, _ := s.authOptions(d)
 		v := dataProviderView{Connector: d.ID, Name: d.Name, Summary: d.Summary, Website: d.Website, DocsURL: d.DocsURL, KeyURL: d.KeyURL,
-			Auth: d.Auth, Fields: fields, Pricing: d.Pricing,
+			AuthOptions: opts, Fields: fields, Pricing: d.Pricing,
 			Status: d.Status, Capabilities: d.Capabilities, Filters: []string{}, Integrations: []dataIntegrationView{}}
 		if c, ok := s.integrations.Registry.Get(d.ID); ok {
 			if ps, ok := c.(connectors.PeopleSearcher); ok {

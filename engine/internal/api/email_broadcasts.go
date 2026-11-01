@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
+	"github.com/outflareai/outflare/engine/internal/missions"
 )
 
 // Broadcasts: one lifecycle email to many people on customer records at
@@ -136,7 +137,7 @@ func (s *Server) listEmailBroadcasts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is one of "+strings.Join(broadcastStatuses, ", "))
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -163,7 +164,8 @@ func (s *Server) findEmailBroadcast(w http.ResponseWriter, r *http.Request, ws, 
 		return nil, false
 	}
 	v, err := scanEmailBroadcast(s.pool.QueryRow(r.Context(), emailBroadcastSelect+` AND b.id = $2`, ws, id))
-	if errors.Is(err, pgx.ErrNoRows) {
+	// On a brand route only the route's brand's broadcasts are found.
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "broadcast not found")
 		return nil, false
 	}
@@ -242,11 +244,28 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 		}
 		b.name = strings.TrimSpace(*f.Name)
 	}
+	// A broadcast belongs to one brand, and sends that brand's template
+	// to that brand's people.
+	brand, err := s.optionalBrand(ctx, accessFrom(ctx), f.BrandID, b.brandID)
+	if err != nil {
+		return err
+	}
+	b.brandID = brand
+	if f.Template == nil && b.templateID != "" {
+		var same bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_templates WHERE id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid)`,
+			b.templateID, b.brandID).Scan(&same); err != nil {
+			return err
+		}
+		if !same {
+			return errInvalid("the broadcast's template belongs to another brand; name one of this brand's with template")
+		}
+	}
 	if f.Template != nil {
 		var id, purpose, status string
 		var topic *string
-		err := s.pool.QueryRow(ctx, `SELECT id, purpose, status, topic_id FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`,
-			ws, *f.Template).Scan(&id, &purpose, &status, &topic)
+		err := s.pool.QueryRow(ctx, `SELECT id, purpose, status, topic_id FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)
+			AND brand_id IS NOT DISTINCT FROM $3::uuid`, ws, *f.Template, b.brandID).Scan(&id, &purpose, &status, &topic)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			return errInvalid("template not found: " + truncate(*f.Template, 63))
@@ -263,7 +282,7 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 		b.templateID = id
 	}
 	if f.Topic.Set {
-		id, err := topicID(ctx, s.pool, ws, deref(f.Topic.Value))
+		id, err := topicID(ctx, s.pool, ws, b.brandID, deref(f.Topic.Value))
 		if err != nil {
 			return err
 		}
@@ -280,12 +299,6 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 			return errInvalid("provider_id must be an email provider id")
 		}
 		b.providerID = f.ProviderID.Value
-	}
-	if f.BrandID.Set {
-		if f.BrandID.Value != nil && !validUUID(*f.BrandID.Value) {
-			return errInvalid("brand_id must be a brand id")
-		}
-		b.brandID = f.BrandID.Value
 	}
 	if f.Audience != nil {
 		switch f.Audience.Kind {
@@ -366,10 +379,10 @@ func (s *Server) createEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO email_broadcasts (workspace_id, name, template_id, topic_id, from_address, provider_id, brand_id,
-			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15) RETURNING id`,
+			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude, mission_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15, NULLIF($16, '')::uuid) RETURNING id`,
 			a.WorkspaceID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID, b.audience, b.recordIDs, data,
-			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude).Scan(&id); err != nil {
+			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude, missions.ID(ctx)).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.created", "email_broadcast", id,

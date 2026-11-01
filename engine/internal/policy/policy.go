@@ -43,6 +43,16 @@ type Decision struct {
 
 // CheckRecipients returns a decision for each email, in order.
 func CheckRecipients(ctx context.Context, q Querier, workspaceID string, emails []string) ([]Decision, error) {
+	return CheckRecipientsIn(ctx, q, workspaceID, "", emails)
+}
+
+// CheckRecipientsIn is CheckRecipients for an email of one brand
+// (plans/brands/README.md, decision 5): a person's consent and review
+// count only in the brand they came from, so only that brand's people
+// with the address decide. Suppressions (unsubscribes from the link of an
+// email with no topic, bounces, complaints, the opt-out list) count for
+// every brand. An empty brand looks at every brand's people.
+func CheckRecipientsIn(ctx context.Context, q Querier, workspaceID, brand string, emails []string) ([]Decision, error) {
 	out := make([]Decision, len(emails))
 	var check []string
 	for i, e := range emails {
@@ -81,11 +91,12 @@ func CheckRecipients(ctx context.Context, q Querier, workspaceID string, emails 
 		SELECT DISTINCT e, '', ''
 		FROM unnest($2::text[]) AS e
 		JOIN record_identities i ON i.workspace_id = $1 AND i.namespace = 'email' AND i.value = e AND i.valid_to IS NULL
+			AND ($3 = '' OR i.brand_id = NULLIF($3, '')::uuid)
 		JOIN LATERAL (
 			SELECT c.status FROM consents c
 			WHERE c.workspace_id = $1 AND c.record_id = i.record_id AND c.channel = 'email' AND c.topic = '' AND c.purpose = 'marketing'
 			ORDER BY c.occurred_at DESC, c.created_at DESC LIMIT 1) c ON true
-		WHERE c.status = 'withdrawn'`, workspaceID, check)
+		WHERE c.status = 'withdrawn'`, workspaceID, check, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -100,10 +111,10 @@ func CheckRecipients(ctx context.Context, q Querier, workspaceID string, emails 
 		FROM unnest($2::text[]) AS e
 		WHERE EXISTS (SELECT 1 FROM record_identities i JOIN records r ON r.id = i.record_id
 			WHERE i.workspace_id = $1 AND i.namespace = 'email' AND i.value = e AND i.valid_to IS NULL
-			  AND r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL)
+			  AND r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL AND ($3 = '' OR r.brand_id = NULLIF($3, '')::uuid))
 		  AND NOT EXISTS (SELECT 1 FROM record_identities i JOIN records r ON r.id = i.record_id
 			WHERE i.workspace_id = $1 AND i.namespace = 'email' AND i.value = e AND i.valid_to IS NULL
-			  AND NOT r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL)`, workspaceID, check)
+			  AND NOT r.needs_review AND r.merged_into IS NULL AND r.archived_at IS NULL AND ($3 = '' OR r.brand_id = NULLIF($3, '')::uuid))`, workspaceID, check, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +193,13 @@ const (
 // stopped by everything but customer and partner entries, which only keep
 // people out of cold email. Cold email honours every suppression.
 func CheckPurpose(ctx context.Context, q Querier, workspaceID, purpose string, emails []string) ([]Decision, error) {
-	out, err := CheckRecipients(ctx, q, workspaceID, emails)
+	return CheckPurposeIn(ctx, q, workspaceID, "", purpose, emails)
+}
+
+// CheckPurposeIn is CheckPurpose for an email of one brand (see
+// CheckRecipientsIn).
+func CheckPurposeIn(ctx context.Context, q Querier, workspaceID, brand, purpose string, emails []string) ([]Decision, error) {
+	out, err := CheckRecipientsIn(ctx, q, workspaceID, brand, emails)
 	if err != nil || purpose == PurposeCold {
 		return out, err
 	}

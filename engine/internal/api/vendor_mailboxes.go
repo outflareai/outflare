@@ -27,7 +27,8 @@ func (s *Server) routesVendorMailboxes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/integrations/{id}/webhook", s.vendorWebhook)
 }
 
-// loadVendor finds a supplier integration and makes sure it is syncing.
+// loadVendor finds a supplier integration. Connecting it started its sync
+// (vendorsync.Service.Connected), so reading never has to.
 func (s *Server) loadVendor(w http.ResponseWriter, r *http.Request) (connectors.Integration, bool) {
 	if s.vendors == nil || !s.needIntegrations(w, r) {
 		if s.vendors == nil {
@@ -41,16 +42,6 @@ func (s *Server) loadVendor(w http.ResponseWriter, r *http.Request) (connectors.
 	}
 	if !s.vendors.IsVendor(i.Connector) {
 		writeError(w, r, http.StatusUnprocessableEntity, "not_a_supplier", "this integration is not a mailbox supplier, so it has no mailboxes to import")
-		return i, false
-	}
-	// Integrations connected before this feature, or by an older engine,
-	// start syncing on first use.
-	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		_, err := s.vendors.Ensure(r.Context(), tx, i.WorkspaceID, i.ID)
-		return err
-	})
-	if err != nil {
-		s.internal(w, r, err)
 		return i, false
 	}
 	return i, true
@@ -81,7 +72,7 @@ func (s *Server) listVendorMailboxes(w http.ResponseWriter, r *http.Request) {
 	if f.Offset < 0 {
 		f.Offset = 0
 	}
-	st, err := s.vendors.GetSettings(r.Context(), s.pool, i.WorkspaceID, i.ID)
+	st, err := s.vendorSettings(r.Context(), i)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -106,8 +97,14 @@ func (s *Server) syncVendorMailboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	a := accessFrom(r.Context())
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		if err := s.vendors.SyncNow(r.Context(), tx, i.WorkspaceID, i.ID); err != nil {
+		started, err := s.vendors.Ensure(r.Context(), tx, i.WorkspaceID, i.ID)
+		if err != nil {
 			return err
+		}
+		if !started {
+			if err := s.vendors.SyncNow(r.Context(), tx, i.WorkspaceID, i.ID); err != nil {
+				return err
+			}
 		}
 		return record(r.Context(), tx, &a.principal, i.WorkspaceID, "integration.sync_requested", "integration", i.ID,
 			map[string]any{"connector": i.Connector})
@@ -161,12 +158,23 @@ func (s *Server) importVendorMailboxes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, out)
 }
 
+// vendorSettings reads a supplier's sync settings. One that has never
+// synced (its connection failed to start it) reads as not synced yet, and
+// Sync now or any change to its settings starts it.
+func (s *Server) vendorSettings(ctx context.Context, i connectors.Integration) (vendorsync.Settings, error) {
+	st, err := s.vendors.GetSettings(ctx, s.pool, i.WorkspaceID, i.ID)
+	if errors.Is(err, vendorsync.ErrNotSynced) {
+		return vendorsync.Settings{IntegrationID: i.ID, Push: vendorsync.PushStatus{State: vendorsync.PushOff}}, nil
+	}
+	return st, err
+}
+
 func (s *Server) getVendorSync(w http.ResponseWriter, r *http.Request) {
 	i, ok := s.loadVendor(w, r)
 	if !ok {
 		return
 	}
-	st, err := s.vendors.GetSettings(r.Context(), s.pool, i.WorkspaceID, i.ID)
+	st, err := s.vendorSettings(r.Context(), i)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -216,6 +224,9 @@ func (s *Server) updateVendorSync(w http.ResponseWriter, r *http.Request) {
 	}
 	var st vendorsync.Settings
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+		if _, err := s.vendors.Ensure(r.Context(), tx, i.WorkspaceID, i.ID); err != nil {
+			return err
+		}
 		var err error
 		if req.Push != nil {
 			if err := s.setPush(r.Context(), tx, a, i, *req.Push); err != nil {

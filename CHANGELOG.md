@@ -6,6 +6,60 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.78.0] - 2026-11-01
+
+### Added
+
+- Support response times: set how fast your team promises to reply and resolve, in working hours or around the clock, for the workspace or one brand. Each conversation shows when its reply is due, and an Overdue folder collects the ones that ran late.
+
+### Changed
+
+- Analytics → Channels shows which channels bring people new to you and which bring people you already knew, how much of their revenue is first or repeat payments, and what the people each channel first brought have paid to date.
+- Analytics → Channels can show identified people only: visits where the person signed in or was named by a form, and the credit on them, leaving out visits known only by a browser cookie. Each credited visit now says how it was matched.
+- Connectors and data providers now say how to connect in one place: `auth_options` lists each way (sign in or API key), whether it works on this server and which is recommended. The repeated `auth` and `auth_methods` fields are gone from the API.
+- A connected sequencer account's name is now `integration_name` everywhere, beside `integration_id`: on campaign links (was `platform`), platform accounts (was `name`), a mailbox's assignment and its `platforms` list (was `platform`) and a sequence's assigned mailboxes (was `platform`). `connector` stays the connector's id.
+- Gmail and Outlook mailbox sign-ins are now connections like any other: signing in through the Gmail or Outlook connector adds the mailbox, and an admin connection (a Google service account or a Microsoft Entra app) adds mailboxes by address. The older mailbox sign-in routes are deprecated.
+- Your own role in `GET /v1/me` and `GET /v1/workspaces/{ws}` now reads like a member's: `role` is the exact role as `GET /roles` lists it (a starting role's key or your workspace's own role's id), with its name in `role_name`. `role_id` is gone. The workspace switcher shows the role's name.
+- Tools that research people and companies can keep what they learned as ordinary fields on the record, created the first time they're needed. They never overwrite a value you set yourself, and every change shows in the record's history.
+
+### Fixed
+
+- The changes from v0.77.0, which didn't pass the release checks, are now published.
+
+### Upgrading
+
+- register `$PUBLIC_URL/v1/integrations/oauth/callback` as a redirect URI on your Google and Microsoft OAuth apps, and give the Microsoft app the delegated permissions `IMAP.AccessAsUser.All` and `SMTP.Send`.
+
+## [0.77.0] - 2026-11-01
+
+### Added
+
+- A journey's holdout now says what the journey changed: each path of a random split against the people held out, with conversions and revenue in the 30 days after, the lift, and whether it is real or too early to tell. On the journey's page, in the API and in MCP.
+
+### Changed
+
+- Paid ads: Meta Ads and Google Ads now sync ad sets (Google's ad groups) and ads, each with spend, impressions, clicks and conversions per day, and each ad's headline and landing page. Open a campaign to see its numbers by day, its ad sets and its ads, and see every platform's spend by day at the top.
+- The automation map now shows where events come from (website, your app, Stripe) and what journeys reach outside Outflare: webhooks, Slack, your CRM, ad audiences and review campaigns. Exported kits leave out webhook keys and ask the other workspace for its own URL, channel and audience.
+- Rules, journeys, lifecycle email, alerts and webhooks now belong to one brand, with API routes under `/v1/brands/{brand}/`: a rule or journey acts only on its brand's people, an unsubscribe applies to the brand it came from (an admin can apply one to every brand), and a webhook hears only its brand's events.
+- Mailbox allocation now lists the mailboxes it keeps from each sequence (a declined suggestion, an undone automatic choice, or a campaign the sequencer refused), and you can clear one so that mailbox can be given to the sequence again, in the app, the API and MCP.
+- Public releases of Outflare for desktop check for updates automatically and install verified updates when the app is idle. The app window and tray menu also offer Check for updates.
+- Desktop release testing can exercise an automatic upgrade through an isolated test channel. Test builds are labelled clearly and keep package and version verification enabled.
+- Link prospects can now be found through expired domains: a page that still links to a domain that has lapsed is a prospect with the method "Expired domain", to offer one of your pages instead.
+- The API calls a reply's tags `tags`: inbox messages return `tags` instead of `labels`, triaging a reply takes `tags`, the `inbox.updated` event reports changed `tags`, and the MCP tool `triage_inbox_message` takes `tags`. "Label" now always means a reply's category, such as interested or not_now.
+- The lead finder page counts data provider and email verifier credits in what results cost, priced at the rates you set in Outcomes, and says which providers still need a price.
+- The lead finder's results no longer show meetings. Results and cost per result go up to people in campaigns and replies, while a better way to measure outcomes is built.
+- A mission's attributed revenue goal now counts payments credited to the broadcasts, social posts and social replies made in the mission, as well as its sequences.
+- A lead list's leads now come from one place, `GET /lead-lists/{id}/members`, which also takes the `suppressed` and `verification` filters. `GET /leads` no longer takes `list_id` and says where to look instead.
+- Inviting someone and changing a member's role take one `role` field: any role's id from `GET /roles`, a starting role like `admin` or one your workspace made. `role_id` is gone, and members and invites return the same `role` they take.
+- Links in sequences now say which step they went out in, and Analytics → Channels can split a campaign by content, so you can see which email in a sequence brought the visit and the sale.
+- Support replies can link to your help centre: Articles in the reply box suggests public articles from what the customer wrote, or searches them, and puts the link in your reply. Suggest a reply now offers a link to each article it used.
+- A mailbox's `warmup.provider` is now null when no connected sequencer runs its warm-up, and `warmup.platform` is gone: the sequencer's warm-up state and score are its entry in `platforms`. To stop warm-up, set `enabled` to false; the `outflare` provider is no longer accepted.
+- Following Outflare and the builder on X now opens X's one-click follow dialog instead of the whole profile. After posting feedback to X, the Feedback box offers a last step, following the builder, and X suggests following both accounts once the post is up.
+
+### Fixed
+
+- Connecting a mailbox supplier such as Cheap Inboxes now reads its mailboxes straight away, and replacing its API key reads them again, without anyone opening the supplier's mailbox list first.
+
 ## [0.76.0] - 2026-11-01
 
 ### Added

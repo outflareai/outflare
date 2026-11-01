@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/outflareai/outflare/engine/internal/journeys"
 )
 
@@ -40,6 +42,19 @@ func (s *Server) testJourney(w http.ResponseWriter, r *http.Request) {
 	if raw, _ := json.Marshal(req.Event); len(raw) > 32<<10 {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "event must be at most 32 KB of JSON")
 		return
+	}
+	// Only the journey's brand's people can go through it, in a test too.
+	if cur.BrandID != nil {
+		var brand *string
+		err := s.pool.QueryRow(r.Context(), `SELECT brand_id::text FROM records WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, req.RecordID).Scan(&brand)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			s.internal(w, r, err)
+			return
+		}
+		if brand == nil || *brand != *cur.BrandID {
+			writeError(w, r, http.StatusNotFound, "not_found", "record not found in the journey's brand, or not a person")
+			return
+		}
 	}
 	// A journey not yet activated is edited in place, so its draft is the
 	// journey itself.

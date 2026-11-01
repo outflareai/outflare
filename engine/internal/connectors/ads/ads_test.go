@@ -760,6 +760,95 @@ func TestPinterestAdsConversions(t *testing.T) {
 	}
 }
 
+func TestMetaAdItems(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"GET /v24.0/act_55/adsets": map[string]any{"data": []any{map[string]any{"id": "31", "name": "Lookalike 1%", "effective_status": "CAMPAIGN_PAUSED", "campaign_id": "9", "daily_budget": "1500"}}},
+		"GET /v24.0/act_55/ads": map[string]any{"data": []any{map[string]any{"id": "41", "name": "Video A", "effective_status": "ACTIVE", "adset_id": "31",
+			"creative": map[string]any{"thumbnail_url": "https://cdn.example/a.jpg", "url_tags": "utm_source=facebook&ad_id={{ad.id}}",
+				"object_story_spec": map[string]any{"link_data": map[string]any{"link": "https://acme.example/demo", "name": "Book a demo", "message": "See Acme in 20 minutes."}}}}}},
+		"GET /v24.0/act_55/insights": func(r *http.Request) any {
+			if r.URL.Query().Get("level") == "ad" {
+				return map[string]any{"data": []any{map[string]any{"ad_id": "41", "ad_name": "Video A", "adset_id": "31", "date_start": "2026-10-01",
+					"spend": "4.20", "impressions": "300", "clicks": "6", "actions": []any{map[string]any{"action_type": "purchase", "value": "1"}},
+					"action_values": []any{map[string]any{"action_type": "purchase", "value": "49"}}}}}
+			}
+			return map[string]any{"data": []any{map[string]any{"adset_id": "31", "adset_name": "Lookalike 1%", "campaign_id": "9", "date_start": "2026-10-01",
+				"spend": "8.40", "impressions": "600", "clicks": "9"}}}
+		},
+	})
+	m := MetaAds{}
+	creds, acct := c.Creds{"api_key": "tok"}, c.AdAccount{ID: "55", Currency: "USD"}
+	sets, err := m.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(sets) != 1 || sets[0].ParentID != "9" || sets[0].Status != c.AdPaused || *sets[0].DailyBudgetMicros != 15_000_000 {
+		t.Fatalf("ad sets %+v %v", sets, err)
+	}
+	ads, err := m.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	if err != nil || len(ads) != 1 || ads[0].ParentID != "31" || ads[0].Details[c.AdDetailHeadline] != "Book a demo" ||
+		ads[0].Details[c.AdDetailURL] != "https://acme.example/demo" || ads[0].Details[c.AdDetailURLTags] == "" || ads[0].Details[c.AdDetailThumbnail] == "" {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	days, err := m.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 1 || days[0].ID != "31" || days[0].ParentID != "9" || days[0].SpendMicros != 8_400_000 {
+		t.Fatalf("ad set days %+v %v", days, err)
+	}
+	days, err = m.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 1 || days[0].ID != "41" || days[0].ParentID != "31" || *days[0].Conversions != 1 || *days[0].ConversionValueMicros != 49_000_000 {
+		t.Fatalf("ad days %+v %v", days, err)
+	}
+	for _, r := range *reqs {
+		if strings.HasSuffix(r.path, "/insights") && !strings.Contains(r.query, "level=ad") {
+			t.Fatalf("insights without a level: %s", r.query)
+		}
+	}
+	if _, err := m.AdItems(ctx, cl, creds, acct, "keyword"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad level: %v", err)
+	}
+}
+
+func TestGoogleAdItems(t *testing.T) {
+	cl, _, _ := fake(t, map[string]any{
+		"POST /v23/customers/111/googleAds:search": func(r *http.Request) any {
+			b, _ := io.ReadAll(r.Body)
+			q := string(b)
+			switch {
+			case strings.Contains(q, "FROM ad_group_ad WHERE segments.date"):
+				return map[string]any{"results": []any{map[string]any{"adGroupAd": map[string]any{"ad": map[string]any{"id": "81"}}, "adGroup": map[string]any{"id": "71"},
+					"segments": map[string]any{"date": "2026-10-01"}, "metrics": map[string]any{"costMicros": "2000000", "impressions": "100", "clicks": "4", "conversions": 1.0}}}}
+			case strings.Contains(q, "FROM ad_group WHERE segments.date"):
+				return map[string]any{"results": []any{map[string]any{"adGroup": map[string]any{"id": "71", "name": "Exact"}, "campaign": map[string]any{"id": "7"},
+					"segments": map[string]any{"date": "2026-10-01"}, "metrics": map[string]any{"costMicros": "5000000", "impressions": "400", "clicks": "10"}}}}
+			case strings.Contains(q, "FROM ad_group_ad"):
+				return map[string]any{"results": []any{map[string]any{"adGroup": map[string]any{"id": "71"}, "adGroupAd": map[string]any{"status": "ENABLED", "ad": map[string]any{
+					"id": "81", "type": "RESPONSIVE_SEARCH_AD", "finalUrls": []string{"https://acme.example/pricing"},
+					"responsiveSearchAd": map[string]any{"headlines": []any{map[string]any{"text": "Acme pricing"}}, "descriptions": []any{map[string]any{"text": "Plans for every team."}}}}}}}}
+			case strings.Contains(q, "FROM ad_group"):
+				return map[string]any{"results": []any{map[string]any{"adGroup": map[string]any{"id": "71", "name": "Exact", "status": "PAUSED"}, "campaign": map[string]any{"id": "7"}}}}
+			}
+			return map[string]any{"results": []any{}}
+		},
+	})
+	g := GoogleAds{}
+	creds, acct := c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111", Currency: "USD"}
+	groups, err := g.AdItems(ctx, cl, creds, acct, c.AdLevelGroup)
+	if err != nil || len(groups) != 1 || groups[0].ID != "71" || groups[0].ParentID != "7" || groups[0].Status != c.AdPaused {
+		t.Fatalf("ad groups %+v %v", groups, err)
+	}
+	ads, err := g.AdItems(ctx, cl, creds, acct, c.AdLevelAd)
+	// An ad without a name of its own takes its first headline.
+	if err != nil || len(ads) != 1 || ads[0].ID != "81" || ads[0].ParentID != "71" || ads[0].Name != "Acme pricing" ||
+		ads[0].Details[c.AdDetailURL] != "https://acme.example/pricing" || ads[0].Details[c.AdDetailType] != "responsive_search_ad" || ads[0].Details[c.AdDetailText] != "Plans for every team." {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	days, err := g.AdItemDays(ctx, cl, creds, acct, c.AdLevelGroup, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 1 || days[0].ID != "71" || days[0].ParentID != "7" || days[0].SpendMicros != 5_000_000 {
+		t.Fatalf("ad group days %+v %v", days, err)
+	}
+	days, err = g.AdItemDays(ctx, cl, creds, acct, c.AdLevelAd, "2026-10-01", "2026-10-01")
+	if err != nil || len(days) != 1 || days[0].ID != "81" || days[0].ParentID != "71" || *days[0].Conversions != 1 {
+		t.Fatalf("ad days %+v %v", days, err)
+	}
+}
+
 func TestGoogleAdsAudiences(t *testing.T) {
 	job := "customers/111/offlineUserDataJobs/9"
 	cl, reqs, _ := fake(t, map[string]any{

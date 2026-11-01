@@ -25,7 +25,7 @@ import (
 
 // ProspectMethods are the ways a prospect can be found.
 var ProspectMethods = []string{"competitor_gap", "broken_link", "reclaim", "competitor_dead_page",
-	"resource_page", "asset", "unlinked_mention", "partner", "manual"}
+	"resource_page", "asset", "unlinked_mention", "partner", "manual", "expired_domain"}
 
 // ProspectStages are a prospect's stages, in order.
 var ProspectStages = []string{"prospect", "excluded", "pitched", "replied", "agreed", "live", "declined", "removed"}
@@ -76,7 +76,7 @@ type ScoreFactor struct {
 // methodPoints favour the methods that most often end in a link: a site
 // that linked before, or that knows the brand, says yes more often.
 var methodPoints = map[string]int{
-	"reclaim": 25, "partner": 20, "unlinked_mention": 20, "broken_link": 15, "competitor_dead_page": 15,
+	"reclaim": 25, "partner": 20, "unlinked_mention": 20, "broken_link": 15, "competitor_dead_page": 15, "expired_domain": 15,
 	"competitor_gap": 10, "resource_page": 10, "manual": 10, "asset": 5,
 }
 

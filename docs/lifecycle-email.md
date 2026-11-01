@@ -5,6 +5,36 @@ sign-in codes, onboarding and product updates) through the workspace's own
 email provider account. Cold outreach stays on mailboxes and sequences; this
 path never sends it.
 
+## Each brand's lifecycle email
+
+Lifecycle email belongs to one brand (`plans/brands/README.md`): its
+templates, topics, broadcasts, journeys and the emails they send. The API
+lives under the brand, `/v1/brands/{brand}/...` with the brand's id:
+`/email-templates`, `/email-topics`, `/email-broadcasts`, `/emails`,
+`/journeys` (with their versions, drafts, test mode, runs and step keys)
+and `/automation-map`. A brand's journeys and broadcasts send only its own
+templates to its own people, and another brand's template, broadcast,
+journey or email is `404` there. Topics are still the workspace's, so
+every brand can use them, but each brand's people choose them in that
+brand. A token made for one brand gets `404` for every other brand's.
+
+What people choose is per brand too (decision 5): an unsubscribe, a topic
+choice or turning off all marketing email applies to the brand whose email
+it came from, so the same address in another brand still gets that
+brand's email. A workspace admin can turn off marketing email to an address
+in every brand at once: `POST /v1/workspaces/{ws}/email-unsubscribes`
+with `email` (`workspace.manage`). Hard bounces and spam complaints still
+stop email from every brand, and so does the unsubscribe link of an email
+with no topic until suppressions move to brands with outreach. Providers
+and sending domains are connections, shared until connections move.
+
+The workspace routes (`/v1/workspaces/{ws}/email-templates` and the rest)
+are deprecated and keep working until the brands contract step: a list is
+the brand `?brand=` picks, else the workspace's first, and something made
+there without `brand_id` goes to the workspace's first brand. In the app
+the Lifecycle pages work inside the brand picked in the brand switcher and
+ask for one when all brands are picked.
+
 ## Providers
 
 | Provider | What to paste | Delivery events | Domains |
@@ -417,6 +447,17 @@ The run's history shows each call as `calling`, then `done` with the status and 
    {"id": "control", "weight": 10, "holdout": true}]}
 ```
 
+#### What a holdout shows
+
+A holdout says what the journey added beyond what would have happened anyway. `GET /v1/brands/{brand}/journeys/{id}/lift?step=test` (scope `analytics.read`, MCP `get_journey_lift`) compares each path of a random split with its holdout path (or `control=` another path):
+
+- **Who converted.** For each path: the people who went that way, how many had a conversion ([attribution.md](attribution.md); `event=` keeps one, such as `payment.succeeded`) within `days` after the split (30 by default, up to 180), and their revenue in that time, net of refunds, in total and per person.
+- **Lift.** How much higher the path's conversion rate is than the control's, as a share: `0.5` is half as many again.
+- **Is it real.** `p_value` is a two-sided two-proportion z-test. `verdict` is `better` or `worse` when it is under 0.05, `no_clear_change` otherwise, and `too_early` while either group has fewer than 30 people or nobody converted.
+- **Incremental revenue.** What the path's people paid beyond what as many control people paid, per currency.
+
+Each run counts once, on the first time it took the step. People whose window isn't over yet count with what they have done so far, which is fair to both groups since the split is random. On the journey's page, a random split step with a holdout shows this beside its results.
+
 A run on a `wait_until` step shows `wait_deadline`. Paths go in order: the first that comes true wins. A paused journey's runs keep waiting but don't move on an event until it is active again; their timeout still counts.
 
 ### AI steps
@@ -455,14 +496,19 @@ workspace as one picture, laid out left to right:
 
 - what sets each one off: events, field changes and smart lists
 - the events rules emit, and the journeys that start on them
-- what journeys touch: static lists, sequences, tags and other journeys
+- what journeys touch: static lists, sequences, tags and other journeys,
+  and outside Outflare the webhooks they call (by host only, since a path
+  or query can hold a token), the Slack channels they post to, the CRM,
+  ad audiences and review campaigns
+- where events come from in the last 30 days: the website, your app
+  through the API, a payments provider such as Stripe, partners and so on
 
 Each card shows its last 7 days: how often an event happened, how often
 a rule fired, how many people entered a journey. Pick a card to light up
 everything it sets off and everything that sets it off, then **Open** it.
 **Only what's live** hides draft and paused rules and journeys, and the
-brand picked in the sidebar limits it to that brand's automations and
-the shared ones. **Touches** narrows it to what leads to one sequence,
+map is always one brand's: the brand picked in the switcher, its rules,
+journeys and their numbers (`GET /v1/brands/{brand}/automation-map`). **Touches** narrows it to what leads to one sequence,
 list or tag. Pick a person to see what reaches them: the events they did,
 the lists they're in, the rules that fired for them and the journeys
 they went through are marked, and everything those set off next lights
@@ -471,7 +517,7 @@ up.
 Above the map, **What needs a look** lists:
 
 - **Loops:** rules and journeys that set each other off, drafts
-  included: a journey that enters another that enters it back, or rules
+  included (the events a wait-until step waits for count too): a journey that enters another that enters it back, or rules
   whose events start each other.
 - **Overlaps:** two journeys that emailed the same people within a day
   of each other in the last 7 days.

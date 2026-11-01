@@ -2,7 +2,7 @@
 
 An alert says something needs a person now. Any part of Outflare raises one, once per thing, in the same transaction that found it. Each alert is:
 
-- **Kept in the app** under Settings → Alerts, and returned by `GET /v1/workspaces/{ws}/alerts` (MCP `list_alerts`), newest first. What an alert says is read from what it is about when shown, so it never keeps its own copy of a name or a message.
+- **Kept in the app** under Settings → Alerts, and returned by `GET /v1/brands/{brand}/alerts` (MCP `list_alerts`), newest first. An alert belongs to the brand of what raised it (or, from a part of Outflare not on brands yet, the workspace's first brand), and is listed only there. What an alert says is read from what it is about when shown, so it never keeps its own copy of a name or a message.
 - **Sent as the `alert.raised` webhook**, with ids only, so Slack, a CRM or Zapier can act on it.
 - **Counted in the [digest](digests.md)**, by kind.
 - **Emailed** to the person it is for, to every owner and admin, or to nobody, as the workspace chooses per kind, and per brand when a brand should differ.
@@ -33,7 +33,7 @@ Connect Slack under Connectors, through Slack's consent screen (when the server 
 
 ## Seeing alerts
 
-Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). Brand-limited people see their brands' alerts and the shared ones.
+Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). A brand's alerts are `GET /v1/brands/{brand}/alerts`; the workspace route (`GET /v1/workspaces/{ws}/alerts`) is deprecated and lists the brand `?brand=` picks, else the workspace's first. Who hears about each kind is the workspace's setting (`.../alerts/settings`), and a brand's own choice (`PUT /v1/brands/{brand}/alerts/settings`) wins over it for that brand's alerts. Mutes are each person's own.
 
 ## In your CRM
 

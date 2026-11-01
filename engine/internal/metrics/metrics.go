@@ -319,6 +319,22 @@ var (
 		Namespace: namespace, Subsystem: "support", Name: "reply_seconds",
 		Help: "Time to send one support reply through its mailbox.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
 	})
+	supportSLABreaches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "sla_breaches_total",
+		Help: "Support SLA targets missed, by target (reply: the team's next reply, resolve: resolving the conversation).",
+	}, []string{"target"})
+	supportOverdue = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "support", Name: "overdue",
+		Help: "Conversations not closed that are past an SLA target, by target (reply, resolve), across workspaces.",
+	}, []string{"target"})
+	supportSLAChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "sla_checks_total",
+		Help: "Runs of the SLA check that marks missed targets, by outcome (success, error).",
+	}, []string{"outcome"})
+	supportSLACheckDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "support", Name: "sla_check_seconds",
+		Help: "Time one SLA check takes.", Buckets: []float64{.01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+	})
 	knowledgeAskDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "knowledge", Name: "ask_seconds",
 		Help: "Time to answer a question from knowledge: finding passages and the AI model's answer.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
@@ -403,6 +419,11 @@ var (
 		Namespace: namespace, Subsystem: "sync", Name: "runs_total",
 		Help: "Scheduled sync runs of connections, by module (analytics, search_console, page_conversions, ads, seo) and outcome (success, internal, connector_auth, connector_quota, connector_unavailable, connector_invalid).",
 	}, []string{"module", "outcome"})
+	// Ad groups' and ads' days stored by the ad sync (Meta and Google).
+	adItemRows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "item_days_synced_total",
+		Help: "Days of numbers stored for ad groups (Meta ad sets, Google ad groups) and ads by the ad sync, by level (ad_group, ad).",
+	}, []string{"level"})
 	// Social accounts: reading followers of connected accounts and of the
 	// public profiles in brand links.
 	socialReads = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -688,10 +709,10 @@ var own = []prometheus.Collector{
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
-	supportMessages, supportReplies, supportReplyDuration,
+	supportMessages, supportReplies, supportReplyDuration, supportSLABreaches, supportOverdue, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
-	reviewReads, reviewsFound, socialReads, syncRuns, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
+	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
 	redditSends,
 	redditChecks,
@@ -968,6 +989,22 @@ func HelpCentreRender(d time.Duration) {
 // and its outcome.
 func SupportMessage(kind, outcome string) { supportMessages.WithLabelValues(kind, outcome).Inc() }
 
+// SupportSLABreached records one SLA target missed: reply or resolve.
+func SupportSLABreached(target string) { supportSLABreaches.WithLabelValues(target).Inc() }
+
+// SupportOverdue sets how many open conversations are past a target.
+func SupportOverdue(target string, n int) { supportOverdue.WithLabelValues(target).Set(float64(n)) }
+
+// SupportSLACheck records one run of the SLA check.
+func SupportSLACheck(ok bool, d time.Duration) {
+	outcome := "success"
+	if !ok {
+		outcome = "error"
+	}
+	supportSLAChecks.WithLabelValues(outcome).Inc()
+	supportSLACheckDuration.Observe(d.Seconds())
+}
+
 // SupportSent records one run of the support reply job.
 func SupportSent(outcome string, d time.Duration) {
 	supportReplies.WithLabelValues(outcome).Inc()
@@ -1058,6 +1095,11 @@ func HookEvent(connector, result string, lag time.Duration) {
 // outcome: success or the error code.
 func SyncRun(module, outcome string) {
 	syncRuns.WithLabelValues(module, outcome).Inc()
+}
+
+// AdItemRows records n days of numbers stored for ad groups or ads.
+func AdItemRows(level string, n int) {
+	adItemRows.WithLabelValues(level).Add(float64(n))
 }
 
 // SocialAccountRead records one read of a social account and its outcome.

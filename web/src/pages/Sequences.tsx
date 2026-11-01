@@ -25,7 +25,7 @@ const sequenceColumns: ColumnDef<Sequence, unknown>[] = [
     cell: ({ row: { original: q } }) => (
       <>
         <div className="flex items-center gap-1.5"><span className="font-medium group-hover:underline">{q.name}</span> <BrandBadge id={q.brand_id} /></div>
-        {(q.links?.length ?? 0) > 0 && <div className="text-xs text-muted-foreground">Runs in {q.links!.map((l) => l.platform).join(", ")}</div>}
+        {(q.links?.length ?? 0) > 0 && <div className="text-xs text-muted-foreground">Runs in {q.links!.map((l) => l.integration_name).join(", ")}</div>}
       </>
     ),
   },
@@ -195,7 +195,7 @@ function Detail({ ws, seq, canManage, onBack, onChange, go }: { ws: string; seq:
     onChange();
   }
 
-  const linked = (seq.links ?? []).map((l) => l.platform).join(" and ");
+  const linked = (seq.links ?? []).map((l) => l.integration_name).join(" and ");
   return (
     <div className="space-y-6">
       <PageHeader

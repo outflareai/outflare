@@ -113,6 +113,13 @@ func (s *Server) finishAccountSignIn(w http.ResponseWriter, r *http.Request, st 
 		if err := s.integrations.Checked(ctx, tx, st.Workspace, st.Integration, &account, nil); err != nil {
 			return err
 		}
+		i, err := s.integrations.Get(ctx, tx, st.Workspace, st.Integration)
+		if err != nil {
+			return err
+		}
+		if err := s.integrations.Reconnected(ctx, tx, i); err != nil {
+			return err
+		}
 		if o.Connector.Definition().Has(connectors.CapSocialMetrics) {
 			// Find the accounts it now reaches and read them straight away.
 			if err := enqueueSocialSync(ctx, tx, st.Workspace, st.Integration, "signin:"+newID()); err != nil {

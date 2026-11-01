@@ -1,3 +1,5 @@
+import { useBrand } from "@/lib/brand";
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useState } from "react";
 import type { Alert, AlertKind, AlertSetting, Integration } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -22,6 +24,8 @@ function link(ws: string, path: string) {
 // Alerts: what needs someone now, from every part of Outflare, and who
 // hears about it by email.
 export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
+  const { brand, active } = useBrand(ws);
+  const brandId = brand?.id ?? "";
   const path = { params: { path: { ws } } };
   const [list, setList] = useState<Alert[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
@@ -46,8 +50,13 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, canManage]);
 
+  // Alerts are one brand's (the picked one); who hears about them is the
+  // workspace's setting.
   async function load() {
-    const [l, s] = await Promise.all([api.GET("/v1/workspaces/{ws}/alerts", path), api.GET("/v1/workspaces/{ws}/alerts/settings", path)]);
+    const [l, s] = await Promise.all([
+      brandId ? api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: { data: [] as Alert[], next_before: null }, error: undefined }),
+      api.GET("/v1/workspaces/{ws}/alerts/settings", path),
+    ]);
     if (l.data) {
       setList(l.data.data);
       setNext(l.data.next_before ?? null);
@@ -58,12 +67,12 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws]);
+  }, [ws, brandId]);
 
   async function more() {
     if (!next) return;
     setBusy("more");
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/alerts", { params: { path: { ws }, query: { before: next } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId }, query: { before: next } } });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (data) {
@@ -106,7 +115,8 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
       <PageHeader title="Alerts" description="What needs someone now, such as a hot reply or a hot website visitor. Each alert is kept here, sent as the alert.raised webhook and counted in the digest." />
 
       <Card title="Recent alerts">
-        {list && list.length === 0 && <Empty title="No alerts yet">Hot replies and hot website visitors show here as they come in.</Empty>}
+        {!brandId && <PickBrand what="Alerts" brands={active.length} />}
+        {brandId && list && list.length === 0 && <Empty title="No alerts yet">Hot replies and hot website visitors show here as they come in.</Empty>}
         <ul className="divide-y">
           {list?.map((a) => (
             <li key={a.id} className="flex items-start justify-between gap-3 py-2 text-sm">

@@ -39,11 +39,11 @@ steps:
   - say: Look at the events new users send in their first week and pick the one that best marks a first win, unless one was given.
     tools: [listCustomerEvents, listRecords]
   - say: Write three short emails (welcome, a nudge with one concrete next step, and a last helpful tip) as templates.
-    tools: [listEmailTopics, createEmailTemplate, previewEmailTemplate]
+    tools: [listBrandEmailTopics, createBrandEmailTemplate, previewBrandEmailTemplate]
   - say: Build a journey that starts on sign-up, sends the emails, and exits as soon as the first-win event arrives.
-    tools: [createJourney]
+    tools: [createBrandJourney]
   - say: Ask a person to turn the journey on.
-    tools: [activateJourney]
+    tools: [activateBrandJourney]
 guardrails:
   - Only people who signed up themselves get these emails, and the contact rules and opt-outs apply to every send.
   - The journey is turned on only after a person approves it.

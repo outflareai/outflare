@@ -26,8 +26,6 @@ ai_receipts
 ai_runs
 ai_usage_readings
 ai_visibility_settings
-alert_deliveries
-alert_mutes
 allocation_changes
 allocation_declines
 allocation_status
@@ -64,11 +62,8 @@ digest_optouts
 digest_settings
 digests
 domain_research
-email_broadcast_recipients
 email_checks
-email_events
 email_patterns
-email_template_versions
 email_topics
 email_verifications
 emailbison_compat_calls
@@ -89,11 +84,6 @@ inbox_views
 indexability_snapshots
 infra_plan_items
 item_slugs
-journey_run_steps
-journey_runs
-journey_signing_secrets
-journey_step_secrets
-journey_versions
 knowledge_chunks
 knowledge_uses
 knowledge_versions
@@ -150,8 +140,6 @@ rank_observations
 reddit_action_events
 reddit_action_snapshots
 reply_rules
-rule_firings
-rule_states
 search_daily
 search_embeddings
 search_sitemaps
@@ -188,5 +176,4 @@ visitor_alerts
 visitor_ip_lookups
 visitor_settings
 warmup_messages
-webhook_deliveries
 workspace_context

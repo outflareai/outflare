@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // Sent emails: every lifecycle and transactional email, newest first, with
 // filters; one email's facts, trigger, timeline and content; and one
 // recipient's whole history.
@@ -61,7 +62,16 @@ const columns: ColumnDef<Email, unknown>[] = [
   { id: "created_at", header: "When", accessorFn: (e) => e.created_at, cell: ({ row: { original: e } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(e.created_at)}>{ago(e.created_at)}</span> },
 ];
 
-export function Emails({ ws, canSend, admin, open, onOpen, go }: { ws: string; canSend: boolean; admin: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+// Emails belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Emails(props: { ws: string; canSend: boolean; admin: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Emails" brands={active.length} />;
+  return <EmailsPage key={brand.id} {...props} />;
+}
+
+function EmailsPage({ ws, canSend, admin, open, onOpen, go }: { ws: string; canSend: boolean; admin: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   // topic:<key> and broadcast:<id> open the list filtered to one topic or
   // broadcast, from those pages.
   const listed = open.startsWith("topic:") || open.startsWith("broadcast:");
@@ -74,17 +84,15 @@ export function Emails({ ws, canSend, admin, open, onOpen, go }: { ws: string; c
     if (listed) onOpen("");
   }, [listed, onOpen]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/email-topics", { params: { path: { ws } } }).then(({ data }) => setTopics(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId } } }).then(({ data }) => setTopics(data?.data ?? []));
   }, [ws]);
   const [emails, setEmails] = useState<Email[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [more, setMore] = useState(false);
 
-  const { query: brandQuery } = useBrand(ws);
   const fetchPage = useCallback(async (before?: string) => {
     const query = {
       limit: 50,
-      ...brandQuery,
       ...(before ? { before } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.purpose ? { purpose: filters.purpose } : {}),
@@ -94,9 +102,9 @@ export function Emails({ ws, canSend, admin, open, onOpen, go }: { ws: string; c
       ...(filters.topic ? { topic: filters.topic } : {}),
       ...(filters.broadcast ? { broadcast: filters.broadcast } : {}),
     };
-    const { data } = await api.GET("/v1/workspaces/{ws}/emails", { params: { path: { ws }, query } });
+    const { data } = await api.GET("/v1/brands/{brand}/emails", { params: { path: { brand: brandId }, query } });
     return data ?? { data: [], next_before: null };
-  }, [ws, filters, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, filters, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let live = true;
@@ -213,12 +221,13 @@ const eventText: Record<string, string> = {
 const eventDot: Record<string, string> = { opened: "bg-sky-500", clicked: "bg-sky-500", delivered: "bg-green-500", bounced: "bg-red-500", complained: "bg-red-500", failed: "bg-red-500", suppressed: "bg-amber-500", delayed: "bg-amber-500", retrying: "bg-amber-500", unsubscribed: "bg-amber-500" };
 
 function EmailDetail({ ws, id, canSend, admin, back, openRecipient, go }: { ws: string; id: string; canSend: boolean; admin: boolean; back: () => void; openRecipient: (address: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [email, setEmail] = useState<Email | null>(null);
   const [missing, setMissing] = useState(false);
   const [view, setView] = useState<"html" | "text">("html");
 
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/emails/{id}", { params: { path: { ws, id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/emails/{id}", { params: { path: { brand: brandId, id } } });
     if (data) setEmail(data);
     else setMissing(true);
   }, [ws, id]);
@@ -239,7 +248,7 @@ function EmailDetail({ ws, id, canSend, admin, back, openRecipient, go }: { ws: 
 
   async function cancel() {
     if (!(await confirmAction("Cancel this email?", "It has not been sent yet, and will not be.", "Cancel email"))) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/emails/{id}/cancel", { params: { path: { ws, id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/emails/{id}/cancel", { params: { path: { brand: brandId, id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     toast("Cancelled.");
     load();

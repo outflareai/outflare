@@ -3781,7 +3781,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 632
+        "y": 640
       },
       "panels": []
     },
@@ -3798,7 +3798,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 633
+        "y": 641
       },
       "targets": [
         {
@@ -3851,7 +3851,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 633
+        "y": 641
       },
       "targets": [
         {
@@ -3913,7 +3913,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 641
+        "y": 649
       },
       "targets": [
         {
@@ -3975,7 +3975,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 641
+        "y": 649
       },
       "targets": [
         {
@@ -5669,6 +5669,56 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Ad sets and ads synced",
+      "description": "Days of numbers the ad sync stores for ad groups (Meta ad sets, Google ad groups) and ads, from the platforms that read below campaigns. Normal: a burst every six hours per connected account, larger the first time an account syncs (90 days). Flat at zero while ads sync runs succeed means the platforms list no ad sets or ads, or their reports came back empty.",
+      "id": 477,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 377
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level) (rate(outflare_ads_item_days_synced_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{level}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Social publishing (the brand's own posts)",
       "id": 109,
@@ -5677,7 +5727,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 377
+        "y": 385
       },
       "panels": []
     },
@@ -5694,7 +5744,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 378
+        "y": 386
       },
       "targets": [
         {
@@ -5744,7 +5794,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 378
+        "y": 386
       },
       "targets": [
         {
@@ -5794,7 +5844,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 386
+        "y": 394
       },
       "targets": [
         {
@@ -5840,7 +5890,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 394
+        "y": 402
       },
       "panels": []
     },
@@ -5857,7 +5907,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 395
+        "y": 403
       },
       "targets": [
         {
@@ -5907,7 +5957,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 395
+        "y": 403
       },
       "targets": [
         {
@@ -5953,7 +6003,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 403
+        "y": 411
       },
       "panels": []
     },
@@ -5970,7 +6020,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 404
+        "y": 412
       },
       "targets": [
         {
@@ -6020,7 +6070,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 412
+        "y": 420
       },
       "targets": [
         {
@@ -6070,7 +6120,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 412
+        "y": 420
       },
       "targets": [
         {
@@ -6120,7 +6170,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 420
+        "y": 428
       },
       "targets": [
         {
@@ -6170,7 +6220,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 420
+        "y": 428
       },
       "targets": [
         {
@@ -6220,7 +6270,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 420
+        "y": 428
       },
       "targets": [
         {
@@ -6270,7 +6320,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 428
+        "y": 436
       },
       "targets": [
         {
@@ -6315,7 +6365,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 436
+        "y": 444
       },
       "collapsed": false,
       "panels": []
@@ -6333,7 +6383,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 437
+        "y": 445
       },
       "targets": [
         {
@@ -6383,7 +6433,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 437
+        "y": 445
       },
       "targets": [
         {
@@ -6442,7 +6492,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 445
+        "y": 453
       },
       "targets": [
         {
@@ -6492,7 +6542,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 445
+        "y": 453
       },
       "targets": [
         {
@@ -6551,7 +6601,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 453
+        "y": 461
       },
       "targets": [
         {
@@ -6597,7 +6647,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 461
+        "y": 469
       },
       "panels": []
     },
@@ -6614,7 +6664,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 462
+        "y": 470
       },
       "targets": [
         {
@@ -6667,7 +6717,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 462
+        "y": 470
       },
       "targets": [
         {
@@ -6720,7 +6770,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 470
+        "y": 478
       },
       "targets": [
         {
@@ -6773,7 +6823,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 470
+        "y": 478
       },
       "targets": [
         {
@@ -6823,7 +6873,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 478
+        "y": 486
       },
       "targets": [
         {
@@ -6876,7 +6926,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 478
+        "y": 486
       },
       "targets": [
         {
@@ -6929,7 +6979,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 486
+        "y": 494
       },
       "targets": [
         {
@@ -6977,7 +7027,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 494
+        "y": 502
       },
       "collapsed": false,
       "panels": []
@@ -6995,7 +7045,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 495
+        "y": 503
       },
       "targets": [
         {
@@ -7048,7 +7098,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 495
+        "y": 503
       },
       "targets": [
         {
@@ -7089,7 +7139,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 503
+        "y": 511
       },
       "panels": []
     },
@@ -7106,7 +7156,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 504
+        "y": 512
       },
       "targets": [
         {
@@ -7159,7 +7209,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 504
+        "y": 512
       },
       "targets": [
         {
@@ -7208,7 +7258,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 512
+        "y": 520
       },
       "panels": []
     },
@@ -7225,7 +7275,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 513
+        "y": 521
       },
       "targets": [
         {
@@ -7278,7 +7328,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 513
+        "y": 521
       },
       "targets": [
         {
@@ -7327,7 +7377,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 521
+        "y": 529
       },
       "panels": []
     },
@@ -7344,7 +7394,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 522
+        "y": 530
       },
       "targets": [
         {
@@ -7397,7 +7447,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 522
+        "y": 530
       },
       "targets": [
         {
@@ -7454,7 +7504,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 530
+        "y": 538
       },
       "id": 187,
       "panels": []
@@ -7472,7 +7522,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 531
+        "y": 539
       },
       "targets": [
         {
@@ -7521,7 +7571,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 531
+        "y": 539
       },
       "targets": [
         {
@@ -7570,7 +7620,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 539
+        "y": 547
       },
       "targets": [
         {
@@ -7619,7 +7669,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 539
+        "y": 547
       },
       "targets": [
         {
@@ -7668,7 +7718,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 547
+        "y": 555
       },
       "targets": [
         {
@@ -7713,7 +7763,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 555
+        "y": 563
       },
       "panels": []
     },
@@ -7730,7 +7780,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 556
+        "y": 564
       },
       "targets": [
         {
@@ -7775,7 +7825,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 556
+        "y": 564
       },
       "targets": [
         {
@@ -7820,7 +7870,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 564
+        "y": 572
       },
       "targets": [
         {
@@ -7872,7 +7922,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 572,
+        "y": 580,
         "w": 12,
         "h": 8
       },
@@ -7933,7 +7983,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 580
+        "y": 588
       },
       "panels": []
     },
@@ -7950,7 +8000,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 581
+        "y": 589
       },
       "targets": [
         {
@@ -8003,7 +8053,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 581
+        "y": 589
       },
       "targets": [
         {
@@ -8056,7 +8106,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 589
+        "y": 597
       },
       "targets": [
         {
@@ -8118,7 +8168,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 589
+        "y": 597
       },
       "targets": [
         {
@@ -8168,6 +8218,218 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Support SLA targets missed, by target",
+      "description": "Replies (reply) and resolutions (resolve) that ran past the time a workspace's SLA promised, per hour, across workspaces. These are the teams' misses, not Outflare faults; normal is whatever your customers' teams run at, and a sudden jump with no change in traffic points at the SLA check.",
+      "id": 478,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 657
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (target) (increase(outflare_support_sla_breaches_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{target}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Support conversations past their SLA",
+      "description": "Conversations not closed that are past an SLA target right now, by target, across workspaces. Moves with how busy support teams are.",
+      "id": 479,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 657
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (target) (outflare_support_overdue{job=\"$job\"})",
+          "legendFormat": "{{target}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Support SLA checks, by outcome",
+      "description": "Runs of the check that marks missed SLA targets, per minute. Normal is about one success a minute per worker process and no errors.",
+      "id": 480,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 665
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_support_sla_checks_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Time for one support SLA check",
+      "description": "95th percentile of one SLA check. Normal is well under a second; it grows with the number of conversations due at once.",
+      "id": 481,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 665
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_support_sla_check_seconds_bucket{job=\"$job\"}[15m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "Journeys",
       "collapsed": false,
@@ -8175,7 +8437,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 597
+        "y": 605
       },
       "id": 191,
       "panels": []
@@ -8193,7 +8455,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 598
+        "y": 606
       },
       "targets": [
         {
@@ -8242,7 +8504,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 598
+        "y": 606
       },
       "targets": [
         {
@@ -8291,7 +8553,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 606
+        "y": 614
       },
       "targets": [
         {
@@ -8336,7 +8598,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 614
+        "y": 622
       },
       "panels": []
     },
@@ -8353,7 +8615,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 615
+        "y": 623
       },
       "targets": [
         {
@@ -8406,7 +8668,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 615
+        "y": 623
       },
       "targets": [
         {
@@ -8464,7 +8726,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 623
+        "y": 631
       },
       "panels": []
     },
@@ -8481,7 +8743,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 624
+        "y": 632
       },
       "targets": [
         {
@@ -8530,7 +8792,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 624
+        "y": 632
       },
       "targets": [
         {
@@ -8575,7 +8837,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 649
+        "y": 673
       },
       "panels": []
     },
@@ -8592,7 +8854,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 650
+        "y": 674
       },
       "targets": [
         {
@@ -8654,7 +8916,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 650
+        "y": 674
       },
       "targets": [
         {
@@ -8707,7 +8969,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 658
+        "y": 682
       },
       "targets": [
         {
@@ -8769,7 +9031,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 658
+        "y": 682
       },
       "targets": [
         {
@@ -8831,7 +9093,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 666
+        "y": 690
       },
       "targets": [
         {
@@ -8888,7 +9150,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 674
+        "y": 698
       },
       "id": 195,
       "panels": []
@@ -8906,7 +9168,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 675
+        "y": 699
       },
       "targets": [
         {
@@ -8951,7 +9213,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 683
+        "y": 707
       },
       "panels": []
     },
@@ -8968,7 +9230,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 684
+        "y": 708
       },
       "targets": [
         {
@@ -9022,7 +9284,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 684
+        "y": 708
       },
       "targets": [
         {
@@ -9076,7 +9338,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 692
+        "y": 716
       },
       "targets": [
         {
@@ -9138,7 +9400,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 700
+        "y": 724
       },
       "targets": [
         {
@@ -9226,7 +9488,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 708
+        "y": 732
       },
       "targets": [
         {
@@ -9279,7 +9541,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 716
+        "y": 740
       },
       "targets": [
         {
@@ -9332,7 +9594,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 716
+        "y": 740
       },
       "targets": [
         {
@@ -9391,7 +9653,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 724
+        "y": 748
       }
     },
     {
@@ -9407,7 +9669,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 725
+        "y": 749
       },
       "targets": [
         {
@@ -9446,7 +9708,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 725
+        "y": 749
       },
       "targets": [
         {
@@ -9485,7 +9747,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 725
+        "y": 749
       },
       "targets": [
         {
@@ -9520,7 +9782,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 733
+        "y": 757
       },
       "datasource": {
         "type": "prometheus",
@@ -9543,7 +9805,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 733
+        "y": 757
       },
       "datasource": {
         "type": "prometheus",
@@ -9566,7 +9828,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 733
+        "y": 757
       },
       "datasource": {
         "type": "prometheus",
@@ -9589,7 +9851,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 741
+        "y": 765
       },
       "datasource": {
         "type": "prometheus",
@@ -9616,7 +9878,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 749
+        "y": 773
       },
       "targets": [
         {
@@ -9678,7 +9940,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 749
+        "y": 773
       },
       "targets": [
         {
@@ -9734,7 +9996,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 757,
+        "y": 781,
         "w": 12,
         "h": 8
       },
@@ -9757,7 +10019,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 757,
+        "y": 781,
         "w": 12,
         "h": 8
       },
@@ -9786,7 +10048,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 765
+        "y": 789
       },
       "targets": [
         {
@@ -9848,7 +10110,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 765
+        "y": 789
       },
       "targets": [
         {

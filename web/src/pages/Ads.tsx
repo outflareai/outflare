@@ -10,6 +10,7 @@ import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
 import { AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
+import { AdTrend, CampaignDetail } from "./AdDrilldown";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -32,13 +33,13 @@ const platforms: { id: string; name: string }[] = [
   { id: "amazon_ads", name: "Amazon Ads" },
   { id: "pinterest_ads", name: "Pinterest Ads" },
 ];
-const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
+export const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
 
 const ranges = [7, 28, 90] as const;
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
 // Money arrives in micros (millionths) of the account's currency.
-const money = (micros: number | null | undefined, currency: string) => {
+export const money = (micros: number | null | undefined, currency: string) => {
   if (micros === null || micros === undefined) return "—";
   try {
     return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: micros >= 10_000_000 ? 0 : 2, maximumFractionDigits: micros >= 10_000_000 ? 0 : 2 }).format(micros / 1e6);
@@ -46,7 +47,7 @@ const money = (micros: number | null | undefined, currency: string) => {
     return `${(micros / 1e6).toFixed(2)} ${currency}`;
   }
 };
-const n = (v: number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(v).toLocaleString());
+export const n = (v: number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(v).toLocaleString());
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${(v * 100).toFixed(2)}%`);
 const roas = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v.toFixed(2)}×`);
 
@@ -59,6 +60,8 @@ export function Ads({ ws, canManage, go }: Props) {
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([]);
   const [byPlatform, setByPlatform] = useState<AdSummaryRow[]>([]);
   const [totals, setTotals] = useState<AdSummaryRow[]>([]);
+  const [byDay, setByDay] = useState<AdSummaryRow[]>([]);
+  const [open, setOpen] = useState<AdCampaign | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -67,11 +70,12 @@ export function Ads({ ws, canManage, go }: Props) {
     const query = brandKey ? { brand: brandKey } : {};
     const to = new Date();
     const range = { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
-    const [c, a, cp, s] = await Promise.all([
+    const [c, a, cp, s, d] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path } }),
       api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query } }),
       api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...query, ...range, limit: 200 } } }),
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "connector" } } }),
+      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "day" } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
     setError(a.error || cp.error || s.error ? errorMessage(a.error ?? cp.error ?? s.error) : "");
@@ -80,6 +84,7 @@ export function Ads({ ws, canManage, go }: Props) {
     setCampaigns(cp.data?.data ?? []);
     setByPlatform(s.data?.data ?? []);
     setTotals(s.data?.totals ?? []);
+    setByDay(d.data?.data ?? []);
   }, [ws, brandKey, days]);
   useEffect(() => {
     load();
@@ -99,6 +104,8 @@ export function Ads({ ws, canManage, go }: Props) {
     if (error) return toast(errorMessage(error), "error");
     load();
   }
+
+  const range = { from: day(new Date(Date.now() - (days - 1) * 86_400_000)), to: day(new Date()) };
 
   const header = (
     <PageHeader
@@ -147,6 +154,10 @@ export function Ads({ ws, canManage, go }: Props) {
         </Stats>
       ))}
 
+      <Card title="By day" description="Every platform's spend, clicks, impressions and conversions per day, as each reports them.">
+        <AdTrend rows={byDay} from={range.from} to={range.to} />
+      </Card>
+
       <Card title="By platform" description={`The last ${days} days. Conversions and ROAS are what each platform reports, with its own attribution window, so they are not added up across platforms.`}>
         <DataTable
           data={byPlatform}
@@ -161,10 +172,11 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
-      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days.`}>
+      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its numbers by day, its ad sets and its ads (Meta and Google).`}>
         <DataTable
           data={campaigns}
           rowId={(c) => c.id}
+          onRowClick={(c) => setOpen(open?.id === c.id ? null : c)}
           searchPlaceholder="Search campaigns"
           empty="Campaigns appear after the first sync."
           initialSort={[{ id: "spend", desc: true }]}
@@ -190,7 +202,9 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
-      <AdResults ws={ws} from={day(new Date(Date.now() - (days - 1) * 86_400_000))} to={day(new Date())} brand={brandKey} go={go} />
+      {open && <CampaignDetail ws={ws} campaign={open} from={range.from} to={range.to} onClose={() => setOpen(null)} />}
+
+      <AdResults ws={ws} from={range.from} to={range.to} brand={brandKey} go={go} />
 
       <AdConversions ws={ws} canManage={canManage} accounts={accounts} />
 
@@ -264,7 +278,7 @@ export function Ads({ ws, canManage, go }: Props) {
 
 // The spend, clicks and platform-reported results columns, shared by the
 // platform and campaign tables.
-function metricColumns<T>(totals: (r: T) => AdTotals, currency: (r: T) => string) {
+export function metricColumns<T>(totals: (r: T) => AdTotals, currency: (r: T) => string) {
   const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
   return [
     { id: "spend", header: "Spend", accessorFn: (r: T) => totals(r).spend_micros, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(money(totals(r).spend_micros, currency(r))) },

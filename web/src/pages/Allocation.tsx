@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AllocationBlocking, AllocationChange, AllocationMode, AllocationSuggestion, PlatformAccount } from "@outflare/sdk";
+import type { AllocationBlocking, AllocationChange, AllocationDecline, AllocationMode, AllocationSuggestion, PlatformAccount } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, confirmAction, Empty, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
@@ -13,6 +13,7 @@ type Attention = { approvals: AllocationSuggestion[]; suggestions_to_review: num
 
 export const actionLabel: Record<string, string> = { assign: "Assigned", release: "Released", move: "Moved", drain: "Draining", finish_drain: "Joined after draining" };
 const needsLabel: Record<string, string> = { review: "Review", team_approval: "Team approval", owner_approval: "Owner approval" };
+const declineLabel: Record<string, string> = { declined: "Suggestion declined", undone: "Automatic choice undone", refused: "Refused by the platform" };
 
 /** Why mailboxes could not be used, as one short line. */
 export function blockingText(b: AllocationBlocking[] | undefined): string {
@@ -24,6 +25,7 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
   const [attention, setAttention] = useState<Attention | null>(null);
   const [suggestions, setSuggestions] = useState<AllocationSuggestion[]>([]);
   const [changes, setChanges] = useState<AllocationChange[]>([]);
+  const [declines, setDeclines] = useState<AllocationDecline[]>([]);
   const [mode, setMode] = useState<AllocationMode>("automatic");
   const [platforms, setPlatforms] = useState<PlatformAccount[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -34,17 +36,19 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
   const load = useCallback(async () => {
     const path = { params: { path: { ws } } };
     const branded = { params: { path: { ws }, query: brandQuery } };
-    const [a, s, c, m, p] = await Promise.all([
+    const [a, s, c, m, p, d] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/allocation/attention", branded),
       api.GET("/v1/workspaces/{ws}/allocation/suggestions", branded),
       api.GET("/v1/workspaces/{ws}/allocation/changes", { params: { path: { ws }, query: { limit: 100, ...brandQuery } } }),
       api.GET("/v1/workspaces/{ws}/allocation/settings", path),
       api.GET("/v1/workspaces/{ws}/platforms", path),
+      api.GET("/v1/workspaces/{ws}/allocation/declines", { params: { path: { ws }, query: { limit: 500, ...brandQuery } } }),
     ]);
     setPlatforms(p.data?.data ?? []);
     setAttention((a.data ?? null) as Attention | null);
     setSuggestions(s.data?.data ?? []);
     setChanges(c.data?.data ?? []);
+    setDeclines(d.data?.data ?? []);
     if (m.data?.mode) setMode(m.data.mode);
   }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -93,7 +97,7 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
 
   async function review(p: PlatformAccount) {
     const ok = await confirmAction(
-      `Let Outflare change ${p.name}?`,
+      `Let Outflare change ${p.integration_name}?`,
       <p>From now on mailbox allocation adds and removes mailboxes on its {plural(p.campaigns ?? 0, "campaign")} by itself in automatic mode, and explains each change here. Look at the suggested changes below first: they are what happens next.</p>,
       "Allow changes",
       false,
@@ -102,7 +106,7 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
     const { data, error } = await api.POST("/v1/workspaces/{ws}/platforms/{id}/review", { params: { path: { ws, id: p.integration_id! } } });
     if (error) return toast(errorMessage(error), "error");
     const applied = data?.applied?.length ?? 0;
-    toast(applied ? `Made ${plural(applied, "change")}. Each one is sent to ${p.name} and confirmed on the next read.` : "Allowed. Nothing needed changing yet.");
+    toast(applied ? `Made ${plural(applied, "change")}. Each one is sent to ${p.integration_name} and confirmed on the next read.` : "Allowed. Nothing needed changing yet.");
     load();
   }
 
@@ -120,6 +124,20 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
     const { error } = await api.POST("/v1/workspaces/{ws}/allocation/changes/{id}/undo", { params: { path: { ws, id: c.id! } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Undone.");
+    load();
+  }
+
+  async function clearDecline(d: AllocationDecline) {
+    const ok = await confirmAction(
+      `Let ${d.mailbox_email} send for ${d.sequence_name} again?`,
+      <p>Outflare may suggest or assign this mailbox to {d.sequence_name} again the next time it plans, which is straight away.</p>,
+      "Clear",
+      false,
+    );
+    if (!ok) return;
+    const { error } = await api.DELETE("/v1/workspaces/{ws}/allocation/declines/{id}", { params: { path: { ws, id: d.id } } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Cleared. ${d.mailbox_email} can be given to ${d.sequence_name} again.`);
     load();
   }
 
@@ -282,7 +300,7 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
             rowId={(p) => p.integration_id!}
             columnsMenu={false}
             columns={[
-              { id: "account", header: "Account", accessorFn: (p) => p.name, cell: ({ row: { original: p } }) => <span className="font-medium">{p.name}</span> },
+              { id: "account", header: "Account", accessorFn: (p) => p.integration_name, cell: ({ row: { original: p } }) => <span className="font-medium">{p.integration_name}</span> },
               {
                 id: "state",
                 header: "State",
@@ -319,6 +337,47 @@ export function Allocation({ ws, canManage, canSetMode, go }: { ws: string; canM
                         {p.awaiting_review && p.control === "full" && <Button onClick={() => review(p)}>Allow changes</Button>}
                       </span>
                     ),
+                  }]
+                : []),
+            ]}
+          />
+        </section>
+      )}
+
+      {declines.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-[13px] font-semibold">Kept from sequences</h2>
+          <p className="text-[12px] text-muted-foreground">Outflare won't give these mailboxes to these sequences again until you clear them.</p>
+          <DataTable
+            data={declines}
+            rowId={(d) => d.id}
+            columnsMenu={false}
+            searchPlaceholder="Search mailbox or sequence"
+            initialSort={[{ id: "when", desc: true }]}
+            columns={[
+              { id: "when", header: "When", accessorFn: (d) => d.declined_at, cell: ({ row: { original: d } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(d.declined_at)}>{ago(d.declined_at)}</span> },
+              { id: "mailbox", header: "Mailbox", accessorFn: (d) => d.mailbox_email, meta: { mono: true } },
+              {
+                id: "sequence",
+                header: "Kept from",
+                accessorFn: (d) => d.sequence_name,
+                cell: ({ row: { original: d } }) => <button className="font-medium underline decoration-border underline-offset-2 hover:decoration-foreground" onClick={() => go("sequences", d.sequence_id)}>{d.sequence_name}</button>,
+              },
+              {
+                id: "why",
+                header: "Why",
+                accessorFn: (d) => declineLabel[d.source] ?? d.source,
+                cell: ({ row: { original: d } }) => (
+                  <span className="text-muted-foreground">{declineLabel[d.source] ?? d.source}{d.actor_name ? ` by ${d.actor_name}` : ""}{d.reason ? `: ${d.reason}` : ""}</span>
+                ),
+              },
+              ...(canManage
+                ? [{
+                    id: "actions",
+                    header: () => <span className="sr-only">Actions</span>,
+                    enableSorting: false,
+                    meta: { align: "right" as const },
+                    cell: ({ row: { original: d } }: { row: { original: AllocationDecline } }) => <Button variant="ghost" onClick={() => clearDecline(d)}>Clear</Button>,
                   }]
                 : []),
             ]}

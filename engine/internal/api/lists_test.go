@@ -134,7 +134,7 @@ func TestBuildListFromSearchWithWaterfall(t *testing.T) {
 	for _, p := range providers["data"].([]any) {
 		p := p.(map[string]any)
 		if p["connector"] == "apollo" {
-			found = len(p["integrations"].([]any)) == 1 && len(p["filters"].([]any)) > 0
+			found = len(p["integrations"].([]any)) == 1 && len(p["filters"].([]any)) > 0 && methods(p) == "oauth2,api_key" && p["auth"] == nil
 		}
 	}
 	if !found {

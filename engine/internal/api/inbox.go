@@ -50,7 +50,7 @@ type inboundView struct {
 	AssigneeName   *string    `json:"assignee_name"`
 	SnoozedUntil   *time.Time `json:"snoozed_until"`
 	Done           bool       `json:"done"`
-	Labels         []string   `json:"labels"`
+	Tags           []string   `json:"tags"`
 	// Unified inbox and labelling.
 	Source             string         `json:"source"`
 	IntegrationID      *string        `json:"integration_id"`
@@ -76,7 +76,7 @@ func (v *inboundView) withGroup() {
 const inboundSelect = `
 	SELECT i.id, i.mailbox_id, m.email, i.from_email, i.from_name, i.to_email, i.subject, i.body, i.kind, i.opt_out, i.read,
 	       i.lead_id, NULLIF(trim(l.first_name || ' ' || l.last_name), ''), NULLIF(l.company, ''), i.sequence_id, q.name, i.received_at,
-	       i.category, i.category_source, i.assigned_to, u.name, i.snoozed_until, i.done, i.labels,
+	       i.category, i.category_source, i.assigned_to, u.name, i.snoozed_until, i.done, i.tags,
 	       i.source, i.integration_id, i.category_confidence, i.category_reason, i.details, i.needs_review, i.classified_at,
 	       COALESCE(q.brand_id, m.brand_id), NULL::text
 	FROM inbound_messages i
@@ -221,7 +221,7 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 				tags = append(tags, t)
 			}
 		}
-		where += ` AND i.labels && ` + arg(tags)
+		where += ` AND i.tags && ` + arg(tags)
 	}
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		p := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToLower(v)) + "%"
@@ -385,14 +385,14 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		AssignedTo   optional[string]    `json:"assigned_to"`
 		SnoozedUntil optional[time.Time] `json:"snoozed_until"`
 		Done         *bool               `json:"done"`
-		Labels       *[]string           `json:"labels"`
+		Tags         *[]string           `json:"tags"`
 		NeedsReview  *bool               `json:"needs_review"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Read == nil && !req.Category.Set && !req.AssignedTo.Set && !req.SnoozedUntil.Set && req.Done == nil && req.Labels == nil && req.NeedsReview == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send read, category, assigned_to, snoozed_until, done, labels or needs_review")
+	if req.Read == nil && !req.Category.Set && !req.AssignedTo.Set && !req.SnoozedUntil.Set && req.Done == nil && req.Tags == nil && req.NeedsReview == nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send read, category, assigned_to, snoozed_until, done, tags or needs_review")
 		return
 	}
 	if req.Category.Value != nil && !slices.Contains(inbox.Categories, *req.Category.Value) {
@@ -407,21 +407,21 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "snoozed_until must be in the future, or null to wake it now")
 		return
 	}
-	var labels []string
-	if req.Labels != nil {
-		labels = []string{}
-		for _, l := range *req.Labels {
-			l = strings.ToLower(strings.TrimSpace(l))
-			if l == "" || len(l) > 40 {
-				writeError(w, r, http.StatusBadRequest, "invalid_request", "each label must be 1 to 40 characters")
+	var tags []string
+	if req.Tags != nil {
+		tags = []string{}
+		for _, t := range *req.Tags {
+			t = strings.ToLower(strings.TrimSpace(t))
+			if t == "" || len(t) > 40 {
+				writeError(w, r, http.StatusBadRequest, "invalid_request", "each tag must be 1 to 40 characters")
 				return
 			}
-			if !slices.Contains(labels, l) {
-				labels = append(labels, l)
+			if !slices.Contains(tags, t) {
+				tags = append(tags, t)
 			}
 		}
-		if len(labels) > 20 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "at most 20 labels")
+		if len(tags) > 20 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "at most 20 tags")
 			return
 		}
 	}
@@ -474,13 +474,16 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 			set = append(set, "done = "+arg(*req.Done))
 			changed["done"] = *req.Done
 		}
-		if req.Labels != nil {
-			set = append(set, "labels = "+arg(labels))
-			changed["labels"] = labels
+		if req.Tags != nil {
+			// labels is the column's old name, written until it is
+			// dropped (0363).
+			t := arg(tags)
+			set = append(set, "tags = "+t, "labels = "+t)
+			changed["tags"] = tags
 			// A new tag joins the workspace's list, so it can be picked
 			// and coloured later.
 			if _, err := tx.Exec(ctx, `INSERT INTO inbox_tags (workspace_id, name) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
-				a.WorkspaceID, labels); err != nil {
+				a.WorkspaceID, tags); err != nil {
 				return err
 			}
 		}

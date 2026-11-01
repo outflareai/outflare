@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -49,12 +50,25 @@ func communityLinksFor(on bool, xURL, builderURL string) []communityLink {
 	}
 	links := []communityLink{{ID: "github", Title: "Star us on GitHub", URL: communityRepoURL}}
 	if xURL != "" {
-		links = append(links, communityLink{ID: "x", Title: "Follow us on X", URL: xURL})
+		links = append(links, communityLink{ID: "x", Title: "Follow us on X", URL: followIntent(xURL)})
 	}
 	if builderURL != "" {
-		links = append(links, communityLink{ID: "builder", Title: "Follow the builder: watch Outflare get built in public", URL: builderURL})
+		links = append(links, communityLink{ID: "builder", Title: "Follow the builder: watch Outflare get built in public", URL: followIntent(builderURL)})
 	}
 	return links
+}
+
+// xProfile is an X profile address, such as https://x.com/outflareai.
+var xProfile = regexp.MustCompile(`^https://(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/?$`)
+
+// followIntent turns an X profile into X's follow dialog, which asks one
+// question, Follow?, instead of opening the whole profile. Any other
+// address is kept as it is.
+func followIntent(u string) string {
+	if m := xProfile.FindStringSubmatch(u); m != nil {
+		return "https://x.com/intent/follow?screen_name=" + m[1]
+	}
+	return u
 }
 
 type communityView struct {

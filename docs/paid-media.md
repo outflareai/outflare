@@ -65,10 +65,19 @@ numbers. Each run stores:
   brand (`PATCH /v1/workspaces/{ws}/ads/accounts/{id}`) or be shared, and can be
   switched off.
 - **Campaigns**, with status, objective and daily budget.
-- **Daily campaign metrics**: spend, impressions, clicks, and the platform's own
-  conversions and conversion value where it reports them. Days are the account's
-  own days, in its time zone.
-- **Spend in the costs ledger**: one entry per campaign per day, channel
+- **Ad sets and ads** (Meta Ads and Google Ads, where Google calls ad sets ad
+  groups): each one under its campaign, with its status, a Meta ad set's own
+  budget, and for each ad what the platform says about it: its headline, text,
+  landing page, URL parameters or tracking template, its type (Google) and a
+  preview image (Meta, a link that expires and is refreshed by each sync).
+  Removed ad groups and ads aren't listed, but their numbers still sync while a
+  report has them.
+- **Daily metrics** for each campaign, ad set and ad: spend, impressions,
+  clicks, and the platform's own conversions and conversion value where it
+  reports them. Days are the account's own days, in its time zone. An ad set's
+  and an ad's numbers are already in their campaign's, so totals count
+  campaigns only.
+- **Spend in the costs ledger**: one entry per campaign (never per ad set or ad) per day, channel
   `paid_ads`, in the account's currency and brand, so paid ads sit beside every
   other cost and outcome. An entry is updated when the platform revises the day.
 
@@ -78,18 +87,19 @@ are not added up across platforms as if they were.
 
 ## Reading it
 
-In the app, open **Paid ads** in the sidebar: spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by platform and campaign, with each account's brand and sync switch. A connection that still needs a developer token asks for it at the top.
+In the app, open **Paid ads** in the sidebar: spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by day, platform and campaign, with each account's brand and sync switch. Open a campaign for its numbers by day, its ad sets and its ads; open an ad set to see only its ads. A connection that still needs a developer token asks for it at the top.
 
 | Call | What it answers |
 | --- | --- |
 | `GET /v1/workspaces/{ws}/ads/accounts` | Every account, its brand and sync status |
 | `GET /v1/workspaces/{ws}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS |
-| `GET /v1/workspaces/{ws}/ads/summary` | Totals grouped by `connector`, `brand`, `account` or `day`, per currency |
+| `GET /v1/workspaces/{ws}/ads/items` | Ad sets and ad groups (`level=ad_group`) or ads (`level=ad`), ranked by spend, with their campaign; `campaign_id` or `parent_id` narrows them |
+| `GET /v1/workspaces/{ws}/ads/summary` | Totals grouped by `connector`, `brand`, `account` or `day`, per currency; `entity_id` gives one campaign's, ad set's or ad's numbers alone |
 | `POST /v1/workspaces/{ws}/ads/sync` | Sync now instead of within six hours |
 
 All of them take `brand`. Money is in micros of the account's currency
 (1,000,000 = one unit); totals are given per currency, never converted. The MCP
-server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`,
+server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`, `list_ad_items`,
 `get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`).
 
 To credit sales to each ad by its id, paste the network's tracking template
@@ -110,8 +120,9 @@ tracking template yet.
 
 `GET /v1/workspaces/{ws}/attribution/ads` (MCP `get_attribution_ads`) gives the
 same rows. It takes `level` (`campaign`, `adset` or `ad`), `from`, `to`,
-`model` and `brand`. Ad accounts sync campaigns only, so ad sets and ads come
-with first-party numbers but no name or spend.
+`model` and `brand`. Meta and Google ad sets and ads come with their names and
+spend; other platforms sync campaigns only, so their ad sets and ads come with
+first-party numbers but no name or spend.
 
 ## Sending conversions back
 

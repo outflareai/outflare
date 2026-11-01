@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -80,6 +81,9 @@ type mapBuilder struct {
 	m     *automationMap
 	nodes map[string]*mapNode
 	edges map[mapEdge]bool
+	// brand is the one brand the map is drawn for, so its numbers count
+	// only that brand's events, firings and runs; nil for every brand.
+	brand *string
 }
 
 func (b *mapBuilder) node(n *mapNode) *mapNode {
@@ -110,7 +114,7 @@ func (s *Server) getAutomationMap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "the automation map shows rules and smart lists too, which needs the customers.read scope")
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -118,14 +122,16 @@ func (s *Server) getAutomationMap(w http.ResponseWriter, r *http.Request) {
 	if rec != "" {
 		var person bool
 		if validUUID(rec) {
-			if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND archived_at IS NULL AND merged_into IS NULL)`,
-				a.WorkspaceID, rec).Scan(&person); err != nil {
+			args := []any{a.WorkspaceID, rec}
+			inBrand := sel.sql("brand_id", &args)
+			if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM records WHERE workspace_id = $1 AND id = $2 AND record_type = 'person' AND archived_at IS NULL AND merged_into IS NULL`+inBrand+`)`,
+				args...).Scan(&person); err != nil {
 				s.internal(w, r, err)
 				return
 			}
 		}
 		if !person {
-			writeError(w, r, http.StatusNotFound, "not_found", "record is not a person in this workspace")
+			writeError(w, r, http.StatusNotFound, "not_found", "record is not a person in this brand")
 			return
 		}
 	}
@@ -151,6 +157,9 @@ func buildAutomationMap(ctx context.Context, tx pgx.Tx, a *access, sel brandSel)
 	visible := func(brand *string) bool { return a.sees(brand) && sel.matches(brand) }
 	b := &mapBuilder{m: &automationMap{Nodes: []*mapNode{}, Edges: []mapEdge{}, Flags: []mapFlag{}, WindowDays: mapWindowDays},
 		nodes: map[string]*mapNode{}, edges: map[mapEdge]bool{}}
+	if sel.id != "" && sel.id != "none" {
+		b.brand = &sel.id
+	}
 
 	// Smart lists, by id, for rules and journey steps to point at.
 	rows, err := tx.Query(ctx, smartListSelect, ws)
@@ -239,7 +248,7 @@ func buildAutomationMap(ctx context.Context, tx pgx.Tx, a *access, sel brandSel)
 			Detail: countOf(len(j.Steps), "step", "steps")}).ID
 		journeyIDs = append(journeyIDs, j.ID)
 	}
-	var seqIDs []string
+	var seqIDs, reviewIDs []string
 	for i := range journeyList {
 		j := &journeyList[i]
 		n, ok := journeyNode[j.ID]
@@ -261,6 +270,19 @@ func buildAutomationMap(ctx context.Context, tx pgx.Tx, a *access, sel brandSel)
 					b.edge(b.event(c.Event), n, "checks")
 				}
 			}
+			// Wait-until and split paths: the events a path waits for,
+			// and the conditions it checks.
+			for _, path := range st.Paths {
+				if path.Event != "" {
+					b.edge(b.event(path.Event), n, "waits_for")
+				}
+				for _, c := range path.Conditions {
+					if c.Event != "" {
+						b.edge(b.event(c.Event), n, "checks")
+					}
+				}
+			}
+			mapActionStep(b, n, st, &reviewIDs)
 			switch st.Kind {
 			case "add_to_list":
 				b.edge(n, listNode[st.ListID], "adds_to")
@@ -272,14 +294,11 @@ func buildAutomationMap(ctx context.Context, tx pgx.Tx, a *access, sel brandSel)
 				if st.Scope != "others" {
 					b.edge(n, journeyNode[st.JourneyID], "exits")
 				}
-			case "enroll_in_sequence", "stop_sequences":
+			case "enroll_in_sequence", "stop_sequences", "push_to_sequencer":
 				if st.SequenceID == "" {
 					continue
 				}
-				kind := "enrolls"
-				if st.Kind == "stop_sequences" {
-					kind = "stops"
-				}
+				kind := map[string]string{"enroll_in_sequence": "enrolls", "stop_sequences": "stops", "push_to_sequencer": "pushes"}[st.Kind]
 				b.edge(n, b.node(&mapNode{ID: "sequence:" + st.SequenceID, Kind: "sequence", Label: "Sequence", RefID: st.SequenceID}).ID, kind)
 				seqIDs = append(seqIDs, st.SequenceID)
 			case "add_tag", "remove_tag":
@@ -293,6 +312,12 @@ func buildAutomationMap(ctx context.Context, tx pgx.Tx, a *access, sel brandSel)
 	}
 
 	if err := mapVolumes(ctx, tx, ws, b, ruleIDs, journeyIDs, seqIDs); err != nil {
+		return nil, err
+	}
+	if err := mapReviewCampaigns(ctx, tx, ws, b, reviewIDs); err != nil {
+		return nil, err
+	}
+	if err := mapSources(ctx, tx, ws, b); err != nil {
 		return nil, err
 	}
 	quiet, err := quietEvents(ctx, tx, ws, b)
@@ -337,9 +362,12 @@ func mapVolumes(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder, ruleID
 		sql    string
 		ids    any
 	}{
-		{"event:", `SELECT name, count(*)::int FROM customer_events WHERE workspace_id = $1 AND name = ANY($2) AND occurred_at > now() - $3 * interval '1 day' GROUP BY name`, events},
-		{"rule:", `SELECT rule_id::text, count(*)::int FROM rule_firings WHERE workspace_id = $1 AND rule_id = ANY($2::uuid[]) AND fired_at > now() - $3 * interval '1 day' GROUP BY rule_id`, ruleIDs},
-		{"journey:", `SELECT journey_id::text, count(*)::int FROM journey_runs WHERE workspace_id = $1 AND journey_id = ANY($2::uuid[]) AND entered_at > now() - $3 * interval '1 day' GROUP BY journey_id`, journeyIDs},
+		{"event:", `SELECT name, count(*)::int FROM customer_events WHERE workspace_id = $1 AND name = ANY($2) AND occurred_at > now() - $3 * interval '1 day'
+			AND ($4::uuid IS NULL OR brand_id = $4) GROUP BY name`, events},
+		{"rule:", `SELECT rule_id::text, count(*)::int FROM rule_firings WHERE workspace_id = $1 AND rule_id = ANY($2::uuid[]) AND fired_at > now() - $3 * interval '1 day'
+			AND ($4::uuid IS NULL OR brand_id = $4) GROUP BY rule_id`, ruleIDs},
+		{"journey:", `SELECT journey_id::text, count(*)::int FROM journey_runs WHERE workspace_id = $1 AND journey_id = ANY($2::uuid[]) AND entered_at > now() - $3 * interval '1 day'
+			AND ($4::uuid IS NULL OR brand_id = $4) GROUP BY journey_id`, journeyIDs},
 	}
 	for _, id := range ruleIDs {
 		set("rule:"+id, 0)
@@ -348,7 +376,7 @@ func mapVolumes(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder, ruleID
 		set("journey:"+id, 0)
 	}
 	for _, q := range queries {
-		rows, err := tx.Query(ctx, q.sql, ws, q.ids, mapWindowDays)
+		rows, err := tx.Query(ctx, q.sql, ws, q.ids, mapWindowDays, b.brand)
 		if err != nil {
 			return err
 		}
@@ -404,10 +432,10 @@ func quietEvents(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder) (map[
 		quiet[n] = true
 	}
 	rows, err := tx.Query(ctx, `SELECT DISTINCT name FROM customer_events WHERE workspace_id = $1 AND name = ANY($2)
-		AND occurred_at > now() - $3 * interval '1 day'
+		AND occurred_at > now() - $3 * interval '1 day' AND ($5::uuid IS NULL OR brand_id = $5)
 		UNION
 		SELECT j.trigger_event FROM journeys j WHERE j.workspace_id = $1 AND j.id = ANY($4::uuid[]) AND EXISTS (
-			SELECT 1 FROM journey_runs r WHERE r.journey_id = j.id AND r.entered_at > now() - $3 * interval '1 day')`, ws, names, mapQuietDays, busy)
+			SELECT 1 FROM journey_runs r WHERE r.journey_id = j.id AND r.entered_at > now() - $3 * interval '1 day')`, ws, names, mapQuietDays, busy, b.brand)
 	if err != nil {
 		return nil, err
 	}
@@ -604,6 +632,115 @@ func mapPerson(ctx context.Context, tx pgx.Tx, ws, rec string, m *automationMap)
 		if err := rows.Err(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// mapActionStep adds what a journey's integration and messaging steps
+// reach outside the workspace's lists and journeys: the webhook it calls
+// (by host only: a path or query can hold a token), the Slack channel it
+// posts to, the CRM, the ad audience and the review campaign.
+func mapActionStep(b *mapBuilder, journey string, st journeys.Step, reviewIDs *[]string) {
+	switch st.Kind {
+	case "webhook":
+		host := "a URL from the run's data"
+		if u, err := url.Parse(st.URL); err == nil && u.Host != "" && !strings.Contains(u.Host, "{") {
+			host = u.Host
+		}
+		b.edge(journey, b.node(&mapNode{ID: "webhook:" + host, Kind: "webhook", Label: host}).ID, "calls")
+	case "slack":
+		b.edge(journey, b.node(&mapNode{ID: "slack:" + st.Channel, Kind: "slack", Label: st.Channel, Detail: "Slack channel"}).ID, "posts")
+	case "push_to_crm":
+		b.edge(journey, b.node(&mapNode{ID: "crm:" + st.ConnectionID, Kind: "crm", Label: "Your CRM"}).ID, "pushes")
+	case "sync_audience":
+		kind := "adds_to"
+		if st.Change == "remove" {
+			kind = "removes_from"
+		}
+		b.edge(journey, b.node(&mapNode{ID: "ad_audience:" + st.AdAccountID + ":" + st.AudienceID, Kind: "ad_audience", Label: "Audience " + st.AudienceID,
+			Detail: "Ad audience"}).ID, kind)
+	case "request_review":
+		if st.ReviewCampaignID != "" {
+			b.edge(journey, b.node(&mapNode{ID: "review_campaign:" + st.ReviewCampaignID, Kind: "review_campaign", Label: "Review campaign",
+				RefID: st.ReviewCampaignID}).ID, "requests")
+			*reviewIDs = append(*reviewIDs, st.ReviewCampaignID)
+		}
+	}
+}
+
+// mapReviewCampaigns names the review campaigns journeys ask for reviews
+// with.
+func mapReviewCampaigns(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(NULLIF(config->>'name', ''), 'Review campaign'), status FROM review_request_campaigns
+		WHERE workspace_id = $1 AND id::text = ANY($2)`, ws, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, status string
+		if err := rows.Scan(&id, &name, &status); err != nil {
+			return err
+		}
+		if n, ok := b.nodes["review_campaign:"+id]; ok {
+			n.Label, n.Status = name, status
+		}
+	}
+	return rows.Err()
+}
+
+// sourceNames are how the map names where events come from; others are
+// written from their label (segment becomes Segment).
+var sourceNames = map[string]string{
+	"browser": "Website", "api": "Your app (API)", "system": "Outflare", "lifecycle": "Lifecycle email", "partners": "Partners",
+	"conversions": "Conversions", "stripe": "Stripe", "paddle": "Paddle", "chargebee": "Chargebee", "lemonsqueezy": "Lemon Squeezy",
+	"segment": "Segment", "rudderstack": "RudderStack", "journey": "Journeys",
+}
+
+// mapSources adds where the map's events came from in the last 30 days:
+// the website snippet, the workspace's app through the API, a payments
+// provider and so on. Events rules emit are already drawn from their rule.
+func mapSources(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder) error {
+	var events []string
+	for _, n := range b.m.Nodes {
+		if n.Kind == "event" {
+			events = append(events, n.Label)
+		}
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT name, source, count(*)::int FROM customer_events WHERE workspace_id = $1 AND name = ANY($2)
+		AND occurred_at > now() - $3 * interval '1 day' AND source <> 'rule' GROUP BY name, source ORDER BY source, name`, ws, events, mapQuietDays)
+	if err != nil {
+		return err
+	}
+	type seen struct {
+		name, source string
+		n            int
+	}
+	got, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (seen, error) {
+		var x seen
+		return x, row.Scan(&x.name, &x.source, &x.n)
+	})
+	if err != nil {
+		return err
+	}
+	total := map[string]int{}
+	for _, x := range got {
+		label := sourceNames[x.source]
+		if label == "" {
+			label = strings.ToUpper(x.source[:1]) + strings.ReplaceAll(x.source[1:], "_", " ")
+		}
+		b.node(&mapNode{ID: "source:" + x.source, Kind: "source", Label: label})
+		b.edge("source:"+x.source, "event:"+x.name, "records")
+		total[x.source] += x.n
+	}
+	for src, n := range total {
+		b.nodes["source:"+src].Detail = countOf(n, "event", "events") + " in 30 days"
 	}
 	return nil
 }

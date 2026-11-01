@@ -64,7 +64,9 @@ function xPrefix(kind: Kind, builder: string): string {
 function draftURL(channel: Channel, kind: Kind, message: string, page: string, version: string, builder: string): string {
   if (channel === "x") {
     const prefix = xPrefix(kind, builder);
-    return `https://x.com/intent/post?${new URLSearchParams({ text: `${prefix} ${message.slice(0, 280 - prefix.length - 1)}` })}`;
+    // related: after posting, X suggests following these accounts.
+    const related = builder ? `${builder},outflareai` : "outflareai";
+    return `https://x.com/intent/post?${new URLSearchParams({ text: `${prefix} ${message.slice(0, 280 - prefix.length - 1)}`, related })}`;
   }
   const [first, ...rest] = message.split("\n");
   const title = first.slice(0, 100);
@@ -98,7 +100,8 @@ function useBuilder(on: boolean): string {
       .GET("/v1/me/community")
       .then(({ data }) => {
         const url = data?.links.find((l) => l.id === "builder")?.url ?? "";
-        return /^https:\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/?$/.exec(url)?.[1] ?? "";
+        // X's follow dialog (intent/follow?screen_name=…) or a profile.
+        return (/[?&]screen_name=([A-Za-z0-9_]{1,15})$/.exec(url) ?? /^https:\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/?$/.exec(url))?.[1] ?? "";
       })
       .catch(() => "");
     builderHandle.then(setH);
@@ -119,6 +122,7 @@ export function FeedbackButton({ page }: { page: string }) {
   const [kind, setKind] = useState<Kind>("idea");
   const [message, setMessage] = useState("");
   const [posted, setPosted] = useState<Record<Channel, boolean> | null>(null);
+  const [followed, setFollowed] = useState(false);
   const v = useVersion(open);
   const builder = useBuilder(open);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -138,6 +142,7 @@ export function FeedbackButton({ page }: { page: string }) {
     if (o) track("ui.feedback_opened", { from: "top_bar" });
     else if (posted) {
       setPosted(null);
+      setFollowed(false);
       setMessage("");
     }
   }
@@ -148,6 +153,15 @@ export function FeedbackButton({ page }: { page: string }) {
     out(channel === "x" ? "x_post" : kind === "bug" ? "issue_draft" : "discussion_draft", posted ? "feedback_step2" : "feedback", kind);
     window.open(draftURL(channel, kind, text, page, v, builder), "_blank", "noopener,noreferrer");
     setPosted((p) => ({ github: false, x: false, ...p, [channel]: true }));
+  }
+
+  // The last step: follow the builder, in X's one-question follow dialog.
+  // It ticks "Follow the builder" in Get started and on Home too.
+  function follow() {
+    out("builder_follow", "feedback_step3", kind);
+    window.open(`https://x.com/intent/follow?${new URLSearchParams({ screen_name: builder })}`, "_blank", "noopener,noreferrer");
+    api.PATCH("/v1/me/community", { body: { clicked: "builder" } }).catch(() => {});
+    setFollowed(true);
   }
 
   return (
@@ -170,9 +184,14 @@ export function FeedbackButton({ page }: { page: string }) {
               <Step n={2} done={posted.x} label={posted.x ? "Filled in on X" : builder ? `Tell @${builder} on X, so people can back it` : "Tell people on X, so they can back it"}>
                 <Button variant="ghost" className="border" onClick={() => post("x")}>{marks.x}Post on X</Button>
               </Step>
+              {builder && (
+                <Step n={3} done={followed} label={followed ? `Following @${builder}` : `Follow @${builder} to see it get built`}>
+                  <Button variant="ghost" className="border" onClick={follow}>{marks.x}Follow</Button>
+                </Step>
+              )}
             </ol>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => { setPosted(null); setMessage(""); box.current?.focus(); }}>Post another</Button>
+              <Button variant="ghost" onClick={() => { setPosted(null); setFollowed(false); setMessage(""); box.current?.focus(); }}>Post another</Button>
               <Button onClick={() => toggle(false)}>Done</Button>
             </div>
           </div>

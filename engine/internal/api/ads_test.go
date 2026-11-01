@@ -35,6 +35,11 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000"},
 			map[string]any{"id": "10", "name": "Old test", "effective_status": "PAUSED"},
 		}}
+	case "/v24.0/act_55/adsets":
+		out = map[string]any{"data": []any{map[string]any{"id": "31", "name": "Lookalike", "effective_status": "ACTIVE", "campaign_id": "9"}}}
+	case "/v24.0/act_55/ads":
+		out = map[string]any{"data": []any{map[string]any{"id": "41", "name": "Demo video", "effective_status": "ACTIVE", "adset_id": "31",
+			"creative": map[string]any{"object_story_spec": map[string]any{"link_data": map[string]any{"link": "https://acme.example/demo", "name": "Book a demo"}}}}}}
 	case "/v24.0/act_55/adspixels":
 		out = map[string]any{"data": []any{map[string]any{"id": "777", "name": "Northpeak pixel"}}}
 	case "/v24.0/777/events":
@@ -72,10 +77,18 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rows := []any{}
 		from, _ := time.Parse(time.DateOnly, tr.Since)
 		to, _ := time.Parse(time.DateOnly, tr.Until)
+		// The one ad set, and its one ad, are all of the campaign.
 		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-			rows = append(rows, map[string]any{"campaign_id": "9", "campaign_name": "Prospecting", "date_start": d.Format(time.DateOnly),
+			row := map[string]any{"campaign_id": "9", "campaign_name": "Prospecting", "date_start": d.Format(time.DateOnly),
 				"spend": "25.40", "impressions": "1000", "clicks": "20",
-				"actions": []any{map[string]any{"action_type": "lead", "value": "2"}}, "action_values": []any{map[string]any{"action_type": "lead", "value": "60"}}})
+				"actions": []any{map[string]any{"action_type": "lead", "value": "2"}}, "action_values": []any{map[string]any{"action_type": "lead", "value": "60"}}}
+			switch r.URL.Query().Get("level") {
+			case "adset":
+				row["adset_id"], row["adset_name"] = "31", "Lookalike"
+			case "ad":
+				row["ad_id"], row["ad_name"], row["adset_id"] = "41", "Demo video", "31"
+			}
+			rows = append(rows, row)
 		}
 		out = map[string]any{"data": rows}
 	default:
@@ -149,7 +162,7 @@ func TestAdsSyncAndReports(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The first run reads 90 days for the one campaign that spent.
-	if res.Accounts != 1 || res.Rows != 90 || res.Campaigns != 2 {
+	if res.Accounts != 1 || res.Rows != 90 || res.Campaigns != 2 || res.AdGroups != 1 || res.Ads != 1 {
 		t.Fatalf("first sync: %+v", res)
 	}
 	accts := owner.must(200, "GET", base+"/ads/accounts", nil)["data"].([]any)
@@ -199,6 +212,47 @@ func TestAdsSyncAndReports(t *testing.T) {
 	if len(days) != 10 {
 		t.Fatalf("by day: %d", len(days))
 	}
+	// Ad sets and ads repeat their campaign's numbers, so totals count
+	// campaigns only.
+	if tot := sum["totals"].([]any)[0].(map[string]any)["totals"].(map[string]any); tot["spend_micros"] != 254_000_000.0 || tot["clicks"] != 200.0 {
+		t.Fatalf("totals count each day once: %v", tot)
+	}
+
+	// Below the campaign: its ad set, and the ad in it.
+	campID := c["id"].(string)
+	sets := owner.must(200, "GET", base+"/ads/items?level=ad_group&from="+from+"&to="+to, nil)["data"].([]any)
+	if len(sets) != 1 {
+		t.Fatalf("ad sets: %v", sets)
+	}
+	set := sets[0].(map[string]any)
+	if set["external_id"] != "31" || set["name"] != "Lookalike" || set["parent_id"] != campID || set["campaign_id"] != campID || set["campaign_name"] != "Prospecting" ||
+		set["totals"].(map[string]any)["spend_micros"] != 254_000_000.0 {
+		t.Fatalf("ad set: %v", set)
+	}
+	ads := owner.must(200, "GET", base+"/ads/items?campaign_id="+campID+"&from="+from+"&to="+to, nil)["data"].([]any)
+	if len(ads) != 1 {
+		t.Fatalf("ads: %v", ads)
+	}
+	ad := ads[0].(map[string]any)
+	if ad["level"] != "ad" || ad["external_id"] != "41" || ad["parent_id"] != set["id"] || ad["parent_name"] != "Lookalike" || ad["campaign_id"] != campID ||
+		ad["details"].(map[string]any)["url"] != "https://acme.example/demo" || ad["details"].(map[string]any)["headline"] != "Book a demo" ||
+		ad["totals"].(map[string]any)["conversions"] != 20.0 {
+		t.Fatalf("ad: %v", ad)
+	}
+	if byParent := owner.must(200, "GET", base+"/ads/items?parent_id="+set["id"].(string), nil)["data"].([]any); len(byParent) != 1 {
+		t.Fatalf("ads in the ad set: %v", byParent)
+	}
+	if other := owner.must(200, "GET", base+"/ads/items?campaign_id=00000000-0000-0000-0000-000000000000", nil)["data"].([]any); len(other) != 0 {
+		t.Fatalf("ads in another campaign: %v", other)
+	}
+	// One ad's trend by day.
+	if trend := owner.must(200, "GET", base+"/ads/summary?group=day&entity_id="+ad["id"].(string)+"&from="+from+"&to="+to, nil)["data"].([]any); len(trend) != 10 ||
+		trend[0].(map[string]any)["totals"].(map[string]any)["spend_micros"] != 25_400_000.0 {
+		t.Fatalf("ad by day: %v", trend)
+	}
+	owner.must(400, "GET", base+"/ads/items?level=campaign", nil)
+	owner.must(400, "GET", base+"/ads/items?campaign_id=nope", nil)
+	owner.must(400, "GET", base+"/ads/summary?entity_id=nope", nil)
 	owner.must(400, "GET", base+"/ads/summary?group=weekday", nil)
 	owner.must(400, "GET", base+"/ads/campaigns?from=yesterday", nil)
 	owner.must(400, "GET", base+"/ads/campaigns?status=live", nil)

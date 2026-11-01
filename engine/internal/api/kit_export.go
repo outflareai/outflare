@@ -69,6 +69,7 @@ type exporter struct {
 	tmpls    []playbooks.KitTemplate
 	handles  map[string]string // a step's template ref → handle
 	seqs     map[string]string // sequence id → input name
+	asked    map[string]string // a setting and its value → input name
 	inputs   []playbooks.KitInput
 	notes    []string
 }
@@ -97,7 +98,7 @@ func (s *Server) exportKit(w http.ResponseWriter, r *http.Request) {
 	var out *kitExport
 	err := pgx.BeginTxFunc(r.Context(), s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		x := &exporter{ctx: r.Context(), tx: tx, a: a, taken: map[string]map[string]bool{}, jKeys: map[string]string{}, lKeys: map[string]string{},
-			ruleSeen: map[string]bool{}, handles: map[string]string{}, seqs: map[string]string{}, notes: []string{}}
+			ruleSeen: map[string]bool{}, handles: map[string]string{}, seqs: map[string]string{}, asked: map[string]string{}, notes: []string{}}
 		var err error
 		out, err = x.export(in)
 		return err
@@ -260,8 +261,56 @@ func (x *exporter) steps(j *journeyView) error {
 		if st.SequenceID != "" {
 			st.SequenceID = "{{" + x.sequence(st.SequenceID, j.Name) + "}}"
 		}
+		x.ownSettings(st, j.Name)
 	}
 	return nil
+}
+
+// ownSettings turns what a step names of this workspace's own (a webhook's
+// URL, a Slack channel, an ad audience, a review campaign) into inputs the
+// workspace applying the kit gives, and leaves out what holds its keys:
+// a webhook's headers and auth, and which connection to use.
+func (x *exporter) ownSettings(st *journeys.Step, journey string) {
+	in := func(setting, value, label, example string) string {
+		return "{{" + x.ask(setting, value, cut(label, 80), example,
+			cut("The journey "+journey+" uses this workspace's own; give yours.", 300)) + "}}"
+	}
+	switch st.Kind {
+	case "webhook":
+		st.URL = in("webhook_url", st.URL, "The URL the webhook in "+journey+" calls", "https://example.com/hooks/outflare")
+		if len(st.Headers) > 0 {
+			st.Headers = nil
+			x.note("The webhook in %s had headers; they can hold keys, so the kit leaves them out. Add them after applying it.", journey)
+		}
+		if st.Auth != nil && st.Auth.Type != "" && st.Auth.Type != "none" {
+			st.Auth = nil
+			x.note("The webhook in %s had auth; the kit leaves it out, so add the key after applying it.", journey)
+		}
+	case "slack":
+		st.Channel = in("slack_channel", st.Channel, "The Slack channel id for "+journey, "C0123456789")
+		st.ConnectionID = ""
+	case "push_to_crm":
+		st.ConnectionID = ""
+	case "sync_audience":
+		st.AdAccountID = in("ad_account", st.AdAccountID, "The ad account for "+journey+" (Paid ads)", "00000000-0000-4000-8000-0000000000aa")
+		st.AudienceID = in("ad_audience", st.AudienceID, "The ad audience id for "+journey, "1234567890")
+	case "request_review":
+		st.ReviewCampaignID = in("review_campaign", st.ReviewCampaignID, "The review campaign for "+journey, "00000000-0000-4000-8000-0000000000bb")
+	}
+}
+
+// ask makes a text input for a setting, once per setting and value, with
+// no default: the value belongs to this workspace, and a URL can hold a
+// token.
+func (x *exporter) ask(setting, value, label, example, help string) string {
+	memo := setting + "\x00" + value
+	if name, ok := x.asked[memo]; ok {
+		return name
+	}
+	name := x.key("input", setting, nil)
+	x.inputs = append(x.inputs, playbooks.KitInput{Name: name, Label: label, Kind: playbooks.InputText, Example: example, Help: help})
+	x.asked[memo] = name
+	return name
 }
 
 // sequence turns a sequence into an input: a sequence id means nothing in

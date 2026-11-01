@@ -313,9 +313,11 @@ type workspaceView struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Slug string `json:"slug"`
+	// Role is the role the caller is on: a starting role's key or the id
+	// of one the workspace made, as GET /roles lists it. Empty for tokens.
 	Role string `json:"role,omitempty"`
-	// The workspace's own role the caller is on, or null for a starting role.
-	RoleID *string `json:"role_id,omitempty"`
+	// The role's name as the workspace shows it.
+	RoleName string `json:"role_name,omitempty"`
 	// What the caller may do here; the app shows only what these allow.
 	Scopes []string `json:"scopes,omitempty"`
 	// The brands the caller is kept to; empty for every brand.
@@ -326,12 +328,30 @@ type workspaceView struct {
 	// Parts of Outflare switched on for this workspace (package
 	// features). Left out when none is on, and in lists other than /v1/me.
 	Features []string `json:"features,omitempty"`
+	// roleID is the workspace's own role stored beside Role, until
+	// resolveRole turns the pair into the one role id.
+	roleID *string
+}
+
+// resolveRole turns the stored starting role and custom role id into the
+// role as GET /roles lists it, with its name.
+func (v *workspaceView) resolveRole(ctx context.Context, q querier) error {
+	if v.Role == "" {
+		return nil
+	}
+	roles, err := loadRoles(ctx, q, v.ID)
+	if err != nil {
+		return err
+	}
+	held := roleOf(roles, v.Role, v.roleID)
+	v.Role, v.RoleName, v.roleID = held.ID, held.Name, nil
+	return nil
 }
 
 func scanWorkspace(row pgx.Row, v *workspaceView, withRole bool) error {
 	dest := []any{&v.ID, &v.Name, &v.Slug}
 	if withRole {
-		dest = append(dest, &v.Role, &v.BrandIDs, &v.RoleID, &v.Scopes)
+		dest = append(dest, &v.Role, &v.BrandIDs, &v.roleID, &v.Scopes)
 	}
 	dest = append(dest, &v.Test)
 	if err := row.Scan(dest...); err != nil {
@@ -401,6 +421,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 	for i := range wss {
 		if wss[i].Features, err = features.List(ctx, s.pool, wss[i].ID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if err := wss[i].resolveRole(ctx, s.pool); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -489,7 +513,11 @@ func (s *Server) writeWorkspace(w http.ResponseWriter, r *http.Request, id, role
 		if a.Brands != nil {
 			v.BrandIDs = a.Brands
 		}
-		v.RoleID, v.Scopes = a.RoleID, a.Scopes
+		v.roleID, v.Scopes = a.RoleID, a.Scopes
+	}
+	if err := v.resolveRole(r.Context(), s.pool); err != nil {
+		s.internal(w, r, err)
+		return
 	}
 	writeJSON(w, status, v)
 }
@@ -497,15 +525,15 @@ func (s *Server) writeWorkspace(w http.ResponseWriter, r *http.Request, id, role
 // ---- Members ----
 
 type memberView struct {
-	UserID    string    `json:"user_id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Name   string `json:"name"`
+	// Role is the role they are on: a starting role's key or the id of
+	// one the workspace made, as GET /roles lists it.
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 	// The brands the member works on; empty for every brand.
 	BrandIDs []string `json:"brand_ids"`
-	// The workspace's own role they are on, or null for a starting role.
-	RoleID *string `json:"role_id"`
 	// Their role's name as the workspace shows it.
 	RoleName string `json:"role_name"`
 }
@@ -527,8 +555,10 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (memberView, error) {
 		var v memberView
-		err := row.Scan(&v.UserID, &v.Email, &v.Name, &v.Role, &v.CreatedAt, &v.BrandIDs, &v.RoleID)
-		v.RoleName = roleOf(roles, v.Role, v.RoleID).Name
+		var roleID *string
+		err := row.Scan(&v.UserID, &v.Email, &v.Name, &v.Role, &v.CreatedAt, &v.BrandIDs, &roleID)
+		held := roleOf(roles, v.Role, roleID)
+		v.Role, v.RoleName = held.ID, held.Name
 		return v, err
 	})
 	if err != nil {
@@ -541,26 +571,18 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
-		// A starting role (owner, admin, operator or member, viewer).
+		// A role's id from GET /roles: a starting role's key (owner,
+		// admin, operator, viewer) or the id of one the
+		// workspace made.
 		Role string `json:"role"`
-		// One of the workspace's own roles, instead of role.
-		RoleID string `json:"role_id"`
 		// Brand ids or handles; empty for every brand.
 		BrandIDs *[]string `json:"brand_ids"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Role == "" && req.RoleID == "" && req.BrandIDs == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send role, role_id, brand_ids or more than one")
-		return
-	}
-	if req.Role != "" && req.RoleID != "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "send role or role_id, not both")
-		return
-	}
-	if req.Role != "" && !auth.ValidRole(req.Role) && req.Role != "member" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "role must be owner, admin, operator (member) or viewer; use role_id for the workspace's own roles")
+	if req.Role == "" && req.BrandIDs == nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send role, brand_ids or both")
 		return
 	}
 	var brands []string
@@ -570,11 +592,7 @@ func (s *Server) updateMember(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ref := req.Role
-	if req.RoleID != "" {
-		ref = req.RoleID
-	}
-	s.changeMember(w, r, a, r.PathValue("user"), memberChange{role: ref, brands: brands, setBrands: req.BrandIDs != nil})
+	s.changeMember(w, r, a, r.PathValue("user"), memberChange{role: req.Role, brands: brands, setBrands: req.BrandIDs != nil})
 }
 
 func (s *Server) removeMember(w http.ResponseWriter, r *http.Request) {
@@ -717,7 +735,7 @@ func (s *Server) changeMember(w http.ResponseWriter, r *http.Request, a *access,
 	case c.remove:
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "role": target.base, "role_id": roleIDOf(target), "role_name": target.Name, "brand_ids": brands})
+		writeJSON(w, http.StatusOK, map[string]any{"user_id": userID, "role": target.ID, "role_name": target.Name, "brand_ids": brands})
 	}
 }
 
@@ -795,15 +813,15 @@ var (
 const inviteLifetime = 7 * 24 * time.Hour
 
 type inviteView struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	// Role is the role the invite gives: a starting role's key or the id
+	// of one the workspace made, as GET /roles lists it.
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	BrandIDs  []string  `json:"brand_ids"`
-	// The workspace's own role the invite gives, or null for a starting role.
-	RoleID   *string `json:"role_id"`
-	RoleName string  `json:"role_name"`
+	RoleName  string    `json:"role_name"`
 }
 
 func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
@@ -823,8 +841,10 @@ func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (inviteView, error) {
 		var v inviteView
-		err := row.Scan(&v.ID, &v.Email, &v.Role, &v.CreatedAt, &v.ExpiresAt, &v.BrandIDs, &v.RoleID)
-		v.RoleName = roleOf(roles, v.Role, v.RoleID).Name
+		var roleID *string
+		err := row.Scan(&v.ID, &v.Email, &v.Role, &v.CreatedAt, &v.ExpiresAt, &v.BrandIDs, &roleID)
+		held := roleOf(roles, v.Role, roleID)
+		v.Role, v.RoleName = held.ID, held.Name
 		return v, err
 	})
 	if err != nil {
@@ -838,10 +858,10 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
 		Email string `json:"email"`
-		// A starting role (owner, admin, operator or member, viewer).
+		// A role's id from GET /roles: a starting role's key (owner,
+		// admin, operator, viewer) or the id of one the
+		// workspace made.
 		Role string `json:"role"`
-		// One of the workspace's own roles, instead of role.
-		RoleID string `json:"role_id"`
 		// Brand ids or handles the person will work on; empty for every
 		// brand.
 		BrandIDs []string `json:"brand_ids"`
@@ -855,15 +875,8 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ref := req.Role
-	if req.RoleID != "" {
-		if req.Role != "" {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "send role or role_id, not both")
-			return
-		}
-		ref = req.RoleID
-	}
 	if ref == "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "role or role_id is required")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "role is required")
 		return
 	}
 	roles, err := loadRoles(r.Context(), s.pool, a.WorkspaceID)
@@ -915,13 +928,13 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		err = tx.QueryRow(ctx, `
 			INSERT INTO invites (workspace_id, email, role, token_hash, invited_by, expires_at, brand_ids, role_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[], $8)
-			RETURNING id, email, role, created_at, expires_at, brand_ids::text[], role_id::text`,
+			RETURNING id, email, created_at, expires_at, brand_ids::text[]`,
 			a.WorkspaceID, email, role.base, hash, invitedBy, time.Now().Add(inviteLifetime), brands, roleID,
-		).Scan(&v.ID, &v.Email, &v.Role, &v.CreatedAt, &v.ExpiresAt, &v.BrandIDs, &v.RoleID)
+		).Scan(&v.ID, &v.Email, &v.CreatedAt, &v.ExpiresAt, &v.BrandIDs)
 		if err != nil {
 			return err
 		}
-		v.RoleName = role.Name
+		v.Role, v.RoleName = role.ID, role.Name
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "invite.created", "invite", v.ID, map[string]any{"email": email, "role": role.base, "role_id": roleID, "brand_ids": brands})
 	})
 	if errors.Is(err, errAlreadyMember) {

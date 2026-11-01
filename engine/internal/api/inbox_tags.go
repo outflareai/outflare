@@ -14,9 +14,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/inbox"
 )
 
-// Inbox tags and saved views. Tags are the names in a reply's labels, kept
-// in a list with colours; a view is a saved set of inbox filters, for one
-// person or shared with the workspace.
+// Inbox tags and saved views. Tags are the names on a reply (stored in the
+// inbound_messages.tags column), kept in a list with colours; a view is a
+// saved set of inbox filters, for one person or shared with the workspace.
 func (s *Server) routesInboxTags(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox-tags", s.inWorkspace(read, s.listInboxTags))
@@ -45,7 +45,7 @@ func (s *Server) listInboxTags(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT t.id, t.name, t.color,
-		       (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = t.workspace_id AND t.name = ANY(i.labels))::int,
+		       (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = t.workspace_id AND t.name = ANY(i.tags))::int,
 		       t.created_at
 		FROM inbox_tags t WHERE t.workspace_id = $1 ORDER BY t.name`, a.WorkspaceID)
 	if err != nil {
@@ -132,7 +132,7 @@ func (s *Server) createInboxTag(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO inbox_tags (workspace_id, name, color) VALUES ($1, $2, $3)
 			ON CONFLICT (workspace_id, name) DO NOTHING
 			RETURNING id, name, color,
-			          (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = $1 AND $2 = ANY(i.labels))::int, created_at`, a.WorkspaceID, name, color).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
+			          (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = $1 AND $2 = ANY(i.tags))::int, created_at`, a.WorkspaceID, name, color).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
@@ -196,8 +196,8 @@ func (s *Server) updateInboxTag(w http.ResponseWriter, r *http.Request) {
 				return errConflict
 			}
 			if _, err := tx.Exec(ctx, `
-				UPDATE inbound_messages SET labels = array_replace(labels, $2, $3)
-				WHERE workspace_id = $1 AND $2 = ANY(labels)`, a.WorkspaceID, cur.Name, name); err != nil {
+				UPDATE inbound_messages SET tags = array_replace(tags, $2, $3), labels = array_replace(tags, $2, $3)
+				WHERE workspace_id = $1 AND $2 = ANY(tags)`, a.WorkspaceID, cur.Name, name); err != nil {
 				return err
 			}
 		}
@@ -228,7 +228,7 @@ func (s *Server) deleteInboxTag(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET labels = array_remove(labels, $2) WHERE workspace_id = $1 AND $2 = ANY(labels)`,
+		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = array_remove(tags, $2), labels = array_remove(tags, $2) WHERE workspace_id = $1 AND $2 = ANY(tags)`,
 			a.WorkspaceID, cur.Name)
 		if err != nil {
 			return err

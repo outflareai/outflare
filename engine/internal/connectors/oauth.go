@@ -169,6 +169,7 @@ func AuthURL(d Definition, app OAuthApp, redirectURI, state, verifier string) st
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
 	ExpiresIn    int64  `json:"expires_in"`
 	Error        string `json:"error"`
 	Description  string `json:"error_description"`
@@ -262,6 +263,9 @@ func tokenCall(ctx context.Context, cl *Client, d Definition, form url.Values, o
 	out := Creds{"access_token": t.AccessToken, "refresh_token": t.RefreshToken}
 	if out["refresh_token"] == "" {
 		out["refresh_token"] = oldRefresh
+	}
+	if d.OAuth.IDToken && t.IDToken != "" {
+		out["id_token"] = t.IDToken
 	}
 	life := time.Duration(t.ExpiresIn) * time.Second
 	if life <= 0 {

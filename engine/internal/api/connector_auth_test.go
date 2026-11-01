@@ -31,6 +31,15 @@ func options(e map[string]any) map[string]map[string]any {
 	return out
 }
 
+// methods lists the methods in auth_options, in order.
+func methods(e map[string]any) string {
+	out := []string{}
+	for _, o := range e["auth_options"].([]any) {
+		out = append(out, o.(map[string]any)["method"].(string))
+	}
+	return strings.Join(out, ",")
+}
+
 // A connector with OAuth and an API key offers both; the person picks,
 // and the connection remembers which way it signed in.
 func TestConnectorOffersOAuthAndAPIKey(t *testing.T) {
@@ -56,7 +65,7 @@ func TestConnectorOffersOAuthAndAPIKey(t *testing.T) {
 	// No HubSpot app on this server: the key is the way, OAuth says why not.
 	entry := catalogEntryFor(t, anon, "/v1/connectors", "hubspot")
 	opts := options(entry)
-	if strings.Join(toStrings(entry["auth_methods"]), ",") != "oauth2,api_key" || entry["configured"] != true ||
+	if methods(entry) != "oauth2,api_key" || entry["auth"] != nil || entry["auth_methods"] != nil || entry["configured"] != true ||
 		opts["oauth2"]["available"] != false || !strings.Contains(opts["oauth2"]["reason"].(string), "CONNECTOR_HUBSPOT_CLIENT_ID") ||
 		opts["api_key"]["available"] != true || opts["api_key"]["recommended"] != true {
 		t.Fatalf("catalog without an app: %v", entry)

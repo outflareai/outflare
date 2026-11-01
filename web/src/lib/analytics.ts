@@ -149,6 +149,8 @@ export type UiEvent =
   | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
   | "ui.help_centre_template_picked" // a template applied in the help centre's Configure and style (template: classic, minimal, bold)
   | "ui.help_centre_brand_imported" // Import your brand in the help centre editor (found_logo, found_color)
+  | "ui.support_sla_saved" // response times saved or turned off in Support settings (enabled, business_hours)
+  | "ui.support_article_linked" // a help centre article's link put in a support reply (from: suggested, search, suggestion)
   | "ui.support_address_made" // a support forwarding address made from Support settings (brand: whether it is a brand's)
   | "ui.support_address_renamed" // a support forwarding address renamed (brand)
   | "ui.support_mailbox_picked" // a mailbox chosen for support from the Support settings (first: whether it was the first)
@@ -204,7 +206,7 @@ export type UiEvent =
   | "ui.cloud_feature_shown" // an Outflare Cloud feature's page on a server that doesn't run it (capability)
   | "ui.cloud_feature_clicked" // its link to Outflare Cloud (capability)
   | "ui.feedback_opened" // the Feedback box opened (from: top_bar, event)
-  | "ui.community_link_opened" // a link to Outflare on GitHub, X, its changelog or support (target: issue_draft, discussion_draft, x_post, good_first_issue, codespace, discussions, support_email, changelog; from: feedback, feedback_step2, whats_new, palette; kind for drafts: bug, idea, question)
+  | "ui.community_link_opened" // a link to Outflare on GitHub, X, its changelog or support (target: issue_draft, discussion_draft, x_post, builder_follow, good_first_issue, codespace, discussions, support_email, changelog; from: feedback, feedback_step2, feedback_step3, whats_new, palette; kind for drafts: bug, idea, question)
   | "ui.whats_new_opened"; // What's new opened (unseen: releases new since they last looked)
 
 type Props = Record<string, string | number | boolean | undefined>;

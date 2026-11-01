@@ -36,9 +36,23 @@ Each conversation can be assigned to a member and a team (`PATCH .../support/con
 
 **Suggest a reply** (`POST .../suggest-reply`) drafts an answer to the customer's latest email from the knowledge customers may be told (public and customers-only items), with the workspace's own AI model and its sources. It runs only when someone asks, so it never spends on its own, and nothing is sent until a person edits and sends it. Without an AI model it says so and still lists what the knowledge holds.
 
+**Articles** (`GET .../support/conversations/{id}/articles`) finds the public articles and quick answers a customer can be sent: without `q`, the best matches for what they last wrote; with `q`, a search. Each comes with its page on the help centre of the conversation's brand (the brand's own, else the one for every brand), and picking one puts its title and link in the reply. Only what the help centre shows is offered, never team or AI-only knowledge; with no live help centre the articles show without links. Suggest a reply's sources carry the same `url`, so a draft can link to the article it came from.
+
 ## Times
 
-`GET .../support/stats` gives, for the last 30 days (or `days`), how many conversations started, were answered and closed, and the median time to the first reply and to closing. Service-level targets come later; the times are tracked from the first conversation.
+`GET .../support/stats` gives, for the last 30 days (or `days`), how many conversations started, were answered and closed, how many missed an SLA target (`sla_missed`), and the median time to the first reply and to closing.
+
+## SLAs
+
+An SLA is how fast the team promises to answer and to resolve. Set one for the whole workspace (`PUT .../support/sla-policies/default`) and, if a brand needs different targets, one for that brand (`PUT .../support/sla-policies/{brand}`), which replaces the workspace's for its conversations. In the app it's under **Support settings**.
+
+- **First reply**: from the customer's first message to the team's first answer.
+- **Next reply**: from each later message the team hasn't answered to its answer.
+- **Resolution**: from when the conversation opened (or reopened) to closing it.
+
+Targets count only in the team's working week (`hours`, per weekday, in `timezone`), or around the clock without it, so a message on Friday evening isn't late on Saturday. A conversation waiting on the customer (pending) has no reply due; closing it stops both clocks.
+
+Each conversation's `sla` says when its next reply and its resolution are due, and when either was missed. A check every minute marks the misses and records `support.sla_breached` (`target`: reply or resolve). The inbox shows what is due and overdue: `?sla=overdue`, `?sla=due_soon` (a reply due within the hour), `?sort=due`, and the `overdue` count. Saving or removing an SLA recomputes every conversation not closed (up to 5,000 at once).
 
 ## Trying it
 
@@ -50,4 +64,4 @@ Reading conversations takes `inbox.read`; replying, notes and changes take `inbo
 
 ## Events and monitoring
 
-Actions are audit events and product events: `support.conversation_started`, `support.message_received`, `support.replied`, `support.reply_sent`, `support.reply_failed`, `support.note_added`, `support.conversation_assigned`, `support.conversation_updated`, `support.conversation_closed`, `support.conversation_reopened`, `support.reply_suggested`, `support.mailbox_added` and `support.mailbox_removed`. The **Support inbox** row of the Grafana dashboard shows messages, replies sent and how long they take; alerts fire when replies fail, wait or are slow ([monitoring](monitoring.md)).
+Actions are audit events and product events: `support.conversation_started`, `support.message_received`, `support.replied`, `support.reply_sent`, `support.reply_failed`, `support.note_added`, `support.conversation_assigned`, `support.conversation_updated`, `support.conversation_closed`, `support.conversation_reopened`, `support.reply_suggested`, `support.mailbox_added`, `support.mailbox_removed`, `support.sla_updated`, `support.sla_removed` and `support.sla_breached`. The **Support inbox** row of the Grafana dashboard shows messages, replies sent and how long they take, SLA misses and conversations past their SLA; alerts fire when replies fail, wait or are slow, and when the SLA check fails, stops or is slow ([monitoring](monitoring.md)).

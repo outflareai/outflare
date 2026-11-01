@@ -30,7 +30,8 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
         tag: z.string().optional(),
         record_id: id.optional().describe("One customer's conversations."),
         q: z.string().max(200).optional().describe("Words in the subject, address, name or messages."),
-        sort: z.enum(["newest", "oldest"]).optional().describe("oldest (with status open): who has waited longest first."),
+        sort: z.enum(["newest", "oldest", "due"]).optional().describe("oldest (with status open): who has waited longest first. due: what the SLA says is due first."),
+        sla: z.enum(["overdue", "due_soon"]).optional().describe("overdue: past an SLA target. due_soon: a reply due within the hour."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous answer, for the next page."),
       },
@@ -48,6 +49,33 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
       annotations: read,
     },
     ({ conversation_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/support/conversations/{id}", { params: { path: conv(conversation_id) } })),
+  );
+
+  server.registerTool(
+    "list_support_slas",
+    {
+      title: "Support SLAs",
+      description:
+        "How fast the team promises to reply and resolve: the workspace's SLA (brand_id null) and any brand's own, with targets in minutes " +
+        "and the working hours they count in. Each conversation's sla says when its reply and resolution are due and whether they were missed.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/support/sla-policies", { params: { path: path() } })),
+  );
+
+  server.registerTool(
+    "find_support_articles",
+    {
+      title: "Find help centre articles for a reply",
+      description:
+        "Public articles a customer can be sent a link to, with their page on the brand's help centre. Without q, the best matches for " +
+        "what the customer last wrote. Link to one instead of pasting it into the reply; url is null when no help centre is live.",
+      inputSchema: { conversation_id: id, q: z.string().max(1000).optional() },
+      annotations: read,
+    },
+    ({ conversation_id, q }) =>
+      call(() => gtm.GET("/v1/workspaces/{ws}/support/conversations/{id}/articles", { params: { path: conv(conversation_id), query: q ? { q } : {} } })),
   );
 
   server.registerTool(
@@ -75,6 +103,29 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     },
     ({ conversation_id }) =>
       call(() => gtm.POST("/v1/workspaces/{ws}/support/conversations/{id}/suggest-reply", { params: { path: conv(conversation_id) } })),
+  );
+
+  server.registerTool(
+    "set_support_sla",
+    {
+      title: "Set a support SLA",
+      description:
+        "Sets the reply and resolution targets for the workspace (scope default) or one brand (its id or handle). Minutes, null for none. " +
+        "hours is 7 lists (Sunday first) of [start, end] minutes after midnight in timezone; leave it out to count around the clock. " +
+        "Confirm the targets with the person first: every open conversation is recomputed.",
+      inputSchema: {
+        scope: z.string().describe("default, or a brand's id or handle."),
+        enabled: z.boolean().optional(),
+        first_reply_minutes: z.number().int().min(1).max(525600).nullable().optional(),
+        next_reply_minutes: z.number().int().min(1).max(525600).nullable().optional(),
+        resolution_minutes: z.number().int().min(1).max(525600).nullable().optional(),
+        timezone: z.string().optional().describe("IANA time zone, such as Europe/London. UTC by default."),
+        hours: z.array(z.array(z.tuple([z.number().int().min(0).max(1440), z.number().int().min(0).max(1440)])).max(4)).length(7).nullable().optional(),
+      },
+      annotations: write,
+    },
+    ({ scope, ...body }) =>
+      call(() => gtm.PUT("/v1/workspaces/{ws}/support/sla-policies/{scope}", { params: { path: { ws: workspace(), scope } }, body })),
   );
 
   server.registerTool(

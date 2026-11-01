@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { WebhookAttempt, WebhookDelivery, WebhookEndpoint, WebhookEventType } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -89,7 +90,16 @@ function EventPicker({ catalog, value, onChange }: { catalog: WebhookEventType[]
   );
 }
 
-export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void }) {
+// Webhooks belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Webhooks(props: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Webhooks" brands={active.length} />;
+  return <WebhooksPage key={brand.id} {...props} />;
+}
+
+function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null);
   const [catalog, setCatalog] = useState<WebhookEventType[]>([]);
   const [adding, setAdding] = useState(false);
@@ -97,13 +107,12 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
   const [description, setDescription] = useState("");
   const [events, setEvents] = useState<string[]>(["*"]);
   const [replyLabels, setReplyLabels] = useState("");
-  const [brand, setBrand] = useState("");
-  const { active: brands, byId } = useBrand(ws);
+  const { byId } = useBrand(ws);
   const [error, setError] = useState("");
   const [secret, setSecret] = useState<{ url: string; secret: string; rotated?: boolean } | null>(null);
 
   const load = useCallback(async () => {
-    const [e, c] = await Promise.all([api.GET("/v1/workspaces/{ws}/webhooks", { params: { path: { ws } } }), api.GET("/v1/webhook-events")]);
+    const [e, c] = await Promise.all([api.GET("/v1/brands/{brand}/webhooks", { params: { path: { brand: brandId } } }), api.GET("/v1/webhook-events")]);
     setEndpoints(e.data?.data ?? []);
     setCatalog(c.data?.data ?? []);
   }, [ws]);
@@ -114,27 +123,26 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/webhooks", { params: { path: { ws } }, body: { url: url.trim(), description: description.trim(), events, categories: replyLabels ? replyLabels.split(",") : [], ...(brand ? { brand } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks", { params: { path: { brand: brandId } }, body: { url: url.trim(), description: description.trim(), events, categories: replyLabels ? replyLabels.split(",") : [] } });
     if (error) return setError(errorMessage(error));
     setError("");
     setSecret({ url: data!.url, secret: data!.secret });
     setUrl("");
     setDescription("");
     setEvents(["*"]);
-    setBrand("");
     setAdding(false);
     load();
   }
 
   async function update(e: WebhookEndpoint, body: { enabled?: boolean; events?: string[]; url?: string; description?: string }, done: string) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/webhooks/{id}", { params: { path: { ws, id: e.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/webhooks/{id}", { params: { path: { brand: brandId, id: e.id } }, body });
     if (error) return toast(errorMessage(error), "error");
     toast(done);
     load();
   }
 
   async function test(e: WebhookEndpoint) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/webhooks/{id}/test", { params: { path: { ws, id: e.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks/{id}/test", { params: { path: { brand: brandId, id: e.id } } });
     if (error) return toast(errorMessage(error), "error");
     if (data?.status === "delivered") toast(`Test event delivered: ${e.url} answered ${data.last_status_code}.`);
     else toast(`Test event failed: ${data?.last_status_code ? `${e.url} answered ${data.last_status_code}` : data?.last_error ?? "no answer"}.`, "error");
@@ -142,7 +150,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
   }
 
   async function showSecret(e: WebhookEndpoint) {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/secret", { params: { path: { ws, id: e.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/webhooks/{id}/secret", { params: { path: { brand: brandId, id: e.id } } });
     if (error) return toast(errorMessage(error), "error");
     setSecret({ url: e.url, secret: data!.secret });
   }
@@ -154,7 +162,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
       choices: [{ label: "Stop the old one now", value: "now", variant: "danger-solid" }, { label: "Keep both for 24 hours", value: "later", variant: "primary" }],
     });
     if (!r) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/webhooks/{id}/rotate-secret", { params: { path: { ws, id: e.id } }, body: { expire_now: r.choice === "now" } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks/{id}/rotate-secret", { params: { path: { brand: brandId, id: e.id } }, body: { expire_now: r.choice === "now" } });
     if (error) return toast(errorMessage(error), "error");
     setSecret({ url: e.url, secret: data!.secret, rotated: true });
   }
@@ -167,7 +175,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
 
   async function remove(e: WebhookEndpoint) {
     if (!(await confirmAction(`Remove ${e.url}?`, <p>Outflare stops sending it events straight away, and deliveries still waiting are dropped. This can't be undone.</p>, "Remove endpoint"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/webhooks/{id}", { params: { path: { ws, id: e.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/webhooks/{id}", { params: { path: { brand: brandId, id: e.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Endpoint removed.");
     if (open === e.id) onOpen("");
@@ -203,16 +211,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
             <Input label="URL" type="url" placeholder="https://example.com/hooks/outflare" hint="Must be public https. Outflare POSTs JSON here." value={url} onChange={(e) => setUrl(e.target.value)} required />
             <Input label="Description" placeholder="e.g. CRM sync, Slack alerts" hint="Optional. Helps you tell endpoints apart." value={description} onChange={(e) => setDescription(e.target.value)} />
             <EventPicker catalog={catalog} value={events} onChange={setEvents} />
-            {brands.length > 0 && (
-              <label className="block text-sm">
-                <span className="mb-1.5 block text-[13px] font-medium">Which brands</span>
-                <select className={`${field} w-full sm:w-80`} value={brand} onChange={(e) => setBrand(e.target.value)}>
-                  <option value="">Every brand</option>
-                  {brands.map((b) => <option key={b.id} value={b.handle}>Only {b.name}</option>)}
-                </select>
-                <span className="mt-1 block text-xs text-muted-foreground">{brand ? "Only events about this brand's records, such as its sequences, mailboxes and replies." : "Events about every brand's records, and the workspace's own."}</span>
-              </label>
-            )}
+            <p className="text-xs text-muted-foreground">{byId(brandId)?.name ?? "This brand"}'s events, such as its sequences, mailboxes and replies, and the workspace's own. An endpoint belongs to one brand.</p>
             <label className="block space-y-1.5 text-sm">
               <span className="font-medium">Replies</span>
               <select className={`${field} w-full`} value={replyLabels} onChange={(e) => setReplyLabels(e.target.value)}>
@@ -248,7 +247,7 @@ export function Webhooks({ ws, canManage, open, onOpen }: { ws: string; canManag
             </span>
           )}
           columns={[
-            { id: "url", header: "Endpoint", accessorFn: (e) => e.url, cell: ({ row: { original: e } }) => <span className="block min-w-0"><span className="block break-all font-mono text-[12px]">{e.url}</span>{(e.description || e.brand_id) && <span className="block text-[12px] text-muted-foreground">{[e.description, e.brand_id && `Only ${byId(e.brand_id)?.name ?? "one brand"}`].filter(Boolean).join(" · ")}</span>}</span> },
+            { id: "url", header: "Endpoint", accessorFn: (e) => e.url, cell: ({ row: { original: e } }) => <span className="block min-w-0"><span className="block break-all font-mono text-[12px]">{e.url}</span>{e.description && <span className="block text-[12px] text-muted-foreground">{e.description}</span>}</span> },
             { id: "events", header: "Events", accessorFn: (e) => e.events.length, cell: ({ row: { original: e } }) => <span className="text-[12px] text-muted-foreground" title={e.events.join("\n")}>{eventsLabel(e.events)}</span> },
             { id: "status", header: "Status", accessorFn: (e) => (e.enabled ? (e.failing_since ? 1 : 0) : 2), cell: ({ row: { original: e } }) => endpointStatus(e) },
             { id: "errors", header: "Errors (24h)", accessorFn: (e) => (e.attempts_24h ? e.failed_attempts_24h / e.attempts_24h : -1), cell: ({ row: { original: e } }) => <span className="whitespace-nowrap text-[12px] text-muted-foreground">{errorRate(e.failed_attempts_24h, e.attempts_24h)}</span> },
@@ -310,6 +309,7 @@ function ActivityBars({ activity }: { activity: Activity }) {
 }
 
 function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; endpoint: WebhookEndpoint; canManage: boolean; back: () => void; onTest: () => Promise<void> }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [rows, setRows] = useState<WebhookDelivery[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
   const [status, setStatus] = useState<"" | WebhookDelivery["status"]>("");
@@ -317,17 +317,17 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
   const [activity, setActivity] = useState<Activity | null>(null);
 
   const load = useCallback(async (before?: number) => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries", { params: { path: { ws, id: endpoint.id }, query: { before, status: status || undefined, limit: 50 } } });
+    const { data } = await api.GET("/v1/brands/{brand}/webhooks/{id}/deliveries", { params: { path: { brand: brandId, id: endpoint.id }, query: { before, status: status || undefined, limit: 50 } } });
     setRows((r) => (before ? [...(r ?? []), ...(data?.data ?? [])] : data?.data ?? []));
     setNext(data?.next_before ?? null);
     if (!before) {
-      const a = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/activity", { params: { path: { ws, id: endpoint.id }, query: { days: 7 } } });
+      const a = await api.GET("/v1/brands/{brand}/webhooks/{id}/activity", { params: { path: { brand: brandId, id: endpoint.id }, query: { days: 7 } } });
       setActivity(a.data ?? null);
     }
-  }, [ws, endpoint.id, status]);
+  }, [brandId, endpoint.id, status]);
 
   async function show(d: WebhookDelivery) {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}", { params: { path: { ws, id: endpoint.id, delivery: d.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/webhooks/{id}/deliveries/{delivery}", { params: { path: { brand: brandId, id: endpoint.id, delivery: d.id } } });
     if (error) return toast(errorMessage(error), "error");
     if (data) setOpen(data);
   }
@@ -337,7 +337,7 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
   }, [load]);
 
   async function redeliver(d: WebhookDelivery) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}/redeliver", { params: { path: { ws, id: endpoint.id, delivery: d.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks/{id}/deliveries/{delivery}/redeliver", { params: { path: { brand: brandId, id: endpoint.id, delivery: d.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(data?.status === "delivered" ? "Delivered." : `Still failing: ${data?.last_status_code ?? data?.last_error ?? "no answer"}.`, data?.status === "delivered" ? "ok" : "error");
     load();

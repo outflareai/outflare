@@ -45,9 +45,9 @@ steps:
   - say: Check what the setup kit would add, then add it with those events. Its list and two journeys arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Rewrite the four emails in the brand's voice.
-    tools: [getBrandContext, updateEmailTemplate]
+    tools: [getBrandContext, updateBrandEmailTemplate]
   - say: Test both journeys with a recent customer, then ask a person to read the emails and turn the journeys on.
-    tools: [getJourney, testJourney]
+    tools: [getBrandJourney, testBrandJourney]
 guardrails:
   - The journeys are turned on only after a person approves them.
   - Never offer a discount or a refund in these emails unless a person approves it.

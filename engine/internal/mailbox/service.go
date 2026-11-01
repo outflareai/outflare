@@ -44,8 +44,12 @@ type Service struct {
 // TokenRequest identifies the mailbox an access token is for.
 type TokenRequest struct {
 	MailboxID, WorkspaceID, Email, Provider string
-	ConnectionID                            *string
-	RefreshToken                            string
+	// IntegrationID is the connection the mailbox signs in through (the
+	// google_mail or outlook_mail connector). ConnectionID and
+	// RefreshToken are the older ways, for mailboxes connected before.
+	IntegrationID *string
+	ConnectionID  *string
+	RefreshToken  string
 }
 
 // TokenSource returns an OAuth access token for a mailbox, and a new
@@ -245,11 +249,11 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 		_, err = tx.Exec(ctx, `
 			INSERT INTO mailboxes (id, workspace_id, pool_id, email, display_name, provider,
 				smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username,
-				credentials, daily_limit, source, auth_method, oauth_connection_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+				credentials, daily_limit, source, auth_method, oauth_connection_id, integration_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 			id, ws, poolID, r.Email, r.DisplayName, r.Provider,
 			r.SMTPHost, r.SMTPPort, r.SMTPUsername, r.IMAPHost, r.IMAPPort, r.IMAPUsername,
-			sealed, limit, source, authMethod(r), r.ConnectionID)
+			sealed, limit, source, authMethod(r), r.ConnectionID, r.IntegrationID)
 	} else {
 		// Re-importing a mailbox replaces its connection details and
 		// re-verifies it. Pool, name and limit change only when given.
@@ -262,11 +266,11 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 				daily_limit = CASE WHEN $13 = 0 THEN daily_limit ELSE $13 END,
 				status = CASE WHEN status = 'paused' THEN status ELSE 'verifying' END,
 				status_reason = NULL, smtp_ok = NULL, imap_ok = NULL, updated_at = now(),
-				auth_method = $14, oauth_connection_id = $15
+				auth_method = $14, oauth_connection_id = $15, integration_id = $16
 			WHERE id = $1 AND workspace_id = $2`,
 			id, ws, r.Provider, r.SMTPHost, r.SMTPPort, r.SMTPUsername,
 			r.IMAPHost, r.IMAPPort, r.IMAPUsername, sealed, poolID, r.DisplayName, r.DailyLimit,
-			authMethod(r), r.ConnectionID)
+			authMethod(r), r.ConnectionID, r.IntegrationID)
 	}
 	if err != nil {
 		return false, "", err
@@ -349,13 +353,13 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 	var smtpHost, imapHost, provider, method string
 	var smtpPort, imapPort int
 	var sealed []byte
-	var connID *string
+	var connID, integrationID *string
 	err := q.QueryRow(ctx, `
 		SELECT email, display_name, status, purpose, brand_id::text, smtp_host, smtp_port, smtp_username,
-		       imap_host, imap_port, imap_username, credentials, provider, auth_method, oauth_connection_id
+		       imap_host, imap_port, imap_username, credentials, provider, auth_method, oauth_connection_id, integration_id
 		FROM mailboxes WHERE id = $1 AND workspace_id = $2`, id, workspaceID,
 	).Scan(&a.Email, &a.DisplayName, &a.Status, &a.Purpose, &a.BrandID, &smtpHost, &smtpPort, &a.SMTPCred.Username,
-		&imapHost, &imapPort, &a.IMAPCred.Username, &sealed, &provider, &method, &connID)
+		&imapHost, &imapPort, &a.IMAPCred.Username, &sealed, &provider, &method, &connID, &integrationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -380,7 +384,7 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 	}
 	tok, rotated, err := s.Tokens.Token(ctx, TokenRequest{
 		MailboxID: id, WorkspaceID: workspaceID, Email: a.Email, Provider: provider,
-		ConnectionID: connID, RefreshToken: c.RefreshToken,
+		IntegrationID: integrationID, ConnectionID: connID, RefreshToken: c.RefreshToken,
 	})
 	if err != nil {
 		var ce *ConnError

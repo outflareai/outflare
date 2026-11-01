@@ -194,6 +194,8 @@ type knowledgePassage struct {
 	// words, meaning or both: how it was found.
 	Match string  `json:"match"`
 	Score float64 `json:"score"`
+	// Its page on the help centre, set where a customer can be sent it.
+	URL *string `json:"url,omitempty"`
 }
 
 type knowledgeQuery struct {

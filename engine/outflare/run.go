@@ -248,6 +248,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	connectors.AddMetadataClients(oauthApps, registry, cfg.PublicURL)
 	integrations := &connectors.Store{Pool: pool, Box: box, Registry: registry, Client: connectorHTTP,
 		OAuthApps: oauthApps}
+	tokens.Integrations = integrations
 	send.Platforms = integrations
 	verifier := &verify.Service{Pool: pool, Store: integrations, Builtin: verifiers.Builtin{Resolver: net.DefaultResolver}, Log: log}
 	verifier.Register(queue)
@@ -269,6 +270,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}})
 	vendors.Register(queue)
 	integrations.OnConnect = append(integrations.OnConnect, vendors.Connected)
+	integrations.OnReconnect = append(integrations.OnReconnect, vendors.Reconnected)
 	integrations.OnDisconnect = append(integrations.OnDisconnect, vendors.Disconnect)
 	// Live updates: connectors that post webhooks to a connection's own
 	// address (Geonode tells us when a scrape finishes).
@@ -525,6 +527,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			smart.Run(ctx, time.Minute)
+		}()
+		// Support replies and resolutions that ran past their SLA.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			(&support.SLAWatch{Pool: pool, Log: log}).Run(ctx, time.Minute)
 		}()
 		// Absence rules' timers.
 		wg.Add(1)

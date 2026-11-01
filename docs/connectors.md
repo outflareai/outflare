@@ -54,7 +54,7 @@ When this server has no OAuth app for a provider, the dialog says so and offers 
 
 Connections that take an address (a self-hosted Matomo, Umami, Plausible, PostHog, EmailBison or Cal.com) and mailboxes' SMTP and IMAP servers only reach public internet addresses, checked on the address actually dialled, so a connection can never be pointed at the server's own network. A self-hosted server whose tools run on the same private network sets `OUTFLARE_CONNECTORS_ALLOW_PRIVATE=true`.
 
-Every catalog entry says how it connects: `auth_methods` lists the ways, recommended first, and `auth_options` says which of them work on this server and, if not, what to set. Each connection has `auth_method` (`oauth2` or `api_key`).
+Every catalog entry says how it connects in one list, `auth_options`: each way (`oauth2`, `api_key`, or `none` for a built-in connector), the connector's preferred way first, whether it works on this server and, if not, what to set, and which one is recommended (the first that works). Each connection has `auth_method` (`oauth2` or `api_key`).
 
 | Connector | Sign in (OAuth) | API key |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ curl -s -X POST $OUTFLARE_URL/v1/workspaces/$WS/integrations \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"connector": "zerobounce", "credentials": {"api_key": "..."}}'
 
-# Or sign in instead, for connectors whose auth_methods include oauth2:
+# Or sign in instead, for connectors whose auth_options include oauth2:
 # open this in a browser (or add ?format=json to get the link)
 open "$OUTFLARE_URL/v1/workspaces/$WS/integrations/oauth/hubspot/authorize"
 ```
@@ -116,13 +116,15 @@ Signing in needs an app registered at the provider. Set `CONNECTOR_<ID>_CLIENT_I
 | Cal.com | app.cal.com, Settings, Developer, OAuth clients, new client (scopes `PROFILE_READ`, `BOOKING_READ`). Cal.com reviews new clients before they work | `CONNECTOR_CAL_COM_CLIENT_ID`, `_CLIENT_SECRET` |
 | Stripe | A Stripe App (`stripe apps create`) with the read permissions `customer_read`, `charge_read`, `event_read`, `product_read`, `plan_read` and `subscription_read`, `stripe_api_access_type: oauth`, public distribution and the callback in `allowed_redirect_uris`. Stripe reviews public apps. The client id is the app's `ca_...` id, the secret is the secret key of the Stripe account that owns the app, and `CONNECTOR_STRIPE_AUTH_URL` is the app's OAuth install link (Settings tab) | `CONNECTOR_STRIPE_CLIENT_ID`, `_CLIENT_SECRET`, `_AUTH_URL` |
 | Google | The server's Google client (see [analytics.md](analytics.md)) | `GOOGLE_OAUTH_CLIENT_ID`, `_SECRET` |
-| Microsoft | The server's Microsoft Entra app, with `Calendars.Read`, `User.Read`, `offline_access` | `MICROSOFT_OAUTH_CLIENT_ID`, `_SECRET` |
+| Microsoft | The server's Microsoft Entra app, with `Calendars.Read`, `User.Read`, `offline_access`, and for Outlook mailboxes `IMAP.AccessAsUser.All` and `SMTP.Send` | `MICROSOFT_OAUTH_CLIENT_ID`, `_SECRET` |
 
 PostHog and HubSpot are one connector each, with both ways in (`posthog`, `hubspot`).
 
+Mailbox sign-ins are connectors too: **Gmail** (`google_mail`) and **Outlook** (`outlook_mail`). Signing in (`oauth2`) connects one person's mailbox and adds it to Mailboxes; signing in again to the same mailbox replaces that connection's credentials. Connecting with fields (`api_key`: a Google service account key with domain-wide delegation, or an Entra app's tenant id, client id and secret) makes an admin connection, which adds any mailbox of the organisation with `POST /v1/workspaces/{ws}/integrations/{id}/mailboxes`. Starting a mailbox sign-in also needs `mailboxes.manage`, and a connection that mailboxes sign in through cannot be removed until they are.
+
 ## One list of connections and domains
 
-`GET /v1/workspaces/{ws}/connections` lists every account the workspace has connected in one shape: connector integrations (`kind: integration`, managed at `/integrations`) and the Google and Microsoft sign-ins for mailboxes (`kind: mailbox_oauth`, managed at `/oauth-connections`). Credentials are never returned.
+`GET /v1/workspaces/{ws}/connections` lists every account the workspace has connected in one shape: connector integrations (`kind: integration`, managed at `/integrations`), Gmail and Outlook mailbox sign-ins among them, and the older Google and Microsoft admin connections for mailboxes (`kind: mailbox_oauth`, managed at the deprecated `/oauth-connections` until they are moved). Credentials are never returned.
 
 `GET /v1/workspaces/{ws}/domains` lists every domain the workspace has set up, once per registrable domain, with each thing it is used for: a brand's website, an SEO site, a site tracking origin, a cold email sending domain, a Lifecycle email domain and a tracking domain for links. Each use has its host (a subdomain such as `links.acme.example` counts under `acme.example`) and status, `needs_attention` lists the uses still pending or failing, and `record_id` is the company record with that domain, when there is one. `?purpose=` keeps the domains set up for one thing. Each module still sets its own domains up; this is the one place to see them together. The MCP tools are `list_connections` and `list_workspace_domains`.
 
@@ -277,6 +279,7 @@ type WebhookVendor interface { RegisterWebhook; DeleteWebhook; ParseWebhook }   
 
 Statuses are mapped to `provisioning`, `active`, `cancelling`, `cancelled` and `failed`. `vendorsync` then:
 
+- starts syncing in the transaction that connects the supplier (`Connected`, an `OnConnect` hook), and syncs again when its key is replaced (`Reconnected`, an `OnReconnect` hook), so the mailboxes are read without anyone opening the list;
 - keeps `vendor_mailboxes`, every mailbox the supplier holds, refreshed every 15 minutes and on verified webhooks (deduplicated by event id);
 - imports chosen mailboxes, or all of them with `auto_import`, through `mailbox.Service.Import`, the same path and checks as a CSV import, with `source` set to the connector id;
 - for Google mailboxes asks the supplier for app passwords first, claiming each one before asking so two workers never ask twice, within the supplier's hourly rate and three at a time;

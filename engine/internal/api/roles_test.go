@@ -91,15 +91,27 @@ func TestCustomRoles(t *testing.T) {
 	owner.must(400, "POST", base+"/roles", map[string]any{"name": "Bad", "scopes": []string{"nope.read"}})
 	owner.must(403, "PATCH", base+"/roles/owner", map[string]any{"name": "Boss"})
 
-	writer, writerID := joinAs(t, owner, ws, "wren@acme.example", map[string]any{"role_id": id})
+	writer, writerID := joinAs(t, owner, ws, "wren@acme.example", map[string]any{"role": id})
 	got := writer.must(200, "GET", base, nil)
-	if got["role_id"] != id || !slices.Contains(scopesOf(got), "seo.manage") || slices.Contains(scopesOf(got), "leads.read") {
+	if got["role"] != id || got["role_name"] != "Content writer" || got["role_id"] != nil || !slices.Contains(scopesOf(got), "seo.manage") || slices.Contains(scopesOf(got), "leads.read") {
 		t.Fatalf("writer workspace view: %v", got)
 	}
 	writer.must(403, "GET", base+"/lead-lists", nil)
 	members := owner.must(200, "GET", base+"/members", nil)["data"].([]any)
-	if m := members[len(members)-1].(map[string]any); m["role_name"] != "Content writer" || m["role"] != "viewer" {
+	if m := members[len(members)-1].(map[string]any); m["role_name"] != "Content writer" || m["role"] != id || m["role_id"] != nil {
 		t.Fatalf("member view: %v", m)
+	}
+
+	// The one role field takes a role's id or a starting key; role_id is gone.
+	pending := owner.must(201, "POST", base+"/invites", map[string]any{"email": "pat@acme.example", "role": id})["invite"].(map[string]any)
+	if pending["role"] != id || pending["role_name"] != "Content writer" {
+		t.Fatalf("invite view: %v", pending)
+	}
+	owner.must(400, "POST", base+"/invites", map[string]any{"email": "pat@acme.example", "role_id": id})
+	owner.must(400, "POST", base+"/invites", map[string]any{"email": "pat@acme.example", "role": "nobody"})
+	owner.must(400, "PATCH", base+"/members/"+writerID, map[string]any{"role": "member"})
+	if m := owner.must(200, "PATCH", base+"/members/"+writerID, map[string]any{"role": id}); m["role"] != id || m["role_name"] != "Content writer" {
+		t.Fatalf("back on the custom role: %v", m)
 	}
 
 	// Editing the role changes what its people can do straight away.
@@ -132,7 +144,7 @@ func TestCustomRoles(t *testing.T) {
 	owner.must(204, "DELETE", base+"/roles/"+id+"?move_to=viewer", nil)
 	members = owner.must(200, "GET", base+"/members", nil)["data"].([]any)
 	for _, m := range members {
-		if m := m.(map[string]any); m["user_id"] == writerID && (m["role_id"] != nil || m["role_name"] != "Viewer") {
+		if m := m.(map[string]any); m["user_id"] == writerID && (m["role"] != "viewer" || m["role_name"] != "Viewer") {
 			t.Fatalf("moved member: %v", m)
 		}
 	}
@@ -151,7 +163,7 @@ func TestRoleBrandsAndTokens(t *testing.T) {
 
 	role := owner.must(201, "POST", base+"/roles", map[string]any{"name": "Brand helper", "scopes": []string{"workspace.read", "leads.read", "leads.manage"}})
 	id := role["id"].(string)
-	helper, _ := joinAs(t, owner, ws, "hal@acme.example", map[string]any{"role_id": id, "brand_ids": []string{brand}})
+	helper, _ := joinAs(t, owner, ws, "hal@acme.example", map[string]any{"role": id, "brand_ids": []string{brand}})
 	if got := helper.must(200, "GET", base, nil)["brand_ids"].([]any); len(got) != 1 {
 		t.Fatalf("brands: %v", got)
 	}
@@ -166,7 +178,7 @@ func TestRoleBrandsAndTokens(t *testing.T) {
 	// Editing a role trims the tokens its people made.
 	maker := owner.must(201, "POST", base+"/roles", map[string]any{"name": "Integrator", "scopes": []string{"workspace.read", "tokens.manage", "leads.manage"}})
 	mid := maker["id"].(string)
-	dev, _ := joinAs(t, owner, ws, "dev@acme.example", map[string]any{"role_id": mid})
+	dev, _ := joinAs(t, owner, ws, "dev@acme.example", map[string]any{"role": mid})
 	tok := dev.must(201, "POST", base+"/api-tokens", map[string]any{"name": "sync", "scopes": []string{"leads.manage"}})
 	bot := &client{t: t, h: h, bearer: tok["token"].(string)}
 	bot.must(200, "GET", base+"/lead-lists", nil)

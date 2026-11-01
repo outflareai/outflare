@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // Rules: the rules engine of the customer data platform. A rule turns what
 // people do, or don't do in time, into an event of its own on their
 // timeline, which journeys start on. This page lists rules and has the
@@ -66,13 +67,22 @@ function useLists(ws: string) {
   return lists;
 }
 
-export function Rules({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+// Rules belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Rules(props: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Rules" brands={active.length} />;
+  return <RulesPage key={brand.id} {...props} />;
+}
+
+function RulesPage({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<Rule[] | null>(null);
   const [archived, setArchived] = useState(false);
   const [error, setError] = useState("");
   const lists = useLists(ws);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/rules", { params: { path: { ws }, query: archived ? { status: "archived" } : {} } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/rules", { params: { path: { brand: brandId }, query: archived ? { status: "archived" } : {} } });
     if (error) setError(errorMessage(error));
     setList((data?.data ?? []).filter((r) => archived || r.status !== "archived"));
   }, [ws, archived]);
@@ -282,6 +292,7 @@ function Sentence({ f, set, catalog, lists, disabled }: { f: Form; set: (f: Form
 }
 
 function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: string; id: string; canManage: boolean; lists: SmartList[]; back: () => void; onCreated: (id: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const catalog = useFlowCatalog(ws);
   const kinds = useStepKinds(ws);
   const [r, setR] = useState<Rule | null>(null);
@@ -296,7 +307,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     if (!id) return;
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/rules/{id}", { params: { path: { ws, id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/rules/{id}", { params: { path: { brand: brandId, id } } });
     if (error || !data) return setError(errorMessage(error));
     setR(data);
     setF(formOf(data));
@@ -304,7 +315,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
   }, [ws, id]);
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/journeys", { params: { path: { ws } } }).then(({ data }) => setJourneys(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/journeys", { params: { path: { brand: brandId } } }).then(({ data }) => setJourneys(data?.data ?? []));
   }, [load, ws]);
 
   if (error && !f) return <Empty title="Could not load this rule" action={<Button onClick={back}>All rules</Button>}>{error}</Empty>;
@@ -320,8 +331,8 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
     setBusy(true);
     setError("");
     const res = r
-      ? await api.PATCH("/v1/workspaces/{ws}/rules/{id}", { params: { path: { ws, id: r.id } }, body: bodyOf(f!) })
-      : await api.POST("/v1/workspaces/{ws}/rules", { params: { path: { ws } }, body: bodyOf(f!) });
+      ? await api.PATCH("/v1/brands/{brand}/rules/{id}", { params: { path: { brand: brandId, id: r.id } }, body: bodyOf(f!) })
+      : await api.POST("/v1/brands/{brand}/rules", { params: { path: { brand: brandId } }, body: bodyOf(f!) });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
     toast(r ? "Saved." : "Draft saved. Dry-run it, then activate it.");
@@ -339,8 +350,8 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
     }[to] as [string, string, string, boolean];
     if (!(await confirmAction(...ask))) return;
     setBusy(true);
-    const path = `/v1/workspaces/{ws}/rules/{id}/${to}` as "/v1/workspaces/{ws}/rules/{id}/activate";
-    const { data, error } = await api.POST(path, { params: { path: { ws, id: r!.id } } });
+    const path = `/v1/brands/{brand}/rules/{id}/${to}` as "/v1/brands/{brand}/rules/{id}/activate";
+    const { data, error } = await api.POST(path, { params: { path: { brand: brandId, id: r!.id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     toast({ activate: "Active.", pause: "Paused.", archive: "Archived." }[to]);
@@ -350,7 +361,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
   async function dryRun() {
     if (!r) return;
     setSimming(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/rules/{id}/simulate", { params: { path: { ws, id: r.id } }, body: { days } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/rules/{id}/simulate", { params: { path: { brand: brandId, id: r.id } }, body: { days } });
     setSimming(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setSim(data);
@@ -362,12 +373,12 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
     if (!r) return;
     setPicking(false);
     track("ui.rule_followup_picked", { kind });
-    const { data: tpl } = await api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } } });
+    const { data: tpl } = await api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } } });
     const templates = (tpl?.data ?? []).filter((t: EmailTemplate) => t.purpose === "lifecycle" && t.status === "active");
     const step = newStep(kinds, kind, [], templates);
     const steps = kind === "email" && !step.template ? [] : clean([step]);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys", {
+      params: { path: { brand: brandId } },
       body: { name: `${r.name}: follow-up`.slice(0, 200), trigger: { kind: "event", event: r.emit_event }, steps },
     });
     if (error || !data) return toast(errorMessage(error), "error");

@@ -21,6 +21,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/hubspot"
 	"github.com/outflareai/outflare/engine/internal/connectors/instantly"
 	"github.com/outflareai/outflare/engine/internal/connectors/linkedin"
+	"github.com/outflareai/outflare/engine/internal/connectors/mailsignin"
 	"github.com/outflareai/outflare/engine/internal/connectors/manifest"
 	"github.com/outflareai/outflare/engine/internal/connectors/models"
 	"github.com/outflareai/outflare/engine/internal/connectors/partnerapps"
@@ -41,6 +42,7 @@ func Available() []c.Connector {
 	out = append(out, verifiers.All()...)
 	out = append(out, data.All()...)
 	out = append(out, emailbison.EmailBison{}, instantly.Instantly{}, smartlead.Smartlead{}, cheapinboxes.Connector{})
+	out = append(out, mailsignin.All()...)
 	out = append(out, calendars.All()...)
 	out = append(out, hubspot.All()...)
 	out = append(out, attio.All()...)

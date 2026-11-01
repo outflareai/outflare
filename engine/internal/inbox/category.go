@@ -97,6 +97,14 @@ func Complaint(body string) bool {
 
 // Categorize sorts a received message by the built-in rules, or returns ""
 // when they can't tell. Only the new text of a reply is read.
+//
+// kind and category look alike for automatic mail but mean different
+// things. kind is what the message is, read from its headers on arrival
+// and never changed: only a "reply" stops sequences, is checked for an
+// opt-out and counts as a reply in reports. category is a label: an
+// "auto_reply" kind always starts as out_of_office or auto_reply here, but
+// the AI can label a header-less reply automatic too, and a person can
+// relabel either, without changing the kind or what it already did.
 func Categorize(kind string, optOut bool, body string) string {
 	switch {
 	case kind == "reply" && Complaint(body):

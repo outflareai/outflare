@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // Journeys: if-this-then-that flows for people on customer records. An
 // event on someone's timeline (or a manual add) starts a run that sends
 // lifecycle emails, waits, branches on what they did and exits. The page
@@ -30,6 +31,7 @@ import { KitNotice } from "@/components/kit-notice";
 import { KitExportSheet } from "@/components/kit-export";
 import type { Go } from "./Lifecycle";
 import { useGuardrails } from "./EmailGuardrails";
+import { money } from "./Channels";
 
 type Status = Journey["status"];
 const statusTone: Record<Status, "green" | "grey" | "amber"> = { draft: "grey", active: "green", paused: "amber", archived: "grey" };
@@ -66,17 +68,25 @@ const columns: ColumnDef<Journey>[] = [
   { id: "updated", header: "Changed", accessorFn: (j) => j.updated_at, cell: ({ row: { original: j } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(j.updated_at)}>{ago(j.updated_at)}</span> },
 ];
 
-export function Journeys({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+// Journeys belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Journeys(props: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Journeys" brands={active.length} />;
+  return <JourneysPage key={brand.id} {...props} />;
+}
+
+function JourneysPage({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<Journey[] | null>(null);
   const [archived, setArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
-  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/journeys", { params: { path: { ws }, query: { ...(archived ? { status: "archived" as const } : {}), ...brandQuery } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/journeys", { params: { path: { brand: brandId }, query: { ...(archived ? { status: "archived" as const } : {}) } } });
     if (error) setError(errorMessage(error));
     setList(data?.data ?? []);
-  }, [ws, archived, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, archived, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) load();
   }, [load, open]);
@@ -138,6 +148,7 @@ function useEvents(ws: string) {
 }
 
 function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () => void; onSaved: (j: Journey) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const events = useEvents(ws);
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"event" | "manual">("event");
@@ -147,8 +158,8 @@ function NewJourneyDialog({ ws, onClose, onSaved }: { ws: string; onClose: () =>
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys", {
+      params: { path: { brand: brandId } },
       body: { name, trigger: kind === "event" ? { kind, event } : { kind } },
     });
     setBusy(false);
@@ -252,12 +263,13 @@ function stepCard(s: Step, j: Journey, kinds: StepKind[], templates: EmailTempla
 // StepResults is what a step has done and who is on it now, in its side
 // panel: each number leads to the people behind it, as in email tools.
 function StepResults({ ws, j, step, card }: { ws: string; j: Journey; step: Step; card: StepCard }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [runs, setRuns] = useState<JourneyRun[] | null>(null);
   const here = j.at_step?.[step.id] ?? 0;
   useEffect(() => {
     setRuns(null);
     if (!here) return;
-    api.GET("/v1/workspaces/{ws}/journeys/{id}/runs", { params: { path: { ws, id: j.id }, query: { status: "active", step: step.id, limit: 20 } } }).then(({ data }) => setRuns(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/journeys/{id}/runs", { params: { path: { brand: brandId, id: j.id }, query: { status: "active", step: step.id, limit: 20 } } }).then(({ data }) => setRuns(data?.data ?? []));
   }, [ws, j.id, step.id, here]);
   if (!card.numbers.length && !here) return null;
   return (
@@ -283,20 +295,57 @@ function StepResults({ ws, j, step, card }: { ws: string; j: Journey; step: Step
   );
 }
 
+type LiftPath = { id: string; holdout: boolean; people: number; converted: number; rate: number; revenue_per_person: { currency: string; amount_cents: number }[]; lift: number | null; p_value: number | null; verdict: string | null; incremental_revenue: { currency: string; amount_cents: number }[] | null };
+
+const verdictText: Record<string, string> = { better: "better", worse: "worse", no_clear_change: "no clear change", too_early: "too early to tell" };
+
+// SplitLift is what a random split changed against its holdout: each
+// path's conversion rate and revenue in the 30 days after the split. People
+// without analytics.read don't see it.
+function SplitLift({ ws, j, step }: { ws: string; j: Journey; step: Step }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
+  const [paths, setPaths] = useState<LiftPath[] | null>(null);
+  useEffect(() => {
+    setPaths(null);
+    api.GET("/v1/brands/{brand}/journeys/{id}/lift", { params: { path: { brand: brandId, id: j.id }, query: { step: step.id } } })
+      .then(({ data }) => setPaths(data?.paths ?? []));
+  }, [ws, brandId, j.id, step.id]);
+  if (!paths || paths.every((p) => p.people === 0)) return null;
+  return (
+    <div className="space-y-1 rounded-md border p-3 text-[13px]">
+      <p className="font-medium">Against the holdout, 30 days after the split</p>
+      <ul className="space-y-0.5">
+        {paths.map((p) => (
+          <li key={p.id} className="flex justify-between gap-2">
+            <span className="truncate">{p.id}{p.holdout ? " (holdout)" : ""}: {(p.rate * 100).toFixed(1)}% of {p.people} converted · {money(p.revenue_per_person)} each</span>
+            {!p.holdout && p.verdict && (
+              <span className={cn("shrink-0", p.verdict === "better" ? "text-emerald-600" : p.verdict === "worse" ? "text-destructive" : "text-muted-foreground")}>
+                {p.lift !== null && p.verdict !== "too_early" ? `${p.lift >= 0 ? "+" : ""}${(p.lift * 100).toFixed(0)}%, ` : ""}{verdictText[p.verdict] ?? p.verdict}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // useRules is the workspace's rules, to link a trigger to the rule that
 // emits its event. Someone who can't read rules sees no link.
 function useRules(ws: string) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [rules, setRules] = useState<Rule[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/rules", { params: { path: { ws } } }).then(({ data }) => setRules(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/rules", { params: { path: { brand: brandId } } }).then(({ data }) => setRules(data?.data ?? []));
   }, [ws]);
   return rules;
 }
 
 function useTemplates(ws: string) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } } }).then(({ data }) =>
+    api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } } }).then(({ data }) =>
       setTemplates((data?.data ?? []).filter((t) => t.purpose === "lifecycle" && t.status === "active")),
     );
   }, [ws]);
@@ -305,11 +354,12 @@ function useTemplates(ws: string) {
 
 // RuleDryRun is what the rule behind a trigger would have done lately.
 function useDryRun(ws: string, rule?: Rule) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [sim, setSim] = useState<RuleSimulation | null>(null);
   useEffect(() => {
     setSim(null);
     if (!rule) return;
-    api.POST("/v1/workspaces/{ws}/rules/{id}/simulate", { params: { path: { ws, id: rule.id } }, body: { days: 30 } }).then(({ data }) => setSim(data ?? null));
+    api.POST("/v1/brands/{brand}/rules/{id}/simulate", { params: { path: { brand: brandId, id: rule.id } }, body: { days: 30 } }).then(({ data }) => setSim(data ?? null));
   }, [ws, rule?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return sim;
 }
@@ -333,6 +383,7 @@ function TriggerCard({ t, rule, sim, go }: { t: TriggerFields; rule?: Rule; sim:
 }
 
 function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string; canManage: boolean; back: () => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const kinds = useStepKinds(ws);
   const templates = useTemplates(ws);
   const catalog = useFlowCatalog(ws);
@@ -367,20 +418,20 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   const undoRef = useRef<(redo: boolean) => void>(() => {});
 
   const loadVersions = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/journeys/{id}/versions", { params: { path: { ws, id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/journeys/{id}/versions", { params: { path: { brand: brandId, id } } });
     setVersions(data?.data ?? []);
   }, [ws, id]);
   // load reads the journey; with fresh, it also starts the builder again
   // from what is saved (its own steps for a journey not live yet, else its
   // draft version).
   const load = useCallback(async (fresh = true) => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/journeys/{id}", { params: { path: { brand: brandId, id } } });
     if (error || !data) return setError(errorMessage(error));
     setJ(data);
     if (!fresh) return;
     let d: JourneyVersion | null = null;
     if (data.draft_updated_at) {
-      const res = await api.GET("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+      const res = await api.GET("/v1/brands/{brand}/journeys/{id}/draft", { params: { path: { brand: brandId, id } } });
       d = res.data ?? null;
     }
     setDraft(d);
@@ -460,8 +511,8 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
     if (!sent || !j) return false;
     setSaving("saving");
     const res = j.status === "draft"
-      ? await api.PATCH("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id } }, body: bodyOf(sent) })
-      : await api.PATCH("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } }, body: bodyOf(sent) });
+      ? await api.PATCH("/v1/brands/{brand}/journeys/{id}", { params: { path: { brand: brandId, id } }, body: bodyOf(sent) })
+      : await api.PATCH("/v1/brands/{brand}/journeys/{id}/draft", { params: { path: { brand: brandId, id } }, body: bodyOf(sent) });
     if (res.error) {
       setSaving("failed");
       setSaveError(errorMessage(res.error));
@@ -486,8 +537,8 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
     if (!reviewed && !(await confirmAction(...ask))) return;
     if (to === "activate" && dirty && !(await save())) return;
     setBusy(true);
-    const path = `/v1/workspaces/{ws}/journeys/{id}/${to}` as "/v1/workspaces/{ws}/journeys/{id}/activate";
-    const { data, error } = await api.POST(path, { params: { path: { ws, id } } });
+    const path = `/v1/brands/{brand}/journeys/{id}/${to}` as "/v1/brands/{brand}/journeys/{id}/activate";
+    const { data, error } = await api.POST(path, { params: { path: { brand: brandId, id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     toast({ activate: "Active.", pause: "Paused.", archive: "Archived." }[to]);
@@ -498,7 +549,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
 
   async function edit() {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys/{id}/draft", { params: { path: { brand: brandId, id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setViewing(null);
@@ -512,7 +563,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
 
   async function discard() {
     if (!(await confirmAction("Throw away this draft?", "Your changes are lost. The live version keeps running as it is.", "Discard"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/journeys/{id}/draft", { params: { path: { ws, id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/journeys/{id}/draft", { params: { path: { brand: brandId, id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Draft discarded.");
     await load();
@@ -522,7 +573,7 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
   async function publish(runs: "keep" | "move") {
     if (dirty && !(await save())) return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/publish", { params: { path: { ws, id } }, body: { runs } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys/{id}/publish", { params: { path: { brand: brandId, id } }, body: { runs } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setPublishing(false);
@@ -648,7 +699,12 @@ function JourneyDetail({ ws, id, canManage, back, go }: { ws: string; id: string
       {open && (
         <StepPanel ws={ws} step={open} steps={shown.steps} kinds={kinds} templates={templates} catalog={catalog} event={shown.trigger.kind === "event" ? shown.trigger.event : null}
           problems={probs.get(open.id) ?? []} editable={editable} go={go} guardrails={guardrails}
-          extra={!viewing && <StepResults ws={ws} j={j} step={open} card={stepCard(open, j, kinds, templates, shown.steps, [])} />}
+          extra={!viewing && (
+            <>
+              <StepResults ws={ws} j={j} step={open} card={stepCard(open, j, kinds, templates, shown.steps, [])} />
+              {open.kind === "split" && open.split_by === "random" && (open.paths ?? []).some((p) => p.holdout) && <SplitLift ws={ws} j={j} step={open} />}
+            </>
+          )}
           onChange={(x) => work && setSteps(replace(work.steps, x))} onRemove={() => removeStep(open.id)} onClose={() => setPanel(null)} />
       )}
       {panel === "trigger" && (
@@ -835,12 +891,13 @@ function ReviewDialog({ j, work, kinds, templates, probs, rule, sim, busy, onPub
 }
 
 function RenameDialog({ ws, j, onClose, onSaved }: { ws: string; j: Journey; onClose: () => void; onSaved: (j: Journey) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [name, setName] = useState(j.name);
   const [description, setDescription] = useState(j.description);
   const [error, setError] = useState("");
   async function save(e: FormEvent) {
     e.preventDefault();
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/journeys/{id}", { params: { path: { ws, id: j.id } }, body: { name, description } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/journeys/{id}", { params: { path: { brand: brandId, id: j.id } }, body: { name, description } });
     if (error || !data) return setError(errorMessage(error));
     onSaved(data);
   }
@@ -868,11 +925,12 @@ function RenameDialog({ ws, j, onClose, onSaved }: { ws: string; j: Journey; onC
 // ---- The people in it ----
 
 function RunsCard({ ws, j, canManage, go }: { ws: string; j: Journey; canManage: boolean; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [runs, setRuns] = useState<JourneyRun[] | null>(null);
   const [status, setStatus] = useState<JourneyRun["status"] | "">("");
   const [open, setOpen] = useState<string>("");
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/journeys/{id}/runs", { params: { path: { ws, id: j.id }, query: { limit: 100, ...(status ? { status } : {}) } } });
+    const { data } = await api.GET("/v1/brands/{brand}/journeys/{id}/runs", { params: { path: { brand: brandId, id: j.id }, query: { limit: 100, ...(status ? { status } : {}) } } });
     setRuns(data?.data ?? []);
   }, [ws, j.id, status]);
   useEffect(() => {
@@ -906,16 +964,17 @@ function RunsCard({ ws, j, canManage, go }: { ws: string; j: Journey; canManage:
 }
 
 function RunDialog({ ws, j, id, canManage, go, onClose, onChanged }: { ws: string; j: Journey; id: string; canManage: boolean; go: Go; onClose: () => void; onChanged: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [r, setR] = useState<JourneyRun | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/journeys/{id}/runs/{run}", { params: { path: { ws, id: j.id, run: id } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/journeys/{id}/runs/{run}", { params: { path: { brand: brandId, id: j.id, run: id } } }).then(({ data, error }) => {
       if (error) toast(errorMessage(error), "error");
       setR(data ?? null);
     });
   }, [ws, j.id, id]);
   async function exit() {
     if (!(await confirmAction("Take them out of this journey?", "Nothing more is sent to them from it.", "Take out"))) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/runs/{run}/exit", { params: { path: { ws, id: j.id, run: id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys/{id}/runs/{run}/exit", { params: { path: { brand: brandId, id: j.id, run: id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     setR({ ...data, history: r?.history });
     onChanged();

@@ -155,6 +155,7 @@ export function AddDomainForm({ ws, providers, onAdded, compact = false }: { ws:
 type Step = { id: string; title: string; done: boolean; body: ReactNode };
 
 export function Lifecycle({ ws, canManage, canSend, go, myEmail }: { ws: string; canManage: boolean; canSend: boolean; go: Go; myEmail: string }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [overview, setOverview] = useState<EmailOverview | null>(null);
   const [providers, setProviders] = useState<EmailProvider[] | null>(null);
   const [guides, setGuides] = useState<EmailProviderGuide[]>([]);
@@ -162,20 +163,20 @@ export function Lifecycle({ ws, canManage, canSend, go, myEmail }: { ws: string;
   const { domains, load: loadDomains } = useDomains(ws);
 
   // Sending setup is usually shared by every brand, so providers aren't
-  // narrowed; the recent emails are the picked brand's.
-  const { query: brandQuery } = useBrand(ws);
+  // narrowed; the recent emails are the picked brand's (none with all
+  // brands picked: emails belong to one brand).
   const load = useCallback(async () => {
     const [o, p, g, r] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/email-overview", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/email-providers", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/email-provider-guides", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/emails", { params: { path: { ws }, query: { limit: 6, ...brandQuery } } }),
+      brandId ? api.GET("/v1/brands/{brand}/emails", { params: { path: { brand: brandId }, query: { limit: 6 } } }) : null,
     ]);
     if (o.data) setOverview(o.data);
     setProviders(p.data?.data ?? []);
     setGuides(g.data?.data ?? []);
-    setRecent(r.data?.data ?? []);
-  }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+    setRecent(r?.data?.data ?? []);
+  }, [ws, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();
@@ -354,6 +355,7 @@ function DailyChart({ days }: { days: EmailOverview["daily"] }) {
 }
 
 function TestSend({ ws, myEmail, domain, onSent, go }: { ws: string; myEmail: string; domain: string; onSent: () => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [to, setTo] = useState(myEmail);
   const [from, setFrom] = useState(`hello@${domain}`);
   const [error, setError] = useState("");
@@ -361,13 +363,15 @@ function TestSend({ ws, myEmail, domain, onSent, go }: { ws: string; myEmail: st
   async function send(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/emails", {
-      params: { path: { ws } },
-      body: {
-        to: to.trim(), from: from.trim(), test: true, subject: "Your first email from Outflare",
-        html: `<p>It works. This email went through your own provider, signed for ${domain}.</p><p>Next: create a template and send it from your app.</p>`,
-      },
-    });
+    // The picked brand's test email; with all brands picked, the first
+    // brand's (the workspace route's default).
+    const body = {
+      to: to.trim(), from: from.trim(), test: true, subject: "Your first email from Outflare",
+      html: `<p>It works. This email went through your own provider, signed for ${domain}.</p><p>Next: create a template and send it from your app.</p>`,
+    };
+    const { data, error } = brandId
+      ? await api.POST("/v1/brands/{brand}/emails", { params: { path: { brand: brandId } }, body })
+      : await api.POST("/v1/workspaces/{ws}/emails", { params: { path: { ws } }, body });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     setError("");

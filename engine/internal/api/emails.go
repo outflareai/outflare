@@ -48,34 +48,49 @@ func (s *Server) routesEmails(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", s.inWorkspace(manage, s.emailDomainDNSApproval))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved", s.inWorkspace(manage, s.emailDomainDNSApproved))
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-templates", s.inWorkspace(read, s.listEmailTemplates))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-templates", s.inWorkspace(manage, s.createEmailTemplate))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-templates/preview", s.inWorkspace(read, s.previewEmailTemplate))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-templates/{id}", s.inWorkspace(read, s.getEmailTemplate))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/email-templates/{id}", s.inWorkspace(manage, s.updateEmailTemplate))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/email-templates/{id}", s.inWorkspace(manage, s.deleteEmailTemplate))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-templates/{id}/publish", s.inWorkspace(manage, s.publishEmailTemplate))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-templates/{id}/versions", s.inWorkspace(read, s.listEmailTemplateVersions))
+	// Lifecycle email belongs to one brand (brand_activation.go): its
+	// templates, topics, broadcasts and the emails they make are served
+	// under the brand, and under the workspace until the contract step.
+	for _, b := range s.activationBases("email-templates", s.inWorkspace) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listEmailTemplates))
+		mux.HandleFunc("POST "+base, on(manage, s.createEmailTemplate))
+		mux.HandleFunc("POST "+base+"/preview", on(read, s.previewEmailTemplate))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getEmailTemplate))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateEmailTemplate))
+		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.deleteEmailTemplate))
+		mux.HandleFunc("POST "+base+"/{id}/publish", on(manage, s.publishEmailTemplate))
+		mux.HandleFunc("GET "+base+"/{id}/versions", on(read, s.listEmailTemplateVersions))
+	}
 
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-guardrails", s.inWorkspace(read, s.getEmailGuardrails))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/email-guardrails", s.inWorkspace(manage, s.updateEmailGuardrails))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-topics", s.inWorkspace(read, s.listEmailTopics))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-topics", s.inWorkspace(manage, s.createEmailTopic))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-topics/{id}", s.inWorkspace(read, s.getEmailTopic))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/email-topics/{id}", s.inWorkspace(manage, s.updateEmailTopic))
+	for _, b := range s.activationBases("email-topics", s.inWorkspace) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listEmailTopics))
+		mux.HandleFunc("POST "+b.path, b.on(manage, s.createEmailTopic))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getEmailTopic))
+		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateEmailTopic))
+	}
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-broadcasts", s.inWorkspace(read, s.listEmailBroadcasts))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-broadcasts", s.inWorkspace(manage, s.createEmailBroadcast))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-broadcasts/{id}", s.inWorkspace(read, s.getEmailBroadcast))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/email-broadcasts/{id}", s.inWorkspace(manage, s.updateEmailBroadcast))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-broadcasts/{id}/send", s.inWorkspace(send, s.sendEmailBroadcast))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/email-broadcasts/{id}/cancel", s.inWorkspace(send, s.cancelEmailBroadcast))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/email-broadcasts/{id}/recipients", s.inWorkspace(read, s.listEmailBroadcastRecipients))
+	for _, b := range s.activationBases("email-broadcasts", s.inWorkspace) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listEmailBroadcasts))
+		mux.HandleFunc("POST "+base, on(manage, s.createEmailBroadcast))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getEmailBroadcast))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateEmailBroadcast))
+		mux.HandleFunc("POST "+base+"/{id}/send", on(send, s.sendEmailBroadcast))
+		mux.HandleFunc("POST "+base+"/{id}/cancel", on(send, s.cancelEmailBroadcast))
+		mux.HandleFunc("GET "+base+"/{id}/recipients", on(read, s.listEmailBroadcastRecipients))
+	}
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/emails", s.inWorkspace(read, s.listEmails))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/emails", s.inWorkspace(send, s.sendEmail))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/emails/{id}", s.inWorkspace(read, s.getEmail))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/emails/{id}/cancel", s.inWorkspace(send, s.cancelEmail))
+	// An admin's unsubscribe for every brand at once (decision 5).
+	mux.HandleFunc("POST /v1/workspaces/{ws}/email-unsubscribes", s.inWorkspace(auth.ScopeWorkspaceManage, s.unsubscribeAllBrands))
+	for _, b := range s.activationBases("emails", s.inWorkspace) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listEmails))
+		mux.HandleFunc("POST "+b.path, b.on(send, s.sendEmail))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getEmail))
+		mux.HandleFunc("POST "+b.path+"/{id}/cancel", b.on(send, s.cancelEmail))
+	}
 	mux.HandleFunc("GET /v1/workspaces/{ws}/email-recipients/{address}", s.inWorkspace(read, s.getEmailRecipient))
 	// The open pixel in emails that track opens.
 	mux.HandleFunc("GET /o/{token}", s.openPixel)
@@ -110,6 +125,15 @@ type emailDay struct {
 func (s *Server) emailOverview(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
+	// Providers and domains are connections, shared until they move to
+	// brands; templates and sends are one brand's (?brand=, default the
+	// workspace's first).
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	targs := []any{a.WorkspaceID}
+	tb := sel.sql("brand_id", &targs)
 	var setup struct {
 		Providers      int  `json:"providers"`
 		EventsActive   bool `json:"events_active"`
@@ -124,14 +148,15 @@ func (s *Server) emailOverview(w http.ResponseWriter, r *http.Request) {
 		EXISTS (SELECT 1 FROM email_providers WHERE workspace_id = $1 AND events_status = 'active'),
 		(SELECT count(*) FROM email_domains WHERE workspace_id = $1)::int,
 		(SELECT count(*) FROM email_domains WHERE workspace_id = $1 AND status = 'verified')::int,
-		(SELECT count(*) FROM email_templates WHERE workspace_id = $1 AND status = 'active')::int,
-		EXISTS (SELECT 1 FROM emails WHERE workspace_id = $1 AND test AND sent_at IS NOT NULL),
-		EXISTS (SELECT 1 FROM emails WHERE workspace_id = $1 AND NOT test AND sent_at IS NOT NULL)`, a.WorkspaceID).
+		(SELECT count(*) FROM email_templates WHERE workspace_id = $1 AND status = 'active'`+tb+`)::int,
+		EXISTS (SELECT 1 FROM emails WHERE workspace_id = $1 AND test AND sent_at IS NOT NULL`+tb+`),
+		EXISTS (SELECT 1 FROM emails WHERE workspace_id = $1 AND NOT test AND sent_at IS NOT NULL`+tb+`)`, targs...).
 		Scan(&setup.Providers, &setup.EventsActive, &setup.Domains, &setup.DomainsVerfied, &setup.Templates, &setup.TestSent, &setup.Sent)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	dargs := []any{a.WorkspaceID}
 	rows, err := s.pool.Query(ctx, `
 		SELECT to_char(d, 'YYYY-MM-DD'),
 		       count(e.id) FILTER (WHERE e.status IN ('queued', 'scheduled', 'sending'))::int,
@@ -142,8 +167,8 @@ func (s *Server) emailOverview(w http.ResponseWriter, r *http.Request) {
 		       count(e.id) FILTER (WHERE e.status = 'failed')::int,
 		       count(e.id) FILTER (WHERE e.status = 'suppressed')::int
 		FROM generate_series((now() AT TIME ZONE 'UTC')::date - 29, (now() AT TIME ZONE 'UTC')::date, interval '1 day') d
-		LEFT JOIN emails e ON e.workspace_id = $1 AND NOT e.test AND (e.created_at AT TIME ZONE 'UTC')::date = d::date
-		GROUP BY d ORDER BY d`, a.WorkspaceID)
+		LEFT JOIN emails e ON e.workspace_id = $1 AND NOT e.test AND (e.created_at AT TIME ZONE 'UTC')::date = d::date`+sel.sql("e.brand_id", &dargs)+`
+		GROUP BY d ORDER BY d`, dargs...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -843,7 +868,7 @@ func (s *Server) listEmailTemplates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is active or archived")
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -867,7 +892,8 @@ func (s *Server) listEmailTemplates(w http.ResponseWriter, r *http.Request) {
 // findEmailTemplate finds a template by id or handle.
 func (s *Server) findEmailTemplate(w http.ResponseWriter, r *http.Request, ws, ref string) (*emailTemplateView, bool) {
 	v, err := scanEmailTemplate(s.pool.QueryRow(r.Context(), emailTemplateSelect+` AND (t.id::text = $2 OR t.handle = $2)`, ws, ref))
-	if errors.Is(err, pgx.ErrNoRows) {
+	// On a brand route only the route's brand's templates are found.
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email template not found")
 		return nil, false
 	}
@@ -914,8 +940,6 @@ func (f *templateFields) validate() string {
 		return "handle must be 1 to 63 lowercase letters, digits, dashes or underscores, such as password-reset"
 	case f.Name != nil && (strings.TrimSpace(*f.Name) == "" || len(*f.Name) > 200):
 		return "name must be 1 to 200 characters"
-	case f.BrandID.Value != nil && !validUUID(*f.BrandID.Value):
-		return "brand_id must be a brand id, or null"
 	case f.Purpose != nil && !slices.Contains(emailPurposes, *f.Purpose):
 		return "purpose must be transactional or lifecycle"
 	case f.Status != nil && *f.Status != "active" && *f.Status != "archived":
@@ -1015,9 +1039,15 @@ func (s *Server) createEmailTemplate(w http.ResponseWriter, r *http.Request) {
 	vars = declare(vars, deref(f.Subject), deref(f.HTML), deref(f.Text))
 	varsJSON, _ := json.Marshal(vars)
 	ctx := r.Context()
+	// A template belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.optionalBrand(ctx, a, f.BrandID, nil)
+	if !s.activationError(w, r, err) {
+		return
+	}
 	var id string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		topic, err := topicID(ctx, tx, a.WorkspaceID, deref(f.Topic.Value))
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		topic, err := topicID(ctx, tx, a.WorkspaceID, brand, deref(f.Topic.Value))
 		if err != nil {
 			return err
 		}
@@ -1026,7 +1056,7 @@ func (s *Server) createEmailTemplate(w http.ResponseWriter, r *http.Request) {
 				track_opens, track_clicks, topic_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, false), COALESCE($13, false), $14)
 			ON CONFLICT (workspace_id, handle) DO NOTHING RETURNING id`,
-			a.WorkspaceID, f.BrandID.Value, *f.Handle, strings.TrimSpace(*f.Name), purpose, deref(f.From), deref(f.ReplyTo),
+			a.WorkspaceID, brand, *f.Handle, strings.TrimSpace(*f.Name), purpose, deref(f.From), deref(f.ReplyTo),
 			deref(f.Subject), deref(f.HTML), deref(f.Text), varsJSON, f.TrackOpens, f.TrackClicks, topic).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
@@ -1107,8 +1137,12 @@ func (s *Server) updateEmailTemplate(w http.ResponseWriter, r *http.Request) {
 	vars = declare(vars, *merged.Subject, *merged.HTML, *merged.Text)
 	varsJSON, _ := json.Marshal(vars)
 	ctx := r.Context()
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		topic, err := topicID(ctx, tx, a.WorkspaceID, deref(f.Topic.Value))
+	brand, err := s.optionalBrand(ctx, a, f.BrandID, cur.BrandID)
+	if !s.activationError(w, r, err) {
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		topic, err := topicID(ctx, tx, a.WorkspaceID, brand, deref(f.Topic.Value))
 		if err != nil {
 			return err
 		}
@@ -1121,7 +1155,7 @@ func (s *Server) updateEmailTemplate(w http.ResponseWriter, r *http.Request) {
 				topic_id = CASE WHEN $17 THEN $18 ELSE topic_id END, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2
 			  AND NOT EXISTS (SELECT 1 FROM email_templates o WHERE o.workspace_id = $1 AND o.handle = $3 AND o.id <> $2)`,
-			a.WorkspaceID, cur.ID, f.Handle, f.Name, f.BrandID.Set, f.BrandID.Value, f.Purpose, f.Status, f.From, f.ReplyTo,
+			a.WorkspaceID, cur.ID, f.Handle, f.Name, true, brand, f.Purpose, f.Status, f.From, f.ReplyTo,
 			*merged.Subject, *merged.HTML, *merged.Text, varsJSON, f.TrackOpens, f.TrackClicks, f.Topic.Set, topic)
 		if err != nil {
 			return err
@@ -1506,7 +1540,7 @@ func (s *Server) listEmails(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "purpose is transactional or lifecycle")
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -1548,7 +1582,7 @@ func (s *Server) findEmail(w http.ResponseWriter, r *http.Request, ws, id string
 	}
 	ctx := r.Context()
 	v, err := scanEmail(s.pool.QueryRow(ctx, emailSelect+` AND e.id = $2`, ws, id))
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !accessFrom(ctx).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email not found")
 		return nil, false
 	}
@@ -1717,9 +1751,6 @@ func (s *Server) sendEmail(w http.ResponseWriter, r *http.Request) {
 	case req.ProviderID != nil && !validUUID(*req.ProviderID):
 		bad("provider_id must be an email provider id")
 		return
-	case req.BrandID != nil && !validUUID(*req.BrandID):
-		bad("brand_id must be a brand id")
-		return
 	case len(req.Tags) > 10 || slices.ContainsFunc(req.Tags, func(t string) bool { return t == "" || len(t) > 64 }):
 		bad("tags must be at most 10 labels of 1 to 64 characters")
 		return
@@ -1745,15 +1776,31 @@ func (s *Server) sendEmail(w http.ResponseWriter, r *http.Request) {
 	if i := reqInfoFrom(ctx); i != nil {
 		d.Surface = surface(r, i)
 	}
+	// An email belongs to one brand: the route's, the one named, else its
+	// template's, else the workspace's first. Its template and topic are
+	// that brand's.
+	var tmpl *emailTemplateView
 	if req.Template != "" {
-		t, ok := s.findEmailTemplate(w, r, a.WorkspaceID, req.Template)
-		if !ok {
+		var ok bool
+		if tmpl, ok = s.findEmailTemplate(w, r, a.WorkspaceID, req.Template); !ok {
 			return
 		}
-		d.TemplateID = t.ID
+		d.TemplateID = tmpl.ID
+		if req.BrandID == nil && a.Brand == "" {
+			req.BrandID = tmpl.BrandID
+		}
+	}
+	brand, err := s.activationBrand(ctx, a, req.BrandID)
+	if !s.activationError(w, r, err) {
+		return
+	}
+	d.BrandID = &brand
+	if tmpl != nil && tmpl.BrandID != nil && *tmpl.BrandID != brand {
+		bad("the template " + tmpl.Handle + " belongs to another brand")
+		return
 	}
 	if req.Topic != nil {
-		id, err := topicID(ctx, s.pool, a.WorkspaceID, *req.Topic)
+		id, err := topicID(ctx, s.pool, a.WorkspaceID, d.BrandID, *req.Topic)
 		var inv errInvalid
 		if errors.As(err, &inv) {
 			bad(string(inv))
@@ -1844,6 +1891,14 @@ func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 		}
 		before = &t
 	}
+	// Emails are one brand's (?brand=, default the workspace's first);
+	// suppressions and leads are still the workspace's.
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	cargs := []any{a.WorkspaceID, addr}
+	cwhere := sel.sql("brand_id", &cargs)
 	out := map[string]any{"address": addr}
 	var c struct {
 		Emails, Delivered, Bounced, Complained, Opened, Clicked int
@@ -1853,7 +1908,7 @@ func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 		SELECT count(*)::int, count(*) FILTER (WHERE delivered_at IS NOT NULL)::int, count(*) FILTER (WHERE status = 'bounced')::int,
 		       count(*) FILTER (WHERE status = 'complained')::int, count(*) FILTER (WHERE opens > 0)::int, count(*) FILTER (WHERE clicks > 0)::int,
 		       min(created_at), max(created_at)
-		FROM emails WHERE workspace_id = $1 AND recipients @> ARRAY[$2] AND NOT test`, a.WorkspaceID, addr).
+		FROM emails WHERE workspace_id = $1 AND recipients @> ARRAY[$2] AND NOT test`+cwhere, cargs...).
 		Scan(&c.Emails, &c.Delivered, &c.Bounced, &c.Complained, &c.Opened, &c.Clicked, &c.First, &c.Last)
 	if err != nil {
 		s.internal(w, r, err)
@@ -1882,14 +1937,15 @@ func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out["lead_id"] = lead
+	eargs := []any{a.WorkspaceID, addr, before, limit}
 	rows, err := s.pool.Query(ctx, `
 		SELECT e.id, e.subject, t.handle, e.purpose, e.trigger_kind, ev.type, ev.detail, ev.occurred_at
 		FROM email_events ev
 		JOIN emails e ON e.id = ev.email_id
 		LEFT JOIN email_templates t ON t.id = e.template_id
 		WHERE e.workspace_id = $1 AND e.recipients @> ARRAY[$2] AND (ev.recipient IS NULL OR lower(ev.recipient) = $2)
-		  AND ($3::timestamptz IS NULL OR ev.occurred_at < $3)
-		ORDER BY ev.occurred_at DESC, ev.id DESC LIMIT $4`, a.WorkspaceID, addr, before, limit)
+		  AND ($3::timestamptz IS NULL OR ev.occurred_at < $3)`+sel.sql("e.brand_id", &eargs)+`
+		ORDER BY ev.occurred_at DESC, ev.id DESC LIMIT $4`, eargs...)
 	if err != nil {
 		s.internal(w, r, err)
 		return

@@ -106,6 +106,26 @@ func EnsureCompaniesFor(ctx context.Context, tx pgx.Tx, c *Caller, brand *string
 // CompanyDomain is a website or domain as a company identity, or "".
 func CompanyDomain(s string) string { return customers.CompanyDomain(s) }
 
+// RecordField is a field an extension keeps on people or companies, such
+// as what a tool learned about them. Type is text, number, url or
+// timestamp.
+type RecordField = customers.Field
+
+// ErrBadRecordField is a RecordField the catalog can't hold.
+var ErrBadRecordField = customers.ErrBadField
+
+// SetRecordFields writes values (by field key) onto a record in tx, as
+// source (such as "enrichment"), making each field in the record's brand
+// the first time. It never overwrites a value a source ahead of it in the
+// field's precedence set (a person's own edit, first-party data), keeps
+// each change in the record's history and records record.updated. It is
+// for background jobs: workspaceID and recordID must come from rows the
+// job already holds for that workspace. It reports whether anything
+// changed.
+func SetRecordFields(ctx context.Context, tx pgx.Tx, workspaceID, recordID, source string, fields []RecordField, values map[string]any) (bool, error) {
+	return customers.SetFields(ctx, tx, workspaceID, recordID, source, fields, values)
+}
+
 // Connections: the workspace's own connected accounts.
 type (
 	WebQuery    = connectors.WebQuery

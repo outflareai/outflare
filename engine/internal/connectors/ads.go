@@ -82,6 +82,61 @@ type AdsReader interface {
 	AdDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, from, to string) ([]AdDay, error)
 }
 
+// Levels below a campaign: an ad group (Meta's ad set, Google's ad group)
+// and an ad.
+const (
+	AdLevelGroup = "ad_group"
+	AdLevelAd    = "ad"
+)
+
+// AdItem is an ad group or an ad. ParentID is the platform's id of the
+// campaign an ad group is in, or of the ad group an ad is in.
+type AdItem struct {
+	ID                string `json:"id"`
+	ParentID          string `json:"parent_id"`
+	Name              string `json:"name"`
+	Status            string `json:"status"`
+	ProviderStatus    string `json:"provider_status"`
+	DailyBudgetMicros *int64 `json:"daily_budget_micros,omitempty"`
+	// Details is what the platform says about an ad, by the AdDetail
+	// keys; empty for ad groups.
+	Details map[string]string `json:"details,omitempty"`
+}
+
+// Keys of AdItem.Details.
+const (
+	AdDetailType      = "type"
+	AdDetailHeadline  = "headline"
+	AdDetailText      = "text"
+	AdDetailURL       = "url"
+	AdDetailURLTags   = "url_tags"
+	AdDetailThumbnail = "thumbnail_url"
+)
+
+// AdItemDay is one ad group's or ad's numbers for one day, like AdDay.
+type AdItemDay struct {
+	ID                    string   `json:"id"`
+	ParentID              string   `json:"parent_id"`
+	Name                  string   `json:"name,omitempty"`
+	Date                  string   `json:"date"`
+	SpendMicros           int64    `json:"spend_micros"`
+	Impressions           int64    `json:"impressions"`
+	Clicks                int64    `json:"clicks"`
+	Conversions           *float64 `json:"conversions,omitempty"`
+	ConversionValueMicros *int64   `json:"conversion_value_micros,omitempty"`
+}
+
+// AdItemsReader is an ad platform that also reads ad groups and ads.
+type AdItemsReader interface {
+	AdsReader
+	// AdItems lists an account's ad groups or ads (level AdLevelGroup or
+	// AdLevelAd).
+	AdItems(ctx context.Context, c *Client, creds Creds, acct AdAccount, level string) ([]AdItem, error)
+	// AdItemDays returns each ad group's or ad's numbers per day, like
+	// AdDays.
+	AdItemDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, level, from, to string) ([]AdItemDay, error)
+}
+
 // SetupNeeder is a connector that needs more than its sign-in before it
 // can be used, such as a Google Ads developer token. SetupFields lists the
 // fields it needs; the person fills them in after signing

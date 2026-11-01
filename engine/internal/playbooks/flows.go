@@ -349,6 +349,11 @@ func (k Kit) Resolve(values map[string]string, ids map[string]string) (Flows, er
 				return out, fmt.Errorf("journey %s: exit_conditions: %s", j.Key, msg)
 			}
 		}
+		for _, raw := range j.Steps {
+			if err := k.portableStep(raw); err != nil {
+				return out, fmt.Errorf("journey %s: %w", j.Key, err)
+			}
+		}
 		if err := decodeFilled(j.Steps, all, &fj.Steps); err != nil {
 			return out, fmt.Errorf("journey %s: steps: %w", j.Key, err)
 		}
@@ -496,4 +501,45 @@ func (k Kit) validateFlows(bad func(string, ...any)) {
 	if _, err := k.Resolve(values, ids); err != nil {
 		bad("%v", err)
 	}
+}
+
+// inputSettings are the step settings that name something of one
+// workspace's own (an ad account, a Slack channel, a review campaign): in
+// a kit each is one of its inputs, as {{name}}, so the workspace applying
+// it gives its own.
+var inputSettings = map[string][]string{
+	"slack":          {"channel"},
+	"sync_audience":  {"ad_account_id", "audience_id"},
+	"request_review": {"review_campaign_id"},
+}
+
+// portableStep checks a kit journey step, as written, for what can't go
+// in a kit: settings that only mean something in one workspace, and
+// webhook headers and auth, which hold a workspace's keys.
+func (k Kit) portableStep(raw any) error {
+	st, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	kind, _ := st["kind"].(string)
+	id, _ := st["id"].(string)
+	for _, name := range inputSettings[kind] {
+		v, _ := st[name].(string)
+		m := slotRE.FindStringSubmatch(strings.TrimSpace(v))
+		if m == nil || m[0] != strings.TrimSpace(v) || !slices.ContainsFunc(k.Inputs, func(in KitInput) bool { return in.Name == m[1] }) {
+			return fmt.Errorf("step %s: %s is one of the kit's inputs, as {{name}}: it names something of one workspace's own", id, name)
+		}
+	}
+	if c, _ := st["connection_id"].(string); c != "" {
+		return fmt.Errorf("step %s: leave connection_id out of a kit; the workspace's own connection is used", id)
+	}
+	if kind == "webhook" {
+		if h, _ := st["headers"].(map[string]any); len(h) > 0 {
+			return fmt.Errorf("step %s: a kit's webhook carries no headers; they can hold a workspace's keys", id)
+		}
+		if a, _ := st["auth"].(map[string]any); a != nil && a["type"] != nil && a["type"] != "none" {
+			return fmt.Errorf("step %s: a kit's webhook carries no auth; add it after applying the kit", id)
+		}
+	}
+	return nil
 }

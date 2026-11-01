@@ -112,9 +112,12 @@ func Matching(patterns []string) []string {
 type Querier = jobs.Querier
 
 // Enqueue writes a delivery, and queues a job, for every enabled endpoint
-// in the workspace subscribed to the event: every brand's, or the event's
-// brand's. It does nothing for events outside the catalog. Call it in the
-// transaction that made the change.
+// in the workspace subscribed to the event. An endpoint belongs to one
+// brand (plans/brands/README.md, decision 4) and gets that brand's events
+// and the workspace's own (members, tokens: no brand), never another
+// brand's; one from before brands (no brand) gets every event. It does
+// nothing for events outside the catalog. Call it in the transaction that
+// made the change.
 func Enqueue(ctx context.Context, q Querier, ev Envelope) error {
 	if ev.WorkspaceID == "" || !Delivered(ev.Type) || ev.Type == TestEvent {
 		return nil
@@ -130,10 +133,10 @@ func Enqueue(ctx context.Context, q Querier, ev Envelope) error {
 	// jobs queued together. With no endpoints it inserts nothing.
 	tag, err := q.Exec(ctx, `
 		WITH d AS (
-			INSERT INTO webhook_deliveries (endpoint_id, workspace_id, event_id, event_type, payload)
-			SELECT e.id, e.workspace_id, $2, $3, $4
+			INSERT INTO webhook_deliveries (endpoint_id, workspace_id, event_id, event_type, payload, brand_id)
+			SELECT e.id, e.workspace_id, $2, $3, $4, COALESCE(e.brand_id, $7::uuid, outflare_first_brand(e.workspace_id))
 			  FROM webhook_endpoints e
-			 WHERE e.workspace_id = $1 AND e.enabled AND (e.brand_id IS NULL OR e.brand_id = $7::uuid)
+			 WHERE e.workspace_id = $1 AND e.enabled AND (e.brand_id IS NULL OR $7::uuid IS NULL OR e.brand_id = $7::uuid)
 			   AND EXISTS (SELECT 1 FROM unnest(e.events) p
 			         WHERE p = '*' OR p = $3 OR (right(p, 2) = '.*' AND $3 LIKE left(p, -1) || '%'))
 			   -- An endpoint listening for some reply labels skips replies

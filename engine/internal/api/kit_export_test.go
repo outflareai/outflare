@@ -174,3 +174,58 @@ func TestExportKit(t *testing.T) {
 		t.Fatalf("kit.applied from a file: %d", fromFile)
 	}
 }
+
+// A webhook's URL, a Slack channel and other settings of one workspace's
+// own become inputs; a webhook's headers and auth stay behind.
+func TestExportKitIntegrations(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	jid := owner.must(201, "POST", base+"/journeys", map[string]any{"name": "Tell billing", "trigger": map[string]any{"kind": "event", "event": "trial.started"},
+		"steps": []map[string]any{
+			{"id": "hook", "kind": "webhook", "url": "https://hooks.example.com/catch/12345/secret-token", "headers": map[string]any{"X-Api-Key": "not-a-real-key"},
+				"auth": map[string]any{"type": "header", "name": "Authorization"}, "next": "tell"},
+			{"id": "tell", "kind": "slack", "channel": "C04BILLINGS", "text": "{{person.email}} started a trial"},
+		}})["id"].(string)
+
+	out := owner.must(200, "POST", base+"/kits/export", map[string]any{"journeys": []string{jid}, "id": "tell-billing"})
+	yaml := out["yaml"].(string)
+	for _, gone := range []string{"secret-token", "not-a-real-key", "X-Api-Key", "Authorization", "C04BILLINGS"} {
+		if strings.Contains(yaml, gone) {
+			t.Fatalf("%s is in the kit file:\n%s", gone, yaml)
+		}
+	}
+	var names []string
+	for _, in := range out["kit"].(map[string]any)["inputs"].([]any) {
+		in := in.(map[string]any)
+		names = append(names, in["name"].(string))
+		if in["default"] != nil || in["kind"] != "text" {
+			t.Fatalf("input: %v", in)
+		}
+	}
+	if strings.Join(names, ",") != "webhook_url,slack_channel" || !strings.Contains(yaml, "url: '{{webhook_url}}'") {
+		t.Fatalf("inputs: %v\n%s", names, yaml)
+	}
+	notes := strings.Join(func() []string {
+		var s []string
+		for _, n := range out["notes"].([]any) {
+			s = append(s, n.(string))
+		}
+		return s
+	}(), " ")
+	if !strings.Contains(notes, "headers") || !strings.Contains(notes, "auth") {
+		t.Fatalf("notes: %s", notes)
+	}
+
+	// Applied elsewhere with that workspace's own URL and channel.
+	ws2 := owner.must(201, "POST", "/v1/workspaces", map[string]any{"name": "Northpeak EU"})["id"].(string)
+	owner.must(400, "POST", "/v1/workspaces/"+ws2+"/kits/apply", map[string]any{"yaml": yaml})
+	owner.must(200, "POST", "/v1/workspaces/"+ws2+"/kits/apply", map[string]any{"yaml": yaml,
+		"inputs": map[string]any{"webhook_url": "https://hooks.example.org/eu", "slack_channel": "C9876543210"}})
+	j := owner.must(200, "GET", "/v1/workspaces/"+ws2+"/journeys", nil)["data"].([]any)[0].(map[string]any)
+	steps := j["steps"].([]any)
+	if steps[0].(map[string]any)["url"] != "https://hooks.example.org/eu" || steps[0].(map[string]any)["headers"] != nil ||
+		steps[1].(map[string]any)["channel"] != "C9876543210" {
+		t.Fatalf("applied steps: %v", steps)
+	}
+}

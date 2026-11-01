@@ -13,7 +13,7 @@ import { baseScope, otherScopes, roleGroups, roleLevel, setRoleLevel, within, ty
 type Scope = WorkspaceRole["scopes"][number];
 
 // roleKey is how a member or invite names its role in the roles list.
-const roleKey = (v: { role?: string; role_id?: string | null }) => v.role_id ?? v.role ?? "";
+const roleKey = (v: { role?: string }) => v.role ?? "";
 
 export function Members({ ws, myId, myScopes, myRole }: { ws: string; myId: string; myScopes: string[]; myRole?: string }) {
   const [members, setMembers] = useState<Member[]>([]);
@@ -55,8 +55,7 @@ export function Members({ ws, myId, myScopes, myRole }: { ws: string; myId: stri
 
   async function changeRole(m: Member, id: string) {
     const r = find(id);
-    const body = r?.builtin ? { role: r.builtin } : { role_id: id };
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/members/{user}", { params: { path: { ws, user: m.user_id! } }, body });
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/members/{user}", { params: { path: { ws, user: m.user_id! } }, body: { role: id } });
     setError(error ? errorMessage(error) : "");
     if (!error) toast(`${m.name} is now ${r?.name ?? "on a new role"}.`);
     load();
@@ -88,8 +87,7 @@ export function Members({ ws, myId, myScopes, myRole }: { ws: string; myId: stri
     e.preventDefault();
     const r = find(inviteRole);
     const brand_ids = r?.brand_limitable ? inviteBrands : [];
-    const body = r?.builtin ? { email, role: r.builtin, brand_ids } : { email, role_id: inviteRole, brand_ids };
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/invites", { ...path, body });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/invites", { ...path, body: { email, role: inviteRole, brand_ids } });
     if (error) return setError(errorMessage(error));
     setError("");
     setLink({ email, url: data?.invite_url ?? "", emailed: !!data?.emailed });

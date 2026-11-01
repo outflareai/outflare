@@ -362,6 +362,12 @@ func Hosts(websites ...string) []string {
 // a subdomain) and has no utm_campaign of its own. Any other link, such as
 // one to another company's site or one tagged by hand, comes back as is.
 func (c Campaign) OwnLink(link string, hosts []string) string {
+	return c.OwnLinkAs(link, hosts, "")
+}
+
+// OwnLinkAs is OwnLink with a utm_content, such as the sequence step a link
+// went out in.
+func (c Campaign) OwnLinkAs(link string, hosts []string, content string) string {
 	u, err := url.Parse(link)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
 		return link
@@ -380,7 +386,7 @@ func (c Campaign) OwnLink(link string, hosts []string) string {
 	if !own {
 		return link
 	}
-	tagged, err := c.Link(link, "")
+	tagged, err := c.Link(link, content)
 	if err != nil {
 		return link
 	}

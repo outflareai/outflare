@@ -66,9 +66,10 @@ type Progress struct {
 	// Money recorded in the spend ledger against the mission, in US cents,
 	// with units priced by the workspace's rates.
 	SpendCents int64 `json:"spend_cents"`
-	// Revenue in US cents: payments credited to the campaigns of the
-	// mission's sequences under the workspace's default attribution model,
-	// net of refunds, and won deals tagged with the mission.
+	// Revenue in US cents: payments credited, under the workspace's default
+	// attribution model and net of refunds, to the campaign links of the
+	// mission's sequences, broadcasts, social posts and social replies; and
+	// won deals tagged with the mission.
 	RevenueAttributedCents int64 `json:"revenue_attributed_cents"`
 	RevenueDealsCents      int64 `json:"revenue_deals_cents"`
 	// RevenueReferredCents is partner sales less refunds, credited in the
@@ -127,9 +128,20 @@ func GetProgress(ctx context.Context, q outcomes.Querier, ws, missionID string) 
 		SELECT coalesce(sum(cr.weight * c.value_minor), 0)::float8
 		FROM attribution_credits cr
 		JOIN attribution_conversions c ON c.event_id = cr.event_id
-		JOIN tracking_campaigns tc ON tc.id = cr.tracking_campaign_id AND tc.workspace_id = $1 AND tc.object_kind = 'sequence'
-		JOIN sequences s ON s.id::text = tc.object_id AND s.workspace_id = $1
-		WHERE cr.workspace_id = $1 AND s.mission_id = $2 AND c.currency = 'USD' AND c.value_minor IS NOT NULL
+		JOIN tracking_campaigns tc ON tc.id = cr.tracking_campaign_id AND tc.workspace_id = $1
+		LEFT JOIN site_sessions ss ON ss.id = cr.session_id
+		WHERE cr.workspace_id = $1 AND c.currency = 'USD' AND c.value_minor IS NOT NULL
+		  AND (
+			(tc.object_kind = 'sequence' AND EXISTS (SELECT 1 FROM sequences s
+				WHERE s.workspace_id = $1 AND s.id::text = tc.object_id AND s.mission_id = $2))
+			OR (tc.object_kind = 'email_broadcast' AND EXISTS (SELECT 1 FROM email_broadcasts b
+				WHERE b.workspace_id = $1 AND b.id::text = tc.object_id AND b.mission_id = $2))
+			-- A social account's or watch's campaign is shared by every post
+			-- or reply on it; each one's own utm_content says which.
+			OR (tc.object_kind = 'social_account' AND ss.utm_content <> '' AND EXISTS (SELECT 1 FROM social_publications sp
+				WHERE sp.workspace_id = $1 AND sp.mission_id = $2 AND sp.utm_content = ss.utm_content))
+			OR (tc.object_kind = 'social_watch' AND ss.utm_content <> '' AND EXISTS (SELECT 1 FROM social_actions sa
+				WHERE sa.workspace_id = $1 AND sa.mission_id = $2 AND sa.utm_content = ss.utm_content)))
 		  AND cr.model = coalesce((SELECT model FROM attribution_settings WHERE workspace_id = $1), 'last_non_direct')`,
 		ws, missionID).Scan(&attributed); err != nil {
 		return p, err

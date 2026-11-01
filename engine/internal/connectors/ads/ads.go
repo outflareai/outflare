@@ -163,3 +163,28 @@ func mustDate(s string) time.Time {
 }
 
 func esc(s string) string { return url.PathEscape(s) }
+
+// firstText is the first value that isn't blank.
+func firstText(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// adDetails keeps an ad's details that have a value, each at most 1,000
+// characters.
+func adDetails(m map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range m {
+		if v = strings.TrimSpace(v); v != "" {
+			if r := []rune(v); len(r) > 1000 {
+				v = string(r[:1000])
+			}
+			out[k] = v
+		}
+	}
+	return out
+}

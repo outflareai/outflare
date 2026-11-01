@@ -151,8 +151,8 @@ func TestInboxSyncMatchesAndActs(t *testing.T) {
 	}
 	members := owner.must(200, "GET", base+"/members", nil)["data"].([]any)
 	uid := members[0].(map[string]any)["user_id"].(string)
-	tri := owner.must(200, "PATCH", path, map[string]any{"category": "meeting_booked", "assigned_to": uid, "labels": []string{" VIP ", "vip", "q4"}})
-	if tri["category"] != "meeting_booked" || tri["category_source"] != "human" || tri["assignee_name"] == nil || len(tri["labels"].([]any)) != 2 {
+	tri := owner.must(200, "PATCH", path, map[string]any{"category": "meeting_booked", "assigned_to": uid, "tags": []string{" VIP ", "vip", "q4"}})
+	if tri["category"] != "meeting_booked" || tri["category_source"] != "human" || tri["assignee_name"] == nil || len(tri["tags"].([]any)) != 2 || tri["labels"] != nil {
 		t.Fatalf("triage: %v", tri)
 	}
 	if mine := owner.must(200, "GET", base+"/inbox?assigned_to=me&tag=vip&category=meeting_booked", nil)["data"].([]any); len(mine) != 1 {

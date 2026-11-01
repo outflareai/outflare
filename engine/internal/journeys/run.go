@@ -683,7 +683,10 @@ func (s *Service) finish(ctx context.Context, tx pgx.Tx, ws string, r run, statu
 // set) only composes it, and checks the guardrails without recording.
 func (s *Service) email(ctx context.Context, tx pgx.Tx, ws string, j *journey, r run, st *Step, t *trial) (*string, string, string, string, error) {
 	var templateID string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, ws, st.Template).Scan(&templateID)
+	// The journey's brand's template: a brand's journeys never send
+	// another brand's email.
+	err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)
+		AND ($3::uuid IS NULL OR brand_id = $3)`, ws, st.Template, j.brandID).Scan(&templateID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", "", "the template " + st.Template + " no longer exists", nil
 	}

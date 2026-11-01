@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 )
 
@@ -173,12 +174,12 @@ func (s *Server) listWorkspaceDomains(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// A connected account, from the connector framework or a mailbox provider
-// sign-in, in one shape.
+// A connected account in one shape.
 type connectedAccount struct {
-	// integration (the connector framework, GET /integrations/{id}) or
-	// mailbox_oauth (a Google or Microsoft sign-in for mailboxes,
-	// /oauth-connections).
+	// integration (the connector framework, GET /integrations/{id}),
+	// including Gmail and Outlook mailbox sign-ins, or mailbox_oauth (an
+	// admin connection made before mailbox sign-ins were connectors,
+	// /oauth-connections, until it is moved to integrations).
 	Kind      string    `json:"kind"`
 	ID        string    `json:"id"`
 	Connector string    `json:"connector"`
@@ -190,8 +191,9 @@ type connectedAccount struct {
 }
 
 // listAllConnections lists every account the workspace has connected:
-// the connector framework's integrations and the mailbox sign-ins that sit
-// beside it, so a connections page and an agent read one list.
+// the connector framework's integrations and the older mailbox admin
+// connections that still sit beside it, so a connections page and an
+// agent read one list.
 func (s *Server) listAllConnections(w http.ResponseWriter, r *http.Request) {
 	if !s.needIntegrations(w, r) {
 		return
@@ -223,7 +225,7 @@ func (s *Server) listAllConnections(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		oauth, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (connectedAccount, error) {
-			v := connectedAccount{Kind: "mailbox_oauth", Category: "mailboxes", Status: "connected"}
+			v := connectedAccount{Kind: "mailbox_oauth", Category: connectors.CategoryMailbox, Status: "connected"}
 			err := row.Scan(&v.ID, &v.Connector, &v.Name, &v.CreatedAt)
 			return v, err
 		})

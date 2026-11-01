@@ -44,7 +44,7 @@ func (s *Server) MoveDeal(ctx context.Context, tx pgx.Tx, ws, recordID string, d
 // checkJourneyActionRefs checks the references of the steps checkJourneyRefs
 // doesn't: a transactional email's template, an owner step's members and
 // a deal step's deal against the catalog.
-func (s *Server) checkJourneyActionRefs(ctx context.Context, ws string, steps []journeys.Step, live bool) error {
+func (s *Server) checkJourneyActionRefs(ctx context.Context, ws string, brand *string, steps []journeys.Step, live bool) error {
 	var c *catalog
 	for _, st := range steps {
 		switch st.Kind {
@@ -52,7 +52,7 @@ func (s *Server) checkJourneyActionRefs(ctx context.Context, ws string, steps []
 			var purpose, status string
 			var published *int
 			err := s.pool.QueryRow(ctx, `SELECT purpose, status, published_version FROM email_templates
-				WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, ws, st.Template).Scan(&purpose, &status, &published)
+				WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2) AND ($3::uuid IS NULL OR brand_id = $3)`, ws, st.Template, brand).Scan(&purpose, &status, &published)
 			switch {
 			case errors.Is(err, pgx.ErrNoRows):
 				return errInvalid("step " + st.ID + ": template not found: " + truncate(st.Template, 63))

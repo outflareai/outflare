@@ -169,23 +169,151 @@ func (m MetaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c
 		if json.Unmarshal(raw, &r) != nil || r.CampaignID == "" {
 			return nil
 		}
-		var conv, value float64
-		for _, a := range r.Actions {
-			if metaConversions[a.ActionType] {
-				conv += float64(a.Value)
-			}
-		}
-		for _, a := range r.ActionValues {
-			if metaConversions[a.ActionType] {
-				value += float64(a.Value)
-			}
-		}
+		conv, value := metaResults(r.Actions, r.ActionValues)
 		out = append(out, c.AdDay{CampaignID: r.CampaignID, CampaignName: r.CampaignName, Date: r.DateStart,
 			SpendMicros: c.MicrosOf(r.Spend), Impressions: int64(r.Impressions), Clicks: int64(r.Clicks),
 			Conversions: ptrF(conv), ConversionValueMicros: ptrI(c.Micros(value))})
 		return nil
 	})
 	return out, err
+}
+
+// AdItems lists ad sets (AdLevelGroup) or ads (AdLevelAd), with each ad's
+// creative: its title, text, link, URL parameters and preview image.
+func (m MetaAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level string) ([]c.AdItem, error) {
+	u := m.base(cl) + "/act_" + esc(acct.ID)
+	switch level {
+	case c.AdLevelGroup:
+		u += "/adsets?fields=id,name,effective_status,campaign_id,daily_budget&limit=200"
+	case c.AdLevelAd:
+		u += "/ads?" + url.Values{"fields": {"id,name,effective_status,adset_id,creative{title,body,thumbnail_url,url_tags,object_story_spec}"}, "limit": {"200"}}.Encode()
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	var out []c.AdItem
+	err := m.pages(ctx, cl, creds, u, func(raw json.RawMessage) error {
+		var x struct {
+			ID              string `json:"id"`
+			Name            string `json:"name"`
+			EffectiveStatus string `json:"effective_status"`
+			CampaignID      string `json:"campaign_id"`
+			AdsetID         string `json:"adset_id"`
+			DailyBudget     string `json:"daily_budget"`
+			Creative        struct {
+				Title           string `json:"title"`
+				Body            string `json:"body"`
+				ThumbnailURL    string `json:"thumbnail_url"`
+				URLTags         string `json:"url_tags"`
+				ObjectStorySpec struct {
+					LinkData struct {
+						Link    string `json:"link"`
+						Name    string `json:"name"`
+						Message string `json:"message"`
+					} `json:"link_data"`
+					VideoData struct {
+						Title        string `json:"title"`
+						Message      string `json:"message"`
+						CallToAction struct {
+							Value struct {
+								Link string `json:"link"`
+							} `json:"value"`
+						} `json:"call_to_action"`
+					} `json:"video_data"`
+				} `json:"object_story_spec"`
+			} `json:"creative"`
+		}
+		if json.Unmarshal(raw, &x) != nil || x.ID == "" {
+			return nil
+		}
+		it := c.AdItem{ID: x.ID, Name: x.Name, Status: status(x.EffectiveStatus), ProviderStatus: x.EffectiveStatus}
+		if level == c.AdLevelGroup {
+			it.ParentID = x.CampaignID
+			if b := atoi64(x.DailyBudget); b > 0 {
+				it.DailyBudgetMicros = ptrI(b * 1e6 / minorUnits(acct.Currency))
+			}
+		} else {
+			cr, story := x.Creative, x.Creative.ObjectStorySpec
+			it.ParentID = x.AdsetID
+			it.Details = adDetails(map[string]string{
+				c.AdDetailHeadline:  firstText(cr.Title, story.LinkData.Name, story.VideoData.Title),
+				c.AdDetailText:      firstText(cr.Body, story.LinkData.Message, story.VideoData.Message),
+				c.AdDetailURL:       firstText(story.LinkData.Link, story.VideoData.CallToAction.Value.Link),
+				c.AdDetailURLTags:   cr.URLTags,
+				c.AdDetailThumbnail: cr.ThumbnailURL,
+			})
+		}
+		out = append(out, it)
+		return nil
+	})
+	return out, err
+}
+
+// AdItemDays reads each ad set's or ad's insights per day.
+func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, level, from, to string) ([]c.AdItemDay, error) {
+	var metaLevel, fields string
+	switch level {
+	case c.AdLevelGroup:
+		metaLevel, fields = "adset", "adset_id,adset_name,campaign_id"
+	case c.AdLevelAd:
+		metaLevel, fields = "ad", "ad_id,ad_name,adset_id"
+	default:
+		return nil, c.Errf(c.ErrInvalid, "level is %s or %s", c.AdLevelGroup, c.AdLevelAd)
+	}
+	tr, _ := json.Marshal(map[string]string{"since": from, "until": to})
+	q := url.Values{
+		"level":          {metaLevel},
+		"time_increment": {"1"},
+		"time_range":     {string(tr)},
+		"fields":         {fields + ",spend,impressions,clicks,actions,action_values"},
+		"limit":          {"500"},
+	}
+	var out []c.AdItemDay
+	err := m.pages(ctx, cl, creds, m.base(cl)+"/act_"+esc(acct.ID)+"/insights?"+q.Encode(), func(raw json.RawMessage) error {
+		var r struct {
+			AdsetID      string       `json:"adset_id"`
+			AdsetName    string       `json:"adset_name"`
+			CampaignID   string       `json:"campaign_id"`
+			AdID         string       `json:"ad_id"`
+			AdName       string       `json:"ad_name"`
+			DateStart    string       `json:"date_start"`
+			Spend        string       `json:"spend"`
+			Impressions  flexInt      `json:"impressions"`
+			Clicks       flexInt      `json:"clicks"`
+			Actions      []metaAction `json:"actions"`
+			ActionValues []metaAction `json:"action_values"`
+		}
+		if json.Unmarshal(raw, &r) != nil {
+			return nil
+		}
+		d := c.AdItemDay{ID: r.AdsetID, ParentID: r.CampaignID, Name: r.AdsetName}
+		if level == c.AdLevelAd {
+			d = c.AdItemDay{ID: r.AdID, ParentID: r.AdsetID, Name: r.AdName}
+		}
+		if d.ID == "" {
+			return nil
+		}
+		conv, value := metaResults(r.Actions, r.ActionValues)
+		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.DateStart, c.MicrosOf(r.Spend), int64(r.Impressions), int64(r.Clicks)
+		d.Conversions, d.ConversionValueMicros = ptrF(conv), ptrI(c.Micros(value))
+		out = append(out, d)
+		return nil
+	})
+	return out, err
+}
+
+// metaResults adds up Meta's standard conversions and their value.
+func metaResults(actions, values []metaAction) (conv, value float64) {
+	for _, a := range actions {
+		if metaConversions[a.ActionType] {
+			conv += float64(a.Value)
+		}
+	}
+	for _, a := range values {
+		if metaConversions[a.ActionType] {
+			value += float64(a.Value)
+		}
+	}
+	return conv, value
 }
 
 // minorUnits is how many of a currency's smallest unit make one: 100 for

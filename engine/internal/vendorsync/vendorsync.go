@@ -115,9 +115,8 @@ func (s *Service) IsVendor(connector string) bool {
 
 // Ensure starts syncing a supplier integration, unless it already is:
 // the first full sync runs at once and a webhook is registered when the
-// engine is reachable. Call it in the transaction that connected the
-// integration, or lazily before reading its mailboxes. It reports whether
-// syncing started now.
+// engine is reachable. Connected calls it in the transaction that connects
+// the integration. It reports whether syncing started now.
 func (s *Service) Ensure(ctx context.Context, tx pgx.Tx, ws, integrationID string) (bool, error) {
 	var connector string
 	err := tx.QueryRow(ctx, `SELECT connector FROM integrations WHERE workspace_id = $1 AND id = $2`, ws, integrationID).Scan(&connector)
@@ -195,7 +194,8 @@ type Settings struct {
 	Push          PushStatus `json:"push"`
 }
 
-// ErrNotSynced means Ensure has not run for the integration.
+// ErrNotSynced means the integration is not syncing: it is not a supplier,
+// or Connected never ran for it.
 var ErrNotSynced = errors.New("this supplier has not been synced yet")
 
 // GetSettings reads an integration's sync settings.

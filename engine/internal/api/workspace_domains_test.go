@@ -63,7 +63,7 @@ func TestOneListOfDomainsAndConnections(t *testing.T) {
 		conns[1].(map[string]any)["id"] != google || conns[1].(map[string]any)["kind"] != "mailbox_oauth" {
 		t.Fatalf("connections: %v", conns)
 	}
-	if n := len(owner.must(200, "GET", base+"/connections?category=mailboxes", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/connections?category=mailbox_provider", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("mailbox connections: %d", n)
 	}
 }

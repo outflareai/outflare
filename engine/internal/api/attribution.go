@@ -30,6 +30,8 @@ func (s *Server) routesAttribution(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/campaigns", s.inWorkspace(read, s.attributionCampaigns))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/ads", s.inWorkspace(read, s.attributionAds))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/conversions", s.inWorkspace(read, s.listAttributionConversions))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/customers", s.inWorkspace(read, s.attributionCustomers))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/cohorts", s.inWorkspace(read, s.attributionCohorts))
 }
 
 type attributionSettings struct {
@@ -169,6 +171,20 @@ type attributionFilter struct {
 	version    *int
 	settings   attributionSettings
 	brand      brandSel
+	// identified keeps only what is tied to the person by their own
+	// identify (a sign-in or a form that names them): visits on their
+	// record, and credit on those visits. Visits known only by the
+	// browser's cookie are left out.
+	identified bool
+}
+
+// visitsSQL narrows a site_sessions query to identified visits when the
+// filter asks for them; alias is the table's alias with its dot, or "".
+func (f attributionFilter) visitsSQL(alias string) string {
+	if !f.identified {
+		return ""
+	}
+	return " AND " + alias + "record_id IS NOT NULL"
 }
 
 func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attributionFilter, bool) {
@@ -195,6 +211,11 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "from must be on or before to, and at most three years before it")
 		return attributionFilter{}, false
 	}
+	match := q.Get("match")
+	if match != "" && match != "all" && match != "identified" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "match is all (the default) or identified")
+		return attributionFilter{}, false
+	}
 	ref := q.Get("model")
 	brand, ok := s.brandFilter(w, r)
 	if !ok {
@@ -208,7 +229,8 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 	if ref == "" {
 		ref = settings.Model
 	}
-	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand}
+	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand,
+		identified: match == "identified"}
 	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, ref)
 	switch {
 	case errors.Is(err, attribution.ErrUnknownModel):
@@ -294,6 +316,11 @@ func moneyList(m map[string]float64) []money {
 func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter, join, keys, where string, args []any,
 	add func(key []any, name string, weight float64, currency *string, value *float64) error) error {
 	args = append([]any{ws, f.from, f.to, f.model}, args...)
+	if f.identified {
+		// Only credit on a visit the person was identified on.
+		join += ` JOIN site_sessions mq ON mq.id = cr.session_id`
+		where += ` AND mq.record_id = c.record_id`
+	}
 	sql := `SELECT ` + keys + `, c.name, sum(cr.weight)::float8, c.currency, sum(cr.weight * c.value_minor)::float8
 		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id` + join + `
 		WHERE cr.workspace_id = $1 AND cr.model = $4 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1` + where +
@@ -356,7 +383,7 @@ func (s *Server) attributionChannels(w http.ResponseWriter, r *http.Request) {
 
 	args := []any{a.WorkspaceID, f.from, f.to}
 	vq, err := s.pool.Query(ctx, `SELECT channel, count(*)::int FROM site_sessions
-		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1`+f.brand.sql(`brand_id`, &args)+`
+		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1`+f.visitsSQL("")+f.brand.sql(`brand_id`, &args)+`
 		GROUP BY channel`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -456,11 +483,30 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "channel is one of the channels in GET .../tracking-taxonomy, or direct")
 		return
 	}
+	tracked := r.URL.Query().Get("tracking_campaign")
+	if tracked != "" && !validUUID(tracked) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "tracking_campaign is a campaign link campaign's id")
+		return
+	}
+	split := r.URL.Query().Get("split")
+	if split != "" && split != "content" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "split is content, or leave it out")
+		return
+	}
+	// The visit's utm_content, when split by content: on the session for
+	// visits, and on the credited visit's session for credit.
+	// creditRows counts its key columns by their commas, so these have none.
+	visitContent, creditContent, creditJoin := `''::text`, `''::text`, ``
+	if split == "content" {
+		visitContent, creditContent = `utm_content`, `(CASE WHEN ss.utm_content IS NULL THEN '' ELSE ss.utm_content END)`
+		creditJoin = ` LEFT JOIN site_sessions ss ON ss.id = cr.session_id`
+	}
 	ctx := r.Context()
 	type campaignRow struct {
 		*attributionRow
 		Source             string  `json:"source"`
 		Campaign           string  `json:"campaign"`
+		Content            string  `json:"content"`
 		TrackingCampaignID *string `json:"tracking_campaign_id"`
 		CampaignName       string  `json:"campaign_name"`
 	}
@@ -473,26 +519,28 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 		if s, ok := key[3].(string); ok && s != "" {
 			id = &s
 		}
-		k := ch + "\x00" + src + "\x00" + camp + "\x00" + deref(id)
+		content, _ := key[4].(string)
+		k := ch + "\x00" + src + "\x00" + camp + "\x00" + deref(id) + "\x00" + content
 		if rows[k] == nil {
-			rows[k] = &campaignRow{attributionRow: newAttributionRow(ch), Source: src, Campaign: camp, TrackingCampaignID: id}
+			rows[k] = &campaignRow{attributionRow: newAttributionRow(ch), Source: src, Campaign: camp, Content: content, TrackingCampaignID: id}
 		}
 		return rows[k]
 	}
-	args := []any{a.WorkspaceID, f.from, f.to, channel}
-	vq, err := s.pool.Query(ctx, `SELECT channel, source, campaign, tracking_campaign_id::text, count(*)::int FROM site_sessions
-		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1 AND channel <> '' AND ($4 = '' OR channel = $4)`+
+	args := []any{a.WorkspaceID, f.from, f.to, channel, tracked}
+	vq, err := s.pool.Query(ctx, `SELECT channel, source, campaign, tracking_campaign_id::text, `+visitContent+`, count(*)::int FROM site_sessions
+		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1 AND channel <> '' AND ($4 = '' OR channel = $4)
+		  AND ($5 = '' OR tracking_campaign_id::text = $5)`+f.visitsSQL("")+
 		f.brand.sql(`brand_id`, &args)+`
-		GROUP BY 1, 2, 3, 4`, args...)
+		GROUP BY 1, 2, 3, 4, 5`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	for vq.Next() {
-		var ch, src, camp string
+		var ch, src, camp, content string
 		var id *string
 		var n int
-		if err := vq.Scan(&ch, &src, &camp, &id, &n); err != nil {
+		if err := vq.Scan(&ch, &src, &camp, &id, &content, &n); err != nil {
 			vq.Close()
 			s.internal(w, r, err)
 			return
@@ -501,15 +549,15 @@ func (s *Server) attributionCampaigns(w http.ResponseWriter, r *http.Request) {
 		if id != nil {
 			idv = *id
 		}
-		row([]any{ch, src, camp, idv}).Visits += n
+		row([]any{ch, src, camp, idv, content}).Visits += n
 	}
 	vq.Close()
 	if err := vq.Err(); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	err = s.creditRows(ctx, a.WorkspaceID, f, ``, `cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text`,
-		` AND ($5 = '' OR cr.channel = $5)`, []any{channel},
+	err = s.creditRows(ctx, a.WorkspaceID, f, creditJoin, `cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text, `+creditContent,
+		` AND ($5 = '' OR cr.channel = $5) AND ($6 = '' OR cr.tracking_campaign_id::text = $6)`, []any{channel, tracked},
 		func(key []any, name string, weight float64, currency *string, value *float64) error {
 			row(key).addCredit(name, weight, currency, value)
 			return nil
@@ -574,6 +622,10 @@ type attributionCredit struct {
 	TouchAt            *time.Time `json:"touch_at"`
 	TagMethod          string     `json:"tag_method"`
 	Weight             float64    `json:"weight"`
+	// MatchedBy is how this visit was tied to the conversion: record (the
+	// person was identified on it), browser (only the browser's cookie) or
+	// none (no visit; the credit is direct).
+	MatchedBy string `json:"matched_by"`
 }
 
 type attributionConversion struct {
@@ -612,6 +664,10 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	ctx := r.Context()
+	matchSQL := ""
+	if f.identified {
+		matchSQL = ` AND c.matched_by = 'record'`
+	}
 	args := []any{a.WorkspaceID, f.from, f.to, f.model, name, channel, recordID, before, limit}
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.event_id::text, c.name, c.record_id::text, c.brand_id::text, c.occurred_at, c.value_minor, c.currency, c.touches, c.matched_by
@@ -619,7 +675,7 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		WHERE c.workspace_id = $1 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1
 		  AND ($5 = '' OR c.name = $5) AND ($7 = '' OR c.record_id::text = $7)
 		  AND ($6 = '' OR EXISTS (SELECT 1 FROM attribution_credits cr WHERE cr.event_id = c.event_id AND cr.model = $4 AND cr.channel = $6))
-		  AND ($8::timestamptz IS NULL OR c.occurred_at < $8)`+f.brand.sql(`c.brand_id`, &args)+`
+		  AND ($8::timestamptz IS NULL OR c.occurred_at < $8)`+matchSQL+f.brand.sql(`c.brand_id`, &args)+`
 		ORDER BY c.occurred_at DESC, c.event_id DESC LIMIT $9`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -648,8 +704,12 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		for _, x := range out {
 			ids = append(ids, x.EventID)
 		}
-		cr, err := s.pool.Query(ctx, `SELECT event_id::text, channel, source, campaign, tracking_campaign_id::text, session_id::text, touch_at, tag_method, weight::float8
-			FROM attribution_credits WHERE workspace_id = $1 AND model = $2 AND event_id = ANY($3::uuid[]) ORDER BY event_id, position`, a.WorkspaceID, f.model, ids)
+		cr, err := s.pool.Query(ctx, `SELECT cr.event_id::text, cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text, cr.session_id::text,
+				cr.touch_at, cr.tag_method, cr.weight::float8,
+				CASE WHEN ss.id IS NULL THEN 'none' WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id THEN 'record' ELSE 'browser' END
+			FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id
+			LEFT JOIN site_sessions ss ON ss.id = cr.session_id
+			WHERE cr.workspace_id = $1 AND cr.model = $2 AND cr.event_id = ANY($3::uuid[]) ORDER BY cr.event_id, cr.position`, a.WorkspaceID, f.model, ids)
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -657,7 +717,7 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		for cr.Next() {
 			var id string
 			var c attributionCredit
-			if err := cr.Scan(&id, &c.Channel, &c.Source, &c.Campaign, &c.TrackingCampaignID, &c.SessionID, &c.TouchAt, &c.TagMethod, &c.Weight); err != nil {
+			if err := cr.Scan(&id, &c.Channel, &c.Source, &c.Campaign, &c.TrackingCampaignID, &c.SessionID, &c.TouchAt, &c.TagMethod, &c.Weight, &c.MatchedBy); err != nil {
 				cr.Close()
 				s.internal(w, r, err)
 				return

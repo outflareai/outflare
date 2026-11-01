@@ -39,7 +39,7 @@ const stageTone: Record<Stage, Tone> = {
 };
 const methodLabel: Record<Method, string> = {
   competitor_gap: "Competitor gap", broken_link: "Broken link", reclaim: "Win back", competitor_dead_page: "Competitor's dead page",
-  resource_page: "Resource page", asset: "Content", unlinked_mention: "Mention", partner: "Partner", manual: "Added by hand",
+  resource_page: "Resource page", asset: "Content", unlinked_mention: "Mention", partner: "Partner", manual: "Added by hand", expired_domain: "Expired domain",
 };
 const reasonLabel: Record<NonNullable<LinkProspect["excluded_reason"]>, string> = {
   links_to_us: "already links to you", competitor: "a competitor", customer: "a customer", partner: "a partner", opted_out: "opted out", spam: "spam",

@@ -178,9 +178,10 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		v := ruleView{Name: r.Name, Description: r.Description, RecordType: r.Rule.RecordType, Trigger: r.Rule.Trigger, Conditions: r.Rule.Conditions,
 			Match: r.Rule.Match, EmitEvent: r.Rule.Emit, Fire: r.Rule.Fire, CooldownSeconds: r.Rule.Cooldown}
 		id := ids["rule."+r.Key]
-		if _, err := tx.Exec(ctx, `INSERT INTO rules (id, workspace_id, name, description, record_type, trigger_kind, trigger, conditions, match,
+		// Kits set up the workspace's first brand, like their lists.
+		if _, err := tx.Exec(ctx, `INSERT INTO rules (id, workspace_id, brand_id, name, description, record_type, trigger_kind, trigger, conditions, match,
 			emit_event, fire, cooldown_seconds, manual_edits, watch_events, watch_fields, list_id, created_by, kit_id, kit_key)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
 			append(append([]any{id, ws, v.Name, v.Description}, ruleColumns(v)...), createdBy, k.ID, r.Key)...); err != nil {
 			return err
 		}
@@ -201,9 +202,9 @@ func applyFlows(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, plan
 		steps, _ := json.Marshal(j.Steps)
 		exitConds, _ := json.Marshal(j.ExitConditions)
 		id := ids["journey."+j.Key]
-		if _, err := tx.Exec(ctx, `INSERT INTO journeys (id, workspace_id, name, description, trigger_kind, trigger_event, trigger_filter,
+		if _, err := tx.Exec(ctx, `INSERT INTO journeys (id, workspace_id, brand_id, name, description, trigger_kind, trigger_event, trigger_filter,
 			entry, goal_event, steps, created_by, exit_events, exit_conditions, kit_id, kit_key)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			VALUES ($1, $2, outflare_first_brand($2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			id, ws, j.Name, j.Description, j.TriggerKind, j.TriggerEvent, filter, j.Entry, j.GoalEvent, steps, createdBy, j.ExitEvents, exitConds,
 			k.ID, j.Key); err != nil {
 			return err

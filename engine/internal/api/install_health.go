@@ -72,10 +72,11 @@ type deprecatedOperation struct {
 	sunset time.Time
 }
 
-// The customer data routes moved under /v1/brands/{brand}/
+// The customer data and activation routes moved under /v1/brands/{brand}/
 // (plans/brands/README.md, decision 6). The workspace routes stay until
 // the contract step.
 var deprecatedOperations = map[string]deprecatedOperation{
+	// Customer data (step 2b part 2).
 	"addRecordIdentity":       {instead: "POST /v1/brands/{brand}/records/{record}/identities"},
 	"addRecordRelationship":   {instead: "POST /v1/brands/{brand}/records/{record}/relationships"},
 	"addStaticListMembers":    {instead: "POST /v1/brands/{brand}/smart-lists/{id}/members"},
@@ -111,6 +112,84 @@ var deprecatedOperations = map[string]deprecatedOperation{
 	"runQuery":                {instead: "POST /v1/brands/{brand}/query"},
 	"updateRecord":            {instead: "PATCH /v1/brands/{brand}/records/{record}"},
 	"updateSmartList":         {instead: "PATCH /v1/brands/{brand}/smart-lists/{id}"},
+	// Activation (step 4): rules, journeys, lifecycle email, alerts and webhooks.
+	"activateJourney":              {instead: "POST /v1/brands/{brand}/journeys/{id}/activate"},
+	"activateRule":                 {instead: "POST /v1/brands/{brand}/rules/{id}/activate"},
+	"addJourneyRun":                {instead: "POST /v1/brands/{brand}/journeys/{id}/runs"},
+	"archiveJourney":               {instead: "POST /v1/brands/{brand}/journeys/{id}/archive"},
+	"archiveRule":                  {instead: "POST /v1/brands/{brand}/rules/{id}/archive"},
+	"cancelEmail":                  {instead: "POST /v1/brands/{brand}/emails/{id}/cancel"},
+	"cancelEmailBroadcast":         {instead: "POST /v1/brands/{brand}/email-broadcasts/{id}/cancel"},
+	"createEmailBroadcast":         {instead: "POST /v1/brands/{brand}/email-broadcasts"},
+	"createEmailTemplate":          {instead: "POST /v1/brands/{brand}/email-templates"},
+	"createEmailTopic":             {instead: "POST /v1/brands/{brand}/email-topics"},
+	"createJourney":                {instead: "POST /v1/brands/{brand}/journeys"},
+	"createJourneyDraft":           {instead: "POST /v1/brands/{brand}/journeys/{id}/draft"},
+	"createRule":                   {instead: "POST /v1/brands/{brand}/rules"},
+	"createWebhook":                {instead: "POST /v1/brands/{brand}/webhooks"},
+	"deleteEmailTemplate":          {instead: "DELETE /v1/brands/{brand}/email-templates/{id}"},
+	"deleteJourneyStepSecret":      {instead: "DELETE /v1/brands/{brand}/journeys/{id}/step-secrets/{step}"},
+	"deleteWebhook":                {instead: "DELETE /v1/brands/{brand}/webhooks/{id}"},
+	"discardJourneyDraft":          {instead: "DELETE /v1/brands/{brand}/journeys/{id}/draft"},
+	"exitJourneyRun":               {instead: "POST /v1/brands/{brand}/journeys/{id}/runs/{run}/exit"},
+	"getAutomationMap":             {instead: "GET /v1/brands/{brand}/automation-map"},
+	"getEmail":                     {instead: "GET /v1/brands/{brand}/emails/{id}"},
+	"getEmailBroadcast":            {instead: "GET /v1/brands/{brand}/email-broadcasts/{id}"},
+	"getEmailTemplate":             {instead: "GET /v1/brands/{brand}/email-templates/{id}"},
+	"getEmailTopic":                {instead: "GET /v1/brands/{brand}/email-topics/{id}"},
+	"getJourney":                   {instead: "GET /v1/brands/{brand}/journeys/{id}"},
+	"getJourneyDraft":              {instead: "GET /v1/brands/{brand}/journeys/{id}/draft"},
+	"getJourneyRun":                {instead: "GET /v1/brands/{brand}/journeys/{id}/runs/{run}"},
+	"getRule":                      {instead: "GET /v1/brands/{brand}/rules/{id}"},
+	"getWebhook":                   {instead: "GET /v1/brands/{brand}/webhooks/{id}"},
+	"getWebhookSecret":             {instead: "GET /v1/brands/{brand}/webhooks/{id}/secret"},
+	"listAlerts":                   {instead: "GET /v1/brands/{brand}/alerts"},
+	"listEmailBroadcastRecipients": {instead: "GET /v1/brands/{brand}/email-broadcasts/{id}/recipients"},
+	"listEmailBroadcasts":          {instead: "GET /v1/brands/{brand}/email-broadcasts"},
+	"listEmailTemplateVersions":    {instead: "GET /v1/brands/{brand}/email-templates/{id}/versions"},
+	"listEmailTemplates":           {instead: "GET /v1/brands/{brand}/email-templates"},
+	"listEmailTopics":              {instead: "GET /v1/brands/{brand}/email-topics"},
+	"listEmails":                   {instead: "GET /v1/brands/{brand}/emails"},
+	"listJourneyRuns":              {instead: "GET /v1/brands/{brand}/journeys/{id}/runs"},
+	"listJourneyStepSecrets":       {instead: "GET /v1/brands/{brand}/journeys/{id}/step-secrets"},
+	"listJourneyVersions":          {instead: "GET /v1/brands/{brand}/journeys/{id}/versions"},
+	"listJourneys":                 {instead: "GET /v1/brands/{brand}/journeys"},
+	"listRuleFirings":              {instead: "GET /v1/brands/{brand}/rules/{id}/firings"},
+	"listRules":                    {instead: "GET /v1/brands/{brand}/rules"},
+	"listWebhookDeliveries":        {instead: "GET /v1/brands/{brand}/webhooks/{id}/deliveries"},
+	"getWebhookDelivery":           {instead: "GET /v1/brands/{brand}/webhooks/{id}/deliveries/{delivery}"},
+	"getWebhookActivity":           {instead: "GET /v1/brands/{brand}/webhooks/{id}/activity"},
+	"listWebhooks":                 {instead: "GET /v1/brands/{brand}/webhooks"},
+	"pauseJourney":                 {instead: "POST /v1/brands/{brand}/journeys/{id}/pause"},
+	"pauseRule":                    {instead: "POST /v1/brands/{brand}/rules/{id}/pause"},
+	"previewEmailTemplate":         {instead: "POST /v1/brands/{brand}/email-templates/preview"},
+	"publishEmailTemplate":         {instead: "POST /v1/brands/{brand}/email-templates/{id}/publish"},
+	"publishJourney":               {instead: "POST /v1/brands/{brand}/journeys/{id}/publish"},
+	"redeliverWebhook":             {instead: "POST /v1/brands/{brand}/webhooks/{id}/deliveries/{delivery}/redeliver"},
+	"rotateWebhookSecret":          {instead: "POST /v1/brands/{brand}/webhooks/{id}/rotate-secret"},
+	"sendEmail":                    {instead: "POST /v1/brands/{brand}/emails"},
+	"sendEmailBroadcast":           {instead: "POST /v1/brands/{brand}/email-broadcasts/{id}/send"},
+	"setJourneyStepSecret":         {instead: "PUT /v1/brands/{brand}/journeys/{id}/step-secrets/{step}"},
+	"simulateRule":                 {instead: "POST /v1/brands/{brand}/rules/{id}/simulate"},
+	"testJourney":                  {instead: "POST /v1/brands/{brand}/journeys/{id}/test"},
+	"testWebhook":                  {instead: "POST /v1/brands/{brand}/webhooks/{id}/test"},
+	"updateEmailBroadcast":         {instead: "PATCH /v1/brands/{brand}/email-broadcasts/{id}"},
+	"updateEmailTemplate":          {instead: "PATCH /v1/brands/{brand}/email-templates/{id}"},
+	"updateEmailTopic":             {instead: "PATCH /v1/brands/{brand}/email-topics/{id}"},
+	"updateJourney":                {instead: "PATCH /v1/brands/{brand}/journeys/{id}"},
+	"updateJourneyDraft":           {instead: "PATCH /v1/brands/{brand}/journeys/{id}/draft"},
+	"updateRule":                   {instead: "PATCH /v1/brands/{brand}/rules/{id}"},
+	"updateWebhook":                {instead: "PATCH /v1/brands/{brand}/webhooks/{id}"},
+
+	// Mailbox sign-ins are connections (the google_mail and outlook_mail
+	// connectors); these stay for mailboxes connected before, until they
+	// are moved.
+	"listOAuthConnections":        {instead: "GET /v1/workspaces/{ws}/integrations?category=mailbox_provider"},
+	"createOAuthConnection":       {instead: "POST /v1/workspaces/{ws}/integrations"},
+	"deleteOAuthConnection":       {instead: "DELETE /v1/workspaces/{ws}/integrations/{id}"},
+	"addOAuthConnectionMailboxes": {instead: "POST /v1/workspaces/{ws}/integrations/{id}/mailboxes"},
+	"authorizeOAuth":              {instead: "GET /v1/workspaces/{ws}/integrations/oauth/{connector}/authorize"},
+	"oauthCallback":               {instead: "GET /v1/integrations/oauth/callback"},
 }
 
 // semverLess compares dotted version numbers; anything unreadable is not

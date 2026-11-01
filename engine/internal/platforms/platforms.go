@@ -524,8 +524,8 @@ func (s *Service) refused(ctx context.Context, p allocation.PlatformOp, seqID, r
 		}
 		// Not offered to this campaign again until a person clears it.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			p.WorkspaceID, p.MailboxID, seqID); err != nil {
+			INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id, source, reason) VALUES ($1, $2, $3, 'refused', left($4, 1000))
+			ON CONFLICT DO NOTHING`, p.WorkspaceID, p.MailboxID, seqID, reason); err != nil {
 			return err
 		}
 		return allocation.Request(ctx, tx, p.WorkspaceID)

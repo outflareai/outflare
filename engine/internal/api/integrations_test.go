@@ -49,7 +49,7 @@ func TestConnectWithAPIKey(t *testing.T) {
 			zb = c.(map[string]any)
 		}
 	}
-	if zb == nil || zb["status"] != "available" || zb["auth"] != "api_key" {
+	if zb == nil || zb["status"] != "available" || methods(zb) != "api_key" {
 		t.Fatalf("zerobounce in catalog: %v", zb)
 	}
 	if u, _ := zb["logo_url"].(string); !strings.HasSuffix(u, "/v1/connectors/zerobounce/logo.svg") || zb["logo_dark_url"] != u+"?theme=dark" {

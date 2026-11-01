@@ -77,6 +77,8 @@ export function Channels({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
+  // identified: only visits the person was identified on, and their credit.
+  const [match, setMatch] = useState<"all" | "identified">("all");
   const [settings, setSettings] = useState<AttributionSettings | null>(null);
   const [model, setModel] = useState<Model | "">("");
   // The workspace's own models (GET .../attribution/models) after the
@@ -93,7 +95,7 @@ export function Channels({ ws, canManage, go }: Props) {
   }, [days]);
 
   const load = useCallback(async () => {
-    const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}) };
+    const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}), ...(match === "identified" ? { match } : {}) };
     const [s, r, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }),
@@ -103,7 +105,7 @@ export function Channels({ ws, canManage, go }: Props) {
     if (s.data) setSettings(s.data);
     if (r.data) setReport(r.data);
     if (m.data) setCustom(m.data.data.map((x) => ({ id: x.key, label: x.name, help: `Your own model, version ${x.version}, starting from ${builtIn.find((b) => b.id === x.spec.base)?.label ?? x.spec.base}.` })));
-  }, [ws, brandKey, model, range]);
+  }, [ws, brandKey, model, range, match]);
   useEffect(() => {
     load();
   }, [load]);
@@ -126,6 +128,16 @@ export function Channels({ ws, canManage, go }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Attribution model" className={field} value={shown} onChange={(e) => setModel(e.target.value === settings?.model ? "" : (e.target.value as Model))}>
             {models.map((m) => <option key={m.id} value={m.id}>{m.label}{m.id === settings?.model ? " (default)" : ""}</option>)}
+          </select>
+          <select
+            aria-label="Which visits"
+            title="Identified people only leaves out visits known only by the browser's cookie, and their credit"
+            className={field}
+            value={match}
+            onChange={(e) => setMatch(e.target.value as "all" | "identified")}
+          >
+            <option value="all">All visits</option>
+            <option value="identified">Identified people only</option>
           </select>
           <div className="flex rounded-md border" role="group" aria-label="Date range">
             {ranges.map((r) => (
@@ -195,28 +207,33 @@ export function Channels({ ws, canManage, go }: Props) {
               )}
             />
           </Card>
+          <PeopleAndCohorts ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} />
         </>
       )}
       <AttributionModels ws={ws} canManage={canManage} defaultModel={settings?.model} onChanged={load} />
       <ConversionDefinitions ws={ws} canManage={canManage} onChanged={load} />
-      <Drilldown ws={ws} row={open} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown }} onClose={() => setOpen(null)} />
+      <Drilldown ws={ws} row={open} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} onClose={() => setOpen(null)} />
     </div>
   );
 }
 
-function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; query: { from: string; to: string; brand?: string; model: Model }; onClose: () => void }) {
+function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" }; onClose: () => void }) {
   const [list, setList] = useState<AttributionCampaignRow[] | null>(null);
   const [error, setError] = useState("");
+  // By content: each campaign split by utm_content, such as the sequence
+  // step (step-1, step-2) a link went out in.
+  const [byContent, setByContent] = useState(false);
   const channel = row?.channel;
   const key = JSON.stringify(query);
   useEffect(() => {
     if (!channel) return;
     setList(null);
-    api.GET("/v1/workspaces/{ws}/attribution/campaigns", { params: { path: { ws }, query: { ...JSON.parse(key), channel } } }).then(({ data, error }) => {
+    const q = { ...JSON.parse(key), channel, ...(byContent ? { split: "content" as const } : {}) };
+    api.GET("/v1/workspaces/{ws}/attribution/campaigns", { params: { path: { ws }, query: q } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setList(data?.data ?? []);
     });
-  }, [ws, channel, key]);
+  }, [ws, channel, key, byContent]);
 
   const columns: ColumnDef<AttributionCampaignRow>[] = [
     { id: "source", header: "Source", accessorFn: (r) => r.source, cell: ({ row: { original: r } }) => <span className="font-mono text-[12px]">{r.source}</span> },
@@ -228,6 +245,12 @@ function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; q
     { id: "conversions", header: "Conversions", accessorFn: (r) => r.conversions, cell: ({ row: { original: r } }) => num(r.conversions) },
     { id: "revenue", header: "Revenue", accessorFn: (r) => r.revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.revenue) },
   ];
+  if (byContent) {
+    columns.splice(2, 0, {
+      id: "content", header: "Content", accessorFn: (r) => r.content,
+      cell: ({ row: { original: r } }) => (r.content ? <span className="font-mono text-[12px]">{r.content}</span> : <span className="text-muted-foreground">None</span>),
+    });
+  }
   return (
     <Sheet open={!!row} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl">
@@ -236,18 +259,22 @@ function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; q
           <SheetDescription>Sources and campaigns in this channel, most conversions first.</SheetDescription>
         </SheetHeader>
         <div className="mt-4 space-y-3">
+          <label className="flex items-center gap-2 text-[13px]">
+            <input type="checkbox" checked={byContent} onChange={(e) => setByContent(e.target.checked)} />
+            Split by content, such as the sequence step a link went out in
+          </label>
           <ErrorText>{error}</ErrorText>
           {!list ? <Loading /> : (
             <DataTable
               columns={columns}
               data={list}
-              rowId={(r) => `${r.source}|${r.campaign}|${r.tracking_campaign_id ?? ""}`}
+              rowId={(r) => `${r.source}|${r.campaign}|${r.tracking_campaign_id ?? ""}|${r.content}`}
               searchPlaceholder="Search sources and campaigns"
               empty="Nothing in this channel for these dates."
               mobile={(r) => (
                 <span className="block min-w-0">
                   <span className="block truncate text-[13px] font-medium">{r.campaign_name || r.campaign || r.source}</span>
-                  <span className="block truncate text-[12px] text-muted-foreground">{r.source} · {num(r.visits)} visits · {num(r.conversions)} conversions</span>
+                  <span className="block truncate text-[12px] text-muted-foreground">{r.source}{r.content ? ` · ${r.content}` : ""} · {num(r.visits)} visits · {num(r.conversions)} conversions</span>
                 </span>
               )}
             />
@@ -255,5 +282,73 @@ function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; q
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+type CustomerRow = { channel: string; label: string; warm_conversions: number; cold_conversions: number; new_revenue: Money[]; repeat_revenue: Money[] };
+type CohortRow = { channel: string; label: string; people: number; customers: number; revenue: Money[]; revenue_per_person: Money[] };
+
+// PeopleAndCohorts answers who each channel brings: people already known
+// or new to you, first or repeat revenue, and what the people a channel
+// first brought are worth over time.
+function PeopleAndCohorts({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" } }) {
+  const [customers, setCustomers] = useState<CustomerRow[] | null>(null);
+  const [cohorts, setCohorts] = useState<CohortRow[] | null>(null);
+  const [error, setError] = useState("");
+  const key = JSON.stringify(query);
+  useEffect(() => {
+    const q = JSON.parse(key) as typeof query;
+    Promise.all([
+      api.GET("/v1/workspaces/{ws}/attribution/customers", { params: { path: { ws }, query: q } }),
+      api.GET("/v1/workspaces/{ws}/attribution/cohorts", { params: { path: { ws }, query: { from: q.from, to: q.to, ...(q.brand ? { brand: q.brand } : {}) } } }),
+    ]).then(([c, h]) => {
+      setError(c.error || h.error ? errorMessage(c.error ?? h.error) : "");
+      setCustomers(c.data?.data ?? []);
+      setCohorts(h.data?.data ?? []);
+    });
+  }, [ws, key]);
+
+  const customerColumns: ColumnDef<CustomerRow>[] = [
+    { id: "channel", header: "Channel", accessorFn: (r) => r.label, cell: ({ row: { original: r } }) => <span className="font-medium">{r.label}</span> },
+    { id: "cold", header: "New to you", accessorFn: (r) => r.cold_conversions, cell: ({ row: { original: r } }) => num(r.cold_conversions) },
+    { id: "warm", header: "Already known", accessorFn: (r) => r.warm_conversions, cell: ({ row: { original: r } }) => num(r.warm_conversions) },
+    { id: "new", header: "First payments", accessorFn: (r) => r.new_revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.new_revenue) },
+    { id: "repeat", header: "Repeat payments", accessorFn: (r) => r.repeat_revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.repeat_revenue) },
+  ];
+  const cohortColumns: ColumnDef<CohortRow>[] = [
+    { id: "channel", header: "First channel", accessorFn: (r) => r.label, cell: ({ row: { original: r } }) => <span className="font-medium">{r.label}</span> },
+    { id: "people", header: "People", accessorFn: (r) => r.people, cell: ({ row: { original: r } }) => num(r.people) },
+    { id: "customers", header: "Paid", accessorFn: (r) => r.customers, cell: ({ row: { original: r } }) => num(r.customers) },
+    { id: "revenue", header: "Paid to date", accessorFn: (r) => r.revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.revenue) },
+    { id: "per", header: "Per person", accessorFn: (r) => r.revenue_per_person[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.revenue_per_person) },
+  ];
+  return (
+    <>
+      <ErrorText>{error}</ErrorText>
+      <Card title="New or known people" description="Conversions credited to people who weren't in Outflare yet when they visited, and to people who already were; and revenue from each person's first payment, and from later ones.">
+        {!customers ? <Loading /> : (
+          <DataTable columns={customerColumns} data={customers} rowId={(r) => r.channel} empty="No conversions for these dates."
+            mobile={(r) => (
+              <span className="block min-w-0">
+                <span className="block truncate text-[13px] font-medium">{r.label}</span>
+                <span className="block truncate text-[12px] text-muted-foreground">{num(r.cold_conversions)} new · {num(r.warm_conversions)} known · {money(r.repeat_revenue)} repeat</span>
+              </span>
+            )}
+          />
+        )}
+      </Card>
+      <Card title="What people are worth, by first channel" description="People whose first conversion was in these dates, grouped by the channel that first brought them, and everything they have paid since. Always first touch.">
+        {!cohorts ? <Loading /> : (
+          <DataTable columns={cohortColumns} data={cohorts} rowId={(r) => r.channel} empty="Nobody converted for the first time in these dates."
+            mobile={(r) => (
+              <span className="block min-w-0">
+                <span className="block truncate text-[13px] font-medium">{r.label}</span>
+                <span className="block truncate text-[12px] text-muted-foreground">{num(r.people)} people · {money(r.revenue_per_person)} each</span>
+              </span>
+            )}
+          />
+        )}
+      </Card>
+    </>
   );
 }

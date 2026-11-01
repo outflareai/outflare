@@ -43,7 +43,10 @@ func subscribed(status string, byDefault bool) bool {
 // or their contact basis rules it out (see skipFor). Someone with no
 // customer record has never chosen, and nothing says how the workspace
 // got them.
-func topicBlocks(ctx context.Context, tx pgx.Tx, ws, purpose string, topicID *string, recipients []string) (map[string]string, error) {
+// Choices are per brand (plans/brands/README.md, decision 5): the person
+// is the email's brand's, so an unsubscribe in one brand never stops
+// another's email.
+func topicBlocks(ctx context.Context, tx pgx.Tx, ws, brand, purpose string, topicID *string, recipients []string) (map[string]string, error) {
 	out := map[string]string{}
 	if purpose != policy.PurposeLifecycle {
 		return out, nil
@@ -58,7 +61,7 @@ func topicBlocks(ctx context.Context, tx pgx.Tx, ws, purpose string, topicID *st
 	}
 	for _, addr := range recipients {
 		addr = strings.ToLower(addr)
-		rec, ok, err := customers.OwnerOf(ctx, tx, ws, "email", addr)
+		rec, ok, err := customers.OwnerOfIn(ctx, tx, ws, brand, "email", addr)
 		if err != nil {
 			return nil, err
 		}
@@ -100,7 +103,11 @@ func choiceBlock(status, key, name string, byDefault bool) string {
 // link shows.
 type Preferences struct {
 	WorkspaceID, Address string
-	// Who sends it: the workspace's name.
+	// The email's brand: its topics and the person's choices are that
+	// brand's.
+	BrandID string
+	// Who sends it: the email's brand's name (the workspace's for an
+	// email with none).
 	Sender string
 	// The email's own topic, if it has one.
 	TopicKey, TopicName string
@@ -114,9 +121,9 @@ func (s *Service) Preferences(ctx context.Context, emailID string) (*Preferences
 	var p Preferences
 	var to []string
 	var topicKey, topicName *string
-	err := s.Pool.QueryRow(ctx, `SELECT e.workspace_id, w.name, e.to_addresses, tp.key, tp.name FROM emails e
-		JOIN workspaces w ON w.id = e.workspace_id
-		LEFT JOIN email_topics tp ON tp.id = e.topic_id WHERE e.id = $1`, emailID).Scan(&p.WorkspaceID, &p.Sender, &to, &topicKey, &topicName)
+	err := s.Pool.QueryRow(ctx, `SELECT e.workspace_id, COALESCE(b.name, w.name), e.to_addresses, tp.key, tp.name, COALESCE(e.brand_id::text, '') FROM emails e
+		JOIN workspaces w ON w.id = e.workspace_id LEFT JOIN brands b ON b.id = e.brand_id
+		LEFT JOIN email_topics tp ON tp.id = e.topic_id WHERE e.id = $1`, emailID).Scan(&p.WorkspaceID, &p.Sender, &to, &topicKey, &topicName, &p.BrandID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && len(to) == 0) {
 		return nil, nil
 	}
@@ -127,7 +134,7 @@ func (s *Service) Preferences(ctx context.Context, emailID string) (*Preferences
 	if topicKey != nil {
 		p.TopicKey, p.TopicName = *topicKey, *topicName
 	}
-	rec, ok, err := customers.OwnerOf(ctx, s.Pool, p.WorkspaceID, "email", p.Address)
+	rec, ok, err := customers.OwnerOfIn(ctx, s.Pool, p.WorkspaceID, p.BrandID, "email", p.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +151,9 @@ func (s *Service) Preferences(ctx context.Context, emailID string) (*Preferences
 	}
 	p.AllWithdrawn = all == customers.Withdrawn
 	rows, err := s.Pool.Query(ctx, `SELECT id, key, name, description, subscribed_by_default, visibility = 'public'
-		FROM email_topics WHERE workspace_id = $1 AND status = 'active' ORDER BY name, key`, p.WorkspaceID)
+		FROM email_topics t WHERE workspace_id = $1 AND status = 'active'
+		  AND (NULLIF($2, '') IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '') IS NULL OR NULLIF(to_jsonb(t) ->> 'brand_id', '')::uuid = NULLIF($2, '')::uuid)
+		ORDER BY name, key`, p.WorkspaceID, p.BrandID)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +201,7 @@ func (s *Service) SetPreferences(ctx context.Context, emailID string, c Preferen
 		return err
 	}
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		rec, err := customers.EnsurePerson(ctx, tx, p.WorkspaceID, "email", p.Address, true, c.RequestID)
+		rec, err := customers.EnsurePersonIn(ctx, tx, p.WorkspaceID, p.BrandID, "email", p.Address, true, c.RequestID)
 		if err != nil {
 			return err
 		}
@@ -243,11 +252,11 @@ func (s *Service) SetPreferences(ctx context.Context, emailID string, c Preferen
 
 // unsubscribeTopic withdraws an email's recipients from its topic: one
 // click on the link, or their mail app's unsubscribe button.
-func (s *Service) unsubscribeTopic(ctx context.Context, tx pgx.Tx, ws, emailID, key string, to []string, requestID string) (bool, error) {
+func (s *Service) unsubscribeTopic(ctx context.Context, tx pgx.Tx, ws, brand, emailID, key string, to []string, requestID string) (bool, error) {
 	changed := false
 	for _, a := range to {
 		a = strings.ToLower(a)
-		rec, err := customers.EnsurePerson(ctx, tx, ws, "email", a, true, requestID)
+		rec, err := customers.EnsurePersonIn(ctx, tx, ws, brand, "email", a, true, requestID)
 		if err != nil {
 			return false, err
 		}

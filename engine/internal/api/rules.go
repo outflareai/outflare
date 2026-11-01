@@ -24,15 +24,21 @@ import (
 
 func (s *Server) routesRules(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/rules", s.inBrand(read, s.listRules))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/rules", s.inBrand(manage, s.createRule))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/rules/{id}", s.inBrand(read, s.getRule))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/rules/{id}", s.inBrand(manage, s.updateRule))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/rules/{id}/activate", s.inBrand(manage, s.activateRule))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/rules/{id}/pause", s.inBrand(manage, s.pauseRule))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/rules/{id}/archive", s.inBrand(manage, s.archiveRule))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/rules/{id}/simulate", s.inBrand(read, s.simulateRule))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/rules/{id}/firings", s.inBrand(read, s.listRuleFirings))
+	// A rule belongs to one brand and acts on its records only
+	// (brand_activation.go): served under the brand, and under the
+	// workspace until the contract step.
+	for _, b := range s.activationBases("rules", s.inBrand) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listRules))
+		mux.HandleFunc("POST "+base, on(manage, s.createRule))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getRule))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateRule))
+		mux.HandleFunc("POST "+base+"/{id}/activate", on(manage, s.activateRule))
+		mux.HandleFunc("POST "+base+"/{id}/pause", on(manage, s.pauseRule))
+		mux.HandleFunc("POST "+base+"/{id}/archive", on(manage, s.archiveRule))
+		mux.HandleFunc("POST "+base+"/{id}/simulate", on(read, s.simulateRule))
+		mux.HandleFunc("GET "+base+"/{id}/firings", on(read, s.listRuleFirings))
+	}
 }
 
 type ruleStats struct {
@@ -100,7 +106,7 @@ func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is one of "+strings.Join(ruleStatuses, ", "))
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -194,16 +200,13 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 		}
 		v.Description = *f.Description
 	}
-	if f.BrandID.Set {
-		v.BrandID = nil
-		if f.BrandID.Value != nil {
-			id, err := s.brandIDFor(ctx, a.WorkspaceID, *f.BrandID.Value)
-			if err != nil {
-				return errInvalid("brand_id must be one of the workspace's brands, or null for every brand")
-			}
-			v.BrandID = &id
-		}
+	// A rule belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.optionalBrand(ctx, a, f.BrandID, v.BrandID)
+	if err != nil {
+		return err
 	}
+	v.BrandID = brand
 	if f.RecordType != nil {
 		v.RecordType = *f.RecordType
 	}
@@ -234,7 +237,7 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 	if msg := rules.Check(v.engine(a.WorkspaceID)); msg != "" {
 		return errInvalid(msg)
 	}
-	c, err := s.readCatalog(ctx, a.WorkspaceID, "", false)
+	c, err := s.readCatalog(ctx, a.WorkspaceID, *v.BrandID, false)
 	if err != nil {
 		return err
 	}
@@ -244,8 +247,8 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 	if v.Trigger.Kind == rules.KindAudience {
 		var listBrand *string
 		err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM smart_lists WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.Trigger.ListID).Scan(&listBrand)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(listBrand)) {
-			return errInvalid("list_id is not a smart list in this workspace")
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!a.sees(listBrand) || listBrand == nil || *listBrand != *v.BrandID)) {
+			return errInvalid("list_id is not a smart list of the rule's brand")
 		}
 		if err != nil {
 			return err
@@ -421,7 +424,9 @@ func (s *Server) activateRule(w http.ResponseWriter, r *http.Request) {
 	if !s.ruleApplied(w, r, s.applyRule(r, a, ruleFields{}, cur)) {
 		return
 	}
-	active, err := rules.Load(r.Context(), s.pool, a.WorkspaceID, `status = 'active'`)
+	// Loops run within a brand: another brand's rules never see this
+	// one's events.
+	active, err := rules.Load(r.Context(), s.pool, a.WorkspaceID, `status = 'active' AND brand_id IS NOT DISTINCT FROM $2::uuid`, cur.BrandID)
 	if err != nil {
 		s.internal(w, r, err)
 		return

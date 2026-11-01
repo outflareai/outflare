@@ -539,6 +539,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesIndexability(mux)
 	s.routesConnectRequests(mux)
 	s.routesVendorMailboxes(mux)
+	s.routesMailSignIn(mux)
 	s.routesEmailBisonCompat(mux)
 	s.routesImports(mux)
 	s.routesCRMImport(mux)

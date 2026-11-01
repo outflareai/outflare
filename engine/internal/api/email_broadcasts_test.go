@@ -38,7 +38,11 @@ func TestEmailBroadcasts(t *testing.T) {
 	owner.must(201, "POST", base+"/email-templates", map[string]any{"name": "Monthly", "purpose": "lifecycle", "topic": "news",
 		"subject": "{{title}}", "html": "<p>Hi {{person.first_name}}</p><p><a href=\"https://northpeak.example/pricing?plan=pro\">Pricing</a> <a href=\"https://acme.example/\">Acme</a></p>",
 		"from": "news@example.com", "publish": true})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	// The broadcast's brand (the workspace's first) has its own site: links
+	// to it carry the campaign. A broadcast belongs to one brand, so
+	// another brand's site would stay as written.
+	first := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	owner.must(200, "PATCH", base+"/brands/"+first, map[string]any{"name": "Northpeak", "website": "northpeak.example"})
 	owner.must(201, "POST", base+"/email-templates", map[string]any{"name": "Receipt", "subject": "x", "html": "x", "publish": true})
 
 	// The people: Ana and Dee get it; Bo left News; Cy is a prospect who

@@ -27,18 +27,24 @@ func (s *Server) routesWebhooks(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/webhook-events", s.listWebhookEvents)
 	read, manage := auth.ScopeWebhooksRead, auth.ScopeWebhooksManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/events", s.inWorkspace(read, s.listEvents))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks", s.inWorkspace(read, s.listWebhooks))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/webhooks", s.inWorkspace(manage, s.createWebhook))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks/{id}", s.inWorkspace(read, s.getWebhook))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/webhooks/{id}", s.inWorkspace(manage, s.updateWebhook))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/webhooks/{id}", s.inWorkspace(manage, s.deleteWebhook))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks/{id}/secret", s.inWorkspace(manage, s.webhookSecret))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/webhooks/{id}/rotate-secret", s.inWorkspace(manage, s.rotateWebhookSecret))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/webhooks/{id}/test", s.inWorkspace(manage, s.testWebhook))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks/{id}/deliveries", s.inWorkspace(read, s.listWebhookDeliveries))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}/redeliver", s.inWorkspace(manage, s.redeliverWebhook))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks/{id}/deliveries/{delivery}", s.inWorkspace(read, s.getWebhookDelivery))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/webhooks/{id}/activity", s.inWorkspace(read, s.webhookActivity))
+	// An endpoint belongs to one brand and hears that brand's events
+	// (decision 4): served under the brand, and under the workspace until
+	// the contract step (brand_activation.go).
+	for _, b := range s.activationBases("webhooks", s.inWorkspace) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listWebhooks))
+		mux.HandleFunc("POST "+base, on(manage, s.createWebhook))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getWebhook))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateWebhook))
+		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.deleteWebhook))
+		mux.HandleFunc("GET "+base+"/{id}/secret", on(manage, s.webhookSecret))
+		mux.HandleFunc("POST "+base+"/{id}/rotate-secret", on(manage, s.rotateWebhookSecret))
+		mux.HandleFunc("POST "+base+"/{id}/test", on(manage, s.testWebhook))
+		mux.HandleFunc("GET "+base+"/{id}/deliveries", on(read, s.listWebhookDeliveries))
+		mux.HandleFunc("POST "+base+"/{id}/deliveries/{delivery}/redeliver", on(manage, s.redeliverWebhook))
+		mux.HandleFunc("GET "+base+"/{id}/deliveries/{delivery}", on(read, s.getWebhookDelivery))
+		mux.HandleFunc("GET "+base+"/{id}/activity", on(read, s.webhookActivity))
+	}
 }
 
 func (s *Server) listWebhookEvents(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +65,8 @@ type webhookView struct {
 	LastSuccessAt  *time.Time `json:"last_success_at"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
-	// Set for an endpoint that gets only one brand's events.
+	// The brand whose events it gets (with the workspace's own). Null only
+	// for an endpoint made before brands, which gets every event.
 	BrandID *string `json:"brand_id"`
 	// Tries in the last 24 hours and how many failed, for its error rate.
 	Attempts24h       int `json:"attempts_24h"`
@@ -85,11 +92,16 @@ func (s *Server) loadWebhooks(ctx context.Context, ws string, id *string) ([]web
 
 func (s *Server) listWebhooks(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.loadWebhooks(r.Context(), a.WorkspaceID, nil)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
+	list = slices.DeleteFunc(list, func(v webhookView) bool { return !sel.matches(v.BrandID) })
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
@@ -106,7 +118,7 @@ func (s *Server) oneWebhook(w http.ResponseWriter, r *http.Request) (webhookView
 		s.internal(w, r, err)
 		return webhookView{}, false
 	}
-	if len(list) == 0 {
+	if len(list) == 0 || !a.sees(list[0].BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "webhook not found")
 		return webhookView{}, false
 	}
@@ -127,29 +139,31 @@ type webhookInput struct {
 	// automatic); groups are stored as their labels.
 	Categories []string `json:"categories"`
 	Enabled    *bool    `json:"enabled"`
-	// One brand's id or handle for only its events; null or "" for every
-	// brand's.
+	// The brand's id or handle whose events it gets. Left out (or null)
+	// it is the route's brand, or on the workspace route the first brand.
 	Brand json.RawMessage `json:"brand"`
 }
 
-// brand resolves the input's brand: whether it was given, and the brand id
-// (nil for every brand).
-func (s *Server) webhookBrand(ctx context.Context, ws string, in *webhookInput) (bool, *string, error) {
+// webhookBrand resolves the input's brand: whether it was given, and the
+// brand id. An endpoint belongs to one brand (decision 4), so null is the
+// default brand (activationBrand), never every brand.
+func (s *Server) webhookBrand(ctx context.Context, a *access, in *webhookInput) (bool, *string, error) {
 	if len(in.Brand) == 0 {
 		return false, nil, nil
 	}
 	var ref *string
 	if err := json.Unmarshal(in.Brand, &ref); err != nil {
-		return false, nil, errInvalid("brand must be a brand's id or handle, or null for every brand")
+		return false, nil, errInvalid("brand must be a brand's id or handle")
 	}
-	if ref == nil || strings.TrimSpace(*ref) == "" {
-		return true, nil, nil
+	if ref != nil {
+		low := strings.ToLower(strings.TrimSpace(*ref))
+		ref = &low
 	}
-	id, err := s.brandIDFor(ctx, ws, strings.ToLower(strings.TrimSpace(*ref)))
-	if errors.Is(err, errNotFound) {
-		return false, nil, errInvalid("brand not found: brand is a brand's id or handle, or null for every brand")
+	id, err := s.activationBrand(ctx, a, ref)
+	if err != nil {
+		return false, nil, err
 	}
-	return true, &id, err
+	return true, &id, nil
 }
 
 func (in *webhookInput) validate(allowPrivate bool) error {
@@ -222,7 +236,12 @@ func (s *Server) createWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	_, brand, err := s.webhookBrand(ctx, a.WorkspaceID, &req)
+	set, brand, err := s.webhookBrand(ctx, a, &req)
+	if !set && err == nil {
+		var id string
+		id, err = s.activationBrand(ctx, a, nil)
+		brand = &id
+	}
 	if s.allocError(w, r, err) {
 		return
 	}
@@ -273,7 +292,7 @@ func (s *Server) updateWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	setBrand, brand, err := s.webhookBrand(ctx, a.WorkspaceID, &req)
+	setBrand, brand, err := s.webhookBrand(ctx, a, &req)
 	if s.allocError(w, r, err) {
 		return
 	}

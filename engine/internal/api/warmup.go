@@ -25,9 +25,9 @@ func (s *Server) routesWarmup(mux *http.ServeMux) {
 type warmupSettings struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	// Provider is the id of the connected sequencer that runs the
-	// warm-up. "outflare" only goes with enabled false, and detaches the
-	// mailbox from its sequencer's warm-up. Turning warm-up on without a
-	// provider keeps the mailbox's sequencer, or picks one it is in.
+	// warm-up. Turning warm-up on without a provider keeps the mailbox's
+	// sequencer, or picks one it is in. Turning it off is enabled false:
+	// the mailbox keeps its sequencer for when it is turned on again.
 	Provider *string `json:"provider,omitempty"`
 
 	// capable is the workspace's connections that can run warm-up, set
@@ -41,9 +41,7 @@ func (w *warmupSettings) validate() string {
 	switch {
 	case w.Enabled == nil && w.Provider == nil:
 		return "set enabled or provider"
-	case w.Provider != nil && *w.Provider == "outflare" && (w.Enabled == nil || *w.Enabled):
-		return noWarmupProvider
-	case w.Provider != nil && *w.Provider != "outflare" && !validUUID(*w.Provider):
+	case w.Provider != nil && !validUUID(*w.Provider):
 		return "provider must be the id of a connected sequencer"
 	}
 	return ""
@@ -52,7 +50,7 @@ func (w *warmupSettings) validate() string {
 // platform returns the integration id when warm-up is to run on a
 // connected sequencer, or "".
 func (w *warmupSettings) platform() string {
-	if w.Provider == nil || *w.Provider == "outflare" {
+	if w.Provider == nil {
 		return ""
 	}
 	return *w.Provider
@@ -167,11 +165,7 @@ func (s *Server) checkProvider(ctx context.Context, q jobs.Querier, ws string, s
 // sequencer involved (the one running it now and the one before) to
 // switch its own warm-up to match.
 func (w *warmupSettings) apply(ctx context.Context, tx pgx.Tx, ws string, ids []string) (int64, error) {
-	var provider *string
-	if w.Provider != nil {
-		p := w.platform()
-		provider = &p
-	}
+	provider := w.Provider
 	rows, err := tx.Query(ctx, `
 		WITH old AS (
 			SELECT id, warmup_integration_id FROM mailboxes
@@ -181,7 +175,7 @@ func (w *warmupSettings) apply(ctx context.Context, tx pgx.Tx, ws string, ids []
 			warmup_started_at = CASE WHEN $3 AND NOT m.warmup_enabled THEN now() ELSE m.warmup_started_at END,
 			warmup_enabled = COALESCE($3, m.warmup_enabled),
 			warmup_integration_id = CASE
-				WHEN $4::text IS NOT NULL THEN NULLIF($4, '')::uuid
+				WHEN $4::uuid IS NOT NULL THEN $4::uuid
 				WHEN $3 AND m.warmup_integration_id IS NULL THEN (
 					SELECT p.integration_id FROM mailbox_platforms p
 					WHERE p.mailbox_id = m.id AND p.integration_id = ANY($5)

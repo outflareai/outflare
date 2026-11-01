@@ -104,7 +104,7 @@ func TestLinkPitchesFromOpenerToLive(t *testing.T) {
 		t.Fatalf("agreed: %v", agreed)
 	}
 	var labels []string
-	if err := e.pool.QueryRow(ctx, `SELECT labels FROM inbound_messages WHERE id = $1`, inbound).Scan(&labels); err != nil || len(labels) != 1 || labels[0] != "link: agreed" {
+	if err := e.pool.QueryRow(ctx, `SELECT tags FROM inbound_messages WHERE id = $1`, inbound).Scan(&labels); err != nil || len(labels) != 1 || labels[0] != "link: agreed" {
 		t.Fatalf("labels: %v %v", labels, err)
 	}
 	if k := owner.must(200, "GET", path, nil); k["reply_kind"] != "agreed" || k["replied_at"] == nil {

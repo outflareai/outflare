@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { useBrand } from "@/lib/brand";
 // The automation map: every rule and journey in the workspace as one
 // read-only picture (GET .../automation-map). What sets each one off sits
 // on the left, what it touches on the right, laid out automatically.
@@ -11,7 +13,7 @@ import {
   type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { CircleAlert, Info, ListChecks, Minus, PencilLine, Plus, Route, Send, Tag, Workflow, X, Zap, type LucideIcon } from "lucide-react";
+import { Building2, CircleAlert, Database, Info, ListChecks, Megaphone, MessageSquare, Minus, PencilLine, Plus, Route, Send, Star, Tag, Webhook, Workflow, X, Zap, type LucideIcon } from "lucide-react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { track } from "@/lib/analytics";
@@ -34,12 +36,19 @@ const kindInfo: Record<MapNode["kind"], { label: string; icon: LucideIcon; tab?:
   smart_list: { label: "People list", icon: ListChecks, tab: "lists" },
   sequence: { label: "Sequence", icon: Send, tab: "sequences" },
   tag: { label: "Tag", icon: Tag },
+  webhook: { label: "Webhook", icon: Webhook },
+  slack: { label: "Slack", icon: MessageSquare },
+  crm: { label: "CRM", icon: Building2 },
+  ad_audience: { label: "Ad audience", icon: Megaphone, tab: "ads" },
+  review_campaign: { label: "Review campaign", icon: Star, tab: "reviews" },
+  source: { label: "Source", icon: Database },
 };
 
 // What a link says; links that only start things say nothing.
 const edgeLabel: Partial<Record<MapEdge["kind"], string>> = {
   waits_for: "waits for", checks: "checks", emits: "emits", goal: "goal", exits_on: "exits on", adds_to: "adds", removes_from: "removes",
   enters: "enters", exits: "takes out", enrolls: "enrolls", stops: "stops", untags: "untags",
+  pushes: "pushes", calls: "calls", posts: "posts", requests: "asks for a review",
 };
 
 const statusTone: Record<string, keyof typeof tones> = { active: "green", draft: "grey", paused: "amber" };
@@ -180,7 +189,16 @@ function Controls({ shape }: { shape: string }) {
 const shows = { all: "Everything", live: "Only what's live" } as const;
 type Show = keyof typeof shows;
 
-export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: string) => void }) {
+// Automations belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function AutomationMap(props: { ws: string; go: (tab: Tab, item?: string) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Automations" brands={active.length} />;
+  return <AutomationMapPage key={brand.id} {...props} />;
+}
+
+function AutomationMapPage({ ws, go }: { ws: string; go: (tab: Tab, item?: string) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [m, setMap] = useState<Map | null>(null);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState("");
@@ -194,11 +212,11 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
   const [person, setPerson] = useState<Person | null>(null);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/automation-map", { params: { path: { ws }, query: person ? { record: person.id } : {} } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/automation-map", { params: { path: { brand: brandId }, query: person ? { record: person.id } : {} } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setMap(data);
-  }, [ws, person]);
+  }, [brandId, person]);
   useEffect(() => {
     load();
   }, [load]);
@@ -243,7 +261,7 @@ export function AutomationMap({ ws, go }: { ws: string; go: (tab: Tab, item?: st
   if (!m) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
   const node = m.nodes.find((n) => n.id === selected);
   const automations = m.nodes.filter((n) => n.kind === "rule" || n.kind === "journey").length;
-  const targets = m.nodes.filter((n) => n.kind === "sequence" || n.kind === "smart_list" || n.kind === "tag").sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label));
+  const targets = m.nodes.filter((n) => !["event", "field", "rule", "journey", "source"].includes(n.kind)).sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label));
   return (
     <div className="space-y-4">
       <PageHeader

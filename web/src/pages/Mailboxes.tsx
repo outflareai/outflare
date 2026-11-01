@@ -5,11 +5,13 @@ import { BrandBadge } from "@/components/brand-badge";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, FilePicker, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { OAuthConnect } from "./OAuth";
+import { takeConnectOutcome } from "./Connectors";
 import type { Tab } from "../App";
 import { placementTone, plural, shortPlatform } from "../format";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { mailboxStatus } from "@/lib/status";
+import { warmupPlatform, warmupScore } from "@/lib/warmup";
 
 // Lifecycle stage: only ready mailboxes send cold email.
 const stageTone = { warming: "blue", ready: "green", resting: "grey", retired: "grey" } as const;
@@ -21,7 +23,14 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
   const [health, setHealth] = useState<{ summary: MailboxHealthSummary; byId: Map<string, MailboxHealth> } | null>(null);
   const [healthOpen, setHealthOpen] = useState<MailboxHealth | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [adding, setAdding] = useState<boolean | null>(openOAuth ? true : null);
+  // A mailbox sign-in comes back here with its outcome in the query.
+  const [signedIn] = useState(() => {
+    const q = new URLSearchParams(location.search);
+    const back = q.has("integration") || q.has("connect_error");
+    takeConnectOutcome();
+    return back;
+  });
+  const [adding, setAdding] = useState<boolean | null>(openOAuth || signedIn ? true : null);
   const [filter, setFilter] = useState<"" | MailboxStatus>("");
   // Connected sequencers that can run warm-up themselves.
   const [warmupPlatforms, setWarmupPlatforms] = useState<{ id: string; name: string; config: Record<string, unknown> }[]>([]);
@@ -64,7 +73,7 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
   const platformsFor = (m: Mailbox) => warmupPlatforms.filter((p) => (m.platforms ?? []).some((x) => x.integration_id === p.id));
   const warming = mailboxes.filter((m) => m.warmup.enabled);
   const notWarming = mailboxes.filter((m) => !m.warmup.enabled && platformsFor(m).length > 0);
-  const scores = warming.flatMap((m) => (m.warmup.platform?.score == null ? [] : [m.warmup.platform.score]));
+  const scores = warming.flatMap((m) => warmupScore(m) ?? []);
   const score = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 
   async function setWarmup(list: Mailbox[], enabled: boolean) {
@@ -277,7 +286,7 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
             {
               id: "warmup",
               header: "Warm-up",
-              accessorFn: (m) => (m.warmup.enabled ? (m.warmup.platform?.score ?? 0) : -1),
+              accessorFn: (m) => (m.warmup.enabled ? (warmupScore(m) ?? 0) : -1),
               cell: ({ row: { original: m } }) => <WarmupCell m={m} />,
             },
             {
@@ -305,7 +314,7 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
                   ) : (
                     <span className="text-muted-foreground">Free</span>
                   )}
-                  {m.assignment?.platform && <Badge tone={m.assignment.confirmed ? "grey" : "blue"} title={m.assignment.confirmed ? undefined : "Asked the platform to add it; confirmed on the next read, within 5 minutes."}>{m.assignment.confirmed ? `in ${shortPlatform(m.assignment.platform)}` : `waiting for ${shortPlatform(m.assignment.platform)}`}</Badge>}
+                  {m.assignment?.integration_name && <Badge tone={m.assignment.confirmed ? "grey" : "blue"} title={m.assignment.confirmed ? undefined : "Asked the platform to add it; confirmed on the next read, within 5 minutes."}>{m.assignment.confirmed ? `in ${shortPlatform(m.assignment.integration_name)}` : `waiting for ${shortPlatform(m.assignment.integration_name)}`}</Badge>}
                   {m.assignment?.state === "draining" && <Badge tone="amber" title="Takes no new leads; finishing the follow-ups it started">Finishing follow-ups</Badge>}
                   {m.lock && <Badge title={m.lock.note || undefined}>{m.lock.kind === "manual_only" ? "Manual only" : m.lock.kind === "team" ? "Team only" : "Kept here"}</Badge>}
                 </div>
@@ -365,21 +374,23 @@ export async function changeWarmup(ws: string, list: Mailbox[], enabled: boolean
 
 export function WarmupCell({ m }: { m: Mailbox }) {
   const w = m.warmup;
+  const running = warmupPlatform(m);
   // Sequencers whose own warm-up is on for it, besides the one running it.
-  const elsewhere = (m.platforms ?? []).filter((p) => p.warmup_enabled && p.integration_id !== w.platform?.integration_id).map((p) => shortPlatform(p.platform));
-  if (!w.enabled || !w.platform)
+  const elsewhere = (m.platforms ?? []).filter((p) => p.warmup_enabled && p.integration_id !== w.provider).map((p) => shortPlatform(p.integration_name));
+  if (!w.enabled || !running)
     return elsewhere.length > 0 ? (
       <Badge tone="blue" title={`${elsewhere.join(" and ")}'s own warm-up is on for this mailbox.`}>On in {elsewhere.join(", ")}</Badge>
     ) : (
       <span className="text-muted-foreground">Off</span>
     );
-  const score = w.platform.score;
+  const score = running.warmup_score ?? null;
+  const name = running.integration_name;
   return (
     <div>
       {w.waiting_on ? (
-        <Badge tone="blue" title="Outflare asked the sequencer to turn its warm-up on. It shows here after the next sync, within 5 minutes.">Turning on in {w.platform.name}</Badge>
+        <Badge tone="blue" title="Outflare asked the sequencer to turn its warm-up on. It shows here after the next sync, within 5 minutes.">Turning on in {name}</Badge>
       ) : (
-        <Badge tone={placementTone(score === null ? null : score / 100)} title={`${w.platform.name} runs this mailbox's warm-up${score === null ? "" : `; its warm-up score is ${score}`}`}>{score === null ? "On" : `${score}`} in {w.platform.name}</Badge>
+        <Badge tone={placementTone(score === null ? null : score / 100)} title={`${name} runs this mailbox's warm-up${score === null ? "" : `; its warm-up score is ${score}`}`}>{score === null ? "On" : `${score}`} in {name}</Badge>
       )}
       {elsewhere.length > 0 && (
         <div className="mt-0.5"><Badge tone="amber" title="It warms up in two places, which doubles its warm-up mail. Choose one with Warm up in… in its menu.">Also warming in {elsewhere.join(", ")}</Badge></div>
@@ -397,13 +408,13 @@ function MailboxName({ m, go }: { m: Mailbox; go: (tab: Tab, item?: string) => v
       <div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-[13px] font-medium break-all">{m.email}</span> <BrandBadge id={m.brand_id} /></div>
       <div className="text-xs text-muted-foreground">
         {m.has_login === false
-          ? <span title="Outflare has no login for it, so it only sends in that platform's campaigns and has no inbox sync here.">In {(m.platforms ?? []).map((p) => shortPlatform(p.platform)).join(", ") || "an outside sequencer"}</span>
+          ? <span title="Outflare has no login for it, so it only sends in that platform's campaigns and has no inbox sync here.">In {(m.platforms ?? []).map((p) => shortPlatform(p.integration_name)).join(", ") || "an outside sequencer"}</span>
           : <>{providerLabel(m.provider)}{m.auth_method === "oauth" ? " · signed in with OAuth" : " · app password"}</>} ·{" "}
         <button className="underline-offset-2 hover:underline" title={`DNS health and settings for ${m.domain}`} onClick={() => go("domains", m.domain)}>{m.domain}</button>
       </div>
       {m.has_login !== false && (m.platforms ?? []).length > 0 && (
         <div className="mt-1 text-xs text-amber-700 dark:text-amber-400" title="Sends there count against the same inbox and domain reputation. Check its limits there too.">
-          Also connected in {(m.platforms ?? []).map((p) => shortPlatform(p.platform)).join(", ")}, which may send from it too
+          Also connected in {(m.platforms ?? []).map((p) => shortPlatform(p.integration_name)).join(", ")}, which may send from it too
         </div>
       )}
       {m.status === "error" && m.status_reason && <Problem reason={m.status_reason} />}
@@ -431,7 +442,7 @@ function StatusCell({ m, paused, h }: { m: Mailbox; paused: boolean; h?: Mailbox
       <Badge tone={tone}>{label}</Badge>
       {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
       {(m.platforms ?? []).filter((p) => p.status !== "ok").map((p) => (
-        <Badge key={p.integration_id} tone={p.status === "paused" ? "grey" : "red"} title={p.status_reason ?? undefined}>{p.status} in {shortPlatform(p.platform)}</Badge>
+        <Badge key={p.integration_id} tone={p.status === "paused" ? "grey" : "red"} title={p.status_reason ?? undefined}>{p.status} in {shortPlatform(p.integration_name)}</Badge>
       ))}
     </div>
   );

@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // Email templates: the receipts, resets and onboarding emails your app
 // sends by handle. Editing changes a draft; publishing makes it the version
 // sends use, and every published version is kept.
@@ -130,16 +131,24 @@ const columns: ColumnDef<EmailTemplate, unknown>[] = [
   { id: "updated_at", header: "Edited", accessorFn: (t) => t.updated_at, cell: ({ row: { original: t } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(t.updated_at)}>{ago(t.updated_at)}</span> },
 ];
 
-export function Templates({ ws, canManage, canSend, myEmail, open, onOpen, go }: { ws: string; canManage: boolean; canSend: boolean; myEmail: string; open: string; onOpen: (item: string) => void; go: Go }) {
+// Email templates belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Templates(props: { ws: string; canManage: boolean; canSend: boolean; myEmail: string; open: string; onOpen: (item: string) => void; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Email templates" brands={active.length} />;
+  return <TemplatesPage key={brand.id} {...props} />;
+}
+
+function TemplatesPage({ ws, canManage, canSend, myEmail, open, onOpen, go }: { ws: string; canManage: boolean; canSend: boolean; myEmail: string; open: string; onOpen: (item: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [status, setStatus] = useState<"active" | "archived">("active");
   const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
   const [starter, setStarter] = useState<Starter | null>(null);
 
-  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws }, query: { status, ...brandQuery } } });
+    const { data } = await api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId }, query: { status } } });
     setTemplates(data?.data ?? []);
-  }, [ws, status, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, status, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
   }, [load]);
@@ -230,6 +239,7 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
   ws: string; id?: string; starter?: Starter; canManage: boolean; canSend: boolean; myEmail: string;
   back: () => void; onCreated: (t: EmailTemplate) => void; onRenamed?: (handle: string) => void; reload: () => void; go: Go;
 }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [saved, setSaved] = useState<EmailTemplate | null>(null);
   const [draft, setDraft] = useState<Draft | null>(starter ? toDraft(starter.template) : null);
   const [missing, setMissing] = useState(false);
@@ -245,8 +255,8 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
   const load = useCallback(async () => {
     if (!id) return;
     const [t, v] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id } } }),
-      api.GET("/v1/workspaces/{ws}/email-templates/{id}/versions", { params: { path: { ws, id } } }),
+      api.GET("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id } } }),
+      api.GET("/v1/brands/{brand}/email-templates/{id}/versions", { params: { path: { brand: brandId, id } } }),
     ]);
     if (!t.data) return setMissing(true);
     setSaved(t.data);
@@ -271,8 +281,8 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
     const body: EmailTemplateInput = { ...draft, ...(draft.handle ? {} : { handle: undefined }), ...(publish ? { publish: true, note } : {}),
       ...(draft.purpose === "transactional" && saved?.topic ? { topic: null } : {}) };
     const res = saved
-      ? await api.PATCH("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id: saved.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: saved.id } }, body })
+      : await api.POST("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } }, body });
     setBusy("");
     if (res.error || !res.data) {
       setError(errorMessage(res.error));
@@ -291,7 +301,7 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
     reload();
     if (t.handle !== saved.handle) onRenamed?.(t.handle);
     if (publish) {
-      const v = await api.GET("/v1/workspaces/{ws}/email-templates/{id}/versions", { params: { path: { ws, id: t.id } } });
+      const v = await api.GET("/v1/brands/{brand}/email-templates/{id}/versions", { params: { path: { brand: brandId, id: t.id } } });
       setVersions(v.data?.data ?? []);
     }
     return t;
@@ -307,14 +317,14 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
     if (r?.choice !== "ok") return;
     if (saved && !dirty) {
       setBusy("publish");
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/email-templates/{id}/publish", { params: { path: { ws, id: saved.id } }, body: { note: r.value } });
+      const { data, error } = await api.POST("/v1/brands/{brand}/email-templates/{id}/publish", { params: { path: { brand: brandId, id: saved.id } }, body: { note: r.value } });
       setBusy("");
       if (error || !data) return setError(errorMessage(error));
       toast(`Published version ${data.published_version}.`);
       setSaved(data);
       setDraft(toDraft(data));
       reload();
-      const v = await api.GET("/v1/workspaces/{ws}/email-templates/{id}/versions", { params: { path: { ws, id: data.id } } });
+      const v = await api.GET("/v1/brands/{brand}/email-templates/{id}/versions", { params: { path: { brand: brandId, id: data.id } } });
       setVersions(v.data?.data ?? []);
       return;
     }
@@ -324,7 +334,7 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
   async function archive() {
     if (!saved) return;
     const next = saved.status === "active" ? "archived" : "active";
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id: saved.id } }, body: { status: next } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: saved.id } }, body: { status: next } });
     if (error || !data) return toast(errorMessage(error), "error");
     toast(next === "archived" ? "Archived. Sends that name it are refused until you restore it." : "Restored.");
     setSaved(data);
@@ -334,7 +344,7 @@ function Editor({ ws, id, starter, canManage, canSend, myEmail, back, onCreated,
   async function remove() {
     if (!saved) return;
     if (!(await confirmAction(`Delete ${saved.name}?`, `Its versions are deleted too, and sends that name ${saved.handle} are refused. Emails already sent keep their content.`, "Delete template"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id: saved.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: saved.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Deleted.");
     back();
@@ -441,6 +451,7 @@ function Variables({ draft, readOnly, onChange }: { draft: Draft; readOnly: bool
 type View = "desktop" | "phone" | "text";
 
 function Preview({ ws, draft, onDeclare, readOnly }: { ws: string; draft: Draft; onDeclare: (names: string[]) => void; readOnly: boolean }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [view, setView] = useState<View>("desktop");
   const [out, setOut] = useState<EmailPreview | null>(null);
   const [error, setError] = useState("");
@@ -450,8 +461,8 @@ function Preview({ ws, draft, onDeclare, readOnly }: { ws: string; draft: Draft;
   useEffect(() => {
     const n = ++seq.current;
     const t = setTimeout(async () => {
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/email-templates/preview", {
-        params: { path: { ws } },
+      const { data, error } = await api.POST("/v1/brands/{brand}/email-templates/preview", {
+        params: { path: { brand: brandId } },
         body: { subject: draft.subject, html: draft.html, text: draft.text, variables: draft.variables.filter((v) => v.name) },
       });
       if (n !== seq.current) return;
@@ -505,6 +516,7 @@ function Preview({ ws, draft, onDeclare, readOnly }: { ws: string; draft: Draft;
 // Tracking is a setting, not content: switching it applies at once,
 // without a publish.
 function Tracking({ ws, template: t, canManage, go, onChange }: { ws: string; template: EmailTemplate; canManage: boolean; go: Go; onChange: (t: EmailTemplate) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [busy, setBusy] = useState("");
   const [linkDomain, setLinkDomain] = useState<string | null | undefined>();
   useEffect(() => {
@@ -512,7 +524,7 @@ function Tracking({ ws, template: t, canManage, go, onChange }: { ws: string; te
   }, [ws]);
   async function toggle(key: "track_opens" | "track_clicks", on: boolean) {
     setBusy(key);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id: t.id } }, body: { [key]: on } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: t.id } }, body: { [key]: on } });
     setBusy("");
     if (error || !data) return toast(errorMessage(error), "error");
     toast(`${key === "track_opens" ? "Open" : "Click"} tracking ${on ? "on" : "off"} for new sends.`);
@@ -547,14 +559,15 @@ function Tracking({ ws, template: t, canManage, go, onChange }: { ws: string; te
 
 // The topic is a setting too: it applies to new sends at once.
 function TopicCard({ ws, template: t, canManage, go, onChange }: { ws: string; template: EmailTemplate; canManage: boolean; go: Go; onChange: (t: EmailTemplate) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [topics, setTopics] = useState<EmailTopic[] | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/email-topics", { params: { path: { ws }, query: { status: "active" } } }).then(({ data }) => setTopics(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId }, query: { status: "active" } } }).then(({ data }) => setTopics(data?.data ?? []));
   }, [ws]);
   async function pick(key: string) {
     setBusy(true);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/email-templates/{id}", { params: { path: { ws, id: t.id } }, body: { topic: key || null } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: t.id } }, body: { topic: key || null } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     toast(data.topic ? `New sends go to people subscribed to ${data.topic.name}.` : "No topic: new sends go to everyone who hasn't left all marketing email.");
@@ -587,6 +600,7 @@ function TopicCard({ ws, template: t, canManage, go, onChange }: { ws: string; t
 }
 
 function TestSend({ ws, template, myEmail, dirty, fallbackFrom }: { ws: string; template: EmailTemplate; myEmail: string; dirty: boolean; fallbackFrom: string }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [to, setTo] = useState(myEmail);
   const [from, setFrom] = useState(template.from || fallbackFrom);
   const [error, setError] = useState("");
@@ -594,8 +608,8 @@ function TestSend({ ws, template, myEmail, dirty, fallbackFrom }: { ws: string; 
   async function send() {
     setBusy(true);
     const data = Object.fromEntries(template.variables.filter((v) => v.example).map((v) => [v.name, v.example!]));
-    const res = await api.POST("/v1/workspaces/{ws}/emails", {
-      params: { path: { ws } },
+    const res = await api.POST("/v1/brands/{brand}/emails", {
+      params: { path: { brand: brandId } },
       body: { to: to.trim(), template: template.id, draft: true, test: true, data, ...(from.trim() ? { from: from.trim() } : {}) },
     });
     setBusy(false);

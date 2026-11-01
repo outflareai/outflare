@@ -44,10 +44,21 @@ func TestLeadImportMergeAndLists(t *testing.T) {
 		t.Fatalf("list membership: %v", ana)
 	}
 
-	// List filter and pagination.
-	if out = owner.must(200, "GET", base+"/leads?list_id="+listID, nil); out["total"] != 2.0 {
-		t.Fatalf("list filter: %v", out)
+	// A list's leads come from the list, with the same filters as /leads;
+	// /leads says where to go rather than ignoring list_id.
+	if out = owner.must(200, "GET", base+"/lead-lists/"+listID+"/members?sort=email", nil); out["total"] != 2.0 {
+		t.Fatalf("list's leads: %v", out)
 	}
+	if out = owner.must(200, "GET", base+"/lead-lists/"+listID+"/members?verification=unverified&suppressed=false", nil); out["total"] != 2.0 {
+		t.Fatalf("list's unverified leads: %v", out)
+	}
+	if out = owner.must(200, "GET", base+"/lead-lists/"+listID+"/members?verification=deliverable", nil); out["total"] != 0.0 {
+		t.Fatalf("list's deliverable leads: %v", out)
+	}
+	owner.must(400, "GET", base+"/lead-lists/"+listID+"/members?verification=nope", nil)
+	owner.must(400, "GET", base+"/leads?list_id="+listID, nil)
+
+	// Pagination.
 	p1 := owner.must(200, "GET", base+"/leads?limit=2", nil)
 	if len(p1["data"].([]any)) != 2 || p1["next_after"] == nil {
 		t.Fatalf("page 1: %v", p1)

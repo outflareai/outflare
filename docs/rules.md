@@ -6,6 +6,8 @@ A rule never sends anything itself. "What happened" (the event) and "what we did
 
 Everything here works the same from the REST API, the MCP server and the web app (Lifecycle → Rules).
 
+A rule belongs to one brand (`plans/brands/README.md`) and acts on that brand's records only; its firings and the events it emits are that brand's. The API lives under the brand: `/v1/brands/{brand}/rules/...`. The workspace routes (`/v1/workspaces/{ws}/rules/...`) are deprecated and keep working until the brands contract step: a list is the brand `?brand=` picks, else the workspace's first, and a rule made there without `brand_id` goes to the workspace's first brand. Two brands can each have a rule of the same name.
+
 ## In the app
 
 Each rule is a card you read as a sentence: "**When** someone does **signed_up** **and doesn't** do **product_activated** **within** **7 days**, **if** plan is not enterprise, **emit** customer.stalled." Pick the kind of trigger from the first blank and fill in the rest. The card also has:
@@ -91,18 +93,18 @@ Some playbooks bring rules in a setup kit, such as "Stalled after sign-up" (acti
 
 | | |
 | --- | --- |
-| `GET/POST .../rules`, `GET/PATCH .../rules/{id}` | List, create, read and change rules (scopes `customers.read` and `customers.manage`) |
+| `GET/POST /v1/brands/{brand}/rules`, `GET/PATCH .../rules/{id}` | List, create, read and change a brand's rules (scopes `customers.read` and `customers.manage`) |
 | `POST .../rules/{id}/activate`, `pause`, `archive` | Turn a rule on or off, or stop it for good |
 | `POST .../rules/{id}/simulate` | The dry run |
 | `GET .../rules/{id}/firings` | When it fired and for whom, newest first, with the event it emitted and the one that set it off |
 
-A rule is a draft until activated. A draft or paused rule changes freely, and a change to what it does raises its `version`, which each firing records, and starts its timers and change tracking afresh (its firings stay, so `fire: once` still holds). An active rule only changes its name and description, so pause it first. A brand's rule covers that brand's records and the shared ones. People limited to some brands see and change only their brands' rules.
+A rule is a draft until activated. A draft or paused rule changes freely, and a change to what it does raises its `version`, which each firing records, and starts its timers and change tracking afresh (its firings stay, so `fire: once` still holds). An active rule only changes its name and description, so pause it first. A rule covers its brand's records only, and an audience rule's smart list is its brand's. People limited to some brands see and change only their brands' rules.
 
-The MCP tools are `list_rules`, `get_rule`, `create_rule`, `update_rule`, `simulate_rule`, `activate_rule`, `pause_rule`, `archive_rule` and `list_rule_firings`.
+The MCP tools are `list_rules`, `get_rule`, `create_rule`, `update_rule`, `simulate_rule`, `activate_rule`, `pause_rule`, `archive_rule` and `list_rule_firings`; each takes `brand`.
 
 ## Webhooks and events
 
-Each firing is the `rule.fired` webhook event, with `record_id`, `event` (the emitted name), `event_id`, `trigger`, `depth` and `rule_version`. Subscribe a [webhook](api-conventions.md) to it to act on rules from your own systems. Making and changing rules are `rule.created`, `rule.updated`, `rule.activated`, `rule.paused` and `rule.archived`.
+Each firing is the `rule.fired` webhook event, with `record_id`, `event` (the emitted name), `event_id`, `trigger`, `depth` and `rule_version`, and the rule's `brand_id` on the event, so only that brand's webhook endpoints get it. Subscribe a [webhook](api-conventions.md) to it to act on rules from your own systems. Making and changing rules are `rule.created`, `rule.updated`, `rule.activated`, `rule.paused` and `rule.archived`.
 
 ## How it runs
 

@@ -28,6 +28,7 @@ func (s *Server) routesAds(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/accounts", s.inBrand(read, s.listAdAccounts))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/accounts/{id}", s.inWorkspace(auth.ScopeIntegrationsManage, s.updateAdAccount))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/campaigns", s.inBrand(read, s.listAdCampaigns))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/items", s.inBrand(read, s.listAdItems))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/summary", s.inBrand(read, s.adsSummary))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/sync", s.inWorkspace(read, s.syncAds))
 }
@@ -544,11 +545,22 @@ func (s *Server) adsSummary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "group is connector, brand, account or day")
 		return
 	}
+	// Campaigns hold all of an account's numbers; ad groups and ads repeat
+	// them, so they count only when one is asked for by its id.
+	level := ` AND e.level = 'campaign'`
+	if id := r.URL.Query().Get("entity_id"); id != "" {
+		if !isUUID(id) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "entity_id is a campaign's, ad group's or ad's id, from GET .../ads/campaigns or .../ads/items")
+			return
+		}
+		f.args = append(f.args, id)
+		level = ` AND e.id = $` + strconv.Itoa(len(f.args))
+	}
 	query := func(key string) ([]adSummaryRow, error) {
 		rows, err := s.pool.Query(r.Context(), `
 			SELECT `+key+`, a.currency, `+adSums+`
 			FROM ad_metrics_daily m JOIN ad_entities e ON e.id = m.ad_entity_id JOIN ad_accounts a ON a.id = e.ad_account_id
-			WHERE m.workspace_id = $1 AND m.day BETWEEN $2 AND $3`+f.where+`
+			WHERE m.workspace_id = $1 AND m.day BETWEEN $2 AND $3`+f.where+level+`
 			GROUP BY 1, 2 ORDER BY 1, 2`, f.args...)
 		if err != nil {
 			return nil, err

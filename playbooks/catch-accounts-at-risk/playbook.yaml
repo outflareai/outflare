@@ -43,9 +43,9 @@ steps:
   - say: Check what the setup kit would add, then add it with those values. Its list, rules and journeys arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Rewrite the two emails in the brand's voice, and dry-run both rules to see how many accounts they would have caught.
-    tools: [getBrandContext, updateEmailTemplate, simulateRule]
+    tools: [getBrandContext, updateBrandEmailTemplate, simulateBrandRule]
   - say: Test both journeys with a key account, then ask a person to turn the rules and journeys on.
-    tools: [getJourney, testJourney]
+    tools: [getBrandJourney, testBrandJourney]
 guardrails:
   - The rules and journeys are turned on only after a person approves them.
   - The owner hears first; the customer gets one short check-in, never a sales pitch.

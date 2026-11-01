@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { useBrand } from "@/lib/brand";
 // Email topics: what people can choose to get, such as product updates.
 // Lifecycle templates belong to one, and the preference page behind every
 // unsubscribe link lists them. Who chose what is a consent on the person's
@@ -33,13 +35,22 @@ const columns: ColumnDef<EmailTopic>[] = [
   { id: "sent", header: "Sent, 30 days", accessorFn: (t) => t.sent_30d },
 ];
 
-export function Topics({ ws, canManage, go }: { ws: string; canManage: boolean; go: Go }) {
+// Email topics belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Topics(props: { ws: string; canManage: boolean; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Email topics" brands={active.length} />;
+  return <TopicsPage key={brand.id} {...props} />;
+}
+
+function TopicsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [topics, setTopics] = useState<EmailTopic[] | null>(null);
   const [status, setStatus] = useState<"active" | "archived">("active");
   const [editing, setEditing] = useState<EmailTopic | "new" | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/email-topics", { params: { path: { ws }, query: { status } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId }, query: { status } } });
     if (error) setError(errorMessage(error));
     setTopics(data?.data ?? []);
   }, [ws, status]);
@@ -48,7 +59,7 @@ export function Topics({ ws, canManage, go }: { ws: string; canManage: boolean; 
   }, [load]);
 
   async function setArchived(t: EmailTopic, archived: boolean) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/email-topics/{id}", { params: { path: { ws, id: t.id } }, body: { status: archived ? "archived" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/email-topics/{id}", { params: { path: { brand: brandId, id: t.id } }, body: { status: archived ? "archived" : "active" } });
     if (error) return toast(errorMessage(error), "error");
     toast(archived ? `Archived ${t.name}. Templates in it keep it until you change them.` : `Restored ${t.name}.`);
     load();
@@ -107,6 +118,7 @@ export function Topics({ ws, canManage, go }: { ws: string; canManage: boolean; 
 }
 
 function TopicDialog({ ws, topic, onClose, onSaved }: { ws: string; topic: EmailTopic | null; onClose: () => void; onSaved: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [name, setName] = useState(topic?.name ?? "");
   const [description, setDescription] = useState(topic?.description ?? "");
   const [byDefault, setByDefault] = useState(topic?.subscribed_by_default ?? true);
@@ -118,8 +130,8 @@ function TopicDialog({ ws, topic, onClose, onSaved }: { ws: string; topic: Email
     setBusy(true);
     const body = { name, description, subscribed_by_default: byDefault, visibility };
     const res = topic
-      ? await api.PATCH("/v1/workspaces/{ws}/email-topics/{id}", { params: { path: { ws, id: topic.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/email-topics", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/email-topics/{id}", { params: { path: { brand: brandId, id: topic.id } }, body })
+      : await api.POST("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId } }, body });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
     toast(topic ? `Saved ${res.data.name}.` : `Added ${res.data.name}. Pick it on a lifecycle template to use it.`);

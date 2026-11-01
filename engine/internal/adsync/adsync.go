@@ -164,7 +164,7 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 		return nil
 	}
 	ev := track.Event{Name: "ads.synced", WorkspaceID: *job.WorkspaceID, ActorType: "system", Surface: "job",
-		Props: map[string]any{"connector": res.Connector, "accounts": res.Accounts, "campaigns": res.Campaigns, "rows": res.Rows}}
+		Props: map[string]any{"connector": res.Connector, "accounts": res.Accounts, "campaigns": res.Campaigns, "ad_groups": res.AdGroups, "ads": res.Ads, "rows": res.Rows}}
 	var db dbError
 	switch {
 	case err == nil:
@@ -193,7 +193,12 @@ type Result struct {
 	Connector string `json:"connector"`
 	Accounts  int    `json:"accounts"`
 	Campaigns int    `json:"campaigns"`
-	Rows      int    `json:"rows"`
+	// AdGroups and Ads are how many the platforms listed, where they
+	// read below campaigns (Meta and Google).
+	AdGroups int `json:"ad_groups"`
+	Ads      int `json:"ads"`
+	// Rows are campaign-days stored.
+	Rows int `json:"rows"`
 }
 
 // dbError marks a database failure, which is retried, from a platform's.
@@ -483,6 +488,127 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 	})
 	if err != nil {
 		return dbError{err}
+	}
+	if ir, ok := r.(connectors.AdItemsReader); ok {
+		for _, level := range []string{connectors.AdLevelGroup, connectors.AdLevelAd} {
+			if err := s.syncItems(ctx, o, ir, a, level, from, to, res); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// parentLevel is the level an ad group's or ad's parent is at.
+var parentLevel = map[string]string{connectors.AdLevelGroup: "campaign", connectors.AdLevelAd: connectors.AdLevelGroup}
+
+// syncItems stores an account's ad groups or ads under their parents, and
+// their numbers per day. Their spend is already in their campaign's, so
+// none of it goes to the spend ledger. An item whose parent isn't stored
+// (an ad in a removed ad group) is left out.
+func (s *Syncer) syncItems(ctx context.Context, o *connectors.Opened, r connectors.AdItemsReader, a account, level, from, to string, res *Result) error {
+	items, err := r.AdItems(ctx, o.Client, o.Creds, a.ad(), level)
+	if err != nil {
+		s.accountError(ctx, a.id, err)
+		return err
+	}
+	days, err := r.AdItemDays(ctx, o.Client, o.Creds, a.ad(), level, from, to)
+	if err != nil {
+		s.accountError(ctx, a.id, err)
+		return err
+	}
+	stored := 0
+	entity := map[string]string{}
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		parents := map[string]string{}
+		rows, err := tx.Query(ctx, `SELECT external_id, id FROM ad_entities WHERE ad_account_id = $1 AND level = $2`, a.id, parentLevel[level])
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var ext, id string
+			if err := rows.Scan(&ext, &id); err != nil {
+				rows.Close()
+				return err
+			}
+			parents[ext] = id
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		save := func(it connectors.AdItem) error {
+			parent, ok := parents[it.ParentID]
+			if !ok || it.ID == "" {
+				return nil
+			}
+			details := []byte("{}")
+			if len(it.Details) > 0 {
+				details, _ = json.Marshal(it.Details)
+			}
+			var id string
+			// An ad group or ad belongs to its campaign's brand.
+			err := tx.QueryRow(ctx, `
+				INSERT INTO ad_entities (workspace_id, ad_account_id, level, parent_id, external_id, name, status, provider_status, daily_budget_micros, details, brand_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, (SELECT brand_id FROM ad_entities WHERE id = $4))
+				ON CONFLICT (ad_account_id, level, external_id) DO UPDATE SET
+					parent_id = EXCLUDED.parent_id,
+					name = COALESCE(NULLIF(EXCLUDED.name, ''), ad_entities.name),
+					status = CASE WHEN EXCLUDED.provider_status = '' THEN ad_entities.status ELSE EXCLUDED.status END,
+					provider_status = COALESCE(NULLIF(EXCLUDED.provider_status, ''), ad_entities.provider_status),
+					daily_budget_micros = COALESCE(EXCLUDED.daily_budget_micros, ad_entities.daily_budget_micros),
+					details = CASE WHEN EXCLUDED.details = '{}' THEN ad_entities.details ELSE EXCLUDED.details END,
+					brand_id = EXCLUDED.brand_id, updated_at = now()
+				RETURNING id`,
+				o.WorkspaceID, a.id, level, parent, it.ID, trim(it.Name, 300), statusOr(it.Status), trim(it.ProviderStatus, 60), it.DailyBudgetMicros, details).Scan(&id)
+			if err != nil {
+				return err
+			}
+			entity[it.ID] = id
+			return nil
+		}
+		for _, it := range items {
+			if err := save(it); err != nil {
+				return err
+			}
+		}
+		for _, d := range days {
+			if _, ok := entity[d.ID]; !ok {
+				// In the report but no longer listed: removed.
+				if err := save(connectors.AdItem{ID: d.ID, ParentID: d.ParentID, Name: d.Name, Status: connectors.AdRemoved, ProviderStatus: "REMOVED"}); err != nil {
+					return err
+				}
+			}
+		}
+		for _, d := range days {
+			id, ok := entity[d.ID]
+			if !ok {
+				continue
+			}
+			if _, err := time.Parse(time.DateOnly, d.Date); err != nil {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
+					impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
+					conversion_value_micros = EXCLUDED.conversion_value_micros, updated_at = now()`,
+				id, d.Date, o.WorkspaceID, a.currency, max(d.SpendMicros, 0), max(d.Impressions, 0), max(d.Clicks, 0), d.Conversions, d.ConversionValueMicros); err != nil {
+				return err
+			}
+			stored++
+		}
+		return nil
+	})
+	if err != nil {
+		return dbError{err}
+	}
+	metrics.AdItemRows(level, stored)
+	if level == connectors.AdLevelGroup {
+		res.AdGroups += len(entity)
+	} else {
+		res.Ads += len(entity)
 	}
 	return nil
 }

@@ -27,15 +27,16 @@ func (s *Server) routesPlatforms(mux *http.ServeMux) {
 
 // linkView is a platform campaign a sequence runs as.
 type linkView struct {
-	ID            string     `json:"id"`
-	IntegrationID string     `json:"integration_id"`
-	Platform      string     `json:"platform"`
-	Connector     string     `json:"connector"`
-	ExternalID    string     `json:"external_id"`
-	Name          string     `json:"name"`
-	Status        string     `json:"status"`
-	Control       string     `json:"control"`
-	LastSyncedAt  *time.Time `json:"last_synced_at"`
+	ID            string `json:"id"`
+	IntegrationID string `json:"integration_id"`
+	// The connected account's name, as the workspace named it.
+	IntegrationName string     `json:"integration_name"`
+	Connector       string     `json:"connector"`
+	ExternalID      string     `json:"external_id"`
+	Name            string     `json:"name"`
+	Status          string     `json:"status"`
+	Control         string     `json:"control"`
+	LastSyncedAt    *time.Time `json:"last_synced_at"`
 }
 
 // loadLinks returns the links of the given sequences by sequence id.
@@ -54,7 +55,7 @@ func (s *Server) loadLinks(ctx context.Context, ws string, seqIDs []string) (map
 	for rows.Next() {
 		var seq string
 		var v linkView
-		if err := rows.Scan(&seq, &v.ID, &v.IntegrationID, &v.Platform, &v.Connector, &v.ExternalID, &v.Name, &v.Status, &v.Control, &v.LastSyncedAt); err != nil {
+		if err := rows.Scan(&seq, &v.ID, &v.IntegrationID, &v.IntegrationName, &v.Connector, &v.ExternalID, &v.Name, &v.Status, &v.Control, &v.LastSyncedAt); err != nil {
 			return nil, err
 		}
 		out[seq] = append(out[seq], v)
@@ -139,18 +140,18 @@ func route(ctx context.Context, tx pgx.Tx, mailboxID, seqID string) (linkID, ref
 }
 
 type platformView struct {
-	IntegrationID  string     `json:"integration_id"`
-	Name           string     `json:"name"`
-	Connector      string     `json:"connector"`
-	Control        string     `json:"control"`
-	SyncedAt       *time.Time `json:"synced_at"`
-	Error          *string    `json:"error"`
-	Stale          bool       `json:"stale"`
-	AwaitingReview bool       `json:"awaiting_review"`
-	Mailboxes      int        `json:"mailboxes"`
-	Campaigns      int        `json:"campaigns"`
-	Unconfirmed    int        `json:"unconfirmed"`
-	Conflicts      int        `json:"conflicts"`
+	IntegrationID   string     `json:"integration_id"`
+	IntegrationName string     `json:"integration_name"`
+	Connector       string     `json:"connector"`
+	Control         string     `json:"control"`
+	SyncedAt        *time.Time `json:"synced_at"`
+	Error           *string    `json:"error"`
+	Stale           bool       `json:"stale"`
+	AwaitingReview  bool       `json:"awaiting_review"`
+	Mailboxes       int        `json:"mailboxes"`
+	Campaigns       int        `json:"campaigns"`
+	Unconfirmed     int        `json:"unconfirmed"`
+	Conflicts       int        `json:"conflicts"`
 }
 
 func (s *Server) loadPlatforms(ctx context.Context, ws string, sel brandSel) ([]platformView, error) {

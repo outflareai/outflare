@@ -2,6 +2,7 @@ package sending
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +17,9 @@ import (
 // for a sequence with none), the way broadcasts and journeys tag theirs.
 // Links to other sites, links tagged by hand, and the unsubscribe and
 // click links under base stay as written. The campaign is made with the
-// first message that has such a link.
+// first message that has such a link. Each link carries its step as
+// utm_content (step-1 for the first), so a campaign's visits and credit
+// split by step.
 func tagOwnLinks(ctx context.Context, tx pgx.Tx, en enrollment, body, base string) (string, error) {
 	hosts, err := utm.BrandHosts(ctx, tx, en.WorkspaceID, en.BrandID)
 	if err != nil || len(hosts) == 0 {
@@ -53,6 +56,6 @@ func tagOwnLinks(ctx context.Context, tx pgx.Tx, en enrollment, body, base strin
 		if strings.HasPrefix(link, base+"/") {
 			return link
 		}
-		return c.OwnLink(link, hosts)
+		return c.OwnLinkAs(link, hosts, "step-"+strconv.Itoa(en.NextStep+1))
 	}), nil
 }

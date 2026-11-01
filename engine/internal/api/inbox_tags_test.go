@@ -84,7 +84,7 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 	maybe := list("needs_review=true")[0]
 	// got returns every event so far; count from here.
 	since := func(name string, before int) []track.Event { return named(got(), name)[before:] }
-	fixed := owner.must(200, "PATCH", base+"/inbox/"+maybe["id"].(string), map[string]any{"category": "not_now", "labels": []string{"Follow up"}})
+	fixed := owner.must(200, "PATCH", base+"/inbox/"+maybe["id"].(string), map[string]any{"category": "not_now", "tags": []string{"Follow up"}})
 	if fixed["category"] != "not_now" || fixed["category_source"] != "human" || fixed["category_confidence"] != 1.0 ||
 		fixed["needs_review"] != false || fixed["group"] != "later" {
 		t.Fatalf("relabelled: %v", fixed)

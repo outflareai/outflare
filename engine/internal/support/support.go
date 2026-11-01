@@ -198,6 +198,9 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		return out, err
 	}
 	out.ConversationID, out.New = conv, true
+	if err := Clock(ctx, tx, conv); err != nil {
+		return out, err
+	}
 	action := "support.message_received"
 	if out.Started {
 		action = "support.conversation_started"
@@ -366,6 +369,9 @@ func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 		WHERE id = $1`, r.ConversationID, next); err != nil {
 		return "", err
 	}
+	if err := Clock(ctx, tx, r.ConversationID); err != nil {
+		return "", err
+	}
 	if forwarded {
 		// The provider sends it; its status is the email's.
 		return id, nil
@@ -483,6 +489,9 @@ func (s *Sender) job(ctx context.Context, j jobs.Job) error {
 		}
 		// Not sent: the customer is waiting on the team again.
 		if _, err := tx.Exec(ctx, `UPDATE support_conversations SET status = 'open', updated_at = now() WHERE id = $1`, conv); err != nil {
+			return err
+		}
+		if err := Clock(ctx, tx, conv); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "support.reply_failed",

@@ -23,10 +23,11 @@ func onTimeline(ctx context.Context, q jobs.Querier, ws, emailID, state string, 
 	var test bool
 	var to []string
 	var template, topic *string
-	err := q.QueryRow(ctx, `SELECT e.purpose, e.test, e.to_addresses, t.handle, tp.key FROM emails e
+	var brand string
+	err := q.QueryRow(ctx, `SELECT e.purpose, e.test, e.to_addresses, t.handle, tp.key, COALESCE(e.brand_id::text, '') FROM emails e
 		LEFT JOIN email_templates t ON t.id = e.template_id
 		LEFT JOIN email_topics tp ON tp.id = e.topic_id
-		WHERE e.workspace_id = $1 AND e.id = $2`, ws, emailID).Scan(&purpose, &test, &to, &template, &topic)
+		WHERE e.workspace_id = $1 AND e.id = $2`, ws, emailID).Scan(&purpose, &test, &to, &template, &topic, &brand)
 	if err != nil || test {
 		return err
 	}
@@ -45,7 +46,9 @@ func onTimeline(ctx context.Context, q jobs.Querier, ws, emailID, state string, 
 	}
 	for _, addr := range recipients {
 		addr = strings.ToLower(addr)
-		rec, ok, err := customers.OwnerOf(ctx, q, ws, "email", addr)
+		// The person in the email's brand: another brand's person with
+		// the same address never sees it on their timeline.
+		rec, ok, err := customers.OwnerOfIn(ctx, q, ws, brand, "email", addr)
 		if err != nil {
 			return err
 		}

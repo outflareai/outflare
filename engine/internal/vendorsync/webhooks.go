@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -156,12 +157,34 @@ func (s *Service) HandleWebhook(ctx context.Context, integrationID string, h htt
 	})
 }
 
-// Connected starts syncing a newly connected supplier. Other connectors
+// Connected starts syncing a newly connected supplier: its first full sync
+// is queued and its webhook registered in the connecting transaction, so
+// its mailboxes are read without anyone opening the list. Other connectors
 // are ignored. Register it as a connectors.Store OnConnect hook.
 func (s *Service) Connected(ctx context.Context, tx pgx.Tx, i connectors.Integration) error {
 	if !s.IsVendor(i.Connector) {
 		return nil
 	}
 	_, err := s.Ensure(ctx, tx, i.WorkspaceID, i.ID)
+	return err
+}
+
+// Reconnected reads a supplier again with its new credentials: a full sync
+// now, and the webhook registered if the old credentials never managed to.
+// Other connectors are ignored. Register it as a connectors.Store
+// OnReconnect hook.
+func (s *Service) Reconnected(ctx context.Context, tx pgx.Tx, i connectors.Integration) error {
+	if !s.IsVendor(i.Connector) {
+		return nil
+	}
+	started, err := s.Ensure(ctx, tx, i.WorkspaceID, i.ID)
+	if err != nil || started {
+		return err
+	}
+	if err := s.SyncNow(ctx, tx, i.WorkspaceID, i.ID); err != nil {
+		return err
+	}
+	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobWebhook, WorkspaceID: &i.WorkspaceID, Payload: idPayload{i.ID}, MaxAttempts: 5,
+		IdempotencyKey: i.ID + ":reconnected:" + strconv.FormatInt(time.Now().UnixNano(), 36)})
 	return err
 }

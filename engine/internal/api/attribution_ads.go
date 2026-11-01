@@ -68,7 +68,7 @@ func (s *Server) attributionAds(w http.ResponseWriter, r *http.Request) {
 	// level.key comes from adLevels, never from the request.
 	args := []any{a.WorkspaceID, f.from, f.to}
 	vq, err := s.pool.Query(ctx, `SELECT ad->>'`+level.key+`', count(*)::int FROM site_sessions
-		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1 AND ad ? '`+level.key+`'`+
+		WHERE workspace_id = $1 AND started_at >= $2::date AND started_at < $3::date + 1 AND ad ? '`+level.key+`'`+f.visitsSQL("")+
 		f.brand.sql(`brand_id`, &args)+`
 		GROUP BY 1`, args...)
 	if err != nil {

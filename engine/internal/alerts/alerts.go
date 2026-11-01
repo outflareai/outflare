@@ -130,9 +130,12 @@ func Raise(ctx context.Context, q jobs.Querier, a Alert) (string, error) {
 		return "", err
 	}
 	var id string
+	// An alert belongs to one brand (plans/brands/README.md): the brand of
+	// what raised it, or, from an area not on brands yet, the workspace's
+	// first. Its settings, its webhook and the alerts list follow it.
 	err = q.QueryRow(ctx, `INSERT INTO alerts (workspace_id, brand_id, kind, dedupe_key, target_type, target_id, record_id, owner_id, data)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING id::text`,
-		a.WorkspaceID, a.BrandID, a.Kind, a.DedupeKey, a.TargetType, a.TargetID, a.RecordID, a.OwnerID, raw).Scan(&id)
+		VALUES ($1, COALESCE($2::uuid, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING id::text, brand_id::text`,
+		a.WorkspaceID, a.BrandID, a.Kind, a.DedupeKey, a.TargetType, a.TargetID, a.RecordID, a.OwnerID, raw).Scan(&id, &a.BrandID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}

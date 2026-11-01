@@ -100,7 +100,7 @@ and lists it here with the rest:
 | --- | --- | --- | --- | --- |
 | Broadcasts | broadcast (`email_broadcast`) | `lifecycle_email` | `outflare` | Links in the email to the brand's own website and domains (any brand's, for an email with no brand) |
 | Journeys | journey (`journey`) | `lifecycle_email` | `outflare` | The same |
-| Sequences | sequence (`sequence`) | `outbound_email` | `outflare` | Links in each step to the sequence's brand's website and domains (any brand's, for a sequence with no brand), tagged before click tracking wraps them |
+| Sequences | sequence (`sequence`) | `outbound_email` | `outflare` | Links in each step to the sequence's brand's website and domains (any brand's, for a sequence with no brand), tagged before click tracking wraps them, with the step as `utm_content` (`step-1`, `step-2`) |
 | Social replies | watch (`social_watch`) | `reddit`, or `organic_social` for X and LinkedIn | the network | The watch's landing page, with each reply as `utm_content` |
 
 Links to other companies' sites are never tagged, and a link you tagged

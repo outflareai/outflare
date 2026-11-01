@@ -79,7 +79,7 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 		e.h.ServeHTTP(rec, req)
 		return rec
 	}
-	if rec := click("Mozilla/5.0 (compatible; Barracuda link scanner)"); rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "https://acme-com.example/pricing?utm_source=outflare&utm_medium=email&utm_campaign=links&ofc=") {
+	if rec := click("Mozilla/5.0 (compatible; Barracuda link scanner)"); rec.Code != http.StatusFound || !strings.HasPrefix(rec.Header().Get("Location"), "https://acme-com.example/pricing?utm_source=outflare&utm_medium=email&utm_campaign=links&utm_content=step-1&ofc=") {
 		t.Fatalf("redirect: %d %v", rec.Code, rec.Header())
 	}
 	got := owner.must(200, "GET", base+"/sequences/"+seqID, nil)

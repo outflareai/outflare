@@ -107,7 +107,7 @@ func TestStoryPitches(t *testing.T) {
 	})
 	var labels []string
 	var review bool
-	if err := e.pool.QueryRow(ctx, `SELECT labels, needs_review FROM inbound_messages WHERE id = $1`, inbound).Scan(&labels, &review); err != nil ||
+	if err := e.pool.QueryRow(ctx, `SELECT tags, needs_review FROM inbound_messages WHERE id = $1`, inbound).Scan(&labels, &review); err != nil ||
 		len(labels) != 1 || labels[0] != "pr: wants the data" || !review {
 		t.Fatalf("reply: %v %v %v", labels, review, err)
 	}

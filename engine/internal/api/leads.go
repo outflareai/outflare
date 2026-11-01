@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -86,6 +87,10 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	if q.Has("list_id") {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "list a list's leads with GET /lead-lists/{id}/members")
+		return
+	}
 	where := ` WHERE l.workspace_id = $1`
 	args := []any{a.WorkspaceID}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
@@ -101,33 +106,16 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 	case sel.id != "":
 		where += ` AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists x ON x.id = m.list_id WHERE m.lead_id = l.id AND x.brand_id = ` + arg(sel.id) + `)`
 	}
-	if v := q.Get("list_id"); v != "" {
-		if !validUUID(v) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "list_id must be a UUID")
-			return
-		}
-		where += ` AND EXISTS (SELECT 1 FROM lead_list_members m WHERE m.lead_id = l.id AND m.list_id = ` + arg(v) + `)`
-	}
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		p := arg("%" + escapeLike(strings.ToLower(v)) + "%")
 		where += ` AND (lower(l.email) LIKE ` + p + ` OR lower(l.first_name || ' ' || l.last_name) LIKE ` + p + ` OR lower(l.company) LIKE ` + p + `)`
 	}
-	switch q.Get("suppressed") {
-	case "true":
-		where += ` AND EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
-	case "false":
-		where += ` AND NOT EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
-	}
-	switch v := q.Get("verification"); v {
-	case "":
-	case "unverified":
-		where += ` AND NOT EXISTS (SELECT 1 FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email))`
-	case "deliverable", "undeliverable", "risky", "unknown":
-		where += ` AND EXISTS (SELECT 1 FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email) AND v.status = ` + arg(v) + `)`
-	default:
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "verification must be deliverable, undeliverable, risky, unknown or unverified")
+	more, msg := leadStateFilters(q, arg)
+	if msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
+	where += more
 	ctx := r.Context()
 	var total int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM leads l`+where, args...).Scan(&total); err != nil {
@@ -155,6 +143,33 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 		next = &e
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_after": next})
+}
+
+// leadStateFilters is the SQL for the suppressed and verification query
+// parameters, which listing leads and listing a list's leads share, or
+// what is wrong with them. arg adds a query argument and returns its
+// placeholder.
+func leadStateFilters(q url.Values, arg func(any) string) (string, string) {
+	where := ""
+	switch q.Get("suppressed") {
+	case "":
+	case "true":
+		where += ` AND EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
+	case "false":
+		where += ` AND NOT EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
+	default:
+		return "", "suppressed must be true or false"
+	}
+	switch v := q.Get("verification"); v {
+	case "":
+	case "unverified":
+		where += ` AND NOT EXISTS (SELECT 1 FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email))`
+	case "deliverable", "undeliverable", "risky", "unknown":
+		where += ` AND EXISTS (SELECT 1 FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email) AND v.status = ` + arg(v) + `)`
+	default:
+		return "", "verification must be deliverable, undeliverable, risky, unknown or unverified"
+	}
+	return where, ""
 }
 
 func escapeLike(s string) string {

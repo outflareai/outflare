@@ -103,17 +103,18 @@ type mailboxAssignment struct {
 	NextSequenceID *string `json:"next_sequence_id"`
 	Source         string  `json:"source"`
 	Reason         string  `json:"reason"`
-	// The platform it sends through, or null when Outflare sends.
-	Platform  *string `json:"platform"`
-	Confirmed bool    `json:"confirmed"`
+	// The name of the connected account it sends through, or null when
+	// Outflare sends.
+	IntegrationName *string `json:"integration_name"`
+	Confirmed       bool    `json:"confirmed"`
 }
 
 type mailboxPlatform struct {
-	IntegrationID string  `json:"integration_id"`
-	Platform      string  `json:"platform"`
-	Status        string  `json:"status"`
-	StatusReason  *string `json:"status_reason"`
-	DailyLimit    *int    `json:"daily_limit"`
+	IntegrationID   string  `json:"integration_id"`
+	IntegrationName string  `json:"integration_name"`
+	Status          string  `json:"status"`
+	StatusReason    *string `json:"status_reason"`
+	DailyLimit      *int    `json:"daily_limit"`
 	// WarmupEnabled is whether the platform's own warm-up is on for it.
 	WarmupEnabled bool      `json:"warmup_enabled"`
 	WarmupScore   *int      `json:"warmup_score"`
@@ -130,27 +131,18 @@ type mailboxLock struct {
 }
 
 // warmupView is a mailbox's warm-up settings. A connected sequencer runs
-// the warm-up; Outflare doesn't send warm-up mail itself.
+// the warm-up; Outflare doesn't send warm-up mail itself. What the
+// sequencer reports (whether its warm-up shows on, its score) is the
+// mailbox's platforms entry for Provider.
 type warmupView struct {
 	Enabled   bool       `json:"enabled"`
 	StartedAt *time.Time `json:"started_at"`
 	// Provider is the id of the connected sequencer that runs the
-	// warm-up, or "outflare" when none does.
-	Provider string `json:"provider"`
-	// Platform is the sequencer's own view of its warm-up, when one runs
-	// it: whether it shows warm-up on, and its warm-up score.
-	Platform *warmupPlatform `json:"platform"`
+	// warm-up (or will when it is turned on), or null when none does.
+	Provider *string `json:"provider"`
 	// WaitingOn is platform while a mailbox has warm-up on here but its
 	// sequencer doesn't show it on yet, and null otherwise.
 	WaitingOn *string `json:"waiting_on"`
-}
-
-type warmupPlatform struct {
-	IntegrationID string     `json:"integration_id"`
-	Name          string     `json:"name"`
-	Enabled       bool       `json:"enabled"`
-	Score         *int       `json:"score"`
-	ObservedAt    *time.Time `json:"observed_at"`
 }
 
 // scanMailbox reads one row of mailboxSelect.
@@ -159,14 +151,9 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 	w := &m.Warmup
 	var senderID, senderName *string
 	var senderConfirmed bool
-	var asg struct{ SequenceID, SequenceName, State, NextSequenceID, Source, Reason, Platform *string }
+	var asg struct{ SequenceID, SequenceName, State, NextSequenceID, Source, Reason, IntegrationName *string }
 	var asgConfirmed bool
-	var wp struct {
-		id, name *string
-		enabled  *bool
-		score    *int
-		observed *time.Time
-	}
+	var platformWarm *bool
 	var lock struct {
 		Kind, SequenceID, TeamID *string
 		Until                    *time.Time
@@ -177,30 +164,24 @@ func scanMailbox(r pgx.CollectableRow) (mailboxView, error) {
 		&m.Status, &m.StatusReason, &m.DailyLimit, &m.MinGapSeconds, &m.SMTPOK, &m.IMAPOK, &m.LastVerifiedAt, &m.LastSyncedAt, &m.SyncError,
 		&m.Source, &m.BrandID, &m.PoolID, &m.PoolName, &m.ServerID, &m.ServerHost,
 		&w.Enabled, &w.StartedAt,
-		&wp.id, &wp.name, &wp.enabled, &wp.score, &wp.observed,
+		&w.Provider, &platformWarm,
 		&m.CreatedAt, &m.UpdatedAt,
 		&senderID, &senderName, &senderConfirmed,
 		&asg.SequenceID, &asg.SequenceName, &asg.State, &asg.NextSequenceID, &asg.Source, &asg.Reason,
 		&lock.Kind, &lock.SequenceID, &lock.TeamID, &lock.Until, &lock.Note,
-		&asg.Platform, &asgConfirmed, &m.HasLogin, &m.Platforms,
+		&asg.IntegrationName, &asgConfirmed, &m.HasLogin, &m.Platforms,
 		&m.Lifecycle.Stage, &m.Lifecycle.Reason, &m.Lifecycle.Until, &m.Lifecycle.ChangedAt, &m.Lifecycle.AutoRest, &m.Lifecycle.PlanID)
 	if senderID != nil {
 		m.Sender = &mailboxSender{ID: *senderID, Name: *senderName, Confirmed: senderConfirmed}
 	}
 	if asg.SequenceID != nil {
 		m.Assignment = &mailboxAssignment{SequenceID: *asg.SequenceID, SequenceName: *asg.SequenceName, State: *asg.State,
-			NextSequenceID: asg.NextSequenceID, Source: *asg.Source, Reason: *asg.Reason, Platform: asg.Platform, Confirmed: asgConfirmed}
+			NextSequenceID: asg.NextSequenceID, Source: *asg.Source, Reason: *asg.Reason, IntegrationName: asg.IntegrationName, Confirmed: asgConfirmed}
 	}
 	if lock.Kind != nil {
 		m.Lock = &mailboxLock{Kind: *lock.Kind, SequenceID: lock.SequenceID, TeamID: lock.TeamID, Until: lock.Until, Note: *lock.Note}
 	}
-	w.Provider = "outflare"
-	if wp.id != nil {
-		w.Provider = *wp.id
-		w.Platform = &warmupPlatform{IntegrationID: *wp.id, Name: deref(wp.name), Enabled: wp.enabled != nil && *wp.enabled,
-			Score: wp.score, ObservedAt: wp.observed}
-	}
-	if w.Enabled && (w.Platform == nil || !w.Platform.Enabled) {
+	if w.Enabled && (platformWarm == nil || !*platformWarm) {
 		waiting := "platform"
 		w.WaitingOn = &waiting
 	}
@@ -214,13 +195,13 @@ const mailboxSelect = `
 	       m.status, m.status_reason, m.daily_limit, m.min_gap_seconds, m.smtp_ok, m.imap_ok, m.last_verified_at, m.last_synced_at, m.sync_error,
 	       m.source, m.brand_id::text, m.pool_id, p.name, m.server_id, sv.host,
 	       m.warmup_enabled, m.warmup_started_at,
-	       m.warmup_integration_id::text, wi.name, wpl.warmup_enabled, wpl.warmup_score, wpl.observed_at,
+	       m.warmup_integration_id::text, wpl.warmup_enabled,
 	       m.created_at, m.updated_at,
 	       m.sender_id::text, sn.name, m.sender_confirmed_at IS NOT NULL,
 	       ma.sequence_id::text, sq.name, ma.state, ma.next_sequence_id::text, ma.source, ma.reason,
 	       lk.kind, lk.sequence_id::text, lk.team_id::text, lk.until, lk.note,
 	       ai.name, ma.link_id IS NULL OR ma.confirmed_at IS NOT NULL, m.has_login,
-	       COALESCE((SELECT jsonb_agg(jsonb_build_object('integration_id', mp.integration_id, 'platform', pi.name, 'status', mp.status,
+	       COALESCE((SELECT jsonb_agg(jsonb_build_object('integration_id', mp.integration_id, 'integration_name', pi.name, 'status', mp.status,
 	                 'status_reason', mp.status_reason, 'daily_limit', mp.daily_limit, 'warmup_enabled', mp.warmup_enabled, 'warmup_score', mp.warmup_score,
 	                 'campaigns', cardinality(mp.campaign_ids), 'observed_at', mp.observed_at) ORDER BY pi.name)
 	                 FROM mailbox_platforms mp JOIN integrations pi ON pi.id = mp.integration_id WHERE mp.mailbox_id = m.id), '[]'),
@@ -232,7 +213,6 @@ const mailboxSelect = `
 	LEFT JOIN sequences sq ON sq.id = ma.sequence_id
 	LEFT JOIN campaign_links al ON al.id = ma.link_id LEFT JOIN integrations ai ON ai.id = al.integration_id
 	LEFT JOIN mailbox_locks lk ON lk.mailbox_id = m.id AND (lk.until IS NULL OR lk.until > now())
-	LEFT JOIN integrations wi ON wi.id = m.warmup_integration_id
 	LEFT JOIN mailbox_platforms wpl ON wpl.mailbox_id = m.id AND wpl.integration_id = m.warmup_integration_id`
 
 func (s *Server) listMailboxes(w http.ResponseWriter, r *http.Request) {

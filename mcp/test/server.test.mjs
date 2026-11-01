@@ -322,17 +322,18 @@ test("analytics for agents: changes, catalog resource, prompts and compact answe
   assert.ok(names.includes("get_analytics_changes") && names.includes("get_analytics_catalog"));
 });
 
-test("webhook tools: create, test and redeliver call the webhook endpoints", async () => {
+test("webhook tools: create, test and redeliver call the brand's webhook endpoints", async () => {
   const HOOK = "44444444-4444-4444-8444-444444444444";
+  const BRAND = "33333333-3333-4333-8333-333333333333";
   const { client, calls } = await connect(() => [200, { id: HOOK, status: "delivered" }]);
-  await client.callTool({ name: "create_webhook", arguments: { url: "https://example.com/h", events: ["lead.replied"] } });
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/webhooks`);
+  await client.callTool({ name: "create_webhook", arguments: { brand: BRAND, url: "https://example.com/h", events: ["lead.replied"] } });
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/webhooks`);
   assert.deepEqual(JSON.parse(calls[0].body), { url: "https://example.com/h", events: ["lead.replied"] });
-  await client.callTool({ name: "test_webhook", arguments: { webhook_id: HOOK } });
-  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/webhooks/${HOOK}/test`);
-  await client.callTool({ name: "redeliver_webhook", arguments: { webhook_id: HOOK, delivery_id: 7 } });
-  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/webhooks/${HOOK}/deliveries/7/redeliver`);
-  await client.callTool({ name: "list_webhook_deliveries", arguments: { webhook_id: HOOK, status: "failed" } });
+  await client.callTool({ name: "test_webhook", arguments: { brand: BRAND, webhook_id: HOOK } });
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/webhooks/${HOOK}/test`);
+  await client.callTool({ name: "redeliver_webhook", arguments: { brand: BRAND, webhook_id: HOOK, delivery_id: 7 } });
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/webhooks/${HOOK}/deliveries/7/redeliver`);
+  await client.callTool({ name: "list_webhook_deliveries", arguments: { brand: BRAND, webhook_id: HOOK, status: "failed" } });
   assert.equal(calls[3].url.search, "?status=failed");
 
   const ro = await connect(() => [200, {}], { readOnly: true });
@@ -444,6 +445,32 @@ test("customer tools and run_query use the brand routes, looking a handle up fir
   await client.callTool({ name: "add_to_static_list", arguments: { brand: BRAND, list_id: SEQ, record_ids: [WS] } });
   assert.equal(calls[4].url.pathname, `/v1/brands/${BRAND}/smart-lists/${SEQ}/members`);
   const missing = await client.callTool({ name: "list_records", arguments: {} });
+  assert.equal(missing.isError, true);
+});
+
+test("activation tools use the brand routes: rules, journeys, lifecycle email and alerts", async () => {
+  const BRAND = "33333333-3333-4333-8333-333333333333";
+  const { client, calls } = await connect((req) => {
+    const u = new URL(req.url);
+    if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
+    return [200, { data: [] }];
+  });
+  await client.callTool({ name: "list_rules", arguments: { brand: "repocket" } });
+  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/brands/repocket`);
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/rules`);
+  await client.callTool({ name: "add_to_journey", arguments: { brand: BRAND, journey: SEQ, record_id: WS } });
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/journeys/${SEQ}/runs`);
+  await client.callTool({ name: "edit_journey_draft", arguments: { brand: BRAND, journey: SEQ, entry: "again" } });
+  assert.equal(calls[3].url.pathname, `/v1/brands/${BRAND}/journeys/${SEQ}/draft`);
+  assert.equal(calls[4].method, "PATCH");
+  assert.equal(calls[4].url.pathname, `/v1/brands/${BRAND}/journeys/${SEQ}/draft`);
+  await client.callTool({ name: "send_email", arguments: { brand: BRAND, to: ["ana@example.com"], from: "hi@example.com", subject: "Hi", text: "Hi" } });
+  assert.equal(calls[5].url.pathname, `/v1/brands/${BRAND}/emails`);
+  await client.callTool({ name: "list_email_topics", arguments: { brand: BRAND } });
+  assert.equal(calls[6].url.pathname, `/v1/brands/${BRAND}/email-topics`);
+  await client.callTool({ name: "list_alerts", arguments: { brand: BRAND } });
+  assert.equal(calls[7].url.pathname, `/v1/brands/${BRAND}/alerts`);
+  const missing = await client.callTool({ name: "list_journeys", arguments: {} });
   assert.equal(missing.isError, true);
 });
 

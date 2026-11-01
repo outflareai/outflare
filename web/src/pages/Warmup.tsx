@@ -6,6 +6,7 @@ import type { Tab } from "../App";
 import { placementTone } from "../format";
 import { DataTable } from "@/components/data-table";
 import { changeWarmup, WarmupCell } from "./Mailboxes";
+import { warmupPlatform, warmupScore } from "@/lib/warmup";
 import { useBrand } from "@/lib/brand";
 
 // Warm-up across every mailbox. Outflare doesn't send warm-up mail itself:
@@ -45,7 +46,7 @@ export function Warmup({ ws, canManage, go }: { ws: string; canManage: boolean; 
   const warming = mailboxes.filter((m) => m.warmup.enabled);
   const notWarming = mailboxes.filter((m) => !m.warmup.enabled && inSequencer(m));
   const outside = mailboxes.filter((m) => !inSequencer(m)).length;
-  const scores = warming.flatMap((m) => (m.warmup.platform?.score == null ? [] : [m.warmup.platform.score]));
+  const scores = warming.flatMap((m) => warmupScore(m) ?? []);
   const score = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
   const turningOn = warming.filter((m) => m.warmup.waiting_on).length;
 
@@ -102,12 +103,12 @@ export function Warmup({ ws, canManage, go }: { ws: string; canManage: boolean; 
         )}
         columns={[
           { id: "email", header: "Mailbox", accessorFn: (m) => m.email, enableHiding: false, cell: ({ row: { original: m } }) => <span className="font-medium">{m.email}</span> },
-          { id: "warmup", header: "Warm-up", accessorFn: (m) => (m.warmup.enabled ? (m.warmup.platform?.score ?? 0) : -1), cell: ({ row: { original: m } }) => <WarmupCell m={m} /> },
+          { id: "warmup", header: "Warm-up", accessorFn: (m) => (m.warmup.enabled ? (warmupScore(m) ?? 0) : -1), cell: ({ row: { original: m } }) => <WarmupCell m={m} /> },
           {
             id: "sequencer",
             header: "Sequencer",
-            accessorFn: (m) => m.warmup.platform?.name ?? "",
-            cell: ({ row: { original: m } }) => <span className="text-muted-foreground">{m.warmup.platform?.name ?? (inSequencer(m) ? "–" : "In none")}</span>,
+            accessorFn: (m) => warmupPlatform(m)?.integration_name ?? "",
+            cell: ({ row: { original: m } }) => <span className="text-muted-foreground">{warmupPlatform(m)?.integration_name ?? (inSequencer(m) ? "–" : "In none")}</span>,
           },
           { id: "actions", header: "", enableHiding: false, enableSorting: false, cell: ({ row: { original: m } }) => <Actions m={m} canManage={canManage} canWarm={inSequencer(m)} change={change} /> },
         ]}

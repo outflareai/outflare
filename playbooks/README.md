@@ -71,7 +71,7 @@ steps:                           # what the agent does, with the operations it u
   - say: Read the brand's context so the emails sound like the brand.
     tools: [getBrandContext]
   - say: Build a journey that starts on sign-up and exits on the first win.
-    tools: [createJourney]
+    tools: [createBrandJourney]
 
 guardrails:                      # what it will never do
   - The journey is turned on only after a person approves it.
@@ -201,7 +201,7 @@ journeys:
 ```
 
 - `{{name}}` is an input's value; `{{smart_list.key}}` and `{{journey.key}}` are the ids of the kit's own parts, for an audience rule's `list_id` or a journey step's `list_id` or `journey_id`. Placeholders go only in text settings; email drafts keep their own `{{person.x}}` variables.
-- A journey's email steps send the kit's own lifecycle email drafts, by handle, and its `transactional_email` steps the kit's own transactional drafts. An `assign_owner` step can't go in a kit: it names members of one workspace.
+- A journey's email steps send the kit's own lifecycle email drafts, by handle, and its `transactional_email` steps the kit's own transactional drafts. An `assign_owner` step can't go in a kit: it names members of one workspace. Settings that name something of one workspace's own are always inputs, written `{{name}}`: a Slack step's `channel`, an ad audience step's `ad_account_id` and `audience_id`, and a review step's `review_campaign_id`. A kit leaves `connection_id` out (the workspace's own connection is used), and its webhook steps carry no `headers` or `auth`, which can hold keys.
 - Applying the kit adds each part as a draft: rules and journeys stay in draft until a person turns them on, and a smart list only fills. Each remembers its kit and key, so applying the kit again leaves it as it is; another part with the same name is a conflict.
 - A playbook that names a flow kit takes every input the kit takes, under the same name, and passes them on when it is started with `apply_kit`.
 - The checks fill each kit in with its inputs' examples and run the API's own checks on every part, so a kit that would fail to apply fails CI instead.
@@ -212,7 +212,7 @@ You don't have to write a flow kit by hand. Build the journey in a workspace, th
 
 - It takes along what the journey uses: the journeys it starts or stops, the static lists it adds people to, the emails it sends (as plain-text drafts), the rules that emit the event that starts it, and the smart lists those rules watch.
 - Ids become `{{journey.key}}` and `{{smart_list.key}}`, and a sequence becomes an input. Tick the events another workspace may name differently, and each becomes an input with yours as its default.
-- The file is checked the way CI checks a kit, so it applies as written. A smart list built on other lists or news searches, or an `assign_owner` step, can't go in a kit, and the export says so. A `move_deal` step keeps its pipeline's keys, and a note reminds you the other workspace needs the same pipeline.
+- The file is checked the way CI checks a kit, so it applies as written. A smart list built on other lists or news searches, or an `assign_owner` step, can't go in a kit, and the export says so. A webhook's URL, a Slack channel, an ad audience and a review campaign become inputs with no default, which the workspace applying the kit fills in; a webhook's headers and auth are left out, with a note, since they can hold keys. A `move_deal` step keeps its pipeline's keys, and a note reminds you the other workspace needs the same pipeline.
 
 Another workspace sets the file up with **Apply a kit file** on the Playbooks page (`POST /v1/workspaces/{ws}/kits/apply`, MCP `apply_kit_file`): a preview first, then every part as a draft. To share it with everyone, save it as `playbooks/kits/<id>.yaml`, give it a playbook that names it, and send a pull request.
 

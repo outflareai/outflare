@@ -406,7 +406,7 @@ func (s *Service) Queue(ctx context.Context, tx pgx.Tx, who Who, e NewEmail) (st
 			subject, html, text_body, template_id, template_version, tags, metadata, status, test, send_at, created_by,
 			trigger_kind, trigger_ref, request_id, surface, token_id, mission_id, track_opens, track_clicks, recipients, topic_id, broadcast_id, record_id,
 			in_reply_to, references_ids)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+		VALUES ($1, $2, COALESCE($3::uuid, outflare_first_brand($2)), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
 			$22, NULLIF($23, ''), NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, '')::uuid, NULLIF($27, '')::uuid, $28, $29, $30, $31, NULLIF($32, '')::uuid, NULLIF($33, '')::uuid,
 			NULLIF($34, ''), NULLIF($35, ''))`,
 		id, e.WorkspaceID, e.BrandID, e.ProviderID, e.Purpose, e.From, e.To, nonNil(e.Cc), nonNil(e.Bcc), nonNil(e.ReplyTo),
@@ -471,7 +471,7 @@ func (s *Service) sendJob(ctx context.Context, job jobs.Job) error {
 type queued struct {
 	WorkspaceID, Purpose, Status, From, Subject, HTML, Text string
 	ProviderID, IntegrationID, Connector, ProviderStatus    *string
-	TopicID                                                 *string
+	TopicID, BrandID                                        *string
 	To, Cc, Bcc, ReplyTo, Tags                              []string
 	Sealed                                                  []byte
 	InReplyTo, References                                   string
@@ -489,13 +489,13 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 			SELECT e.workspace_id, e.purpose, e.status, e.from_address, e.subject, e.html, e.text_body,
 			       e.to_addresses, e.cc, e.bcc, e.reply_to, e.tags,
 			       p.id, p.integration_id, p.connector, p.status, p.secrets, e.topic_id,
-			       COALESCE(e.in_reply_to, ''), COALESCE(e.references_ids, '')
+			       COALESCE(e.in_reply_to, ''), COALESCE(e.references_ids, ''), e.brand_id::text
 			FROM emails e LEFT JOIN email_providers p ON p.id = e.provider_id
 			WHERE e.id = $1 FOR UPDATE OF e`, id).
 			Scan(&q.WorkspaceID, &q.Purpose, &q.Status, &q.From, &q.Subject, &q.HTML, &q.Text,
 				&q.To, &q.Cc, &q.Bcc, &q.ReplyTo, &q.Tags,
 				&q.ProviderID, &q.IntegrationID, &q.Connector, &q.ProviderStatus, &q.Sealed, &q.TopicID,
-				&q.InReplyTo, &q.References)
+				&q.InReplyTo, &q.References, &q.BrandID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			skip = true
 			return nil
@@ -541,7 +541,7 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 		// The policy check, at the moment of sending: an unsubscribe or a
 		// bounce since the email was queued still stops it.
 		all := append(append(append([]string{}, q.To...), q.Cc...), q.Bcc...)
-		ds, err := policy.CheckPurpose(ctx, tx, q.WorkspaceID, q.Purpose, all)
+		ds, err := policy.CheckPurposeIn(ctx, tx, q.WorkspaceID, deref(q.BrandID), q.Purpose, all)
 		if err != nil {
 			return err
 		}
@@ -553,7 +553,7 @@ func (s *Service) Send(ctx context.Context, id string, last bool) error {
 		}
 		// What each person chose on their customer record: the email's
 		// topic, or all marketing email.
-		chosen, err := topicBlocks(ctx, tx, q.WorkspaceID, q.Purpose, q.TopicID, all)
+		chosen, err := topicBlocks(ctx, tx, q.WorkspaceID, deref(q.BrandID), q.Purpose, q.TopicID, all)
 		if err != nil {
 			return err
 		}
@@ -906,11 +906,11 @@ func (s *Service) ParseUnsubscribe(token string) (string, bool) {
 // one without suppresses them for all lifecycle email.
 func (s *Service) Unsubscribe(ctx context.Context, emailID, requestID string) error {
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		var ws string
+		var ws, brand string
 		var to []string
 		var topic *string
-		err := tx.QueryRow(ctx, `SELECT e.workspace_id, e.to_addresses, tp.key FROM emails e
-			LEFT JOIN email_topics tp ON tp.id = e.topic_id WHERE e.id = $1`, emailID).Scan(&ws, &to, &topic)
+		err := tx.QueryRow(ctx, `SELECT e.workspace_id, e.to_addresses, tp.key, COALESCE(e.brand_id::text, '') FROM emails e
+			LEFT JOIN email_topics tp ON tp.id = e.topic_id WHERE e.id = $1`, emailID).Scan(&ws, &to, &topic, &brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -918,7 +918,7 @@ func (s *Service) Unsubscribe(ctx context.Context, emailID, requestID string) er
 			return err
 		}
 		if topic != nil {
-			changed, err := s.unsubscribeTopic(ctx, tx, ws, emailID, *topic, to, requestID)
+			changed, err := s.unsubscribeTopic(ctx, tx, ws, brand, emailID, *topic, to, requestID)
 			if err != nil || !changed {
 				return err
 			}
@@ -927,9 +927,12 @@ func (s *Service) Unsubscribe(ctx context.Context, emailID, requestID string) er
 			}
 			return s.record(ctx, tx, System, ws, "email.unsubscribed", "email", emailID, map[string]any{"scope": "topic"})
 		}
-		// Also on their customer record, so every feature sees it.
+		// Also on their customer record in the email's brand, so every
+		// feature there sees it (decision 5: an unsubscribe applies to the
+		// brand it came from). The suppression below is still for every
+		// brand until suppressions move to brands with outreach.
 		for _, a := range to {
-			rec, err := customers.EnsurePerson(ctx, tx, ws, "email", a, true, requestID)
+			rec, err := customers.EnsurePersonIn(ctx, tx, ws, brand, "email", a, true, requestID)
 			if err != nil {
 				return err
 			}

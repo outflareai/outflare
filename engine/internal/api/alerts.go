@@ -19,8 +19,15 @@ import (
 // it by email.
 func (s *Server) routesAlerts(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeWorkspaceManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/alerts", s.inBrand(read, s.listAlerts))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/alerts/settings", s.inBrand(read, s.getAlertSettings))
+	// An alert belongs to the brand of what raised it: listed under the
+	// brand, and under the workspace until the contract step
+	// (brand_activation.go). A brand's settings override the workspace's
+	// defaults; mutes and chat channels are the team's.
+	for _, b := range s.activationBases("alerts", s.inBrand) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listAlerts))
+		mux.HandleFunc("GET "+b.path+"/settings", b.on(read, s.getAlertSettings))
+	}
+	mux.HandleFunc("PUT /v1/brands/{brand}/alerts/settings", s.onBrand(manage, s.setAlertSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/alerts/settings", s.inWorkspace(manage, s.setAlertSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/alerts/mutes", s.inBrand(read, s.setAlertMute))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/alerts/channels", s.inWorkspace(manage, s.listAlertChannels))
@@ -76,10 +83,16 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 		before = &t
 	}
+	// One brand's alerts: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID, kinds, before, limit + 1}
 	rows, err := s.pool.Query(ctx, `SELECT id::text FROM alerts
-		WHERE workspace_id = $1 AND kind = ANY ($2) AND ($3::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY ($3))
-		  AND ($4::timestamptz IS NULL OR created_at < $4)
-		ORDER BY created_at DESC LIMIT $5`, a.WorkspaceID, kinds, a.Brands, before, limit+1)
+		WHERE workspace_id = $1 AND kind = ANY ($2) AND ($3::timestamptz IS NULL OR created_at < $3)`+sel.sql("brand_id", &args)+`
+		ORDER BY created_at DESC LIMIT $4`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -190,6 +203,14 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := alerts.Find(req.Kind); !ok {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is not a kind of alert; GET .../alerts/settings lists them")
 		return
+	}
+	// Under a brand the setting is that brand's own.
+	if a.Brand != "" {
+		if req.BrandID != nil && *req.BrandID != a.Brand {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id can only be this route's brand")
+			return
+		}
+		req.BrandID = &a.Brand
 	}
 	if req.Email.Value != nil && !slices.Contains([]string{alerts.ToOwner, alerts.ToAdmins, alerts.ToOff}, *req.Email.Value) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "email must be owner, admins or off, or null to follow the workspace")

@@ -9,6 +9,7 @@ import type { EmailTemplate, JourneyTest } from "@outflare/sdk";
 import { api, errorMessage } from "../../api";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
+import { useBrand } from "@/lib/brand";
 import { Button, ErrorText } from "../../ui";
 import { ago } from "../../format";
 import { PersonPicker, type Person } from "@/components/person-picker";
@@ -75,6 +76,7 @@ export function TestPanel({ ws, journey, version, note, steps, kinds, templates,
   ws: string; journey: string; version: "live" | "draft"; note: string; steps: Step[]; kinds: StepKind[]; templates: EmailTemplate[]; triggerEvent: string | null; saved: string;
   onResult: (m: TestMarks | null) => void; onClose: () => void; onOpen: (step: string) => void;
 }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [person, setPerson] = useState<Person | null>(null);
   const [paths, setPaths] = useState<Record<string, "yes" | "no">>({});
   const [res, setRes] = useState<Result | null>(null);
@@ -84,7 +86,7 @@ export function TestPanel({ ws, journey, version, note, steps, kinds, templates,
   stepsRef.current = steps;
   const run = useCallback(async (p: Person, ways: Record<string, "yes" | "no">) => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journeys/{id}/test", { params: { path: { ws, id: journey } }, body: { record_id: p.id, version, paths: ways } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/journeys/{id}/test", { params: { path: { brand: brandId, id: journey } }, body: { record_id: p.id, version, paths: ways } });
     setBusy(false);
     if (error || !data) {
       setError(errorMessage(error));
@@ -92,7 +94,7 @@ export function TestPanel({ ws, journey, version, note, steps, kinds, templates,
     }
     setError("");
     setRes(data);
-  }, [ws, journey, version]);
+  }, [brandId, journey, version]);
   useEffect(() => {
     if (person) run(person, paths);
   }, [person, paths, run, saved]);

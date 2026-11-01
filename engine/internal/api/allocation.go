@@ -30,6 +30,8 @@ func (s *Server) routesAllocation(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/allocation/suggestions/{id}/decline", s.inWorkspace(manage, s.declineSuggestion))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/allocation/changes", s.inWorkspace(read, s.listChanges))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/allocation/changes/{id}/undo", s.inWorkspace(manage, s.undoChange))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/allocation/declines", s.inWorkspace(read, s.listDeclines))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/allocation/declines/{id}", s.inWorkspace(manage, s.clearDecline))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/allocation/attention", s.inWorkspace(read, s.allocationAttention))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/assign", s.inWorkspace(manage, s.assignMailboxes))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/release", s.inWorkspace(manage, s.releaseMailboxes))
@@ -325,7 +327,7 @@ func (s *Server) declineSuggestion(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id, declined_by) VALUES ($1, $2, $3, $4)
+			INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id, declined_by, source) VALUES ($1, $2, $3, $4, 'declined')
 			ON CONFLICT DO NOTHING`, a.WorkspaceID, g.mailbox, g.seq, a.ActorID); err != nil {
 			return err
 		}
@@ -535,7 +537,7 @@ func (s *Server) undoChange(w http.ResponseWriter, r *http.Request) {
 		}
 		// Undoing the allocator's choice tells it not to make it again.
 		if ch.source == "automatic" && ch.to != nil && (ch.action == allocation.Assign || ch.action == allocation.Move) {
-			if _, err := tx.Exec(ctx, `INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id, declined_by) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+			if _, err := tx.Exec(ctx, `INSERT INTO allocation_declines (workspace_id, mailbox_id, sequence_id, declined_by, source) VALUES ($1, $2, $3, $4, 'undone') ON CONFLICT DO NOTHING`,
 				a.WorkspaceID, ch.mailbox, *ch.to, a.ActorID); err != nil {
 				return err
 			}
@@ -887,8 +889,9 @@ type assignedView struct {
 	LockKind    *string   `json:"lock_kind"`
 	AssignedAt  time.Time `json:"assigned_at"`
 	MailboxStat string    `json:"mailbox_status"`
-	// The platform it sends through for this sequence, or null for Outflare.
-	Platform *string `json:"platform"`
+	// The name of the connected account it sends through for this
+	// sequence, or null for Outflare.
+	IntegrationName *string `json:"integration_name"`
 	// False while a platform has not yet shown the mailbox on the campaign.
 	Confirmed  bool       `json:"confirmed"`
 	DrainUntil *time.Time `json:"drain_until"`

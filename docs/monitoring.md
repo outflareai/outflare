@@ -134,6 +134,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_reviews_new_total` | `platform` | Reviews kept for the first time. |
 | `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`) | Active review pages, and how many failed their last read. |
 | `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `page_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
+| `outflare_ads_item_days_synced_total` | `level` (`ad_group`, `ad`) | Days of numbers stored for ad sets, ad groups and ads (Meta and Google). |
 | `outflare_sync_stuck` | `module`, `code` | Scheduled reads whose last 3 or more runs failed, retries included, by the last error code: connections' syncs, SEO site competitor and backlink reads (`seo_site_competitors`, `seo_site_backlinks`), news searches (`news`) and competitor looks (`competitor_glances`, always `crawl_failed`). |
 | `outflare_social_account_reads_total` | `channel`, `outcome` (`success`, `blocked`, `page_not_found`, `invalid_address`, `no_follower_count`, `save_failed`, `connector_error`) | Reads of social accounts' followers ([social](social.md)). |
 | `outflare_social_stuck_accounts` | `channel`, `code` | Active social accounts whose last 3 or more reads failed, retries included, by the last error code. |
@@ -288,6 +289,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - the newest exchange rate over 6 days old
 - reports from Outflare for desktop failing on Outflare's side, the apps unable to read one AI tool on most computers (it likely changed its endpoint), or most linked computers silent for 12 hours (info)
 - over a quarter of support replies failing to send, a support reply waiting over 5 minutes for a worker, or replies taking over 20 seconds to send at the 95th percentile (info)
+- the support SLA check failing or not running for 15 minutes, or taking over 5 seconds at the 95th percentile (info)
 - over 5% of public help centre pages failing
 - help centre views not being counted (info)
 - help centre pages taking over a second to build at the 95th percentile (info)

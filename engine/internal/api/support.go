@@ -31,7 +31,11 @@ func (s *Server) routesSupport(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+base+"/conversations/{id}/replies", s.inBrand(manage, s.replySupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/notes", s.inBrand(manage, s.noteSupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/suggest-reply", s.inBrand(manage, s.suggestSupportReply))
+	mux.HandleFunc("GET "+base+"/conversations/{id}/articles", s.inBrand(read, s.listSupportArticles))
 	mux.HandleFunc("GET "+base+"/stats", s.inBrand(read, s.supportStats))
+	mux.HandleFunc("GET "+base+"/sla-policies", s.inBrand(read, s.listSupportSLAPolicies))
+	mux.HandleFunc("PUT "+base+"/sla-policies/{scope}", s.inWorkspace(manage, s.putSupportSLAPolicy))
+	mux.HandleFunc("DELETE "+base+"/sla-policies/{scope}", s.inWorkspace(manage, s.deleteSupportSLAPolicy))
 	mux.HandleFunc("GET "+base+"/mailboxes", s.inWorkspace(auth.ScopeMailboxesRead, s.listSupportMailboxes))
 	mux.HandleFunc("PUT "+base+"/mailboxes/{id}", s.inWorkspace(auth.ScopeMailboxesManage, s.addSupportMailbox))
 	mux.HandleFunc("DELETE "+base+"/mailboxes/{id}", s.inWorkspace(auth.ScopeMailboxesManage, s.removeSupportMailbox))
@@ -69,6 +73,9 @@ type supportConversationView struct {
 	LastFrom       string         `json:"last_from"`
 	Preview        string         `json:"preview"`
 	Messages       int            `json:"messages"`
+	// When the team's next reply and the resolution are due under the
+	// SLA, and whether each was missed; all null without an SLA.
+	SLA            supportSLAView `json:"sla"`
 	FirstMessageAt time.Time      `json:"first_message_at"`
 	FirstReplyAt   *time.Time     `json:"first_reply_at"`
 	ClosedAt       *time.Time     `json:"closed_at"`
@@ -85,7 +92,8 @@ const supportConversationSelect = `
 		COALESCE((SELECT left(regexp_replace(sm.body, '\s+', ' ', 'g'), 160) FROM support_messages sm
 			WHERE sm.conversation_id = c.id AND sm.kind <> 'note' ORDER BY sm.created_at DESC LIMIT 1), ''),
 		(SELECT count(*) FROM support_messages sm WHERE sm.conversation_id = c.id AND sm.kind <> 'note')::int,
-		c.first_message_at, c.first_reply_at, c.closed_at, c.last_message_at, c.created_at
+		c.first_message_at, c.first_reply_at, c.closed_at, c.last_message_at, c.created_at,
+		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at
 	FROM support_conversations c
 	LEFT JOIN records r ON r.id = c.record_id
 	LEFT JOIN mailboxes m ON m.id = c.mailbox_id
@@ -98,7 +106,8 @@ func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConvers
 	var assigneeID, assigneeName, teamID, teamName *string
 	err := row.Scan(&v.ID, &v.BrandID, &v.RecordID, &v.Contact.Name, &v.Contact.Email, &v.MailboxID, &v.MailboxEmail,
 		&v.Via, &v.InboundAddress, &v.ReplyFrom, &v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
-		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt)
+		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt,
+		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt)
 	if assigneeID != nil {
 		v.Assignee = &supportPerson{ID: *assigneeID, Name: deref(assigneeName)}
 	}
@@ -188,6 +197,16 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		args = append(args, rec)
 		where += ` AND c.record_id = $` + itoa(len(args))
 	}
+	switch qs.Get("sla") {
+	case "":
+	case "overdue":
+		where += ` AND c.status <> 'closed' AND (c.reply_breached_at IS NOT NULL OR c.resolve_breached_at IS NOT NULL)`
+	case "due_soon":
+		where += ` AND c.status <> 'closed' AND c.reply_breached_at IS NULL AND c.reply_due_at <= now() + interval '1 hour'`
+	default:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "sla is overdue or due_soon")
+		return
+	}
 	if q := strings.TrimSpace(qs.Get("q")); q != "" {
 		args = append(args, "%"+likeEscape(strings.ToLower(q))+"%")
 		n := itoa(len(args))
@@ -203,7 +222,11 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 	// Waiting longest first among open ones reads like a queue; the rest
 	// newest first.
 	order := ` ORDER BY c.last_message_at DESC, c.id`
-	if qs.Get("status") == support.StatusOpen && qs.Get("sort") == "oldest" {
+	switch {
+	case qs.Get("sort") == "due":
+		// What is due first; nothing due last.
+		order = ` ORDER BY LEAST(c.reply_due_at, c.resolve_due_at) NULLS LAST, c.last_message_at DESC, c.id`
+	case qs.Get("status") == support.StatusOpen && qs.Get("sort") == "oldest":
 		order = ` ORDER BY c.last_message_at, c.id`
 	}
 	args = append(args, limit, offset)
@@ -233,15 +256,19 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 // supportBrandSQL keeps a list to the picked brand: its conversations and
 // those of no brand (a mailbox or address shared by every brand), which
 // are every brand's to answer.
-func supportBrandSQL(b brandSel, args *[]any) string {
+func supportBrandSQL(b brandSel, args *[]any) string { return sharedBrandSQL(b, "c.brand_id", args) }
+
+// sharedBrandSQL keeps rows to the picked brand's and those of no brand,
+// which every brand shares.
+func sharedBrandSQL(b brandSel, col string, args *[]any) string {
 	if b.id == "" || b.id == "none" {
-		return b.sql("c.brand_id", args)
+		return b.sql(col, args)
 	}
 	*args = append(*args, b.id)
-	out := ` AND (c.brand_id IS NULL OR c.brand_id = $` + itoa(len(*args)) + `)`
+	out := ` AND (` + col + ` IS NULL OR ` + col + ` = $` + itoa(len(*args)) + `)`
 	if b.in != nil {
 		*args = append(*args, b.in)
-		out += ` AND (c.brand_id IS NULL OR c.brand_id = ANY($` + itoa(len(*args)) + `::uuid[]))`
+		out += ` AND (` + col + ` IS NULL OR ` + col + ` = ANY($` + itoa(len(*args)) + `::uuid[]))`
 	}
 	return out
 }
@@ -249,15 +276,16 @@ func supportBrandSQL(b brandSel, args *[]any) string {
 // supportCounts are the inbox's folder counts.
 func (s *Server) supportCounts(ctx context.Context, a *access, brand brandSel) (map[string]int, error) {
 	args := []any{a.WorkspaceID, a.UserID}
-	var open, pending, closed, mine, unassigned int
+	var open, pending, closed, mine, unassigned, overdue int
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE c.status = 'open'), count(*) FILTER (WHERE c.status = 'pending'),
 			count(*) FILTER (WHERE c.status = 'closed'),
 			count(*) FILTER (WHERE c.status <> 'closed' AND c.assignee_id::text = $2),
-			count(*) FILTER (WHERE c.status <> 'closed' AND c.assignee_id IS NULL)
+			count(*) FILTER (WHERE c.status <> 'closed' AND c.assignee_id IS NULL),
+			count(*) FILTER (WHERE c.status <> 'closed' AND (c.reply_breached_at IS NOT NULL OR c.resolve_breached_at IS NOT NULL))
 		FROM support_conversations c WHERE c.workspace_id = $1`+supportBrandSQL(brand, &args), args...).
-		Scan(&open, &pending, &closed, &mine, &unassigned)
-	return map[string]int{"open": open, "pending": pending, "closed": closed, "mine": mine, "unassigned": unassigned}, err
+		Scan(&open, &pending, &closed, &mine, &unassigned, &overdue)
+	return map[string]int{"open": open, "pending": pending, "closed": closed, "mine": mine, "unassigned": unassigned, "overdue": overdue}, err
 }
 
 type supportMessageView struct {
@@ -469,6 +497,9 @@ func (s *Server) updateSupportConversation(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		if req.Status != nil && *req.Status != c.Status {
+			if err := support.Clock(ctx, tx, c.ID); err != nil {
+				return err
+			}
 			data["status"] = *req.Status
 			switch *req.Status {
 			case support.StatusClosed:
@@ -652,6 +683,10 @@ func (s *Server) suggestSupportReply(w http.ResponseWriter, r *http.Request) {
 		outcome = "unanswered"
 	}
 	ev.Props["answered"], ev.Props["cited"] = out.Answered, len(out.Citations)
+	if err := s.linkHelpArticles(ctx, a.WorkspaceID, kq.brand, out.Citations); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	metrics.KnowledgeAsked(outcome, time.Since(start))
 	track.Emit(ctx, ev)
 	writeJSON(w, http.StatusOK, out)
@@ -668,15 +703,15 @@ func (s *Server) supportStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID, days}
-	var started, replied, closed int
+	var started, replied, closed, missed int
 	var firstReply, resolution *float64
 	err := s.pool.QueryRow(r.Context(), `
-		SELECT count(*), count(c.first_reply_at), count(c.closed_at),
+		SELECT count(*), count(c.first_reply_at), count(c.closed_at), count(*) FILTER (WHERE c.sla_breaches > 0),
 			percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM c.first_reply_at - c.first_message_at)) FILTER (WHERE c.first_reply_at IS NOT NULL),
 			percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM c.closed_at - c.first_message_at)) FILTER (WHERE c.closed_at IS NOT NULL)
 		FROM support_conversations c
 		WHERE c.workspace_id = $1 AND c.first_message_at > now() - make_interval(days => $2)`+supportBrandSQL(brand, &args), args...).
-		Scan(&started, &replied, &closed, &firstReply, &resolution)
+		Scan(&started, &replied, &closed, &missed, &firstReply, &resolution)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -687,7 +722,7 @@ func (s *Server) supportStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"days": days, "conversations": started, "replied": replied, "closed": closed,
-		"median_first_reply_seconds": firstReply, "median_resolution_seconds": resolution, "counts": counts})
+		"median_first_reply_seconds": firstReply, "median_resolution_seconds": resolution, "sla_missed": missed, "counts": counts})
 }
 
 // ---- Support mailboxes ----

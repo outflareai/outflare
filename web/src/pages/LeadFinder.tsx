@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Switch } from "@/components/ui/switch";
 import { TagInput } from "@/components/icp";
 
-type Props = { ws: string; canManage: boolean; onConnectors: () => void; onProfiles: () => void };
+type Props = { ws: string; canManage: boolean; onConnectors: () => void; onProfiles: () => void; onRates?: () => void };
 
 type Settings = { respect_robots: boolean; review: boolean; share_index: boolean; generic_emails?: boolean; eu_notice_accepted_at: string | null };
 // Someone a run looked up at one of its added companies.
@@ -43,8 +43,8 @@ type Run = {
   provider_cents: number; ai_cents: number; error_code: string | null; error: string | null; created_at: string; finished_at: string | null;
   // Only on a single run (and the front page's latest runs).
   pipeline?: Pipeline; contacts?: Counts; campaign?: RunCampaign;
-  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; verify_credits?: number };
-  results?: { in_campaign: number; sent: number; replied: number; meetings?: number };
+  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; verify_credits?: number; people_cents?: number; verify_cents?: number; unpriced?: string[] };
+  results?: { in_campaign: number; sent: number; replied: number };
   to_review?: number;
 };
 type Pipeline = { state: "running" | "paused" | "cancelled" | "finished"; pause_code?: string; pause_reason?: string; stages: StageCount[] };
@@ -57,7 +57,11 @@ type Candidate = {
   score: number | null; reasons: string[]; query: string; status: "pending" | "added" | "dismissed"; record_id: string | null; from_index: boolean;
   picked?: boolean; blocked?: string | null; warnings?: string[];
 };
-type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; meetings?: number; ai_cents: number; web_cents: number; web_tokens: number };
+type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; ai_cents: number; web_cents: number; web_tokens: number;
+  people_credits?: number; verify_credits?: number; credit_cents?: number; credits_unpriced?: boolean };
+
+// spentOf is what results cost: AI, web, and credits at your spend rates.
+const spentOf = (t: Totals) => t.ai_cents + t.web_cents + (t.credit_cents ?? 0);
 type Need = { kind: "paused" | "ready" | "review" | "waiting"; run_id: string; profile_id: string | null; profile_name: string; count: number; code?: string; reason?: string; campaign?: string };
 type Search = Totals & { profile_id: string; profile_name: string; campaign: RunCampaign | null; last_run: Run | null };
 type Summary = { days: number; needs: Need[]; totals: Totals; searches: Search[] };
@@ -161,7 +165,7 @@ const stateBadge = (r: Run) => {
   return <Badge tone={s.tone} title={s.why}>{s.label}</Badge>;
 };
 
-export function LeadFinder({ ws, canManage, onConnectors, onProfiles }: Props) {
+export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }: Props) {
   const base = `/v1/workspaces/${ws}/cloud/lead-finder`;
   const [settings, setSettings] = useState<Settings | null>(null);
   const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
@@ -198,7 +202,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles }: Props) {
   if (!settings || !runs) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
   if (open) {
     return <RunView key={open.id} ws={ws} base={base} id={open.id} tab={open.tab} filter={open.filter} canManage={canManage} profiles={profiles}
-      onBack={() => { setOpen(null); load(); }} onConnectors={onConnectors} onRunAgain={(profile, target) => { setOpen(null); setSetup({ profile, target }); }} />;
+      onBack={() => { setOpen(null); load(); }} onConnectors={onConnectors} onRates={onRates} onRunAgain={(profile, target) => { setOpen(null); setSetup({ profile, target }); }} />;
   }
   const profileName = Object.fromEntries(profiles.map((p) => [p.id, p.name])) as Record<string, string>;
   const ready = settings.eu_notice_accepted_at && profiles.length > 0;
@@ -232,7 +236,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles }: Props) {
       ) : (
         <>
           {summary && summary.needs.length > 0 && <NeedsYou needs={summary.needs} canManage={canManage} onOpen={(id, tab, filter) => setOpen({ id, tab, filter })} onConnectors={onConnectors} />}
-          {summary && <Results totals={summary.totals} days={days} onDays={setDays} />}
+          {summary && <Results totals={summary.totals} days={days} onDays={setDays} onRates={onRates} />}
           <div className="space-y-3">
             {summary && (
               <div className="flex gap-1 border-b text-[13px]" role="tablist">
@@ -292,8 +296,9 @@ function NeedsYou({ needs, canManage, onOpen, onConnectors }: { needs: Need[]; c
 
 // Results are what the period's runs produced, for whoever asks "is this
 // working, and what does it cost?".
-function Results({ totals: t, days, onDays }: { totals: Totals; days: number; onDays: (d: number) => void }) {
-  const spent = t.ai_cents + t.web_cents;
+function Results({ totals: t, days, onDays, onRates }: { totals: Totals; days: number; onDays: (d: number) => void; onRates?: () => void }) {
+  const spent = spentOf(t);
+  const credits = (t.people_credits ?? 0) + (t.verify_credits ?? 0);
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -305,13 +310,18 @@ function Results({ totals: t, days, onDays }: { totals: Totals; days: number; on
           <option value={365}>Last year</option>
         </select>
       </div>
-      <Stats cols={t.meetings !== undefined ? 5 : 4}>
+      <Stats cols={4}>
         <Stat label="Companies" value={n(t.found)} sub={`${n(t.fit)} fit, ${n(t.added)} added`} />
         <Stat label="People" value={n(t.people)} sub={`${n(t.emails)} with an email`} />
         <Stat label="In campaigns" value={n(t.in_campaign)} sub={`${n(t.replied)} replied${t.in_campaign ? `, ${((100 * t.replied) / t.in_campaign).toFixed(1)}%` : ""}`} />
-        {t.meetings !== undefined && <Stat label="Meetings" value={n(t.meetings)} sub={t.in_campaign ? `${((100 * t.meetings) / t.in_campaign).toFixed(1)}% of people in campaigns` : "booked by people it found"} />}
-        <Stat label="Spent" value={money(spent)} sub={t.meetings ? `${money(spent / t.meetings)} a meeting` : t.in_campaign ? `${usd(spent / t.in_campaign)} a person in a campaign` : `${n(t.web_tokens)} Geonode tokens`} />
+        <Stat label="Spent" value={money(spent)} sub={t.in_campaign ? `${usd(spent / t.in_campaign)} a person in a campaign` : `${n(t.web_tokens)} Geonode tokens`} />
       </Stats>
+      {credits > 0 && (
+        <p className="text-[12px] text-muted-foreground">
+          Spent includes AI, web and {n(t.people_credits ?? 0)} data provider and {n(t.verify_credits ?? 0)} email verifier credits ({money(t.credit_cents ?? 0)} at your prices).
+          {t.credits_unpriced && <> Some credits have no price yet and count nothing{onRates ? <>: <button className="underline" onClick={onRates}>set prices in Outcomes</button>, under Spend.</> : "; set prices in Outcomes, under Spend."}</>}
+        </p>
+      )}
     </section>
   );
 }
@@ -325,7 +335,7 @@ function SearchesTable({ searches, canManage, onOpen, onRunAgain }: { searches: 
           <tr className="border-b">
             <th className="px-3 py-2 font-medium">Search</th><th className="px-3 py-2 font-medium">Campaign</th><th className="px-3 py-2 font-medium">Latest run</th>
             <th className="px-3 py-2 text-right font-medium">Companies</th><th className="px-3 py-2 text-right font-medium">People</th>
-            <th className="px-3 py-2 text-right font-medium">In campaign</th><th className="px-3 py-2 text-right font-medium">Replied</th><th className="px-3 py-2 text-right font-medium">Meetings</th>
+            <th className="px-3 py-2 text-right font-medium">In campaign</th><th className="px-3 py-2 text-right font-medium">Replied</th>
             <th className="px-3 py-2 text-right font-medium">Spent</th><th className="px-3 py-2" />
           </tr>
         </thead>
@@ -357,8 +367,7 @@ function SearchesTable({ searches, canManage, onOpen, onRunAgain }: { searches: 
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.people)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.in_campaign)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{n(s.replied)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{s.meetings !== undefined ? n(s.meetings) : "–"}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{money(s.ai_cents + s.web_cents)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{money(spentOf(s))}</td>
                 <td className="px-3 py-2.5 text-right">{action}</td>
               </tr>
             );
@@ -622,9 +631,9 @@ function SettingsDialog({ base, settings, onClose, onSaved }: { base: string; se
 
 type Tab = "companies" | "people" | "spend" | "details";
 
-function RunView({ ws, base, id, tab: initialTab, filter, canManage, profiles, onBack, onConnectors, onRunAgain }: {
+function RunView({ ws, base, id, tab: initialTab, filter, canManage, profiles, onBack, onConnectors, onRates, onRunAgain }: {
   ws: string; base: string; id: string; tab?: Tab; filter?: string; canManage: boolean; profiles: CustomerProfile[];
-  onBack: () => void; onConnectors: () => void; onRunAgain: (profile: string, target: number) => void;
+  onBack: () => void; onConnectors: () => void; onRates?: () => void; onRunAgain: (profile: string, target: number) => void;
 }) {
   const [run, setRun] = useState<Run | null>(null);
   const [tab, setTab] = useState<Tab | null>(initialTab ?? null);
@@ -727,7 +736,7 @@ function RunView({ ws, base, id, tab: initialTab, filter, canManage, profiles, o
         </div>
         {shown === "companies" && <Companies base={base} run={run} canManage={canManage} filter={companyFilter} onFilter={setCompanyFilter} onChanged={load} />}
         {shown === "people" && <People base={base} run={run} canManage={canManage} filter={shownPeopleFilter} onFilter={(f) => { setTab("people"); setPeopleFilter(f ?? ""); }} onChanged={load} onCampaign={() => setEditingCampaign(true)} />}
-        {shown === "spend" && <Spend run={run} />}
+        {shown === "spend" && <Spend run={run} onRates={onRates} />}
         {shown === "details" && <Details run={run} />}
       </div>
       {resuming && <ResumeDialog base={base} run={run} onClose={() => setResuming(false)} onResumed={() => { setResuming(false); load(); }} />}
@@ -750,7 +759,6 @@ function Funnel({ run, people, onPick }: { run: Run; people: number; onPick: (t:
     { label: "People", value: people, sub: `${n(emails?.skipped ?? 0)} no email`, tab: "people" },
     { label: "Ready", value: k?.ready ?? 0, sub: "waiting for you", tab: "people", filter: "ready", hot: (k?.ready ?? 0) > 0 },
     { label: "In campaign", value: k?.enrolled ?? 0, sub: `${n(run.results?.replied ?? 0)} replied`, tab: "people", filter: "enrolled" },
-    ...(run.results?.meetings !== undefined ? [{ label: "Meetings", value: run.results.meetings, sub: "booked" }] : []),
   ];
   return (
     <div className={`grid grid-cols-2 gap-1.5 sm:grid-cols-4 ${tiles.length > 7 ? "lg:grid-cols-8" : "lg:grid-cols-7"}`}>
@@ -1038,23 +1046,33 @@ function People({ base, run, canManage, filter, onFilter, onChanged, onCampaign 
   );
 }
 
-// Spend is what the run cost on the workspace's own accounts.
-function Spend({ run }: { run: Run }) {
+// Spend is what the run cost on the workspace's own accounts. Credits are
+// priced with the workspace's spend rates; ones without a rate count
+// nothing, and the providers missing one are named.
+function Spend({ run, onRates }: { run: Run; onRates?: () => void }) {
   const sp = run.spend ?? { ai_cents: run.ai_cents, web_cents: run.provider_cents, web_tokens: run.search_tokens + run.page_tokens, people_credits: 0 };
-  const money$ = sp.ai_cents + sp.web_cents;
+  const money$ = sp.ai_cents + sp.web_cents + (sp.people_cents ?? 0) + (sp.verify_cents ?? 0);
   const fit = run.accepted + run.maybe;
   const inCampaign = run.contacts?.enrolled ?? 0;
+  const unpriced = sp.unpriced ?? [];
+  const credits = (c: number, cents?: number) => (cents ? `${money(cents)}, ${n(c)} credits` : `${n(c)} credits`);
   return (
     <div className="space-y-3">
       <Stats cols={5}>
         <Stat label="AI" value={money(sp.ai_cents)} sub={`your AI key, up to ${money(run.max_ai_cents)}`} />
         <Stat label="Web (Geonode)" value={sp.web_cents ? money(sp.web_cents) : `${n(sp.web_tokens)} tokens`} sub={`${plural(run.searches, "search", "searches")}, ${plural(run.pages, "page")}`} />
-        <Stat label="Data provider" value={`${n(sp.people_credits)}`} sub="credits for people searches" />
-        <Stat label="Email verifier" value={`${n(sp.verify_credits ?? 0)}`} sub="credits for checking addresses" />
-        <Stat label="Per result" value={run.results?.meetings ? money(money$ / run.results.meetings) : inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
-          sub={run.results?.meetings ? "a meeting" : inCampaign ? "a person in the campaign" : "a company that fits"} />
+        <Stat label="Data provider" value={credits(sp.people_credits, sp.people_cents)} sub="for people searches" />
+        <Stat label="Email verifier" value={credits(sp.verify_credits ?? 0, sp.verify_cents)} sub="for checking addresses" />
+        <Stat label="Per result" value={inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
+          sub={inCampaign ? "a person in the campaign" : "a company that fits"} />
       </Stats>
-      <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts. Credits are what your data provider and email verifier count; checks your verifier already made recently, and the free built-in checks, cost none.</p>
+      {unpriced.length > 0 && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] dark:border-amber-900 dark:bg-amber-950/40">
+          No price yet for {unpriced.map((p) => p || "your email verifier").join(", ")} credits, so they count nothing in the spend and per result.{" "}
+          {onRates ? <button className="underline" onClick={onRates}>Set prices in Outcomes</button> : "Set prices in Outcomes"}, under Spend.
+        </p>
+      )}
+      <p className="text-[12px] text-muted-foreground">Everything runs on your own accounts. Credits are what your data provider and email verifier count, priced at the rates you set in Outcomes; checks your verifier already made recently, and the free built-in checks, cost none.</p>
     </div>
   );
 }

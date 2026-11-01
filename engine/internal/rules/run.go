@@ -96,10 +96,16 @@ func loadSubject(ctx context.Context, q jobs.Querier, ws, id string) (*subject, 
 	return &sub, nil
 }
 
-// inBrand reports whether a rule covers a record: a rule for every brand
-// covers everyone, and a brand's rule its records and the shared ones.
+// inBrand reports whether a rule covers a record: a rule belongs to one
+// brand and acts on that brand's records only (plans/brands/README.md).
+// A rule with no brand comes only from a version before brands' step 4
+// (migration 0352 gave every rule a brand); it keeps covering every
+// brand until the contract step, as it did there.
 func (r Rule) inBrand(sub *subject) bool {
-	return r.BrandID == nil || sub.brandID == nil || *r.BrandID == *sub.brandID
+	if r.BrandID == nil {
+		return true
+	}
+	return sub.brandID != nil && *r.BrandID == *sub.brandID
 }
 
 // attributeConds and propertyConds split a rule's conditions.

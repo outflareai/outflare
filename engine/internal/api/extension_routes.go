@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/seosync"
 )
 
 // Workspace routes for extensions. An extension (the hosted Cloud) serves
@@ -171,4 +172,15 @@ func noteExtension(r *http.Request) {
 	if n, ok := r.Context().Value(ctxExtensionKey{}).(*bool); ok {
 		*n = true
 	}
+}
+
+// AddLinkProspects adds pages to site's link prospect list in tx, as the
+// caller, recording link_prospect.found for each new one. The caller must
+// be able to change site's brand; the pages are already checked
+// (seosync.ProspectPage, a known method, not on the site itself).
+func (c *Caller) AddLinkProspects(ctx context.Context, tx pgx.Tx, site seosync.ProspectSite, source string, list []seosync.Prospect) (seosync.ProspectsAdded, error) {
+	if !c.Writes(site.BrandID) {
+		return seosync.ProspectsAdded{}, errSharedRecord
+	}
+	return seosync.AddProspects(ctx, tx, c.WorkspaceID, site, source, actorRef(c.a), c.s.prospectRecorder(c.a), list)
 }

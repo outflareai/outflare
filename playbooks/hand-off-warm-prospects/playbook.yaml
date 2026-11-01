@@ -41,7 +41,7 @@ steps:
   - say: Check what the setup kit would add, then add it with those events and the sequence's id. Its list and two journeys arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Test both journeys with a recent prospect, then ask a person to turn them on.
-    tools: [getJourney, testJourney]
+    tools: [getBrandJourney, testBrandJourney]
 guardrails:
   - The journeys are turned on only after a person approves them.
   - A prospect already in another sequence isn't started on a second one.

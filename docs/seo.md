@@ -313,7 +313,8 @@ contacts a site for you.
 
 Every way of earning links (competitors' links, broken links, links to win
 back, competitors' dead pages, resource pages, promoting a piece of content,
-mentions without a link, partners) adds to one list of **link prospects**:
+mentions without a link, partners, pages that still link to a domain that
+has expired) adds to one list of **link prospects**:
 pages that could link to one of your sites (`POST /link-prospects`, up to 500
 at a time, MCP `add_link_prospects`). Playbooks add to it too. It costs
 nothing: numbers come from what is stored.

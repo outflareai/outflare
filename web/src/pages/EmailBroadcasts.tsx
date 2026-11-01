@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // Broadcasts: one lifecycle email to many people on customer records at
 // once, such as a newsletter or a launch. A draft picks a published
 // template and a topic; sending makes one email per person and skips the
@@ -52,16 +53,24 @@ const columns: ColumnDef<EmailBroadcast>[] = [
   { id: "when", header: "When", accessorFn: (b) => b.started_at ?? b.send_at ?? b.created_at, cell: ({ row: { original: b } }) => when(b) },
 ];
 
-export function Broadcasts({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+// Broadcasts belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Broadcasts(props: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Broadcasts" brands={active.length} />;
+  return <BroadcastsPage key={brand.id} {...props} />;
+}
+
+function BroadcastsPage({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<EmailBroadcast[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
-  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/email-broadcasts", { params: { path: { ws }, query: brandQuery } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts", { params: { path: { brand: brandId } } });
     if (error) setError(errorMessage(error));
     setList(data?.data ?? []);
-  }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) load();
   }, [load, open]);
@@ -105,6 +114,7 @@ export function Broadcasts({ ws, canManage, open, onOpen, go }: { ws: string; ca
 }
 
 function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: string; canManage: boolean; back: () => void; go: Go }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [b, setB] = useState<EmailBroadcast | null>(null);
   const [skipped, setSkipped] = useState<EmailBroadcastRecipient[]>([]);
   const [editing, setEditing] = useState(false);
@@ -112,11 +122,11 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/email-broadcasts/{id}", { params: { path: { ws, id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id } } });
     if (error) return setError(errorMessage(error));
     setB(data!);
     if (data!.skipped > 0) {
-      const r = await api.GET("/v1/workspaces/{ws}/email-broadcasts/{id}/recipients", { params: { path: { ws, id }, query: { skipped: "true", limit: 200 } } });
+      const r = await api.GET("/v1/brands/{brand}/email-broadcasts/{id}/recipients", { params: { path: { brand: brandId, id }, query: { skipped: "true", limit: 200 } } });
       setSkipped(r.data?.data ?? []);
     }
   }, [ws, id]);
@@ -140,7 +150,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
       at ? "Schedule" : "Send now", false);
     if (!ok) return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/email-broadcasts/{id}/send", { params: { path: { ws, id } }, body: at ? { send_at: at } : {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/email-broadcasts/{id}/send", { params: { path: { brand: brandId, id } }, body: at ? { send_at: at } : {} });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setScheduling(false);
@@ -149,7 +159,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
   }
   async function cancel() {
     if (!(await confirmAction("Cancel this broadcast?", "Emails that have not gone yet are cancelled. This can't be undone.", "Cancel broadcast"))) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/email-broadcasts/{id}/cancel", { params: { path: { ws, id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/email-broadcasts/{id}/cancel", { params: { path: { brand: brandId, id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     setB(data);
     toast("Cancelled.");
@@ -246,6 +256,7 @@ function ScheduleDialog({ onClose, onPick }: { onClose: () => void; onPick: (at:
 }
 
 function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broadcast?: EmailBroadcast; onClose: () => void; onSaved: (b: EmailBroadcast) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [templates, setTemplates] = useState<EmailTemplate[] | null>(null);
   const [topics, setTopics] = useState<EmailTopic[]>([]);
   const [name, setName] = useState(broadcast?.name ?? "");
@@ -255,10 +266,10 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/email-templates", { params: { path: { ws } } }).then(({ data }) =>
+    api.GET("/v1/brands/{brand}/email-templates", { params: { path: { brand: brandId } } }).then(({ data }) =>
       setTemplates((data?.data ?? []).filter((t) => t.purpose === "lifecycle" && t.status === "active")),
     );
-    api.GET("/v1/workspaces/{ws}/email-topics", { params: { path: { ws }, query: { status: "active" } } }).then(({ data }) => setTopics(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/email-topics", { params: { path: { brand: brandId }, query: { status: "active" } } }).then(({ data }) => setTopics(data?.data ?? []));
   }, [ws]);
   const chosen = templates?.find((t) => t.id === template);
   async function save(e: FormEvent) {
@@ -266,8 +277,8 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
     setBusy(true);
     const body = { name, template, exclude, ...(topic !== undefined ? { topic: topic || null } : {}) };
     const res = broadcast
-      ? await api.PATCH("/v1/workspaces/{ws}/email-broadcasts/{id}", { params: { path: { ws, id: broadcast.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/email-broadcasts", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id: broadcast.id } }, body })
+      : await api.POST("/v1/brands/{brand}/email-broadcasts", { params: { path: { brand: brandId } }, body });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
     toast(broadcast ? "Saved." : "Draft saved. Check the audience, then send it.");

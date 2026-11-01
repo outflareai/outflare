@@ -41,9 +41,9 @@ steps:
   - say: Check what the setup kit would add, then add it with those events. Its list, rule and journey arrive as drafts.
     tools: [previewKit, applyKit]
   - say: Rewrite the two emails in the brand's voice, and dry-run the rule to see how many sign-ups it would have caught.
-    tools: [getBrandContext, updateEmailTemplate, simulateRule]
+    tools: [getBrandContext, updateBrandEmailTemplate, simulateBrandRule]
   - say: Test the journey with a recent sign-up, then ask a person to read the emails and turn the rule and the journey on.
-    tools: [getJourney, testJourney]
+    tools: [getBrandJourney, testBrandJourney]
 guardrails:
   - The rule and the journey are turned on only after a person approves them.
   - Contact rules and opt-outs apply to every email, and the journey stops as soon as someone activates.

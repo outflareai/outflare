@@ -141,7 +141,7 @@ export function SequenceMailboxes({ ws, seq, canManage, go, onChange }: { ws: st
         )}
         {a.links.length > 0 && (
           <p className="rounded-lg border bg-muted/40 px-3 py-2 text-[13px]">
-            Runs as {a.links.map((l, i) => <span key={l.id}>{i > 0 && " and "}the <span className="font-medium">{l.platform}</span> campaign <span className="font-medium">{l.name}</span></span>)}.{" "}
+            Runs as {a.links.map((l, i) => <span key={l.id}>{i > 0 && " and "}the <span className="font-medium">{l.integration_name}</span> campaign <span className="font-medium">{l.name}</span></span>)}.{" "}
             <span className="text-muted-foreground">
               {a.links.every((l) => l.control === "read_only")
                 ? "That platform picks a mailbox for each contact itself, so Outflare only shows what it uses."
@@ -226,9 +226,9 @@ export function SequenceMailboxes({ ws, seq, canManage, go, onChange }: { ws: st
                 accessorFn: (m) => m.state,
                 cell: ({ row: { original: m } }) =>
                   m.state === "draining" ? <Status tone="amber">{m.drain_until ? `Leaves ${stamp(m.drain_until)}` : "Finishing follow-ups"}</Status>
-                  : m.confirmed === false ? <span title={`Asked ${m.platform} to add it; confirmed on the next read, within 5 minutes.`}><Status tone="blue">Waiting for {shortPlatform(m.platform)}</Status></span>
+                  : m.confirmed === false ? <span title={`Asked ${m.integration_name} to add it; confirmed on the next read, within 5 minutes.`}><Status tone="blue">Waiting for {shortPlatform(m.integration_name)}</Status></span>
                   : m.mailbox_status !== "active" ? <Status tone="red">{m.mailbox_status}</Status>
-                  : <Status tone="green">{m.platform ? `Sending in ${shortPlatform(m.platform)}` : "Sending"}</Status>,
+                  : <Status tone="green">{m.integration_name ? `Sending in ${shortPlatform(m.integration_name)}` : "Sending"}</Status>,
               },
               { id: "inflight", header: "Mid-sequence", accessorFn: (m) => m.in_flight ?? 0, meta: { align: "right", mono: true } },
               { id: "limit", header: "Per day", accessorFn: (m) => m.daily_limit ?? 0, meta: { align: "right", mono: true } },

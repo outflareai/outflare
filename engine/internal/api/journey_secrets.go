@@ -22,9 +22,12 @@ func (s *Server) routesJourneySecrets(mux *http.ServeMux) {
 	read, manage := auth.ScopeEmailsRead, auth.ScopeEmailsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/signing-secret", s.inWorkspace(manage, s.journeySigningSecret))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journeys/signing-secret/rotate", s.inWorkspace(manage, s.rotateJourneySigningSecret))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/journeys/{id}/step-secrets", s.inWorkspace(read, s.listJourneyStepSecrets))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}", s.inWorkspace(manage, s.setJourneyStepSecret))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/journeys/{id}/step-secrets/{step}", s.inWorkspace(manage, s.deleteJourneyStepSecret))
+	// A step's key belongs to its journey, so to its brand.
+	for _, b := range s.activationBases("journeys", s.inWorkspace) {
+		mux.HandleFunc("GET "+b.path+"/{id}/step-secrets", b.on(read, s.listJourneyStepSecrets))
+		mux.HandleFunc("PUT "+b.path+"/{id}/step-secrets/{step}", b.on(manage, s.setJourneyStepSecret))
+		mux.HandleFunc("DELETE "+b.path+"/{id}/step-secrets/{step}", b.on(manage, s.deleteJourneyStepSecret))
+	}
 }
 
 // journeySigningSecret shows the workspace's signing secret, making it

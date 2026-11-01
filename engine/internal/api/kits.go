@@ -368,8 +368,8 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		vars, _ := json.Marshal(declare([]emails.Variable{}, t.Subject, "", t.Text))
 		var id string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO email_templates (workspace_id, handle, name, purpose, subject, html, text_body, variables)
-			VALUES ($1, $2, $3, $4, $5, '', $6, $7)
+			INSERT INTO email_templates (workspace_id, brand_id, handle, name, purpose, subject, html, text_body, variables)
+			VALUES ($1, outflare_first_brand($1), $2, $3, $4, $5, '', $6, $7)
 			ON CONFLICT (workspace_id, handle) DO NOTHING RETURNING id`,
 			ws, t.Handle, t.Name, t.Purpose, t.Subject, t.Text, vars).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -20,6 +20,7 @@ var topicKeyRE = regexp.MustCompile(`^[a-z][a-z0-9_]{1,62}$`)
 
 type emailTopicView struct {
 	ID                  string    `json:"id"`
+	BrandID             *string   `json:"brand_id"`
 	Key                 string    `json:"key"`
 	Name                string    `json:"name"`
 	Description         string    `json:"description"`
@@ -32,8 +33,13 @@ type emailTopicView struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+// topicBrand is a topic's brand. Topics are still the workspace's (every
+// brand's) in the schema; reading the brand this way lets a later
+// migration add email_topics.brand_id while this version serves.
+const topicBrand = `NULLIF(to_jsonb(t) ->> 'brand_id', '')::uuid`
+
 const emailTopicSelect = `
-	SELECT t.id, t.key, t.name, t.description, t.subscribed_by_default, t.visibility, t.status,
+	SELECT t.id, ` + topicBrand + `::text, t.key, t.name, t.description, t.subscribed_by_default, t.visibility, t.status,
 	       (SELECT count(*) FROM email_templates et WHERE et.topic_id = t.id AND et.status = 'active')::int,
 	       (SELECT count(*) FROM emails e WHERE e.workspace_id = t.workspace_id AND e.topic_id = t.id
 	          AND e.created_at > now() - interval '30 days' AND NOT e.test)::int,
@@ -59,7 +65,7 @@ func (n nullTopic) ref() *topicRef {
 
 func scanEmailTopic(row pgx.Row) (emailTopicView, error) {
 	var v emailTopicView
-	err := row.Scan(&v.ID, &v.Key, &v.Name, &v.Description, &v.SubscribedByDefault, &v.Visibility, &v.Status,
+	err := row.Scan(&v.ID, &v.BrandID, &v.Key, &v.Name, &v.Description, &v.SubscribedByDefault, &v.Visibility, &v.Status,
 		&v.Templates, &v.Sent30d, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
@@ -71,7 +77,20 @@ func (s *Server) listEmailTopics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is active or archived")
 		return
 	}
-	rows, err := s.pool.Query(r.Context(), emailTopicSelect+` AND ($2 = '' OR t.status = $2) ORDER BY t.name, t.key`, a.WorkspaceID, status)
+	// The brand's topics (the route's, or the one ?brand= picks, else the
+	// first brand's) and the workspace's, which every brand uses until
+	// topics move to brands.
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID, status}
+	where := ""
+	if sel.id != "" && sel.id != "none" {
+		args = append(args, sel.id)
+		where = ` AND (` + topicBrand + ` IS NULL OR ` + topicBrand + ` = $3)`
+	}
+	rows, err := s.pool.Query(r.Context(), emailTopicSelect+` AND ($2 = '' OR t.status = $2)`+where+` ORDER BY t.name, t.key`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -89,8 +108,10 @@ func (s *Server) listEmailTopics(w http.ResponseWriter, r *http.Request) {
 
 // findEmailTopic finds a topic by id or key.
 func (s *Server) findEmailTopic(w http.ResponseWriter, r *http.Request, ws, ref string) (*emailTopicView, bool) {
+	// The workspace's topics are every brand's; one of a brand's own only
+	// that brand's.
 	v, err := scanEmailTopic(s.pool.QueryRow(r.Context(), emailTopicSelect+` AND (t.id::text = $2 OR t.key = $2)`, ws, ref))
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && v.BrandID != nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email topic not found")
 		return nil, false
 	}
@@ -105,12 +126,15 @@ func (s *Server) findEmailTopic(w http.ResponseWriter, r *http.Request, ws, ref 
 // "" is no topic.
 func topicID(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, ws, ref string) (*string, error) {
+}, ws string, brand *string, ref string) (*string, error) {
 	if ref == "" {
 		return nil, nil
 	}
+	// Another brand's own topic is not found; the workspace's are every
+	// brand's.
 	var id, status string
-	err := q.QueryRow(ctx, `SELECT id, status FROM email_topics WHERE workspace_id = $1 AND (id::text = $2 OR key = $2)`, ws, ref).Scan(&id, &status)
+	err := q.QueryRow(ctx, `SELECT id, status FROM email_topics t WHERE workspace_id = $1 AND (id::text = $2 OR key = $2)
+		AND ($3::uuid IS NULL OR `+topicBrand+` IS NULL OR `+topicBrand+` = $3)`, ws, ref, brand).Scan(&id, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errInvalid("topic not found: " + truncate(ref, 63))
 	}

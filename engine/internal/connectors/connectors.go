@@ -55,9 +55,12 @@ const (
 	CapImportCampaigns = "import.campaigns" // implements Importer
 	CapImportLeads     = "import.leads"
 	CapImportMailboxes = "import.mailboxes"
-	CapImportCRM       = "import.crm"    // implements CRMImporter
-	CapSocialSearch    = "social.search" // implements SocialSearcher
-	CapSocialReply     = "social.reply"
+	// CapMailboxSignIn: the connection signs mailboxes in to SMTP and IMAP
+	// with OAuth instead of a password (implements MailSignIn).
+	CapMailboxSignIn = "mailboxes.sign_in"
+	CapImportCRM     = "import.crm"    // implements CRMImporter
+	CapSocialSearch  = "social.search" // implements SocialSearcher
+	CapSocialReply   = "social.reply"
 	// CapRedditCampaigns: posts, comments, replies and upvotes on Reddit
 	// through a managed account network (Engain), with status reads.
 	CapRedditCampaigns = "reddit.campaigns"
@@ -129,6 +132,10 @@ type OAuth struct {
 	// Amazon-Advertising-API-ClientId header). It is the app's public id,
 	// not a secret, and only names the app the workspace signed in through.
 	KeepClientID bool `json:"-"`
+	// IDToken keeps the OpenID Connect ID token the token endpoint returns
+	// beside the tokens as id_token, for connectors whose account is read
+	// from it (a mailbox sign-in's token is for the mail servers only).
+	IDToken bool `json:"-"`
 }
 
 // Definition is a connector's catalog entry.
@@ -141,12 +148,14 @@ type Definition struct {
 	Website     string `json:"website"`
 	DocsURL     string `json:"docs_url"`
 	KeyURL      string `json:"key_url,omitempty"` // where to find the API key
-	// Auth is the recommended way to connect: OAuth when the vendor has
-	// it. AuthMethods lists every way, recommended first; empty means
+	// Auth is the preferred way to connect: OAuth when the vendor has
+	// it. AuthMethods lists every way, preferred first; empty means
 	// only Auth. Fields are what the api_key method asks for, OAuth is
-	// the oauth2 method's consent screen.
-	Auth         string   `json:"auth"`
-	AuthMethods  []string `json:"auth_methods"`
+	// the oauth2 method's consent screen. Neither is in the API: the
+	// catalog's auth_options lists each method, whether this server can
+	// use it and which is recommended, so clients read only that.
+	Auth         string   `json:"-"`
+	AuthMethods  []string `json:"-"`
 	Fields       []Field  `json:"fields"`
 	OAuth        *OAuth   `json:"oauth,omitempty"`
 	Capabilities []string `json:"capabilities"`
@@ -253,6 +262,18 @@ type Account struct {
 	Credits *float64 `json:"credits,omitempty"`
 	// Anything else worth showing, e.g. the plan.
 	Details map[string]string `json:"details,omitempty"`
+}
+
+// MailSignIn is a connector whose connections sign mailboxes in to SMTP
+// and IMAP with XOAUTH2: one person's sign-in (oauth2) or an admin
+// connection that signs in every mailbox of an organisation (api_key).
+type MailSignIn interface {
+	// MailProvider is the mailbox provider its mailboxes use (google or
+	// microsoft).
+	MailProvider() string
+	// MailToken returns an access token for the mailbox email, from an
+	// opened connection's credentials.
+	MailToken(ctx context.Context, cl *Client, method string, creds Creds, email string) (string, error)
 }
 
 // Connector is implemented by every available connector.
@@ -437,7 +458,7 @@ func (r *Registry) Definition(id string) (Definition, bool) {
 	return d.normal(), ok
 }
 
-// normal fills AuthMethods, so clients always get the full list, and
+// normal fills AuthMethods, so callers always get the full list, and
 // marks connectors with no publisher as Outflare's own.
 func (d Definition) normal() Definition {
 	d.AuthMethods = d.Methods()

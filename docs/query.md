@@ -30,6 +30,8 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `records` | `customers.read` | Every record of every type, including merged (`merged_into`) and archived ones |
 | `record_identities`, `record_relationships` | `customers.read` | Emails, phones, ids and domains; links between records |
 | `customer_events`, `consents`, `subscriptions` | `customers.read` | Product events, the consent log, payment subscriptions (`monthly_minor` is MRR in minor units) |
+| `rules`, `rule_firings` | `customers.read` | The brand's [rules](rules.md), and each time one fired for a record |
+| `journeys`, `journey_runs` | `customers.read` | The brand's journeys (`steps` counts the live version's steps), and each person's way through one |
 | `brands` | `workspace.read` | The brand itself |
 | `leads` | `leads.read` | Leads for outreach; they have no brand yet, so a brand's query can't read them |
 | `sequences`, `enrollments`, `messages` | `sequences.read` | Sequences, who is in them, and the emails they sent (without bodies) |

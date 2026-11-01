@@ -795,7 +795,7 @@ function WorkspaceSwitcher({ workspaces, ws, onChange }: { workspaces: Workspace
               <DropdownMenuItem key={w.id} className="text-[13px]" onSelect={() => onChange(w.id)}>
                 <span className="flex size-5 items-center justify-center rounded border font-mono text-[10px] uppercase">{w.name[0]}</span>
                 <span className="flex-1 truncate">{w.name}</span>
-                {w.id === ws?.id ? <Icon name="check" className="size-3.5" /> : i < 9 && <DropdownMenuShortcut className="font-mono">{w.role}</DropdownMenuShortcut>}
+                {w.id === ws?.id ? <Icon name="check" className="size-3.5" /> : i < 9 && <DropdownMenuShortcut>{w.role_name}</DropdownMenuShortcut>}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -1058,26 +1058,26 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Lifecycle email setup and sending", path: "/v1/workspaces/{ws}/email-overview", params: base, mcp: "get_email_overview", ask: "Set up Amazon SES so my app can send password resets and receipts from example.com.", scope: "emails.read" };
     case "emails":
       return item
-        ? { title: "One email and its delivery", path: "/v1/workspaces/{ws}/emails/{id}", params: { ...base, id: item }, mcp: "get_email", ask: "Why did this email not reach the person?", scope: "emails.read" }
-        : { title: "Sent emails", path: "/v1/workspaces/{ws}/emails", params: base, query: { limit: 50 }, mcp: "list_emails", ask: "Which receipts bounced this week, and why?", scope: "emails.read" };
+        ? { title: "One email and its delivery", path: "/v1/brands/{brand}/emails/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_email", ask: "Why did this email not reach the person?", scope: "emails.read" }
+        : { title: "Sent emails", path: "/v1/brands/{brand}/emails", params: { brand: "BRAND_ID" }, query: { limit: 50 }, mcp: "list_emails", ask: "Which receipts bounced this week, and why?", scope: "emails.read" };
     case "templates":
       return item
-        ? { title: "One template", path: "/v1/workspaces/{ws}/email-templates/{id}", params: { ...base, id: item }, mcp: "get_email_template", ask: "Rewrite this template to be shorter and friendlier, keeping its variables.", scope: "emails.read" }
-        : { title: "Email templates", path: "/v1/workspaces/{ws}/email-templates", params: base, mcp: "list_email_templates", ask: "Write a welcome email template for new sign-ups with a first_name variable.", scope: "emails.read" };
+        ? { title: "One template", path: "/v1/brands/{brand}/email-templates/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_email_template", ask: "Rewrite this template to be shorter and friendlier, keeping its variables.", scope: "emails.read" }
+        : { title: "Email templates", path: "/v1/brands/{brand}/email-templates", params: { brand: "BRAND_ID" }, mcp: "list_email_templates", ask: "Write a welcome email template for new sign-ups with a first_name variable.", scope: "emails.read" };
     case "broadcasts":
-      return { title: "Email broadcasts", path: "/v1/workspaces/{ws}/email-broadcasts", params: base, mcp: "list_email_broadcasts", ask: "Draft our October newsletter to everyone in the newsletter topic, using the monthly template, and tell me how many people it will reach.", scope: "emails.read" };
+      return { title: "Email broadcasts", path: "/v1/brands/{brand}/email-broadcasts", params: { brand: "BRAND_ID" }, mcp: "list_email_broadcasts", ask: "Draft our October newsletter to everyone in the newsletter topic, using the monthly template, and tell me how many people it will reach.", scope: "emails.read" };
     case "journeys":
       return item
-        ? { title: "One journey", path: "/v1/workspaces/{ws}/journeys/{id}", params: { ...base, id: item }, mcp: "get_journey", ask: "How is this journey doing, and where do people drop out?", scope: "emails.read" }
-        : { title: "Journeys", path: "/v1/workspaces/{ws}/journeys", params: base, mcp: "list_journeys", ask: "Build an onboarding journey: when someone signs up, send the welcome email, wait two days, and send tips unless they upgraded.", scope: "emails.read" };
+        ? { title: "One journey", path: "/v1/brands/{brand}/journeys/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_journey", ask: "How is this journey doing, and where do people drop out?", scope: "emails.read" }
+        : { title: "Journeys", path: "/v1/brands/{brand}/journeys", params: { brand: "BRAND_ID" }, mcp: "list_journeys", ask: "Build an onboarding journey: when someone signs up, send the welcome email, wait two days, and send tips unless they upgraded.", scope: "emails.read" };
     case "rules":
       return item
-        ? { title: "One rule", path: "/v1/workspaces/{ws}/rules/{id}", params: { ...base, id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
-        : { title: "Rules", path: "/v1/workspaces/{ws}/rules", params: base, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
+        ? { title: "One rule", path: "/v1/brands/{brand}/rules/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_rule", ask: "What would this rule have done over the last 30 days, and which journeys start on its event?", scope: "customers.read" }
+        : { title: "Rules", path: "/v1/brands/{brand}/rules", params: { brand: "BRAND_ID" }, mcp: "list_rules", ask: "Make a rule that emits customer.stalled when someone signs up and doesn't activate within 7 days, unless they're on enterprise, and dry-run it.", scope: "customers.read" };
     case "automations":
-      return { title: "The automation map", path: "/v1/workspaces/{ws}/automation-map", params: base, mcp: "get_automation_map", ask: "Walk me through how my rules and journeys fit together, and what I should fix first.", scope: "emails.read" };
+      return { title: "The automation map", path: "/v1/brands/{brand}/automation-map", params: { brand: "BRAND_ID" }, mcp: "get_automation_map", ask: "Walk me through how my rules and journeys fit together, and what I should fix first.", scope: "emails.read" };
     case "topics":
-      return { title: "Email topics", path: "/v1/workspaces/{ws}/email-topics", params: base, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
+      return { title: "Email topics", path: "/v1/brands/{brand}/email-topics", params: { brand: "BRAND_ID" }, mcp: "list_email_topics", ask: "Add topics for product updates and our monthly newsletter, and put my lifecycle templates in the right one.", scope: "emails.read" };
     case "providers":
       return { title: "Email providers", path: "/v1/workspaces/{ws}/email-providers", params: base, mcp: "list_email_providers", ask: "Is my email provider still in the SES sandbox, and are my sending domains verified?", scope: "emails.read" };
     case "support":
@@ -1101,7 +1101,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "members":
       return { title: "Members", path: "/v1/workspaces/{ws}/members", params: base, scope: "members.read" };
     case "alerts":
-      return { title: "Alerts", path: "/v1/workspaces/{ws}/alerts", params: base, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
+      return { title: "Alerts", path: "/v1/brands/{brand}/alerts", params: { brand: "BRAND_ID" }, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
     case "digests":
       return { title: "Digests", path: "/v1/workspaces/{ws}/digests", params: base, mcp: "preview_digest", ask: "Summarise how the whole workspace did this week, and what needs me first.", scope: "workspace.read" };
     case "connectors":
@@ -1109,8 +1109,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Connected services", path: "/v1/workspaces/{ws}/integrations", params: base, mcp: "list_integrations", ask: "Which of my connected services need attention, and how many verification credits are left?", scope: "integrations.read" };
     case "webhooks":
       return item
-        ? { title: "A webhook's deliveries", path: "/v1/workspaces/{ws}/webhooks/{id}/deliveries", params: { ...base, id: item }, mcp: "list_webhook_deliveries", ask: "Which deliveries to this webhook failed this week, and why?", scope: "webhooks.read" }
-        : { title: "Webhooks", path: "/v1/workspaces/{ws}/webhooks", params: base, mcp: "list_webhooks", ask: "Are any of my webhooks failing?", scope: "webhooks.read" };
+        ? { title: "A webhook's deliveries", path: "/v1/brands/{brand}/webhooks/{id}/deliveries", params: { brand: "BRAND_ID", id: item }, mcp: "list_webhook_deliveries", ask: "Which deliveries to this webhook failed this week, and why?", scope: "webhooks.read" }
+        : { title: "Webhooks", path: "/v1/brands/{brand}/webhooks", params: { brand: "BRAND_ID" }, mcp: "list_webhooks", ask: "Are any of my webhooks failing?", scope: "webhooks.read" };
     case "tokens":
       return { title: "API tokens", path: "/v1/workspaces/{ws}/api-tokens", params: base, scope: "tokens.manage" };
     case "logs":

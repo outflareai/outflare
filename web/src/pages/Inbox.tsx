@@ -281,7 +281,7 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
                       {m.source !== "mailbox" && <Badge title="Where this reply came from">{sourceName(m.source)}</Badge>}
                       {m.snoozed_until && new Date(m.snoozed_until) > new Date() && <Badge title={stamp(m.snoozed_until)}>Snoozed</Badge>}
                       {m.assignee_name && <Badge title="Assigned to">{m.assignee_name}</Badge>}
-                      {m.labels.map((l) => <Tag key={l} name={l} tags={tags} />)}
+                      {m.tags.map((t) => <Tag key={t} name={t} tags={tags} />)}
                       <span className="truncate">{[m.company, m.sequence_name].filter(Boolean).join(" · ")}</span>
                     </div>
                   </button>
@@ -351,7 +351,7 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
     onBack();
   }
 
-  type Patch = { category?: Category | null; assigned_to?: string | null; snoozed_until?: string | null; done?: boolean; labels?: string[]; needs_review?: boolean };
+  type Patch = { category?: Category | null; assigned_to?: string | null; snoozed_until?: string | null; done?: boolean; tags?: string[]; needs_review?: boolean };
   async function triage(body: Patch, said?: string, close = false) {
     const { data, error } = await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -411,7 +411,7 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
               <option value="">Unassigned</option>
               {members.map((m) => <option key={m.user_id} value={m.user_id ?? ""}>{m.name || m.email}</option>)}
             </select>
-            <Labels labels={msg.labels} tags={tags} onChange={(labels) => triage({ labels })} />
+            <TagPicker names={msg.tags} tags={tags} onChange={(names) => triage({ tags: names })} />
             {msg.category_source && (
               <span className="text-[12px] text-muted-foreground">
                 {sourceLabel[msg.category_source]}
@@ -480,23 +480,24 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
   );
 }
 
-function Labels({ labels, tags, onChange }: { labels: string[]; tags: InboxTag[]; onChange: (l: string[]) => void }) {
+// A reply's tags (names), picked from or added to the workspace's tags.
+function TagPicker({ names, tags, onChange }: { names: string[]; tags: InboxTag[]; onChange: (names: string[]) => void }) {
   const [text, setText] = useState("");
   function add(e: FormEvent) {
     e.preventDefault();
-    const l = text.trim().toLowerCase();
-    if (l && !labels.includes(l)) onChange([...labels, l]);
+    const n = text.trim().toLowerCase();
+    if (n && !names.includes(n)) onChange([...names, n]);
     setText("");
   }
   return (
     <form onSubmit={add} className="flex flex-wrap items-center gap-1.5">
-      {labels.map((l) => (
-        <Tag key={l} name={l} tags={tags}>
-          <button type="button" aria-label={`Remove tag ${l}`} className="opacity-70 hover:opacity-100" onClick={() => onChange(labels.filter((x) => x !== l))}><X className="size-3" /></button>
+      {names.map((n) => (
+        <Tag key={n} name={n} tags={tags}>
+          <button type="button" aria-label={`Remove tag ${n}`} className="opacity-70 hover:opacity-100" onClick={() => onChange(names.filter((x) => x !== n))}><X className="size-3" /></button>
         </Tag>
       ))}
       <input aria-label="Add a tag" list="inbox-tags" className={`${field} h-7 w-28`} maxLength={40} placeholder="Add tag" value={text} onChange={(e) => setText(e.target.value)} />
-      <datalist id="inbox-tags">{tags.filter((t) => !labels.includes(t.name)).map((t) => <option key={t.id} value={t.name} />)}</datalist>
+      <datalist id="inbox-tags">{tags.filter((t) => !names.includes(t.name)).map((t) => <option key={t.id} value={t.name} />)}</datalist>
     </form>
   );
 }

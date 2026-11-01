@@ -117,6 +117,14 @@ func (s *Server) createConnectRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "not_configured", def.Name+" needs an OAuth app on this server: "+connectors.OAuthHint(def))
 		return
 	}
+	// A mailbox sign-in adds a mailbox, so asking for one needs what adding
+	// a mailbox needs.
+	if _, mail := s.mailSignIn(def.ID); mail {
+		if msg := mailboxRefusal(a); msg != "" {
+			writeError(w, r, http.StatusForbidden, "forbidden", msg)
+			return
+		}
+	}
 	reason := strings.TrimSpace(req.Reason)
 	if len([]rune(reason)) > maxReasonChars {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "reason must be at most 500 characters")
@@ -277,8 +285,14 @@ func (s *Server) openLink(w http.ResponseWriter, r *http.Request, token string) 
 		s.internal(w, r, err)
 		return p, connectors.Definition{}, false
 	}
-	if !auth.Grants(effectiveScopes(role, stored), auth.ScopeIntegrationsManage) {
+	scopes := effectiveScopes(role, stored)
+	if !auth.Grants(scopes, auth.ScopeIntegrationsManage) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "your role in this workspace can't connect services: ask a workspace admin to open the link")
+		return p, connectors.Definition{}, false
+	}
+	// Signing in to a mailbox adds it, so the person needs mailboxes.manage too.
+	if _, mail := s.mailSignIn(p.Connector); mail && !auth.Grants(scopes, auth.ScopeMailboxesManage) {
+		writeError(w, r, http.StatusForbidden, "forbidden", "your role in this workspace can't add mailboxes: ask a workspace admin to open the link")
 		return p, connectors.Definition{}, false
 	}
 	if createdBy != nil {

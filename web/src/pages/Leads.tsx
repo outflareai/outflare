@@ -42,15 +42,23 @@ export function Leads({ ws, canManage, go }: { ws: string; canManage: boolean; g
   const { query: brandQuery } = useBrand(ws);
   const load = useCallback(
     async (after?: string) => {
-      const query = { ...(listId ? { list_id: listId } : {}), ...(q ? { q } : {}), ...(verification ? { verification: verification as "deliverable" } : {}), ...(after ? { after } : {}), limit: 100, ...brandQuery };
-      const [l, ls] = await Promise.all([
-        api.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query } }),
-        after ? Promise.resolve(null) : api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: brandQuery } }),
-      ]);
-      if (l.data) {
-        setLeads((prev) => (after ? [...prev, ...l.data.data] : l.data.data));
-        setTotal(l.data.total);
-        setNext(l.data.next_after ?? null);
+      const filters = { ...(q ? { q } : {}), ...(verification ? { verification: verification as "deliverable" } : {}), limit: 100 };
+      // A list's leads come from the list, in the same order; after is
+      // then the offset of the next page.
+      const page = async () => {
+        if (!listId) {
+          const { data } = await api.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query: { ...filters, ...(after ? { after } : {}), ...brandQuery } } });
+          return data && { data: data.data as Lead[], total: data.total, next: data.next_after ?? null };
+        }
+        const query = { ...filters, sort: "email" as const, ...(after ? { offset: Number(after) } : {}) };
+        const { data } = await api.GET("/v1/workspaces/{ws}/lead-lists/{id}/members", { params: { path: { ws, id: listId }, query } });
+        return data && { data: data.data as Lead[], total: data.total, next: data.next_offset == null ? null : String(data.next_offset) };
+      };
+      const [l, ls] = await Promise.all([page(), after ? Promise.resolve(null) : api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: brandQuery } })]);
+      if (l) {
+        setLeads((prev) => (after ? [...prev, ...l.data] : l.data));
+        setTotal(l.total);
+        setNext(l.next);
       }
       if (ls?.data) setLists(ls.data.data);
       setLoaded(true);
