@@ -132,7 +132,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
     const [list, chart, tail] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, limit: 100 } } }),
       api.GET("/v1/workspaces/{ws}/logs/histogram", { params: { path: { ws }, query: params } }),
-      api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, after: "latest" } } }),
+      api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, start: "latest" as const } } }),
     ]);
     if (list.error) {
       setError(errorMessage(list.error));
@@ -140,8 +140,8 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
       return;
     }
     setLogs(list.data.data);
-    setNext(list.data.next_before ?? null);
-    after.current = tail.data?.next_after ?? null;
+    setNext(list.data.next_cursor ?? null);
+    after.current = tail.data?.next_cursor ?? null;
     if (chart.data) setHist({ bucket: chart.data.bucket_seconds, since: chart.data.since, until: chart.data.until, data: chart.data.data });
   }, [ws, params]);
 
@@ -151,10 +151,10 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
 
   const older = async () => {
     if (!next) return;
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, limit: 100, before: next } } });
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, limit: 100, cursor: next } } });
     if (error) return toast(errorMessage(error), "error");
     setLogs((cur) => [...(cur ?? []), ...data.data]);
-    setNext(data.next_before ?? null);
+    setNext(data.next_cursor ?? null);
   };
 
   // Live: ask for calls after the newest one every two seconds, while the
@@ -170,9 +170,9 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
           if (!stop && c) setHist({ bucket: c.bucket_seconds, since: c.since, until: c.until, data: c.data });
         });
       }
-      const { data } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, after: after.current, limit: 500 } } });
+      const { data } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, cursor: after.current, limit: 500 } } });
       if (stop || !data) return;
-      after.current = data.next_after ?? after.current;
+      after.current = data.next_cursor ?? after.current;
       if (data.data.length === 0) return;
       const added = [...data.data].reverse();
       setLogs((cur) => [...added, ...(cur ?? [])].slice(0, 2000));
@@ -591,14 +591,14 @@ function Jobs({ ws }: { ws: string }) {
   const [next, setNext] = useState<string | null>(null);
   const [shown, setShown] = useState<string>();
   const load = useCallback(
-    async (before?: string) => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/jobs", { params: { path: { ws }, query: { status: (status || undefined) as Job["status"] | undefined, before } } });
+    async (cursor?: string) => {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/jobs", { params: { path: { ws }, query: { status: (status || undefined) as Job["status"] | undefined, cursor } } });
       if (error) {
         toast(errorMessage(error), "error");
         return;
       }
-      setJobs((cur) => (before ? [...(cur ?? []), ...data.data] : data.data));
-      setNext(data.next_before ?? null);
+      setJobs((cur) => (cursor ? [...(cur ?? []), ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
     },
     [ws, status],
   );

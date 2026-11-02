@@ -348,3 +348,119 @@ func TestAttributionCustomersAndCohorts(t *testing.T) {
 		t.Fatalf("empty period = %v", got)
 	}
 }
+
+// Credit rolls up from people to their company, and a won deal is spread
+// across channels by the credit its people earned before it closed.
+func TestAttributionAccountsAndDeals(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	now := time.Now()
+	acme := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Acme"})["id"].(string)
+	northpeak := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Northpeak"})["id"].(string)
+	person := func(name string) string {
+		id := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', $2) RETURNING id::text`, ws, name)
+		owner.must(200, "PATCH", base+"/records/"+id, map[string]any{"attributes": map[string]any{"companies": []string{acme}}})
+		return id
+	}
+	wes, cy := person("Wes"), person("Cy")
+	visit := func(rec, channel string, at time.Time) string {
+		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
+			ws, rec, at, channel)
+	}
+	conv := func(rec, name string, at time.Time, value any, session, channel string) {
+		t.Helper()
+		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record') RETURNING event_id::text`, ev, ws, rec, name, at, value)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight)
+			VALUES ($1, $2, 'last_non_direct', 0, $3, $4, $5, 'google', 1) RETURNING event_id::text`, ev, ws, session, at.Add(-time.Hour), channel)
+	}
+	wesVisit, cyVisit := visit(wes, "seo", now.Add(-48*time.Hour)), visit(cy, "paid_ads", now.Add(-3*time.Hour))
+	conv(wes, "payment.succeeded", now.Add(-24*time.Hour), 4000, wesVisit, "seo")
+	conv(cy, "signed_up", now.Add(-2*time.Hour), nil, cyVisit, "paid_ads")
+	conv(cy, "payment.succeeded", now.Add(-90*time.Minute), 3000, cyVisit, "paid_ads")
+	conv(cy, "payment.succeeded", now.Add(-80*time.Minute), 3000, cyVisit, "paid_ads")
+	// After the deal closed: it doesn't count toward the deal.
+	conv(wes, "payment.succeeded", now.Add(10*time.Minute), 1000, wesVisit, "seo")
+
+	won := func(name, company string, cents int) {
+		id := owner.must(201, "POST", base+"/records", map[string]any{"type": "deal", "name": name,
+			"attributes": map[string]any{"stage": "qualified", "associated_company": company}})["id"].(string)
+		// A CRM deal's state and amount come from the CRM.
+		exec(`UPDATE deals SET state = 'won', closed_at = $2, amount_cents = $3, currency = 'USD' WHERE id = $1 RETURNING id::text`, id, now, cents)
+	}
+	won("Acme pilot", acme, 100000)
+	won("Northpeak pilot", northpeak, 40000)
+
+	usd := func(v any) float64 {
+		for _, m := range v.([]any) {
+			if m.(map[string]any)["currency"] == "USD" {
+				return m.(map[string]any)["amount_cents"].(float64)
+			}
+		}
+		return 0
+	}
+	to := now.AddDate(0, 0, 1).Format(time.DateOnly)
+	accounts := owner.must(200, "GET", base+"/attribution/accounts?to="+to, nil)["data"].([]any)
+	if len(accounts) != 2 {
+		t.Fatalf("accounts = %v", accounts)
+	}
+	a := accounts[0].(map[string]any)
+	if a["record_id"] != acme || a["name"] != "Acme" || a["people"] != 2.0 || a["conversions"] != 5.0 || usd(a["revenue"]) != 11000 ||
+		a["top_channel"] != "paid_ads" || a["deals_won"] != 1.0 || usd(a["deal_value"]) != 100000 {
+		t.Fatalf("acme = %v", a)
+	}
+	if n := accounts[1].(map[string]any); n["record_id"] != northpeak || n["conversions"] != 0.0 || n["deals_won"] != 1.0 || n["top_channel"] != "" {
+		t.Fatalf("northpeak = %v", n)
+	}
+
+	// Acme's deal: one credited conversion from search and three from ads
+	// before it closed, so a quarter and three quarters. Northpeak's has no
+	// people.
+	d := owner.must(200, "GET", base+"/attribution/deals?to="+to, nil)
+	rows := map[string]map[string]any{}
+	for _, r := range d["data"].([]any) {
+		rows[r.(map[string]any)["channel"].(string)] = r.(map[string]any)
+	}
+	if ads := rows["paid_ads"]; len(rows) != 2 || ads["deals"] != 0.75 || usd(ads["value"]) != 75000 || ads["label"] == "" {
+		t.Fatalf("deals = %v", d)
+	}
+	if seo := rows["seo"]; seo["deals"] != 0.25 || usd(seo["value"]) != 25000 {
+		t.Fatalf("seo = %v", seo)
+	}
+	if u := d["unattributed"].(map[string]any); u["deals"] != 1.0 || usd(u["value"]) != 40000 {
+		t.Fatalf("unattributed = %v", u)
+	}
+	// Identified visits only: the same here.
+	if d := owner.must(200, "GET", base+"/attribution/deals?to="+to+"&match=identified", nil); len(d["data"].([]any)) != 2 {
+		t.Fatalf("identified deals = %v", d)
+	}
+	if a := owner.must(200, "GET", base+"/attribution/accounts?to="+to+"&match=identified", nil)["data"].([]any); len(a) != 2 {
+		t.Fatalf("identified accounts = %v", a)
+	}
+	// The deals are the workspace brand's; the conversions belong to no
+	// brand, so under the deals' brand nothing is credited.
+	brand := exec(`SELECT brand_id::text FROM records WHERE workspace_id = $1 AND name = 'Acme pilot'`, ws)
+	if d := owner.must(200, "GET", base+"/attribution/deals?to="+to+"&brand="+brand, nil); len(d["data"].([]any)) != 0 ||
+		d["unattributed"].(map[string]any)["deals"] != 2.0 {
+		t.Fatalf("deals by brand = %v", d)
+	}
+	if d := owner.must(200, "GET", base+"/attribution/deals?to="+to+"&brand=none", nil); d["unattributed"].(map[string]any)["deals"] != 0.0 {
+		t.Fatalf("deals with no brand = %v", d)
+	}
+	// Outside the period: nothing won.
+	old := now.AddDate(0, 0, -40).Format(time.DateOnly)
+	if d := owner.must(200, "GET", base+"/attribution/deals?from="+old+"&to="+old, nil); len(d["data"].([]any)) != 0 || d["unattributed"].(map[string]any)["deals"] != 0.0 {
+		t.Fatalf("empty period = %v", d)
+	}
+}

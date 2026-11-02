@@ -23,6 +23,8 @@ const (
 	CapFindEmail     = "data.find_email"     // a PersonEnricher that finds work emails from a name and company
 	CapRevealCompany = "data.reveal_company" // implements CompanyRevealer
 	CapRevealPerson  = "data.reveal_person"  // implements PersonRevealer
+	// CapSearchCompanies finds companies (not people) matching a profile.
+	CapSearchCompanies = "data.search_companies" // implements CompanySearcher
 )
 
 // Filter names a PeopleSearcher may support. They match the customer profile's
@@ -207,6 +209,37 @@ type PeopleSearcher interface {
 	SearchFilters() []string
 	// SearchPeople returns one page. cursor is empty for the first page.
 	SearchPeople(ctx context.Context, c *Client, creds Creds, f PeopleFilter, cursor string, size int) (SearchPage, error)
+}
+
+// CompanyFilter is what a company search looks for: the customer
+// profile's company filters, plus technologies where the provider knows
+// them.
+type CompanyFilter struct {
+	Industries     []string `json:"industries,omitempty"`
+	EmployeeRanges []string `json:"employee_ranges,omitempty"`
+	Locations      []string `json:"locations,omitempty"`
+	Keywords       []string `json:"keywords,omitempty"`
+	Technologies   []string `json:"technologies,omitempty"`
+}
+
+// CompanyPage is one page of a company search.
+type CompanyPage struct {
+	Companies []Company
+	// Total matches, when the provider says.
+	Total *int
+	// Next is passed back for the following page; empty when there are no
+	// more.
+	Next string
+	// Credits the provider charged for this page.
+	Credits float64
+}
+
+// CompanySearcher finds companies matching a filter, on the workspace's
+// own account.
+type CompanySearcher interface {
+	Connector
+	// SearchCompanies returns one page; cursor is empty for the first.
+	SearchCompanies(ctx context.Context, c *Client, creds Creds, f CompanyFilter, cursor string, size int) (CompanyPage, error)
 }
 
 // PersonQuery identifies a person to enrich. Providers use whatever they

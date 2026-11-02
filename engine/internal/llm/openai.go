@@ -1,8 +1,10 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,7 +73,7 @@ func (m *openAIModel) Chat(ctx context.Context, req Request) (Response, error) {
 	if req.Reference != "" {
 		system += "\n\n" + req.Reference
 	}
-	msgs := []oaMessage{{Role: "system", Content: str(system)}}
+	msgs := []any{oaMessage{Role: "system", Content: str(system)}}
 	for _, msg := range req.Messages {
 		if msg.Role == "assistant" {
 			am := oaMessage{Role: "assistant", Content: str(msg.Text)}
@@ -83,14 +85,24 @@ func (m *openAIModel) Chat(ctx context.Context, req Request) (Response, error) {
 			msgs = append(msgs, am)
 			continue
 		}
+		// A tool message is text only on most of these APIs, so the
+		// images a tool returned follow in a user message.
+		var toolImages []Image
 		for _, r := range msg.ToolResults {
 			content := r.Content
 			if r.IsError {
 				content = "ERROR: " + content
 			}
 			msgs = append(msgs, oaMessage{Role: "tool", ToolCallID: r.CallID, Content: str(content)})
+			toolImages = append(toolImages, r.Images...)
 		}
-		if msg.Text != "" {
+		if len(toolImages) > 0 {
+			msgs = append(msgs, oaUserParts("The images the tools above returned.", toolImages))
+		}
+		switch {
+		case len(msg.Images) > 0:
+			msgs = append(msgs, oaUserParts(msg.Text, msg.Images))
+		case msg.Text != "":
 			msgs = append(msgs, oaMessage{Role: "user", Content: str(msg.Text)})
 		}
 	}
@@ -127,7 +139,13 @@ func (m *openAIModel) Chat(ctx context.Context, req Request) (Response, error) {
 			"json_schema": map[string]any{"name": "answer", "schema": req.JSONSchema}}
 	}
 	var out oaResponse
-	if err := m.do(ctx, http.MethodPost, "/chat/completions", body, &out); err != nil {
+	if req.OnText != nil {
+		body["stream"] = true
+		body["stream_options"] = map[string]any{"include_usage": true}
+		if err := m.stream(ctx, body, req.OnText, &out); err != nil {
+			return Response{Usage: Usage{Model: m.c.Model}}, err
+		}
+	} else if err := m.do(ctx, http.MethodPost, "/chat/completions", body, &out); err != nil {
 		return Response{Usage: Usage{Model: m.c.Model}}, err
 	}
 	model := out.Model
@@ -331,4 +349,167 @@ func containsAny(s string, words []string) bool {
 		}
 	}
 	return false
+}
+
+// oaUserParts is a user message with text and images, as content parts.
+func oaUserParts(text string, images []Image) map[string]any {
+	var parts []map[string]any
+	if text != "" {
+		parts = append(parts, map[string]any{"type": "text", "text": text})
+	}
+	for _, img := range images {
+		parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{
+			"url": "data:" + img.MediaType + ";base64," + base64.StdEncoding.EncodeToString(img.Data)}})
+	}
+	return map[string]any{"role": "user", "content": parts}
+}
+
+// oaChunk is one streamed piece of a chat completion.
+type oaChunk struct {
+	Model   string `json:"model"`
+	Choices []struct {
+		Delta struct {
+			Content   *string `json:"content"`
+			Refusal   *string `json:"refusal"`
+			ToolCalls []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+			Annotations []struct {
+				Type        string `json:"type"`
+				URLCitation struct {
+					URL   string `json:"url"`
+					Title string `json:"title"`
+				} `json:"url_citation"`
+			} `json:"annotations"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *json.RawMessage `json:"usage"`
+}
+
+// stream makes a streamed chat completion: it hands each piece of text to
+// onText as it arrives and assembles the same answer a call without
+// streaming returns into out. Rate limits, server errors and connection
+// failures are retried twice, like a call without streaming, but only
+// before the stream starts: once text has been handed on, a reply is
+// never shown twice.
+func (m *openAIModel) stream(ctx context.Context, body map[string]any, onText func(string), out *oaResponse) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	var resp *http.Response
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt*2) * time.Second):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.c.Provider.Base(m.c.BaseURL)+"/chat/completions", bytes.NewReader(payload))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+m.c.Key)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Content-Type", "application/json")
+		r, err := m.http.Do(req)
+		if err != nil {
+			lastErr = scrubErr(fmt.Errorf("could not reach %s: %w", m.c.Provider.Name, err), m.c.Key)
+			continue
+		}
+		switch {
+		case r.StatusCode == 401 || r.StatusCode == 403:
+			r.Body.Close()
+			return fmt.Errorf("%s API returned %d: %w", m.c.Provider.Name, r.StatusCode, ErrAuth)
+		case r.StatusCode == 429 || r.StatusCode >= 500:
+			data, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+			r.Body.Close()
+			lastErr = providerErr(m.c, r.StatusCode, data)
+			continue
+		case r.StatusCode >= 300:
+			data, _ := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+			r.Body.Close()
+			return providerErr(m.c, r.StatusCode, data)
+		}
+		resp = r
+		break
+	}
+	if resp == nil {
+		return lastErr
+	}
+	defer resp.Body.Close()
+	var (
+		text    strings.Builder
+		refusal strings.Builder
+		calls   []oaToolCall
+		finish  string
+	)
+	msg := oaMessage{Role: "assistant"}
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, maxAnswer))
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+		var c oaChunk
+		if json.Unmarshal([]byte(data), &c) != nil {
+			continue
+		}
+		if c.Model != "" {
+			out.Model = c.Model
+		}
+		if c.Usage != nil && len(*c.Usage) > 0 && string(*c.Usage) != "null" {
+			_ = json.Unmarshal(*c.Usage, &out.Usage)
+		}
+		for _, ch := range c.Choices {
+			if d := ch.Delta.Content; d != nil && *d != "" {
+				text.WriteString(*d)
+				onText(*d)
+			}
+			if r := ch.Delta.Refusal; r != nil {
+				refusal.WriteString(*r)
+			}
+			for _, tc := range ch.Delta.ToolCalls {
+				for len(calls) <= tc.Index {
+					calls = append(calls, oaToolCall{Type: "function"})
+				}
+				if tc.ID != "" {
+					calls[tc.Index].ID = tc.ID
+				}
+				calls[tc.Index].Function.Name += tc.Function.Name
+				calls[tc.Index].Function.Arguments += tc.Function.Arguments
+			}
+			msg.Annotations = append(msg.Annotations, ch.Delta.Annotations...)
+			if ch.FinishReason != nil && *ch.FinishReason != "" {
+				finish = *ch.FinishReason
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return scrubErr(fmt.Errorf("%s stream broke off: %w", m.c.Provider.Name, err), m.c.Key)
+	}
+	msg.Content = str(text.String())
+	if refusal.Len() > 0 {
+		msg.Refusal = str(refusal.String())
+	}
+	msg.ToolCalls = calls
+	out.Choices = append(out.Choices, struct {
+		Message      oaMessage `json:"message"`
+		FinishReason string    `json:"finish_reason"`
+	}{Message: msg, FinishReason: finish})
+	return nil
 }

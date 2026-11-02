@@ -55,9 +55,8 @@ type vendorMailboxList struct {
 	Counts    vendorsync.Counts    `json:"counts"`
 	Total     int                  `json:"total"`
 	Mailboxes []vendorsync.Mailbox `json:"mailboxes"`
-	// The next page's offset and cursor; null on the last page.
-	NextOffset *int `json:"next_offset"`
-	NextCursor any  `json:"next_cursor"`
+	// The next page, null on the last page.
+	NextCursor any `json:"next_cursor"`
 }
 
 func (s *Server) listVendorMailboxes(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +67,8 @@ func (s *Server) listVendorMailboxes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := vendorsync.Filter{ImportState: q.Get("import_state"), Status: q.Get("status"), Query: q.Get("q")}
 	f.Limit, _ = strconv.Atoi(q.Get("limit"))
-	f.Offset, _ = strconv.Atoi(q.Get("offset"))
-	if f.Offset < 0 {
-		f.Offset = 0
+	if f.Offset, ok = pageOffsetParam(w, r); !ok {
+		return
 	}
 	st, err := s.vendorSettings(r.Context(), i)
 	if err != nil {
@@ -84,8 +82,7 @@ func (s *Server) listVendorMailboxes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := vendorMailboxList{Integration: i, Sync: st, Synced: st.LastSyncedAt != nil, Counts: counts, Total: total, Mailboxes: list}
 	if n := f.Offset + len(list); len(list) > 0 && n < total {
-		out.NextOffset = &n
-		out.NextCursor = cursorFor("offset", n)
+		out.NextCursor = nextCursor(pageOffset, n)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

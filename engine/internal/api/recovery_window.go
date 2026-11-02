@@ -674,8 +674,8 @@ func (s *Server) listRecentlyDeleted(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	where := []string{"d.brand_id = $1", "d.workspace_id = $2", "d.restored_at IS NULL", "d.purge_after > now()", "(d.deleted_at, d.id::text) < ($3, $4)"}
@@ -719,7 +719,7 @@ func (s *Server) listRecentlyDeleted(w http.ResponseWriter, r *http.Request) {
 		v := last.DeletedAt.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getDeletion(w http.ResponseWriter, r *http.Request) {

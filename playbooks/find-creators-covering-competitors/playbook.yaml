@@ -55,9 +55,9 @@ steps:
   - say: Vet each one (topic fit, recent views, how the review read) and move them to Vetted or Declined with a one-line reason.
     tools: [updateRecord]
   - say: Draft a short pitch for each vetted creator that names what they said about the competitor and why your product is worth a look, as a sequence held until a person approves the sends.
-    tools: [createSequence, replaceSequenceSteps, previewSequence]
+    tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Move partnerships to Pitched when the sequence runs, and to Negotiating or Declined as replies come in.
-    tools: [listInbox, updateRecord]
+    tools: [listBrandInbox, updateRecord]
 guardrails:
   - Never send a pitch, accept terms or promise money without a person's approval.
   - Never criticise a competitor in a pitch; say what your product does better.

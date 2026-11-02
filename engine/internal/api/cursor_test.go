@@ -55,4 +55,11 @@ func TestCursorPagesEveryList(t *testing.T) {
 	if err := body["error"].(map[string]any); err["code"] != "invalid_cursor" || err["param"] != "cursor" {
 		t.Fatalf("bad cursor: %v", err)
 	}
+	// A cursor from a list that pages another way is refused, not misread.
+	leads := owner.must(200, "GET", "/v1/workspaces/"+ws+"/leads?limit=2", nil)
+	c := url.QueryEscape(leads["next_cursor"].(string))
+	body = owner.must(400, "GET", "/v1/workspaces/"+ws+"/audit-events?cursor="+c, nil)
+	if err := body["error"].(map[string]any); err["code"] != "invalid_cursor" {
+		t.Fatalf("other list's cursor: %v", err)
+	}
 }

@@ -132,7 +132,7 @@ func (s *Server) listCompetitors(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -164,7 +164,7 @@ func (s *Server) listCompetitors(w http.ResponseWriter, r *http.Request) {
 		n := offset + len(list)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // trackable checks a site may track one more competitor.
@@ -469,7 +469,7 @@ func (s *Server) listCompetitorEvents(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -506,7 +506,7 @@ func (s *Server) listCompetitorEvents(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []competitorEventView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // Gaps: what tracked competitors have that the site doesn't, from the
@@ -588,7 +588,7 @@ func (s *Server) competitorGaps(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -680,7 +680,7 @@ func (s *Server) competitorGaps(w http.ResponseWriter, r *http.Request) {
 			}
 			return strings.Compare(x.Keyword, y.Keyword)
 		})
-		out["data"], out["next_offset"] = page(list, offset, limit)
+		out["data"], out["next_cursor"] = page(list, offset, limit)
 		out["total"] = len(list)
 		out["your_keywords"] = len(mine)
 		writeJSON(w, http.StatusOK, out)
@@ -734,19 +734,19 @@ func (s *Server) competitorGaps(w http.ResponseWriter, r *http.Request) {
 		}
 		return strings.Compare(x.Domain, y.Domain)
 	})
-	out["data"], out["next_offset"] = page(list, offset, limit)
+	out["data"], out["next_cursor"] = page(list, offset, limit)
 	out["total"] = len(list)
 	out["your_domains"] = len(have)
 	writeJSON(w, http.StatusOK, out)
 }
 
-// page cuts one page out of a sorted list, with the offset of the next
-// page or nil after the last.
-func page[T any](list []T, offset, limit int) ([]T, *int) {
+// page cuts one page out of a sorted list, with the next page's cursor
+// or nil after the last.
+func page[T any](list []T, offset, limit int) ([]T, any) {
 	from := min(offset, len(list))
 	to := min(from+limit, len(list))
 	if to < len(list) {
-		return list[from:to], &to
+		return list[from:to], nextCursor(pageOffset, to)
 	}
 	return list[from:to], nil
 }

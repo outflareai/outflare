@@ -40,12 +40,13 @@ func TestKits(t *testing.T) {
 	if plan["conflicts"] != float64(1) || kitActions(plan)["field:person.audience_size"] != "conflict" || plan["applied"] != false {
 		t.Fatalf("preview with a conflict: %v", plan)
 	}
+	sets := len(owner.must(200, "GET", base+"/catalog/option-sets", nil)["data"].([]any))
 	res := owner.must(409, "POST", base+"/kits/creators-partnerships/apply", nil)
 	if !strings.Contains(res["error"].(map[string]any)["message"].(string), "audience_size") {
 		t.Fatalf("conflict: %v", res)
 	}
-	if n := len(owner.must(200, "GET", base+"/catalog/option-sets", nil)["data"].([]any)); n != 7 {
-		t.Fatalf("a refused kit added option lists: %d", n)
+	if n := len(owner.must(200, "GET", base+"/catalog/option-sets", nil)["data"].([]any)); n != sets {
+		t.Fatalf("a refused kit added option lists: %d, was %d", n, sets)
 	}
 
 	// Archive the clash away under another key: the kit applies.

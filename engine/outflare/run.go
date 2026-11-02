@@ -66,6 +66,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/infra"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/journeys"
+	productlifecycle "github.com/outflareai/outflare/engine/internal/lifecycle"
 	"github.com/outflareai/outflare/engine/internal/linkbuild"
 	"github.com/outflareai/outflare/engine/internal/lists"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
@@ -221,9 +222,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	queue := jobs.New(pool, log)
 	tokens := &oauth.Tokens{
-		Pool: pool, Box: box, Endpoints: oauth.DefaultEndpoints,
-		Google:    oauth.Client{ID: cfg.GoogleClientID, Secret: cfg.GoogleClientSecret},
-		Microsoft: oauth.Client{ID: cfg.MicrosoftClientID, Secret: cfg.MicrosoftClientSecret},
+		Box: box, Endpoints: oauth.DefaultEndpoints,
+		Google: oauth.Client{ID: cfg.GoogleClientID, Secret: cfg.GoogleClientSecret},
 	}
 	// Connectors and mailbox servers are addresses a workspace types in, so
 	// they only reach the public internet unless the operator allows more.
@@ -357,6 +357,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// own, which journeys and webhooks act on.
 	ruleEngine := &rules.Service{Pool: pool, Log: log}
 	ruleEngine.Register(queue)
+	// Lifecycle stages per product: each move is an event on the timeline.
+	lifecycleStages := &productlifecycle.Service{Pool: pool, Log: log}
+	lifecycleStages.Register(queue)
 	// The daily or weekly digest of each workspace, emailed only through
 	// the workspace's own email provider.
 	digest := &digests.Service{Pool: pool, Emails: lifecycle, PublicURL: cfg.PublicURL, Log: log}
@@ -397,7 +400,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
-		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools,
+		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools, SupportAuto: host.supportAuto,
 	})
 	// Journey steps that change fields write through the API's checks.
 	journeyRuns.Fields = apiServer
@@ -438,6 +441,14 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	}
 	if mcpMissing != nil {
 		track.Fail(ctx, log, track.Event{Name: "mcp.server_missing", ActorType: "system", Surface: "system"}, "not_configured", mcpMissing)
+	}
+	// Mailbox sign-ins from before they were connections move into Gmail
+	// and Outlook connections before anything signs a mailbox in, since
+	// mailboxes now sign in only through a connection. It only reads and
+	// writes this database, so it is quick; a row that fails is logged and
+	// tried again at the next start.
+	if _, err := oauth.MoveLegacy(ctx, integrations, log); err != nil {
+		track.Fail(ctx, log, track.Event{Name: "mailbox.sign_in_move_failed", ActorType: "system", Surface: "system"}, "internal", err)
 	}
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -539,6 +550,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			ruleEngine.Run(ctx, time.Minute)
+		}()
+		// Lifecycle inactivity moves (at risk, churned for no usage).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lifecycleStages.Run(ctx, time.Minute)
 		}()
 		wg.Add(1)
 		go func() {

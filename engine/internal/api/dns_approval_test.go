@@ -36,6 +36,10 @@ func (r *txtRecords) LookupTXT(_ context.Context, name string) ([]string, error)
 	return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
 
+func (r *txtRecords) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
+	return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+}
+
 // A site's proof approved once at its DNS provider (Domain Connect): the
 // lookup says why not until the key is published, then gives a signed
 // link where the provider has the template; coming back starts the checks.
@@ -46,7 +50,7 @@ func TestDNSApproval(t *testing.T) {
 		case "/dc/v2/northpeak.example/settings", "/dc/v2/lakeside.example/settings":
 			w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/dc","urlAPI":"https://` + r.Host + `/dc"}`))
 		case "/dc/v2/domainTemplates/providers/outflare.ai/services/siteverify", "/dc/v2/domainTemplates/providers/outflare.ai/services/dmarc",
-			"/dc/v2/domainTemplates/providers/outflare.ai/services/googleworkspace":
+			"/dc/v2/domainTemplates/providers/outflare.ai/services/googleworkspace", "/dc/v2/domainTemplates/providers/outflare.ai/services/servicecname":
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
@@ -90,10 +94,14 @@ func TestDNSApproval(t *testing.T) {
 	txt.set("_domainconnect.northpeak.example", strings.TrimPrefix(provider.URL, "https://")+"/dc")
 
 	// The tracking template points at app.outflare.ai only, not this
-	// test server.
+	// test server, so the general subdomain template carries the target,
+	// always with host= (never the apex).
 	td := owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "links.northpeak.example"})
-	if a := approval(base + "/tracking-domains/" + td["id"].(string)); a["reason"] != "no_template" {
-		t.Fatalf("other target: %v", a)
+	if a := approval(base + "/tracking-domains/" + td["id"].(string)); a["available"] != true {
+		t.Fatalf("tracking domain: %v", a)
+	} else if link, _ := url.Parse(a["url"].(string)); !strings.HasSuffix(link.Path, "/services/servicecname/apply") ||
+		link.Query().Get("host") != "links" || link.Query().Get("domain") != "northpeak.example" || link.Query().Get("target") == "" || link.Query().Get("target") != td["target"] {
+		t.Fatalf("tracking domain link: %s (target %v)", link, td["target"])
 	}
 
 	a := approval(sitePath)
@@ -168,6 +176,12 @@ func TestDNSApproval(t *testing.T) {
 		t.Fatalf("with DKIM: %v", q)
 	}
 	owner.must(400, "GET", lPath+"/dns/approval?dkim=not-a-key", nil)
+	// A key already at the selector: Cloudflare would add the new one
+	// beside it rather than replace it, so the approval isn't offered.
+	txt.set("google._domainkey.lakeside.example", "v=DKIM1; k=rsa; p=")
+	if a := owner.must(200, "GET", lPath+"/dns/approval?return=/acme/domains&dkim="+url.QueryEscape(dkim), nil); a["available"] != false || a["reason"] != "conflict" || a["url"] != nil {
+		t.Fatalf("key already at the selector: %v", a)
+	}
 
 	owner.must(404, "GET", base+"/email-provider-domains/00000000-0000-4000-8000-000000000000/dns/approval", nil)
 	owner.must(404, "POST", base+"/tracking-domains/00000000-0000-4000-8000-000000000000/dns/approved", map[string]any{})

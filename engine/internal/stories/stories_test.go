@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestQuoteInContext(t *testing.T) {
+	release := "Northpeak looked at sites.\n\n“Blocking every bot also blocks the people your customers send,” said Ana Ruiz.\n\nMore below."
+	if got := InContext(release, "Blocking every bot also blocks the people your customers send."); got != "“Blocking every bot also blocks the people your customers send,” said Ana Ruiz." {
+		t.Fatalf("InContext = %q", got)
+	}
+	if got := InContext(release, "Something else entirely."); got != "" {
+		t.Fatalf("not quoted: %q", got)
+	}
+	if !SameWords("Blocking every bot, too!", "blocking  every bot too") || SameWords("Blocking bots", "Blocking every bot") {
+		t.Fatal("SameWords")
+	}
+}
+
 func TestNumbers(t *testing.T) {
 	got := Numbers("In 2026, 37% of 1,200 sites (37 percent) blocked bots, up 2x; plans cost $49 and 3 teams took part, 14.5 million requests.")
 	want := []string{"37%", "1200", "37%", "2x", "$49", "14.5m"}

@@ -61,8 +61,8 @@ func (c *runner) logs(ctx context.Context, args []string) int {
 
 	type page struct {
 		Data       []json.RawMessage `json:"data"`
-		NextAfter  *string           `json:"next_after"`
 		NextCursor *string           `json:"next_cursor"`
+		HasMore    bool              `json:"has_more"`
 	}
 	get := func(q url.Values) (*page, int) {
 		for k, v := range filter {
@@ -87,11 +87,14 @@ func (c *runner) logs(ctx context.Context, args []string) int {
 
 	// Where following starts: before the latest calls, which are printed
 	// first, oldest first.
-	start, code := get(url.Values{"after": {"latest"}})
+	start, code := get(url.Values{"start": {"latest"}})
 	if start == nil {
 		return code
 	}
-	after := *start.NextAfter
+	if start.NextCursor == nil {
+		return c.fail(1, errors.New("the server's logs answered something unexpected"))
+	}
+	cursor := *start.NextCursor
 	if lines > 0 {
 		recent, code := get(url.Values{"limit": {fmt.Sprint(lines)}})
 		if recent == nil {
@@ -106,17 +109,17 @@ func (c *runner) logs(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintln(c.env.Stderr, "Following new calls. Ctrl-C to stop.")
 	for {
-		p, code := get(url.Values{"after": {after}, "limit": {"500"}})
+		p, code := get(url.Values{"cursor": {cursor}, "limit": {"500"}})
 		if p == nil {
 			return max(code, 0)
 		}
 		for _, l := range p.Data {
 			c.logLine(l)
 		}
-		if p.NextAfter != nil {
-			after = *p.NextAfter
-		}
 		if p.NextCursor != nil {
+			cursor = *p.NextCursor
+		}
+		if p.HasMore {
 			continue
 		}
 		select {

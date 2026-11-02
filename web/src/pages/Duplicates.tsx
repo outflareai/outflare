@@ -31,15 +31,15 @@ export function Duplicates({ ws, cat, canManage, tabs, onOpen }: { ws: string; c
   const brand = picked?.id ?? "";
 
   const load = useCallback(
-    async (before?: string) => {
+    async (cursor?: string) => {
       if (!brand) return;
       const { data, error } = await api.GET("/v1/brands/{brand}/records/duplicates", {
-        params: { path: { brand }, query: { limit: 50, ...(decided ? { status: "merged,linked,dismissed" } : {}), ...(type ? { type } : {}), ...(before ? { before } : {}) } },
+        params: { path: { brand }, query: { limit: 50, ...(decided ? { status: "merged,linked,dismissed" } : {}), ...(type ? { type } : {}), ...(cursor ? { cursor } : {}) } },
       });
       if (!data) return setError(errorMessage(error));
       setError("");
-      setPairs((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
-      setNext(data.next_before ?? null);
+      setPairs((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
     },
     [brand, decided, type],
   );

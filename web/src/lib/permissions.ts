@@ -19,6 +19,7 @@ export const areas: Area[] = [
   { id: "social", label: "Social", help: "Watch Reddit for posts the brand can help with and draft replies. Only a person approves a reply, in Outflare.", read: ["social.read"], write: ["social.manage"] },
   { id: "partners", label: "Partners", help: "Referral, affiliate and influencer programs, partners, rewards and payouts. Reporting conversions from your backend is its own power below.", read: ["partners.read"], write: ["partners.manage"] },
   { id: "missions", label: "Missions", help: "Work toward a goal on its own, within limits.", read: ["missions.read"], write: ["missions.run"] },
+  { id: "actions", label: "Agent changes", help: "See every change agents made, what waits for a person, and what each agent may do.", read: ["actions.read"], write: [] },
   { id: "analytics", label: "Analytics", help: "Reports from connected analytics tools, and the campaign links that tag your traffic.", read: ["analytics.read"], write: ["analytics.manage"] },
   { id: "my_ai_accounts", label: "Your AI accounts", help: "The AI subscriptions you use: their usage, resets and renewals.", read: ["my_ai_accounts.read"], write: ["my_ai_accounts.manage"] },
   { id: "ai_accounts", label: "Everyone's AI accounts", help: "Every AI subscription people in the workspace use.", read: ["ai_accounts.read"], write: ["ai_accounts.manage"] },
@@ -30,6 +31,7 @@ export const areas: Area[] = [
 export const extras: { scope: Scope; label: string; help: string }[] = [
   { scope: "infrastructure.approve", label: "Spend money", help: "Buy domains and mailboxes without asking. Off means a person approves each purchase." },
   { scope: "missions.approve", label: "Approve missions", help: "Approve missions and their held changes." },
+  { scope: "actions.approve", label: "Approve agents' changes", help: "Approve or reject changes agents hold for a person. Never their own." },
   { scope: "partners.conversions", label: "Report partner conversions", help: "Send sign-ups, sales and refunds from your backend, and mark action rewards done. All a server token for partners needs." },
   { scope: "suppressions.manage", label: "Remove from the suppression list", help: "Let mail reach people who were suppressed." },
   { scope: "members.manage", label: "Invite people and change roles", help: "Never past what the person who connected it can do. Removing people is only for a signed-in person." },

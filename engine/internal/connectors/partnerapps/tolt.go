@@ -567,8 +567,10 @@ func toltCommission(o map[string]any) c.ImportCommission {
 	case "rejected", "declined", "refunded", "canceled", "cancelled", "void":
 		status = "rejected"
 	}
-	// A commission in a payout is paid, whatever its status says.
-	if status != "rejected" && ref(o, "payout_id", "payout") != "" {
+	// A commission is paid when Tolt says so. Being in a payout isn't
+	// enough: Tolt's pending and "not eligible" payouts hold commissions it
+	// hasn't paid yet, still approved (or pending).
+	if status == "approved" && !when(o, "paid_at").IsZero() {
 		status = "paid"
 	}
 	return c.ImportCommission{ID: str(o, "id"), PartnerID: ref(o, "partner_id", "partner"), CustomerID: ref(o, "customer_id", "customer"),

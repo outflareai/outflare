@@ -270,28 +270,29 @@ func TestEventsFeedPollsForward(t *testing.T) {
 	_, owner, ws, _ := webhookEnv(t)
 	base := "/v1/workspaces/" + ws
 	first := owner.must(200, "GET", base+"/events", nil)
-	cursor := first["next_after"].(string)
+	cursor := first["next_cursor"].(string)
 	owner.must(201, "POST", base+"/leads", map[string]any{"email": "ana@getacme-co.example"})
 	owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Q4"})
 
-	page := owner.must(200, "GET", base+"/events?types=lead.*&after="+cursor, nil)
+	page := owner.must(200, "GET", base+"/events?types=lead.*&cursor="+cursor, nil)
 	data := page["data"].([]any)
-	if len(data) != 1 || data[0].(map[string]any)["type"] != "lead.created" || page["next_after"] == cursor {
+	if len(data) != 1 || data[0].(map[string]any)["type"] != "lead.created" || page["next_cursor"] == cursor {
 		t.Fatalf("feed %v", page)
 	}
 	// The lead's new person record is an event too.
-	all := owner.must(200, "GET", base+"/events?after="+cursor, nil)["data"].([]any)
+	allPage := owner.must(200, "GET", base+"/events?cursor="+cursor, nil)
+	all := allPage["data"].([]any)
 	if len(all) != 3 || all[0].(map[string]any)["type"] != "record.created" {
 		t.Fatalf("all types: %v", all)
 	}
-	again := owner.must(200, "GET", base+"/events?types=lead.*&after="+page["next_after"].(string), nil)
-	if len(again["data"].([]any)) != 0 || again["next_after"] != page["next_after"] {
+	again := owner.must(200, "GET", base+"/events?types=lead.*&cursor="+page["next_cursor"].(string), nil)
+	if len(again["data"].([]any)) != 0 || again["next_cursor"] != page["next_cursor"] {
 		t.Fatalf("nothing new keeps the cursor: %v", again)
 	}
 	owner.must(400, "GET", base+"/events?types=nope", nil)
 
-	latest := owner.must(200, "GET", base+"/events?after=latest", nil)
-	if len(latest["data"].([]any)) != 0 || latest["next_after"] != all[2].(map[string]any)["id"] {
+	latest := owner.must(200, "GET", base+"/events?start=latest", nil)
+	if len(latest["data"].([]any)) != 0 || latest["next_cursor"] != allPage["next_cursor"] {
 		t.Fatalf("latest %v", latest)
 	}
 }

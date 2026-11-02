@@ -117,6 +117,7 @@ const (
 	EnrollInAnotherCampaign   = peoplesteps.InAnotherCampaign
 	EnrollCampaignUnavailable = peoplesteps.CampaignUnavailable
 	EnrollCampaignReady       = peoplesteps.CampaignReady
+	EnrollSequencerRefused    = peoplesteps.SequencerRefused
 )
 
 // RegisterPeopleSteps adds the shared people steps to c.Pipeline. Call it
@@ -127,7 +128,7 @@ func (p *Pipeline) RegisterPeopleSteps(c PeopleSteps) {
 	if p.h.emailFinder != nil {
 		finder = p.h.emailFinder
 	}
-	for _, s := range peoplesteps.Stages(p.h.Pool, finder, c) {
+	for _, s := range peoplesteps.Stages(p.h.Pool, finder, p.h.store, c) {
 		p.Register(s)
 	}
 }

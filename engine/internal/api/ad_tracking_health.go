@@ -38,6 +38,18 @@ type trackingHealthCampaign struct {
 	Spend      []money `json:"spend"`
 }
 
+// trackingHealthAd is a live ad whose links don't carry the tracking
+// template, as the platform reported them.
+type trackingHealthAd struct {
+	AdEntityID   string  `json:"ad_entity_id"`
+	Connector    string  `json:"connector"`
+	Name         string  `json:"name"`
+	ExternalID   string  `json:"external_id"`
+	CampaignName string  `json:"campaign_name"`
+	URL          string  `json:"url"`
+	Spend        []money `json:"spend"`
+}
+
 type trackingHealthSends struct {
 	Connector string `json:"connector"`
 	Sent      int    `json:"sent"`
@@ -180,6 +192,45 @@ func (s *Server) adTrackingHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ads that are live or spent, whose links the platform says don't carry
+	// the template (Meta's URL parameters, Google's final URL suffix or
+	// tracking template). Ads it said nothing about aren't listed.
+	aargs := []any{a.WorkspaceID, since.Format(time.DateOnly)}
+	arow, err := s.pool.Query(ctx, `SELECT e.id::text, a.connector, e.name, e.external_id, COALESCE(c.name, ''), COALESCE(e.details->>'url', ''), a.currency,
+			COALESCE(sum(m.spend_micros), 0)::float8
+		FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+		LEFT JOIN ad_entities g ON g.id = e.parent_id LEFT JOIN ad_entities c ON c.id = g.parent_id
+		LEFT JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day >= $2::date
+		WHERE e.workspace_id = $1 AND e.level = 'ad' AND e.details->>'templated' = 'false' AND a.status = 'active'`+brand.sql(`COALESCE(e.brand_id, a.brand_id)`, &aargs)+`
+		GROUP BY e.id, a.id, c.id
+		HAVING sum(m.spend_micros) > 0 OR e.status = 'active'
+		ORDER BY COALESCE(sum(m.spend_micros), 0) DESC, e.name LIMIT 100`, aargs...)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	untemplated := []trackingHealthAd{}
+	for arow.Next() {
+		var x trackingHealthAd
+		var currency string
+		var spend float64
+		if err := arow.Scan(&x.AdEntityID, &x.Connector, &x.Name, &x.ExternalID, &x.CampaignName, &x.URL, &currency, &spend); err != nil {
+			arow.Close()
+			s.internal(w, r, err)
+			return
+		}
+		x.Spend = []money{}
+		if spend > 0 {
+			x.Spend = moneyList(map[string]float64{currency: spend / 10_000})
+		}
+		untemplated = append(untemplated, x)
+	}
+	arow.Close()
+	if err := arow.Err(); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+
 	// Conversions sent back, per platform, with the commonest failure.
 	sargs := []any{a.WorkspaceID, since}
 	srow, err := s.pool.Query(ctx, `SELECT a.connector, q.status, q.reason, count(*)::int
@@ -227,9 +278,10 @@ func (s *Server) adTrackingHealth(w http.ResponseWriter, r *http.Request) {
 		Days      int                      `json:"days"`
 		Networks  []*trackingHealthNetwork `json:"networks"`
 		Campaigns []trackingHealthCampaign `json:"campaigns_without_visits"`
+		Ads       []trackingHealthAd       `json:"ads_without_template"`
 		Sends     []*trackingHealthSends   `json:"sends"`
 		Issues    []trackingHealthIssue    `json:"issues"`
-	}{Days: days, Networks: []*trackingHealthNetwork{}, Campaigns: campaigns, Sends: []*trackingHealthSends{}, Issues: []trackingHealthIssue{}}
+	}{Days: days, Networks: []*trackingHealthNetwork{}, Campaigns: campaigns, Ads: untemplated, Sends: []*trackingHealthSends{}, Issues: []trackingHealthIssue{}}
 	for _, x := range nets {
 		out.Networks = append(out.Networks, x)
 	}
@@ -243,12 +295,12 @@ func (s *Server) adTrackingHealth(w http.ResponseWriter, r *http.Request) {
 		out.Sends = append(out.Sends, x)
 	}
 	sort.Slice(out.Sends, func(i, j int) bool { return out.Sends[i].Connector < out.Sends[j].Connector })
-	out.Issues = healthIssues(out.Networks, campaigns, out.Sends)
+	out.Issues = healthIssues(out.Networks, campaigns, untemplated, out.Sends)
 	writeJSON(w, http.StatusOK, out)
 }
 
 // healthIssues says what is wrong, worst first, and what to do about it.
-func healthIssues(nets []*trackingHealthNetwork, campaigns []trackingHealthCampaign, sends []*trackingHealthSends) []trackingHealthIssue {
+func healthIssues(nets []*trackingHealthNetwork, campaigns []trackingHealthCampaign, ads []trackingHealthAd, sends []*trackingHealthSends) []trackingHealthIssue {
 	out := []trackingHealthIssue{}
 	for _, n := range nets {
 		if n.Network == "other" || n.Visits < healthMinVisits || float64(n.Untracked) < healthUntrackedShare*float64(n.Visits) {
@@ -283,6 +335,30 @@ func healthIssues(nets []*trackingHealthNetwork, campaigns []trackingHealthCampa
 			fix = "Add the " + label + " tracking template to that campaign, and check that its landing page runs the website snippet."
 		}
 		out = append(out, trackingHealthIssue{Code: "campaigns_without_visits", Severity: "warning", Subject: c, Message: msg, Fix: fix})
+	}
+	adsBy := map[string]int{}
+	for _, x := range ads {
+		adsBy[x.Connector]++
+	}
+	adConnectors := make([]string, 0, len(adsBy))
+	for c := range adsBy {
+		adConnectors = append(adConnectors, c)
+	}
+	sort.Strings(adConnectors)
+	for _, c := range adConnectors {
+		label, field := c, "tracking template"
+		for _, n := range adtrack.Networks {
+			if n.Connector == c {
+				label, field = n.Label, n.Field
+			}
+		}
+		count := adsBy[c]
+		msg := strconv.Itoa(count) + " " + label + " ads link without Outflare's tracking template, so their clicks can't be tied to the ad."
+		if count == 1 {
+			msg = "One " + label + " ad links without Outflare's tracking template, so its clicks can't be tied to the ad."
+		}
+		out = append(out, trackingHealthIssue{Code: "ads_without_template", Severity: "warning", Subject: c, Message: msg,
+			Fix: "Paste the " + label + " tracking template into " + field + " on each ad listed in the tracking health report."})
 	}
 	for _, x := range sends {
 		total := x.Sent + x.Failed

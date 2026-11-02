@@ -220,7 +220,7 @@ func (s *Server) listLinkPitches(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -243,7 +243,7 @@ func (s *Server) listLinkPitches(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []linkPitchView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getLinkPitch(w http.ResponseWriter, r *http.Request) {

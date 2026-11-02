@@ -30,6 +30,7 @@ var aliases = map[string]string{
 	"vercel_ai_gateway":        "vercel",
 	"zoom_scheduler":           "zoom",
 	"cheapverifier":            "cheapinboxes",
+	"slack_knowledge":          "slack",
 	"outlook_mail":             "outlook_calendar", // the Outlook mark
 }
 

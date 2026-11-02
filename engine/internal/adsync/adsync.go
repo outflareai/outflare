@@ -164,7 +164,7 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 		return nil
 	}
 	ev := track.Event{Name: "ads.synced", WorkspaceID: *job.WorkspaceID, ActorType: "system", Surface: "job",
-		Props: map[string]any{"connector": res.Connector, "accounts": res.Accounts, "campaigns": res.Campaigns, "ad_groups": res.AdGroups, "ads": res.Ads, "rows": res.Rows}}
+		Props: map[string]any{"connector": res.Connector, "accounts": res.Accounts, "campaigns": res.Campaigns, "ad_groups": res.AdGroups, "ads": res.Ads, "keywords": res.Keywords, "search_terms": res.SearchTerms, "rows": res.Rows}}
 	var db dbError
 	switch {
 	case err == nil:
@@ -197,6 +197,10 @@ type Result struct {
 	// read below campaigns (Meta and Google).
 	AdGroups int `json:"ad_groups"`
 	Ads      int `json:"ads"`
+	// Keywords and SearchTerms are keyword-days and search-days stored
+	// (Google).
+	Keywords    int `json:"keywords"`
+	SearchTerms int `json:"search_terms"`
 	// Rows are campaign-days stored.
 	Rows int `json:"rows"`
 }
@@ -455,17 +459,7 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 			if _, err := time.Parse(time.DateOnly, d.Date); err != nil {
 				continue
 			}
-			var convValue *int64
-			if d.ConversionValueMicros != nil {
-				convValue = d.ConversionValueMicros
-			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
-					impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
-					conversion_value_micros = EXCLUDED.conversion_value_micros, updated_at = now()`,
-				id, d.Date, o.WorkspaceID, a.currency, max(d.SpendMicros, 0), max(d.Impressions, 0), max(d.Clicks, 0), d.Conversions, convValue); err != nil {
+			if err := saveDay(ctx, tx, id, o.WorkspaceID, a.currency, d.Date, d.SpendMicros, d.Impressions, d.Clicks, d.Conversions, d.ConversionValueMicros, d.AdExtra); err != nil {
 				return err
 			}
 			if err := ledger(ctx, tx, o.WorkspaceID, o.ID, connector, id, brand[d.CampaignID], a.currency, d.Date, d.SpendMicros, names[d.CampaignID]); err != nil {
@@ -496,7 +490,155 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 			}
 		}
 	}
+	if kr, ok := r.(connectors.AdKeywordsReader); ok {
+		if err := s.syncKeywords(ctx, o, kr, a, from, to, res); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// syncKeywords stores an account's search keywords with their numbers per
+// day, and the searches they matched, under their ad groups. The window's
+// days are replaced whole, so a search the platform no longer reports
+// for a day goes.
+func (s *Syncer) syncKeywords(ctx context.Context, o *connectors.Opened, r connectors.AdKeywordsReader, a account, from, to string, res *Result) error {
+	kws, err := r.AdKeywordDays(ctx, o.Client, o.Creds, a.ad(), from, to)
+	if err != nil {
+		s.accountError(ctx, a.id, err)
+		return err
+	}
+	terms, err := r.AdSearchTermDays(ctx, o.Client, o.Creds, a.ad(), from, to)
+	if err != nil {
+		s.accountError(ctx, a.id, err)
+		return err
+	}
+	var kwDays, termDays int
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		groups, brands := map[string]string{}, map[string]*string{}
+		rows, err := tx.Query(ctx, `SELECT e.external_id, e.id, `+entityBrand+` FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+			WHERE e.ad_account_id = $1 AND e.level = 'ad_group'`, a.id)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var ext, id string
+			var brand *string
+			if err := rows.Scan(&ext, &id, &brand); err != nil {
+				rows.Close()
+				return err
+			}
+			groups[ext], brands[id] = id, brand
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM ad_keyword_metrics_daily m USING ad_keywords k
+			WHERE k.id = m.keyword_id AND k.ad_account_id = $1 AND m.day BETWEEN $2 AND $3`, a.id, from, to); err != nil {
+			return err
+		}
+		keyword := map[string]string{}
+		for _, d := range kws {
+			group, ok := groups[d.AdGroupID]
+			if !ok || d.ID == "" {
+				continue
+			}
+			if _, err := time.Parse(time.DateOnly, d.Date); err != nil {
+				continue
+			}
+			k := d.AdGroupID + "|" + d.ID
+			id, ok := keyword[k]
+			if !ok {
+				if err := tx.QueryRow(ctx, `
+					INSERT INTO ad_keywords (workspace_id, ad_account_id, ad_group_id, external_id, text, match_type, status, brand_id)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+					ON CONFLICT (ad_group_id, external_id) DO UPDATE SET text = EXCLUDED.text, match_type = EXCLUDED.match_type,
+						status = EXCLUDED.status, brand_id = EXCLUDED.brand_id, updated_at = now()
+					RETURNING id`, o.WorkspaceID, a.id, group, d.ID, trim(d.Text, 300), trim(d.MatchType, 30), statusOr(d.Status), brands[group]).Scan(&id); err != nil {
+					return err
+				}
+				keyword[k] = id
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO ad_keyword_metrics_daily (keyword_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros, brand_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				ON CONFLICT (keyword_id, day) DO UPDATE SET spend_micros = EXCLUDED.spend_micros, impressions = EXCLUDED.impressions,
+					clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions, conversion_value_micros = EXCLUDED.conversion_value_micros,
+					brand_id = EXCLUDED.brand_id`,
+				id, d.Date, o.WorkspaceID, a.currency, max(d.SpendMicros, 0), max(d.Impressions, 0), max(d.Clicks, 0), d.Conversions, d.ConversionValueMicros, brands[group]); err != nil {
+				return err
+			}
+			kwDays++
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM ad_search_terms_daily WHERE ad_account_id = $1 AND day BETWEEN $2 AND $3`, a.id, from, to); err != nil {
+			return err
+		}
+		// One row per ad group, day, search and keyword, however the
+		// platform splits them.
+		type key struct{ group, day, term, kw, match string }
+		type sums struct {
+			spend, impressions, clicks int64
+			conv                       *float64
+			value                      *int64
+		}
+		agg := map[key]*sums{}
+		var order []key
+		for _, d := range terms {
+			group, ok := groups[d.AdGroupID]
+			term := trim(d.Term, 300)
+			if !ok || term == "" {
+				continue
+			}
+			if _, err := time.Parse(time.DateOnly, d.Date); err != nil {
+				continue
+			}
+			k := key{group, d.Date, term, trim(d.KeywordText, 300), trim(d.KeywordMatchType, 30)}
+			x := agg[k]
+			if x == nil {
+				x = &sums{}
+				agg[k] = x
+				order = append(order, k)
+			}
+			x.spend += max(d.SpendMicros, 0)
+			x.impressions += max(d.Impressions, 0)
+			x.clicks += max(d.Clicks, 0)
+			if d.Conversions != nil {
+				x.conv = ptr(deref(x.conv) + *d.Conversions)
+			}
+			if d.ConversionValueMicros != nil {
+				x.value = ptr(deref(x.value) + *d.ConversionValueMicros)
+			}
+		}
+		copyRows := make([][]any, 0, len(order))
+		for _, k := range order {
+			x := agg[k]
+			day, _ := time.Parse(time.DateOnly, k.day)
+			copyRows = append(copyRows, []any{o.WorkspaceID, brands[k.group], a.id, k.group, day, k.term, k.kw, k.match, a.currency, x.spend, x.impressions, x.clicks, x.conv, x.value})
+		}
+		n, err := tx.CopyFrom(ctx, pgx.Identifier{"ad_search_terms_daily"},
+			[]string{"workspace_id", "brand_id", "ad_account_id", "ad_group_id", "day", "term", "keyword_text", "keyword_match_type", "currency",
+				"spend_micros", "impressions", "clicks", "conversions", "conversion_value_micros"}, pgx.CopyFromRows(copyRows))
+		termDays = int(n)
+		return err
+	})
+	if err != nil {
+		return dbError{err}
+	}
+	metrics.AdItemRows("keyword", kwDays)
+	metrics.AdItemRows("search_term", termDays)
+	res.Keywords += len(kws)
+	res.SearchTerms += termDays
+	return nil
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func deref[T int64 | float64](p *T) T {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // parentLevel is the level an ad group's or ad's parent is at.
@@ -588,13 +730,7 @@ func (s *Syncer) syncItems(ctx context.Context, o *connectors.Opened, r connecto
 			if _, err := time.Parse(time.DateOnly, d.Date); err != nil {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
-					impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
-					conversion_value_micros = EXCLUDED.conversion_value_micros, updated_at = now()`,
-				id, d.Date, o.WorkspaceID, a.currency, max(d.SpendMicros, 0), max(d.Impressions, 0), max(d.Clicks, 0), d.Conversions, d.ConversionValueMicros); err != nil {
+			if err := saveDay(ctx, tx, id, o.WorkspaceID, a.currency, d.Date, d.SpendMicros, d.Impressions, d.Clicks, d.Conversions, d.ConversionValueMicros, d.AdExtra); err != nil {
 				return err
 			}
 			stored++
@@ -612,6 +748,50 @@ func (s *Syncer) syncItems(ctx context.Context, o *connectors.Opened, r connecto
 	}
 	return nil
 }
+
+// saveDay stores one campaign's, ad group's or ad's numbers for a day,
+// and its conversions by action in place of what the day had before.
+func saveDay(ctx context.Context, tx pgx.Tx, entityID, ws, currency, day string, spend, impressions, clicks int64, conv *float64, value *int64, x connectors.AdExtra) error {
+	nonNeg := func(v *int64) *int64 {
+		if v == nil || *v < 0 {
+			return nil
+		}
+		return v
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, impressions, clicks, conversions, conversion_value_micros,
+			reach, link_clicks, landing_page_views, video_views)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (ad_entity_id, day) DO UPDATE SET currency = EXCLUDED.currency, spend_micros = EXCLUDED.spend_micros,
+			impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks, conversions = EXCLUDED.conversions,
+			conversion_value_micros = EXCLUDED.conversion_value_micros, reach = EXCLUDED.reach, link_clicks = EXCLUDED.link_clicks,
+			landing_page_views = EXCLUDED.landing_page_views, video_views = EXCLUDED.video_views, updated_at = now()`,
+		entityID, day, ws, currency, max(spend, 0), max(impressions, 0), max(clicks, 0), conv, value,
+		nonNeg(x.Reach), nonNeg(x.LinkClicks), nonNeg(x.LandingPageViews), nonNeg(x.VideoViews)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ad_conversion_actions_daily WHERE ad_entity_id = $1 AND day = $2`, entityID, day); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, a := range x.Actions {
+		name := trim(a.Name, 300)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if _, err := tx.Exec(ctx, `INSERT INTO ad_conversion_actions_daily (ad_entity_id, day, action, workspace_id, conversions, value_micros, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, (SELECT `+entityBrand+` FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id WHERE e.id = $1))`,
+			entityID, day, name, ws, max(a.Conversions, 0), a.ValueMicros); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// entityBrand is an ad entity's brand: its own, or its account's (e and
+// a).
+const entityBrand = `COALESCE(e.brand_id, a.brand_id)`
 
 // ledger writes one campaign-day's spend to the spend ledger, or removes
 // it when the platform now says nothing was spent.

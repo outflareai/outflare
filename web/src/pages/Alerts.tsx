@@ -54,12 +54,12 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
   // workspace's setting.
   async function load() {
     const [l, s] = await Promise.all([
-      brandId ? api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: { data: [] as Alert[], next_before: null }, error: undefined }),
+      brandId ? api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: { data: [] as Alert[], next_cursor: null }, error: undefined }),
       api.GET("/v1/workspaces/{ws}/alerts/settings", path),
     ]);
     if (l.data) {
       setList(l.data.data);
-      setNext(l.data.next_before ?? null);
+      setNext(l.data.next_cursor ?? null);
     }
     if (s.data) setSet(s.data as Settings);
     setError(l.error ? errorMessage(l.error) : s.error ? errorMessage(s.error) : "");
@@ -72,12 +72,12 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
   async function more() {
     if (!next) return;
     setBusy("more");
-    const { data, error } = await api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId }, query: { before: next } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId }, query: { cursor: next } } });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (data) {
       setList([...(list ?? []), ...data.data]);
-      setNext(data.next_before ?? null);
+      setNext(data.next_cursor ?? null);
     }
   }
 

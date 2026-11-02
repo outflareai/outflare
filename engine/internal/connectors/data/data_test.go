@@ -209,6 +209,11 @@ func TestEveryConnectorIsWellFormed(t *testing.T) {
 				t.Errorf("%s claims search but does not implement it", d.ID)
 			}
 		}
+		if d.Has(c.CapSearchCompanies) {
+			if _, ok := conn.(c.CompanySearcher); !ok {
+				t.Errorf("%s claims company search but does not implement it", d.ID)
+			}
+		}
 		if d.Has(c.CapRevealCompany) {
 			if _, ok := conn.(c.CompanyRevealer); !ok {
 				t.Errorf("%s claims company reveal but does not implement it", d.ID)
@@ -328,5 +333,39 @@ func TestParsePeople(t *testing.T) {
 	}
 	if _, err := (Warmly{}).ParsePeople([]byte(`not json`)); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("not json: %v", err)
+	}
+}
+
+func TestCompanySearch(t *testing.T) {
+	f, cl := newFake(t)
+	f.routes["/api/v1/mixed_companies/search"] = reply(`{"pagination":{"total_entries":3},"organizations":[
+		{"name":"Atlas","primary_domain":"atlas.example","estimated_num_employees":40,"city":"Sydney","country":"Australia"},
+		{"name":"No site"}]}`)
+	filter := c.CompanyFilter{Industries: []string{"logistics"}, EmployeeRanges: []string{"11-50"}, Locations: []string{"Australia"},
+		Technologies: []string{"Google Tag Manager"}}
+	page, err := Apollo{}.SearchCompanies(context.Background(), cl, key, filter, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := f.bodies["/api/v1/mixed_companies/search"]
+	if body["organization_num_employees_ranges"].([]any)[0] != "11,50" || body["currently_using_any_of_technology_uids"].([]any)[0] != "google_tag_manager" ||
+		body["organization_locations"].([]any)[0] != "Australia" {
+		t.Fatalf("apollo body: %v", body)
+	}
+	if len(page.Companies) != 1 || page.Companies[0].Domain != "atlas.example" || page.Companies[0].Location != "Sydney, Australia" || page.Next != "2" {
+		t.Fatalf("apollo page: %+v", page)
+	}
+
+	f.routes["/v5/company/search"] = reply(`{"total":1,"scroll_token":"tok","data":[
+		{"name":"northpeak","website":"northpeak.example","industry":"retail","size":"11-50","location":{"name":"denver, colorado, united states"}}]}`)
+	pp, err := PDL{}.SearchCompanies(context.Background(), cl, key, filter, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pp.Companies) != 1 || pp.Companies[0].Domain != "northpeak.example" || pp.Companies[0].Name != "Northpeak" || pp.Credits != 1 || pp.Next != "tok" {
+		t.Fatalf("pdl page: %+v", pp)
+	}
+	if q := f.bodies["/v5/company/search"]["query"]; q == nil {
+		t.Fatalf("pdl body: %v", f.bodies["/v5/company/search"])
 	}
 }

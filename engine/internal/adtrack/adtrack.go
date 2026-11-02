@@ -318,3 +318,17 @@ func Arrival(ids map[string]any, ad int, source string) (network, outcome string
 	}
 	return network, ArrivalNone
 }
+
+// HasTemplate reports whether an ad's link or URL parameters carry
+// Outflare's tracking template: without it, a visit from the ad has no ad
+// ids (CleanAd reads only AdParams).
+func HasTemplate(tags ...string) bool {
+	for _, t := range tags {
+		for _, p := range AdParams {
+			if strings.Contains(t, p.Param+"=") {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -32,6 +32,8 @@ func (s *Server) routesAttribution(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/conversions", s.inWorkspace(read, s.listAttributionConversions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/customers", s.inWorkspace(read, s.attributionCustomers))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/cohorts", s.inWorkspace(read, s.attributionCohorts))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/accounts", s.inWorkspace(read, s.attributionAccounts))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/deals", s.inWorkspace(read, s.attributionDeals))
 }
 
 type attributionSettings struct {
@@ -736,5 +738,5 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		t := out[len(out)-1].OccurredAt.Format(time.RFC3339Nano)
 		next = &t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"model": f.ref, "model_version": f.version, "data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"model": f.ref, "model_version": f.version, "data": out, "next_cursor": nextCursor(pageBefore, next)})
 }

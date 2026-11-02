@@ -112,11 +112,14 @@ jobs:
           files=$(cut -f2 <<<"$listed")
           has() { grep -qE "$1" <<<"$files"; }
           # The migrations job checks the migration files (append-only, unique
-          # numbers, expand-only) on any pull request that touches them; the
-          # previous version's tests on the new schema run in the batch, and
-          # only when it adds a migration.
+          # numbers, expand-only) on any pull request that touches them. The
+          # previous version's tests on the new schema (the rollback check) run
+          # when it adds a migration: on the pull request itself once it is
+          # ready, so its author finds a failure there, and again in its batch.
+          # In a batch they were what failed it, each failure costing a split
+          # and two more full runs while every other pull request waited.
           if has '^(engine/internal/db/migrations/|scripts/checkmigrations/)'; then echo "migrations=true" >> "$GITHUB_OUTPUT"; fi
-          if [ "$batch" = false ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
+          if [ "$DRAFT" = true ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
             echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
           fi
           if [ "$batch" = true ]; then
@@ -381,9 +384,9 @@ jobs:
   # Every deploy must be safe to roll back, and must not break the version
   # still serving while it starts (docs/migrations.md). The previous
   # version's tests run in the same three parts as the engine job, each with
-  # its own database; in one job they took 16 minutes. They run in a batch
-  # that adds a migration; any other pull request that touches migrations
-  # runs only the checks.
+  # its own database; in one job they took 16 minutes. They run on a pull
+  # request that adds a migration (once it is ready) and in its batch; any
+  # other pull request that touches migrations runs only the checks.
   migrations-part:
     needs: same-files
     # Only pull requests that change migrations (above). Runs if same-files

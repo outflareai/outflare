@@ -139,20 +139,6 @@ var spamRanges = map[string][2]int{
 	"toxic":   {seosync.SpamToxic, 100},
 }
 
-// offsetParam reads ?offset=, 0 when unset.
-func offsetParam(w http.ResponseWriter, r *http.Request) (int, bool) {
-	v := r.URL.Query().Get("offset")
-	if v == "" {
-		return 0, true
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 0 {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "offset is a whole number of 0 or more")
-		return 0, false
-	}
-	return n, true
-}
-
 // siteParam reads ?site_id=, "" when unset.
 func siteParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	site := r.URL.Query().Get("site_id")
@@ -343,7 +329,7 @@ func (s *Server) listBacklinks(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -389,7 +375,7 @@ func (s *Server) listBacklinks(w http.ResponseWriter, r *http.Request) {
 		n := offset + len(list)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 type backlinkEventLink struct {
@@ -444,7 +430,7 @@ func (s *Server) listBacklinkEvents(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -479,7 +465,7 @@ func (s *Server) listBacklinkEvents(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []backlinkEventView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 type backlinkCounts struct {

@@ -45,7 +45,7 @@ steps:
   - say: Draft each release, check it and fix what the check finds. A person approves each one.
     tools: [draftStory, getStory, updateStory, checkStory]
   - say: For each region, pick the journalists from that region's news search and a short sequence whose first step uses {{custom.opener}}.
-    tools: [listJournalists, listSequences, createSequence, previewSequence]
+    tools: [listJournalists, listBrandSequences, createBrandSequence, previewBrandSequence]
   - say: Start the pitches, each waiting for a person, and report results by region.
     tools: [startStoryPitches, listStoryPitches, getStoryResults]
 guardrails:

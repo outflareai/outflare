@@ -101,7 +101,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	dns := &fakeDNS{mx: map[string][]*net.MX{}, txt: map[string][]string{}, host: map[string][]string{}}
-	tokens := &oauth.Tokens{Pool: pool, Box: box}
+	tokens := &oauth.Tokens{Box: box}
 	mail := &mailbox.Service{Pool: pool, Box: box, Dialer: &mailbox.Dialer{Timeout: 5 * time.Second}, Resolver: dns, Tokens: tokens, Log: log}
 	send := &sending.Engine{Pool: pool, Mail: mail, Box: box, PublicURL: "http://localhost:8080", Log: log}
 	syncer := &inbox.Syncer{Pool: pool, Mail: mail, Log: log}

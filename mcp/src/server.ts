@@ -199,6 +199,7 @@ const settings = {
   exclude: exclusion,
   track_clicks: z.boolean().optional().describe("Rewrite links so clicks are counted. Off by default; rewritten links can hurt deliverability, so pair it with a verified tracking domain."),
   unsubscribe_header: z.boolean().optional().describe("Add List-Unsubscribe and one-click headers. On by default; Gmail and Yahoo expect them from bulk senders."),
+  holdout_percent: z.number().int().min(0).max(50).optional().describe("Share of enrollments held out on purpose (0 to 50, 0 is off): they never get an email, so get_sequence_lift can show what the sequence added."),
   team_id: id.nullable().optional().describe("Team that owns the sequence; its senders' mailboxes are used first. Defaults to the token's team."),
   priority: z.enum(["low", "normal", "high"]).optional().describe("Higher may take mailboxes from lower-priority sequences, down to their min_daily."),
   target_daily: z.number().int().min(1).nullable().optional().describe("Sends a day to allocate mailboxes for. Null uses daily_new_limit times the steps."),
@@ -472,10 +473,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List leads",
       description: "Search leads by email, name or company. Each lead carries its latest verification result (null = not checked yet). For one list's leads use list_lead_list_members. Page with cursor=next_cursor.",
-      inputSchema: { q: z.string().optional(), brand: brandParam, suppressed: z.boolean().optional(), verification: z.enum(["deliverable", "undeliverable", "risky", "unknown", "unverified"]).optional(), limit: limit(500), cursor, fields },
+      inputSchema: { brand: brandRef, q: z.string().optional(), suppressed: z.boolean().optional(), verification: z.enum(["deliverable", "undeliverable", "risky", "unknown", "unverified"]).optional(), limit: limit(500), cursor, fields },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/leads", { params: { path, query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/leads", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -484,18 +485,18 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List lead lists",
       description: "Lead lists with their sizes, search settings and latest build or refresh.",
       inputSchema: {
+        brand: brandRef,
         kind: z.enum(["manual", "search"]).optional(),
-        brand: brandParam,
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/lead-lists", { params: { path, query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
     "get_lead_list",
-    { title: "Get a lead list", description: "A list's settings and its latest run.", inputSchema: { list_id: id }, annotations: read },
-    ({ list_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/lead-lists/{id}", { params: { path: { ...path, id: list_id } } })),
+    { title: "Get a lead list", description: "A list's settings and its latest run.", inputSchema: { brand: brandRef, list_id: id }, annotations: read },
+    ({ brand, list_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: b, id: list_id } } }))),
   );
 
   server.registerTool(
@@ -504,6 +505,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List a list's leads",
       description: "A list's leads with their ICP fit score (0-100) and the reasons, best fit first. Takes the same suppressed and verification filters as list_leads.",
       inputSchema: {
+        brand: brandRef,
         list_id: id,
         sort: z.enum(["score", "added", "email"]).optional(),
         q: z.string().optional(),
@@ -516,7 +518,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    ({ list_id, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/lead-lists/{id}/members", { params: { path: { ...path, id: list_id }, query: q } })),
+    ({ brand, list_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lead-lists/{id}/members", { params: { path: { brand: b, id: list_id }, query: q } }))),
   );
 
   const smartRule = z.object({
@@ -587,8 +589,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
 
   server.registerTool(
     "list_list_runs",
-    { title: "List a list's runs", description: "Builds, refreshes and enrichments of a list, newest first.", inputSchema: { list_id: id }, annotations: read },
-    ({ list_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/lead-lists/{id}/runs", { params: { path: { ...path, id: list_id } } })),
+    { title: "List a list's runs", description: "Builds, refreshes and enrichments of a list, newest first.", inputSchema: { brand: brandRef, list_id: id }, annotations: read },
+    ({ brand, list_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lead-lists/{id}/runs", { params: { path: { brand: b, id: list_id } } }))),
   );
 
   server.registerTool(
@@ -596,16 +598,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Get a list run",
       description: "A run's status and counts: found, added, enriched, skipped by reason, and credits spent. Poll until status is done, failed or cancelled.",
-      inputSchema: { run_id: id },
+      inputSchema: { brand: brandRef, run_id: id },
       annotations: read,
     },
-    ({ run_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/list-runs/{run}", { params: { path: { ...path, run: run_id } } })),
+    ({ brand, run_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/list-runs/{run}", { params: { path: { brand: b, run: run_id } } }))),
   );
 
   server.registerTool(
     "get_lead_sources",
-    { title: "Where a lead came from", description: "The data providers that supplied a lead and the run that added it.", inputSchema: { lead_id: id }, annotations: read },
-    ({ lead_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/leads/{id}/sources", { params: { path: { ...path, id: lead_id } } })),
+    { title: "Where a lead came from", description: "The data providers that supplied a lead and the run that added it.", inputSchema: { brand: brandRef, lead_id: id }, annotations: read },
+    ({ brand, lead_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/leads/{id}/sources", { params: { path: { brand: b, id: lead_id } } }))),
   );
 
   server.registerTool(
@@ -613,10 +615,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Read a lead",
       description: "One lead by id: contact fields, custom fields (usable as template variables), lists, verification and whether it is suppressed.",
-      inputSchema: { lead_id: id },
+      inputSchema: { brand: brandRef, lead_id: id },
       annotations: read,
     },
-    ({ lead_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/leads/{id}", { params: { path: { ws, id: lead_id } } })),
+    ({ brand, lead_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/leads/{id}", { params: { path: { brand: b, id: lead_id } } }))),
   );
 
   server.registerTool(
@@ -628,13 +630,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "With brand, also applies the cross-brand rule (get_brand_rules): someone another brand emailed recently is refused as other_brand:<handle>. " +
         "purpose lifecycle (newsletters, product updates) also applies each person's contact basis: third_party_no_consent or no_consent.",
       inputSchema: {
+        brand: brandRef.describe("The brand that would email them: a handle or id from list_brands. Its own opt-outs count, and those for every brand."),
         emails: z.array(z.string()).min(1).max(1000),
-        brand: z.string().optional().describe("The brand that would email them: a handle or id from list_brands."),
         purpose: z.enum(["cold", "lifecycle", "transactional"]).optional().describe("Default cold."),
       },
       annotations: read,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/recipients/check", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/recipients/check", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -684,6 +686,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "The opt-out list every send checks: emails and domains that are never emailed (or, for customer, partner and blocklist, never cold emailed). " +
         "Each entry says why, how it was added (manual, automated, or ai_suggested with the AI's confidence), who added it and from which tool.",
       inputSchema: {
+        brand: brandRef,
         kind: z.enum(["email", "domain"]).optional(),
         method: z.enum(["manual", "automated", "ai_suggested"]).optional(),
         source: z.string().optional().describe("The tool that added it, such as reply, emailbison_sync or apollo_import."),
@@ -696,7 +699,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/suppressions", { params: { path, query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/suppressions", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -704,16 +707,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List sequences",
       description: "Sequences that are not archived, newest first, with steps and enrollment counts.",
-      inputSchema: { brand: brandParam },
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/sequences", { params: { path, query: withBrand(q) } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
     "get_sequence",
-    { title: "Get a sequence", description: "One sequence with its settings, steps and counts.", inputSchema: { sequence_id: id }, annotations: read },
-    ({ sequence_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/sequences/{id}", { params: { path: { ws, id: sequence_id } } })),
+    { title: "Get a sequence", description: "One sequence with its settings, steps and counts.", inputSchema: { brand: brandRef, sequence_id: id }, annotations: read },
+    ({ brand, sequence_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/sequences/{id}", { params: { path: { brand: b, id: sequence_id } } }))),
   );
 
   server.registerTool(
@@ -721,10 +724,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Preview a sequence",
       description: "Render every step for one lead, with any template variables the lead is missing (a missing variable blocks the real send).",
-      inputSchema: { sequence_id: id, lead_id: id },
+      inputSchema: { brand: brandRef, sequence_id: id, lead_id: id },
       annotations: read,
     },
-    ({ sequence_id, lead_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/sequences/{id}/preview", { params: { path: { ws, id: sequence_id } }, body: { lead_id } })),
+    ({ brand, sequence_id, lead_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/sequences/{id}/preview", { params: { path: { brand: b, id: sequence_id } }, body: { lead_id } }))),
   );
 
   server.registerTool(
@@ -733,6 +736,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List enrollments",
       description: "The leads in a sequence, with status, next step and next send time.",
       inputSchema: {
+        brand: brandRef,
         sequence_id: id,
         status: z.enum(["active", "completed", "stopped", "unsubscribed", "bounced", "replied", "blocked", "failed"]).optional(),
         limit: limit(500),
@@ -741,7 +745,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    ({ sequence_id, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/sequences/{id}/enrollments", { params: { path: { ws, id: sequence_id }, query } })),
+    ({ brand, sequence_id, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/sequences/{id}/enrollments", { params: { path: { brand: b, id: sequence_id }, query } }))),
   );
 
   server.registerTool(
@@ -750,7 +754,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List sent messages",
       description: "Every send attempt, newest first: sent, failed, and blocked by the policy with the reason. Page with cursor=next_cursor.",
       inputSchema: {
-        brand: brandParam,
+        brand: brandRef,
         sequence_id: id.optional(),
         lead_id: id.optional(),
         mailbox_id: id.optional(),
@@ -762,7 +766,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/messages", { params: { path, query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/messages", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -775,6 +779,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "To work the inbox: status=open shows what still needs handling; group=hot shows the replies that want an answer; needs_review=true shows labels the AI was unsure of; " +
         "category=none shows replies nobody has labelled yet, which you can read and label with triage_inbox_message. list_inbox_views has the filters people saved.",
       inputSchema: {
+        brand: brandRef,
         kind: z
           .enum(["reply", "auto_reply", "bounce", "other", "all"])
           .optional()
@@ -792,20 +797,19 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         lead_id: id.optional(),
         sequence_id: id.optional(),
         q: z.string().optional().describe("Search sender, subject and text."),
-        brand: brandParam.describe("Only mail to this brand's mailboxes: a handle or id from list_brands, none for shared mailboxes, or all."),
         limit: limit(200),
         cursor,
         fields,
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/inbox", { params: { path, query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/inbox", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
     "get_inbox_message",
-    { title: "Read a received message", description: "A received message and the whole conversation with that lead, oldest first.", inputSchema: { message_id: id }, annotations: read },
-    ({ message_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id: message_id } } })),
+    { title: "Read a received message", description: "A received message and the whole conversation with that lead, oldest first.", inputSchema: { brand: brandRef, message_id: id }, annotations: read },
+    ({ brand, message_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: b, id: message_id } } }))),
   );
 
   server.registerTool(
@@ -954,6 +958,49 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     () => call(() => gtm.GET("/v1/workspaces/{ws}/mission-actions", { params: { path } })),
   );
 
+  // The action layer (docs/actions.md): an agent token with action_gate on
+  // gets 202 with a held action for a change a person must approve.
+  server.registerTool(
+    "list_actions",
+    {
+      title: "List agent changes",
+      description:
+        "Changes agent tokens made through the action layer, newest first: run, held for a person (held), refused by a grant, and what people decided. " +
+        "status=held is the approval inbox.",
+      inputSchema: {
+        status: z.string().optional().describe("Comma-separated: held, running, executed, failed, refused, rejected."),
+        token_id: id.optional().describe("Only this agent token's changes."),
+        cursor,
+        limit: limit(200),
+      },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/actions", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "get_action",
+    {
+      title: "Check a held change",
+      description: "Poll after a 202 with an action: shows whether a person approved or rejected it, their note, and the result when it ran.",
+      inputSchema: { action_id: id },
+      annotations: read,
+    },
+    ({ action_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/actions/{id}", { params: { path: { ws, id: action_id } } })),
+  );
+
+  server.registerTool(
+    "list_action_grants",
+    {
+      title: "What agent tokens may do",
+      description:
+        "The grants people set: for each agent token, which changes run on their own, wait for a person or are refused. Only a person changes them.",
+      inputSchema: { token_id: id.optional().describe("Only this token's grants.") },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/action-grants", { params: { path, query: q } })),
+  );
+
   // Connectors and verification. Nothing needs connecting to run: mailboxes
   // can be added directly, and verification falls back to the built-in checks.
 
@@ -1006,7 +1053,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List every connection",
       description:
         "Every account the workspace has connected in one list: connector integrations (kind integration, see list_integrations), " +
-        "Gmail and Outlook mailbox sign-ins among them, and older Google and Microsoft admin connections for mailboxes (kind mailbox_oauth), " +
+        "Gmail and Outlook mailbox sign-ins among them, " +
         "with connector, name, category and status. Credentials are never returned.",
       inputSchema: { category: z.string().optional().describe("Only this category, e.g. crm or mailbox_provider."), brand: brandParam },
       annotations: read,
@@ -1171,12 +1218,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Newest first, from every connection or one. status: queued, handled, ignored (nothing in Outflare uses it yet) or failed (error_code says why; " +
         "replay_hook_event runs it again). summary holds the ids, counts and statuses the tool reported, such as a Geonode job's job_id and completed_urls. " +
-        "Page with before=next_before.",
+        "Page with cursor=next_cursor.",
       inputSchema: {
         integration_id: id.optional(),
         status: z.enum(["queued", "handled", "ignored", "failed"]).optional(),
         limit: z.number().int().min(1).max(200).optional(),
-        before: z.string().datetime().optional(),
+        cursor,
       },
       annotations: read,
     },
@@ -1665,6 +1712,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List meetings with leads",
       description: "Meetings synced from calendars, booking tools and the CRM, or logged by hand, with the lead and sequence each is tied to. Newest first; page with cursor=next_cursor.",
       inputSchema: {
+        brand: brandRef,
         ...periodInput,
         sequence_id: id.optional(),
         mission_id: id.optional(),
@@ -1676,7 +1724,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/meetings", { params: { path, query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/meetings", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -1685,6 +1733,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List deals",
       description: "Deals read from the CRM (or logged by hand), with stage, state, amount in cents and the lead and sequence each came from.",
       inputSchema: {
+        brand: brandRef,
         ...periodInput,
         sequence_id: id.optional(),
         mission_id: id.optional(),
@@ -1696,7 +1745,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/deals", { params: { path, query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/deals", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -1821,8 +1870,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "What happened since",
       description:
         "Workspace events oldest first: replies (lead.replied), bounces, opt-outs, paused mailboxes, held mission writes and more, the same events webhooks send. " +
-        "Call without after to start, keep next_after, and next time pass it as after to see only what is new. types narrows it, e.g. [\"lead.replied\", \"mailbox.*\"].",
-      inputSchema: { after: z.string().optional(), types: z.array(z.string()).optional(), limit: limit(500), brand: brandParam.describe("Only changes to this brand's records: a handle or id, or none for the rest.") },
+        "Call without cursor to start from the beginning, or with start=\"latest\" to start from now; keep next_cursor and next time pass it as cursor to see only what is new. types narrows it, e.g. [\"lead.replied\", \"mailbox.*\"].",
+      inputSchema: { start: z.enum(["latest"]).optional(), cursor, types: z.array(z.string()).optional(), limit: limit(500), brand: brandParam.describe("Only changes to this brand's records: a handle or id, or none for the rest.") },
       annotations: read,
     },
     ({ types, ...q }) => call(() => gtm.GET("/v1/workspaces/{ws}/events", { params: { path, query: { ...q, ...(types?.length ? { types: types.join(",") } : {}) } } })),
@@ -1865,7 +1914,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Every API call made in this workspace (web app, API, MCP, CLI, missions), newest first, with status, duration, error code, operation, MCP tool and who made it. " +
         "Use it to find why calls failed: level=[\"warning\",\"error\"], surface=[\"mcp\"], since=\"1h\". q searches paths, operations and error codes. " +
-        "To see only new calls, pass after=\"latest\" once, then after=next_after. Needs audit.read. Logs are kept 30 days and never hold bodies or keys.",
+        "To see only new calls, pass start=\"latest\" once, then cursor=next_cursor. Needs audit.read. Logs are kept 30 days and never hold bodies or keys.",
       inputSchema: {
         level: z.array(z.enum(["info", "warning", "error"])).optional(),
         status: z.array(z.string()).optional().describe("Codes or classes: [\"404\", \"5xx\"]"),
@@ -1879,7 +1928,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         q: z.string().max(200).optional(),
         since: z.string().optional().describe("A timestamp or how long ago: 15m, 24h, 7d"),
         until: z.string().optional(),
-        after: z.string().optional(),
+        start: z.enum(["latest"]).optional(),
         cursor,
         fields,
         limit: limit(500),
@@ -2086,8 +2135,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "get_email_recipient",
     {
       title: "Everything one address was sent",
-      description: "One person's lifecycle email history: counts (delivered, bounced, opened, clicked), whether they are suppressed and why, their lead if any, and every event of every email to them, newest first. Page with before=next_before.",
-      inputSchema: { address: z.string(), limit: z.number().int().min(1).max(500).optional(), before: z.string().datetime().optional() },
+      description: "One person's lifecycle email history: counts (delivered, bounced, opened, clicked), whether they are suppressed and why, their lead if any, and every event of every email to them, newest first. Page with cursor=next_cursor.",
+      inputSchema: { address: z.string(), limit: z.number().int().min(1).max(500).optional(), cursor },
       annotations: read,
     },
     ({ address, ...query }) => call(() => gtm.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address }, query } })),
@@ -2520,6 +2569,30 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "get_attribution_accounts",
+    {
+      title: "Credit per company",
+      description:
+        "Credit rolled up from people to their company: for every company, how many of its people converted, the conversions and revenue credited to them under the model, the channel with the most credit, and the deals it won between from and to.",
+      inputSchema: attributionRange,
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/accounts", { params: { path, query } })),
+  );
+
+  server.registerTool(
+    "get_attribution_deals",
+    {
+      title: "Won deal value per channel",
+      description:
+        "Deals won between from and to, spread across channels in proportion to the credit (under the model) of the conversions their people (the deal's people, its contact and everyone at its company) had before it closed. Deals with no credited people are counted as unattributed.",
+      inputSchema: attributionRange,
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/attribution/deals", { params: { path, query } })),
+  );
+
+  server.registerTool(
     "get_attribution_ads",
     {
       title: "Ad report",
@@ -2632,6 +2705,65 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "list_ad_conversion_actions",
+    {
+      title: "Platform conversions by action",
+      description:
+        "The conversions Meta and Google counted, by their own action (Meta: purchase, lead, complete_registration, start_trial, subscribe, custom.<id>; Google: each conversion action), per connector and currency. " +
+        "Platform-reported, not Outflare's attribution. Without entity_id, all campaigns; with it, one campaign, ad set or ad.",
+      inputSchema: {
+        from: adDay.describe("First day (YYYY-MM-DD)."),
+        to: adDay.describe("Last day (YYYY-MM-DD)."),
+        entity_id: id.optional().describe("One campaign's, ad set's or ad's id, from list_ad_campaigns or list_ad_items."),
+        connector: adConnector,
+        account_id: id.optional(),
+        brand: brandParam,
+      },
+      annotations: read,
+    },
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/conversion-actions", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "list_ad_keywords",
+    {
+      title: "Google search keywords ranked by spend",
+      description: "Google Ads search keywords that showed an ad, with match type, ad group, campaign and totals (spend, clicks, CPC, CTR, the platform's conversions). Money is in micros.",
+      inputSchema: {
+        from: adDay.describe("First day (YYYY-MM-DD). Default 27 days before to."),
+        to: adDay.describe("Last day (YYYY-MM-DD). Default today, UTC."),
+        campaign_id: id.optional(),
+        ad_group_id: id.optional(),
+        account_id: id.optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+        brand: brandParam,
+      },
+      annotations: read,
+    },
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/keywords", { params: { path, query: withBrand(q) } })),
+  );
+
+  server.registerTool(
+    "list_ad_search_terms",
+    {
+      title: "What people searched that showed a Google ad",
+      description:
+        "Google Ads search terms ranked by spend, each with the keyword it matched, its ad group and campaign and its totals. Use it to find searches that spend without converting (candidates for negative keywords). Money is in micros.",
+      inputSchema: {
+        from: adDay.describe("First day (YYYY-MM-DD). Default 27 days before to."),
+        to: adDay.describe("Last day (YYYY-MM-DD). Default today, UTC."),
+        campaign_id: id.optional(),
+        ad_group_id: id.optional(),
+        account_id: id.optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+        brand: brandParam,
+      },
+      annotations: read,
+    },
+    (q) => callCompact(() => gtm.GET("/v1/workspaces/{ws}/ads/search-terms", { params: { path, query: withBrand(q) } })),
   );
 
   server.registerTool(
@@ -3685,13 +3817,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "List the brand's own posts",
       description:
         "Original posts on the brand's X accounts and LinkedIn pages and profiles, newest first: drafts, approved and scheduled ones, published ones with their link and " +
-        "post_id (its numbers are in list_own_social_posts), and failed ones with the reason. Pass next_before as before for older ones.",
+        "post_id (its numbers are in list_own_social_posts), and failed ones with the reason. Pass next_cursor as cursor for older ones.",
       inputSchema: {
         status: publicationStatus.optional(),
         channel: z.enum(["x", "linkedin"]).optional(),
         account_id: id.optional(),
         series_id: id.optional(),
-        before: z.string().optional(),
+        cursor,
         limit: limit(200),
         brand: socialBrand,
       },
@@ -4711,12 +4843,55 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Draft a quote for a story",
       description:
-        "Drafts a quote by one of the brand's experts (the default when expert_id is left out). It is a draft until a person records that the expert approved these exact words; " +
-        "only approved quotes may appear in the release.",
+        "Drafts a quote by one of the brand's experts (the default when expert_id is left out). It is a draft until the expert approves these exact words " +
+        "(ask them with request_quote_approval) or a person records that they did; only approved quotes may appear in the release.",
       inputSchema: { story_id: id, body: z.string().min(1).max(2000), expert_id: id.optional() },
       annotations: write,
     },
     ({ story_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/{story}/quotes", { params: { path: { ws, story: story_id } }, body })),
+  );
+
+  server.registerTool(
+    "request_quote_approval",
+    {
+      title: "Ask an expert to approve a quote",
+      description:
+        "Asks a draft quote's expert to approve its exact words on a page with no account: approve, suggest other words, or decline. " +
+        "delivery email: the expert is enrolled in sequence_id, one of the brand's own outreach sequences with one step carrying {{custom.approval_link}} and no click tracking, " +
+        "which sends it from the mailboxes allocated to it after the send policy checks (409 blocked no_mailbox_allocated when none is allocated). " +
+        "delivery link: the answer's url is the link, shown once; give it to the person to send by Slack or anything else, and never post it publicly. " +
+        "The link works once, for 14 days; asking again replaces it, and changing the words voids it. Follow it with list_quote_approval_requests or get_story.",
+      inputSchema: {
+        story_id: id,
+        quote_id: id,
+        delivery: z.enum(["email", "link"]),
+        sequence_id: id.optional().describe("For delivery email: the outreach sequence that sends it."),
+      },
+      annotations: write,
+    },
+    ({ story_id, quote_id, delivery, sequence_id }) =>
+      call(() =>
+        gtm.POST("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", {
+          params: { path: { ws, story: story_id, quote: quote_id } },
+          body: { delivery, ...(sequence_id ? { sequence_id } : {}) },
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "list_quote_approval_requests",
+    {
+      title: "List the requests to a quote's expert",
+      description:
+        "Lists the requests to approve a quote, newest first: sending, open, failed (with reason), approved, changes_suggested (with the expert's suggested_body), declined, void or expired, " +
+        "with when each was sent, opened and decided.",
+      inputSchema: { story_id: id, quote_id: id },
+      annotations: read,
+    },
+    ({ story_id, quote_id }) =>
+      call(() =>
+        gtm.GET("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", { params: { path: { ws, story: story_id, quote: quote_id } } }),
+      ),
   );
 
   server.registerTool(
@@ -4793,7 +4968,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         status: z.enum(["writing", "draft", "enrolled", "rejected"]).optional(),
         brand: z.string().max(100).optional().describe("A brand's id or handle."),
         limit: z.number().int().min(1).max(500).optional(),
-        offset: z.number().int().min(0).optional(),
+        cursor,
       },
       annotations: read,
     },
@@ -4823,6 +4998,23 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "create_story_pitch_sequence",
+    {
+      title: "Create a sequence for story pitches",
+      description:
+        "Creates a draft Outflare sequence for a brand that passes every pitch rule: the pitch with the headline ({{custom.story_title}}) and the opener " +
+        "({{custom.opener}}), then one short follow-up three days later, stopping on any reply. Use it when the brand has no sequence for pitch_story. " +
+        "It is a draft: a person gives it mailboxes and activates it under Sequences before anything is sent.",
+      inputSchema: {
+        brand_id: z.string().max(100).describe("A brand's id or handle."),
+        name: z.string().max(200).optional().describe("Default: Story pitches: <brand>."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/stories/pitch-sequence", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
     "get_story_results",
     {
       title: "Results of stories",
@@ -4843,12 +5035,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List journalists",
       description:
-        "Authors of news articles the news watch read whose address the free email finder found at the outlet: each a person record on the outlet's company, " +
-        "with how many articles they wrote, their latest, their outlets and the news searches (topics) their articles came up in; most articles first. " +
-        "For a media list, create a smart list with the rule { news_search: <search id>, op: exists }. Reads what is stored, so it costs nothing.",
+        "People who write for an outlet: authors of news articles the news watch read whose address the free email finder found at the outlet, and journalists " +
+        "people added by hand or from a file. Each is a person record on their outlets' company records, with their beats (and suggested beats from the " +
+        "searches their articles came up in), job title, how many articles they wrote, their latest, their outlets with each one's tier, and the news " +
+        "searches (topics) their articles came up in; most articles first. For a media list, create a smart list with rules such as " +
+        "{ news_search: <search id>, op: exists }, { attribute: 'beats', op: 'contains', value: <beat> } or " +
+        "{ company_attribute: 'outlet_tier', op: 'eq', value: 'national' }. Reads what is stored, so it costs nothing.",
       inputSchema: {
         search_id: id.optional().describe("Only journalists whose articles this news search found."),
         since: z.string().optional().describe("Only articles published at or after this time, like 2026-10-01T00:00:00Z."),
+        beat: z.string().max(100).optional().describe("Only journalists with this beat, ignoring case."),
+        tier: z.string().max(100).optional().describe("Only journalists on an outlet of this tier (national, trade, regional, local, newsletter), or several separated by commas."),
         brand: z.string().max(100).optional().describe("A brand's id or handle."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous page."),
@@ -4856,6 +5053,77 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/journalists", { params: { path: { ws }, query } })),
+  );
+
+  const outletTier = z.enum(["national", "trade", "regional", "local", "newsletter"]);
+
+  server.registerTool(
+    "add_journalist",
+    {
+      title: "Add a journalist",
+      description:
+        "Adds a journalist the workspace already knows: the person with this email in the brand (made when there is none), marked as a journalist with their " +
+        "job title and beats, on their outlet's company record (found by its website or made as a prospect company, or an existing one by outlet_record_id) " +
+        "with the outlet's tier. Outflare never buys journalist data. They show in list_journalists with no articles until the news watch finds some.",
+      inputSchema: {
+        name: z.string().min(1).max(200),
+        email: z.string().max(320),
+        job_title: z.string().max(200).optional(),
+        beats: z.array(z.string().max(100)).max(30).optional().describe("Topics they cover, added to the beats they have."),
+        outlet_website: z.string().max(253).optional().describe("The outlet's website or domain."),
+        outlet_record_id: id.optional().describe("Or the outlet's company record."),
+        outlet_name: z.string().max(200).optional(),
+        outlet_tier: outletTier.optional(),
+        brand_id: z.string().max(100).optional().describe("A brand's id or handle; default the workspace's first."),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/journalists", { params: { path: { ws } }, body })),
+  );
+
+  server.registerTool(
+    "import_journalists_csv",
+    {
+      title: "Import journalists from CSV",
+      description:
+        "Adds journalists from CSV text, each as add_journalist does. Columns: email (required), name (or first and last name), title, outlet or company, " +
+        "outlet website, beats (separated by semicolons) and outlet tier (national, trade, regional, local, newsletter). dry_run: true checks the file and " +
+        "says what would happen without saving anything; check with it first. Rows that can't be added are listed in errors.",
+      inputSchema: {
+        csv: z.string().min(1),
+        brand: z.string().max(100).optional().describe("A brand's id or handle; default the workspace's first."),
+        dry_run: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ csv, brand, dry_run }) =>
+      call(() =>
+        gtm.POST("/v1/workspaces/{ws}/journalists/import", {
+          params: { path: { ws }, query: { ...(brand ? { brand } : {}), ...(dry_run !== undefined ? { dry_run } : {}) } },
+          body: csv,
+          bodySerializer: (b: string) => b,
+          headers: { "Content-Type": "text/csv" },
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "update_journalist",
+    {
+      title: "Change a journalist's beats or title",
+      description:
+        "beats replaces a journalist's beats (an empty list clears them; add suggested_beats from list_journalists to accept them); job_title sets or (null) " +
+        "clears their title; journalist false takes them off the journalists list. A person's edit always wins over the news watch's suggestions.",
+      inputSchema: {
+        record_id: id.describe("The journalist's person record."),
+        beats: z.array(z.string().max(100)).max(30).optional(),
+        job_title: z.string().max(200).nullable().optional(),
+        journalist: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ record_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/journalists/{record}", { params: { path: { ws, record: record_id } }, body })),
   );
 
   server.registerTool(
@@ -5015,7 +5283,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         prospect_id: id.optional(),
         brand: z.string().max(100).optional().describe("A brand's id or handle, or none for shared sites."),
         limit: z.number().int().min(1).max(500).optional(),
-        offset: z.number().int().min(0).optional(),
+        cursor,
       },
       annotations: read,
     },
@@ -5641,13 +5909,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         rule: z.string().regex(/^[a-z0-9_]+$/).max(60).describe("A rule id from list_crawl_issues, like title_missing."),
         template: z.string().max(500).optional().describe("Only pages of this URL template, like /blog/*."),
         limit: z.number().int().min(1).max(1000).optional(),
-        after: z.string().optional().describe("next_after from the previous page."),
+        cursor,
       },
       annotations: read,
     },
-    ({ crawl_id, rule, template, limit, after }) =>
+    ({ crawl_id, rule, template, limit, cursor }) =>
       call(() =>
-        gtm.GET("/v1/workspaces/{ws}/crawls/{crawl}/issues/{rule}", { params: { path: { ws, crawl: crawl_id, rule }, query: { template, limit, after } } }),
+        gtm.GET("/v1/workspaces/{ws}/crawls/{crawl}/issues/{rule}", { params: { path: { ws, crawl: crawl_id, rule }, query: { template, limit, cursor } } }),
       ),
   );
 
@@ -5745,7 +6013,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         indexable: z.boolean().optional(),
         q: z.string().max(500).optional().describe("Part of the URL."),
         limit: z.number().int().min(1).max(1000).optional(),
-        offset: z.number().int().min(0).optional(),
+        cursor,
       },
       annotations: read,
     },
@@ -6018,10 +6286,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Preview a people search",
       description:
         "Runs one page (10 people) of a search at a data provider and saves nothing, to check filters before building a list. Returns a run; poll get_list_run for the sample and total matches. Reveals no emails.",
-      inputSchema: { search_integration_id: id, filters: peopleFilter, profile_id: id.nullable().optional().describe("Score the sample against this ideal customer profile.") },
+      inputSchema: { brand: brandRef, search_integration_id: id, filters: peopleFilter, profile_id: id.nullable().optional().describe("Score the sample against this ideal customer profile.") },
       annotations: { ...write, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/lead-lists/preview", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/lead-lists/preview", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -6098,16 +6366,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Create a lead list",
       description:
         "Creates a list. With search_integration_id and filters it is built from that data provider; set build to true to start the first build (spends provider credits, capped by credit_cap and max_leads). Without them it is a manual list.",
-      inputSchema: { ...listSettings, name: z.string().min(1).max(100), build: z.boolean().optional() },
+      inputSchema: { brand: brandRef, ...listSettings, name: z.string().min(1).max(100), build: z.boolean().optional() },
       annotations: { ...write, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/lead-lists", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/lead-lists", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "update_lead_list",
-    { title: "Change a lead list", description: "Changes a list's settings. Absent fields keep their value.", inputSchema: { list_id: id, ...listSettings }, annotations: write },
-    ({ list_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/lead-lists/{id}", { params: { path: { ...path, id: list_id } }, body })),
+    { title: "Change a lead list", description: "Changes a list's settings. Absent fields keep their value.", inputSchema: { brand: brandRef, list_id: id, ...listSettings }, annotations: write },
+    ({ brand, list_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: b, id: list_id } }, body }))),
   );
 
   server.registerTool(
@@ -6117,6 +6385,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "build or refresh: search the provider, find missing emails, and add new leads that fit, leaving out suppressed, recently contacted, in-sequence and undeliverable people. enrich: fill in missing fields on the list's leads. Spends provider credits; max_leads and credit_cap override the list's limits for this run. Returns a run to poll with get_list_run.",
       inputSchema: {
+        brand: brandRef,
         list_id: id,
         kind: z.enum(["build", "refresh", "enrich"]).optional(),
         max_leads: z.number().int().min(1).max(50000).optional(),
@@ -6124,13 +6393,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, openWorldHint: true },
     },
-    ({ list_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/lead-lists/{id}/runs", { params: { path: { ...path, id: list_id } }, body })),
+    ({ brand, list_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/lead-lists/{id}/runs", { params: { path: { brand: b, id: list_id } }, body }))),
   );
 
   server.registerTool(
     "cancel_list_run",
-    { title: "Cancel a list run", description: "Stops a queued or running run. Leads already added stay.", inputSchema: { run_id: id }, annotations: write },
-    ({ run_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/list-runs/{run}/cancel", { params: { path: { ...path, run: run_id } } })),
+    { title: "Cancel a list run", description: "Stops a queued or running run. Leads already added stay.", inputSchema: { brand: brandRef, run_id: id }, annotations: write },
+    ({ brand, run_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/list-runs/{run}/cancel", { params: { path: { brand: b, run: run_id } } }))),
   );
 
   server.registerTool(
@@ -6500,10 +6769,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Add or update a lead",
       description: "Upserts by email. Empty fields keep stored values; custom fields are merged and usable as template variables.",
       inputSchema: {
+        brand: brandRef,
         email: z.string(),
         first_name: z.string().optional(),
         last_name: z.string().optional(),
         company: z.string().optional(),
+        company_record_id: id.optional().describe("An existing company record to link in the same transaction."),
         title: z.string().optional(),
         phone: z.string().optional(),
         linkedin_url: z.string().optional(),
@@ -6513,7 +6784,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/leads", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/leads", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -6522,10 +6793,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Change a lead",
       description: "Change a lead's fields by id. Only the fields given change. In custom, a null value removes that field. To change the email, create a new lead.",
       inputSchema: {
+        brand: brandRef,
         lead_id: id,
         first_name: z.string().optional(),
         last_name: z.string().optional(),
         company: z.string().optional(),
+        company_record_id: id.optional().describe("An existing company record to link in the same transaction."),
         title: z.string().optional(),
         phone: z.string().optional(),
         linkedin_url: z.string().optional(),
@@ -6534,7 +6807,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ lead_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/leads/{id}", { params: { path: { ws, id: lead_id } }, body })),
+    ({ brand, lead_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/leads/{id}", { params: { path: { brand: b, id: lead_id } }, body }))),
   );
 
   server.registerTool(
@@ -6544,11 +6817,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Delete a lead and its enrollments. With suppress true the address also goes on the suppression list (do_not_contact), " +
         "so an erasure or opt-out request still holds if the person is imported again. Use it for erasure requests; to stop emailing someone, add_suppressions is enough.",
-      inputSchema: { lead_id: id, suppress: z.boolean().optional().describe("Also suppress the address. Default false.") },
+      inputSchema: { brand: brandRef, lead_id: id, suppress: z.boolean().optional().describe("Also suppress the address. Default false.") },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ lead_id, suppress }) =>
-      call(() => gtm.DELETE("/v1/workspaces/{ws}/leads/{id}", { params: { path: { ws, id: lead_id }, query: suppress ? { suppress: true } : {} } })),
+    ({ brand, lead_id, suppress }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/leads/{id}", { params: { path: { brand: b, id: lead_id }, query: suppress ? { suppress: true } : {} } }))),
   );
 
   server.registerTool(
@@ -6556,10 +6829,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Add leads to a list",
       description: "Add existing leads (by id) to a lead list. Leads already in it are skipped.",
-      inputSchema: { list_id: id, lead_ids: z.array(id).min(1).max(10000) },
+      inputSchema: { brand: brandRef, list_id: id, lead_ids: z.array(id).min(1).max(10000) },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ list_id, lead_ids }) => call(() => gtm.POST("/v1/workspaces/{ws}/lead-lists/{id}/leads", { params: { path: { ws, id: list_id } }, body: { lead_ids } })),
+    ({ brand, list_id, lead_ids }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/lead-lists/{id}/leads", { params: { path: { brand: b, id: list_id } }, body: { lead_ids } }))),
   );
 
   server.registerTool(
@@ -6567,11 +6840,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Remove a lead from a list",
       description: "Take one lead out of a lead list. The lead itself stays.",
-      inputSchema: { list_id: id, lead_id: id },
+      inputSchema: { brand: brandRef, list_id: id, lead_id: id },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ list_id, lead_id }) =>
-      call(() => gtm.DELETE("/v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}", { params: { path: { ws, id: list_id, lead: lead_id } } })),
+    ({ brand, list_id, lead_id }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/lead-lists/{id}/leads/{lead}", { params: { path: { brand: b, id: list_id, lead: lead_id } } }))),
   );
 
   server.registerTool(
@@ -6599,17 +6872,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Import leads from CSV",
       description: "Bulk upsert from CSV text. Only an email column is required; other columns become custom fields. Optionally adds every lead to a list, created if missing.",
-      inputSchema: { csv: z.string().min(1), list: z.string().max(100).optional().describe("Name of the list to add the leads to.") },
+      inputSchema: { brand: brandRef, csv: z.string().min(1), list: z.string().max(100).optional().describe("Name of the list to add the leads to.") },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ csv, list }) =>
+    ({ brand, csv, list }) =>
       call(() =>
-        gtm.POST("/v1/workspaces/{ws}/leads/import", {
-          params: { path, query: list ? { list } : {} },
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/leads/import", {
+          params: { path: { brand: b }, query: list ? { list } : {} },
           body: csv,
           bodySerializer: (b: string) => b,
           headers: { "Content-Type": "text/csv" },
-        }),
+        })),
       ),
   );
 
@@ -6622,15 +6895,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "reason competitor keeps a rival out of cold and marketing email; customer, partner and blocklist (on a sequencer's blocklist) only out of cold email. " +
         "Up to 100,000 at once, to move a list from an old tool (give source, such as hubspot_export).",
       inputSchema: {
+        brand: brandRef,
         values: z.array(z.string()).min(1).max(100000),
         reason: z.enum(["unsubscribed", "bounced", "complained", "manual", "do_not_contact", "competitor", "customer", "partner", "legal", "blocklist"]).optional(),
         note: z.string().max(500).optional(),
         source: z.string().regex(/^[a-z0-9._-]{1,64}$/).optional(),
         method: z.enum(["manual", "automated", "ai_suggested"]).optional(),
+        all_brands: z.boolean().optional().describe("Apply them to every brand, not just this one. Only for someone who sees every brand; bounces and complaints always apply to every brand."),
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/suppressions", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/suppressions", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -6724,10 +6999,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Create a sequence",
       description: "Creates a draft that sends nothing until update_sequence sets status active. Defaults: UTC, Monday to Friday, 09:00 to 17:00, stop on reply.",
-      inputSchema: { ...settings, name: z.string().min(1).max(200), steps: steps.optional() },
+      inputSchema: { brand: brandRef, ...settings, name: z.string().min(1).max(200), steps: steps.optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/sequences", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/sequences", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -6736,10 +7011,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Change, start or pause a sequence",
       description:
         "Change settings, or set status: active starts sending (needs at least one step, and a daily_new_limit or target_daily so it gets mailboxes), paused holds every lead where it is, archived hides it.",
-      inputSchema: { sequence_id: id, ...settings, status: z.enum(["active", "paused", "archived"]).optional() },
+      inputSchema: { brand: brandRef, sequence_id: id, ...settings, status: z.enum(["active", "paused", "archived"]).optional() },
       annotations: sends,
     },
-    ({ sequence_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/sequences/{id}", { params: { path: { ws, id: sequence_id } }, body })),
+    ({ brand, sequence_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/sequences/{id}", { params: { path: { brand: b, id: sequence_id } }, body }))),
   );
 
   server.registerTool(
@@ -6747,10 +7022,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Replace a sequence's steps",
       description: "Sets the whole list of steps. Leads already in the sequence carry on from their current position.",
-      inputSchema: { sequence_id: id, steps },
+      inputSchema: { brand: brandRef, sequence_id: id, steps },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ sequence_id, steps }) => call(() => gtm.PUT("/v1/workspaces/{ws}/sequences/{id}/steps", { params: { path: { ws, id: sequence_id } }, body: { steps } })),
+    ({ brand, sequence_id, steps }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/sequences/{id}/steps", { params: { path: { brand: b, id: sequence_id } }, body: { steps } }))),
   );
 
   server.registerTool(
@@ -6758,10 +7033,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Add leads to a sequence",
       description: "Send lead_ids or list_id. Suppressed leads are skipped, and so are leads active in another sequence unless skip_active_elsewhere is false. Leads get email only while the sequence is active.",
-      inputSchema: { sequence_id: id, lead_ids: z.array(id).max(10000).optional(), list_id: id.optional(), skip_active_elsewhere: z.boolean().optional() },
+      inputSchema: { brand: brandRef, sequence_id: id, lead_ids: z.array(id).max(10000).optional(), list_id: id.optional(), skip_active_elsewhere: z.boolean().optional() },
       annotations: { ...sends, idempotentHint: true },
     },
-    ({ sequence_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments", { params: { path: { ws, id: sequence_id } }, body })),
+    ({ brand, sequence_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/sequences/{id}/enrollments", { params: { path: { brand: b, id: sequence_id } }, body }))),
   );
 
   server.registerTool(
@@ -6769,17 +7044,17 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Stop emailing a lead in a sequence",
       description: "Stops one enrollment. It cannot be restarted.",
-      inputSchema: { sequence_id: id, enrollment_id: id },
+      inputSchema: { brand: brandRef, sequence_id: id, enrollment_id: id },
       annotations: { ...write, destructiveHint: true, idempotentHint: true },
     },
-    ({ sequence_id, enrollment_id }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop", { params: { path: { ws, id: sequence_id, eid: enrollment_id } } })),
+    ({ brand, sequence_id, enrollment_id }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/sequences/{id}/enrollments/{eid}/stop", { params: { path: { brand: b, id: sequence_id, eid: enrollment_id } } }))),
   );
 
   server.registerTool(
     "mark_inbox_read",
-    { title: "Mark a message read or unread", inputSchema: { message_id: id, read: z.boolean().default(true) }, annotations: { ...write, idempotentHint: true } },
-    ({ message_id, read }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id: message_id } }, body: { read } })),
+    { title: "Mark a message read or unread", inputSchema: { brand: brandRef, message_id: id, read: z.boolean().default(true) }, annotations: { ...write, idempotentHint: true } },
+    ({ brand, message_id, read }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: b, id: message_id } }, body: { read } }))),
   );
 
   server.registerTool(
@@ -6791,6 +7066,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
         "snoozed_until: an ISO time in the future when it comes back to the open inbox, or null. done: handled. tags: replaces the tags (new ones join list_inbox_tags). " +
         "needs_review: flag it for a person to check. Sorting a reply does not send anything or change its sequence.",
       inputSchema: {
+        brand: brandRef,
         message_id: id,
         category: z.enum(inboxCategories).nullable().optional(),
         assigned_to: id.nullable().optional(),
@@ -6802,7 +7078,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ message_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id: message_id } }, body })),
+    ({ brand, message_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: b, id: message_id } }, body }))),
   );
 
   server.registerTool(
@@ -6931,10 +7207,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Add the person a reply refers you to",
       description:
         "Adds the address a referral reply names (details.referral_email) as a lead on the referrer's lists, marked referred_by, and with sequence_id enrols them unless they opted out. Fails with no_referral when the reply names no address.",
-      inputSchema: { message_id: id, sequence_id: id.optional() },
+      inputSchema: { brand: brandRef, message_id: id, sequence_id: id.optional() },
       annotations: write,
     },
-    ({ message_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/inbox/{id}/referral", { params: { path: { ws, id: message_id } }, body })),
+    ({ brand, message_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/inbox/{id}/referral", { params: { path: { brand: b, id: message_id } }, body }))),
   );
 
   server.registerTool(
@@ -6942,11 +7218,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "List alerts",
       description:
-        "What needs someone now, newest first: hot replies (reply.hot), hot website visitors (visitor.hot) and other kinds. Each has a title, a line of detail and the app page (path) that has it. Page with next_before.",
+        "What needs someone now, newest first: hot replies (reply.hot), hot website visitors (visitor.hot) and other kinds. Each has a title, a line of detail and the app page (path) that has it. Page with cursor=next_cursor.",
       inputSchema: {
         brand: brandRef,
         kind: z.string().optional().describe("One kind, such as reply.hot."),
-        before: z.string().optional().describe("next_before from the previous page."),
+        cursor,
         limit: z.number().int().min(1).max(200).optional(),
       },
       annotations: read,
@@ -7010,10 +7286,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     {
       title: "Reply to a received message",
       description: "Sends a plain-text reply now, from the mailbox it arrived at, in the same thread. Suppressed or opted-out addresses are refused.",
-      inputSchema: { message_id: id, body: z.string().min(1).max(20000) },
+      inputSchema: { brand: brandRef, message_id: id, body: z.string().min(1).max(20000) },
       annotations: sends,
     },
-    ({ message_id, body }) => call(() => gtm.POST("/v1/workspaces/{ws}/inbox/{id}/reply", { params: { path: { ws, id: message_id } }, body: { body } })),
+    ({ brand, message_id, body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/inbox/{id}/reply", { params: { path: { brand: b, id: message_id } }, body: { body } }))),
   );
 
   // The sandbox: in a test workspace these play the outside world.
@@ -7134,6 +7410,79 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     ({ playbook_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: playbook_id } }, body })),
   );
 
+  // Agent runs (docs/actions.md, "Outflare's agent on the action layer"):
+  // Outflare's agent runs a playbook as an agent token of its own.
+  server.registerTool(
+    "run_playbook",
+    {
+      title: "Run a playbook with Outflare's agent",
+      description:
+        "Start a playbook as an agent run: Outflare's agent carries it out in turns on the workspace's AI model, as an agent of its own on the action layer. " +
+        "The mode sets what it may change on its own: copilot (default) holds every change for a person, autonomous runs changes within max_spend_cents a month, dry_run only records what it would do. " +
+        "Fails with connector_needed or ai_model_needed until the workspace connects what it needs.",
+      inputSchema: {
+        playbook_id: z.string().min(1).max(60),
+        inputs: z.record(z.string(), z.string().max(500)).optional().describe("Values for the playbook's inputs, by name (get_playbook lists them)."),
+        mode: z.enum(["copilot", "autonomous", "dry_run"]).optional(),
+        max_spend_cents: z.number().int().min(0).optional().describe("For autonomous: the most its changes may spend a month, in cents."),
+        brand: z.string().optional().describe("The brand the run works for: its id or handle."),
+        apply_kit: z.boolean().optional().describe("Also set up the playbook's setup kit first. Check preview_kit first."),
+      },
+      annotations: write,
+    },
+    ({ playbook_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/playbooks/{id}/agent-runs", { params: { path: { ws, id: playbook_id } }, body })),
+  );
+
+  server.registerTool(
+    "list_agent_runs",
+    {
+      title: "List agent runs",
+      description: "Runs of Outflare's agent on the action layer, newest first, with their turns, held changes and spend.",
+      inputSchema: {
+        status: z.string().optional().describe("Comma-separated: running, paused, completed, stopped, failed."),
+        playbook_id: z.string().optional(),
+        cursor,
+        limit: limit(200),
+      },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/agent-runs", { params: { path, query: q } })),
+  );
+
+  server.registerTool(
+    "get_agent_run",
+    {
+      title: "Read an agent run",
+      description: "The run's check-in: the run, its brand's and the company's context, the latest updates, and how the agent is to act.",
+      inputSchema: { run_id: id },
+      annotations: read,
+    },
+    ({ run_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/agent-runs/{id}", { params: { path: { ws, id: run_id } } })),
+  );
+
+  server.registerTool(
+    "write_to_agent_run",
+    {
+      title: "Write to an agent run",
+      description: "Leave the agent an instruction or a note; it answers in its next turn, which your message brings forward.",
+      inputSchema: { run_id: id, kind: z.enum(["instruction", "note"]).default("instruction"), body: z.string().min(1).max(20000) },
+      annotations: write,
+    },
+    ({ run_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/agent-runs/{id}/updates", { params: { path: { ws, id: run_id } }, body })),
+  );
+
+  for (const [name, title, description] of [
+    ["pause_agent_run", "Pause an agent run", "No more turns until a person resumes it."],
+    ["stop_agent_run", "Stop an agent run", "Ends the run for good and revokes its token; its held changes stay for a person to decide."],
+  ] as const) {
+    const action = name.split("_")[0] as "pause" | "stop";
+    server.registerTool(
+      name,
+      { title, description, inputSchema: { run_id: id }, annotations: write },
+      ({ run_id }) => call(() => gtm.POST(`/v1/workspaces/{ws}/agent-runs/{id}/${action}`, { params: { path: { ws, id: run_id } } })),
+    );
+  }
+
   const automationSettings = {
     name: z.string().min(1).max(200).optional(),
     brand_id: id.nullable().optional().describe("Run for one brand only, taking only its events. Null for every brand."),
@@ -7213,7 +7562,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     "list_playbook_automation_runs",
     {
       title: "An automation's runs",
-      description: "The missions an automation started, newest first, with their status, progress and report.",
+      description: "The runs an automation started, newest first: agent_runs when Outflare's agent runs it (on the action layer, with their turns, held changes and spend), data for the missions of an outside agent's runs.",
       inputSchema: { automation_id: id },
       annotations: read,
     },
@@ -8058,6 +8407,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       description:
         "Records a meeting no connected calendar sees. Give lead_id or attendee_email; it is credited to the sequence that last emailed the lead unless sequence_id is given.",
       inputSchema: {
+        brand: brandRef,
         lead_id: id.optional(),
         attendee_email: z.string().optional(),
         attendee_name: z.string().optional(),
@@ -8073,7 +8423,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/meetings", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/meetings", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -8082,6 +8432,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Update a meeting",
       description: "Mark held, no_show or qualified, or fix which sequence it counts for (that pins it against syncs). unattributed: not from outreach.",
       inputSchema: {
+        brand: brandRef,
         meeting_id: id,
         status: z.enum(["booked", "held", "no_show", "canceled"]).optional(),
         qualified: z.boolean().optional(),
@@ -8092,7 +8443,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ meeting_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/meetings/{id}", { params: { path: { ws, id: meeting_id } }, body })),
+    ({ brand, meeting_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/meetings/{id}", { params: { path: { brand: b, id: meeting_id } }, body }))),
   );
 
   server.registerTool(
@@ -8101,6 +8452,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Log a deal",
       description: "For workspaces without a connected CRM. Tie it to outreach with meeting_id, lead_id or contact_email. Amounts are in cents.",
       inputSchema: {
+        brand: brandRef,
         name: z.string().max(300),
         lead_id: id.optional(),
         contact_email: z.string().optional(),
@@ -8116,7 +8468,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/deals", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/deals", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -8125,6 +8477,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       title: "Update a deal",
       description: "Change a hand-logged deal, or the sequence any deal counts for. Deals from a CRM only take attribution changes; edit them in the CRM.",
       inputSchema: {
+        brand: brandRef,
         deal_id: id,
         name: z.string().optional(),
         stage: z.string().optional(),
@@ -8136,7 +8489,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ deal_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/deals/{id}", { params: { path: { ws, id: deal_id } }, body })),
+    ({ brand, deal_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/deals/{id}", { params: { path: { brand: b, id: deal_id } }, body }))),
   );
 
   server.registerTool(
@@ -8561,6 +8914,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     data: z.record(z.string(), z.unknown()).optional().describe("Template variables for everyone; each person's own fields are under person, such as person.first_name."),
     track: z.object({ opens: z.boolean().nullable().optional(), clicks: z.boolean().nullable().optional() }).optional(),
     exclude: exclusion,
+    holdout_percent: z.number().int().min(0).max(50).optional().describe("Share of the audience held out on purpose (0 to 50, 0 is off): they never get it, so get_email_broadcast_lift can show what it added."),
   };
 
   server.registerTool(
@@ -8612,6 +8966,37 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
       annotations: write,
     },
     ({ brand, broadcast, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: b, id: broadcast } }, body }))),
+  );
+
+  const liftQuery = {
+    event: z.string().max(200).optional().describe("Only this conversion, such as payment.succeeded; any conversion by default."),
+    days: z.number().int().min(1).max(180).optional().describe("How long after a person was reached a conversion counts; 30 by default."),
+  };
+
+  server.registerTool(
+    "get_email_broadcast_lift",
+    {
+      title: "What a broadcast added",
+      description:
+        "For a broadcast with a holdout: the people it was sent to against the people it held out, with how many converted within days, their revenue, the lift in conversion rate, a p-value, a verdict (better, worse, no_clear_change, too_early) and the revenue beyond what as many held-out people paid.",
+      inputSchema: { brand: brandRef, broadcast: z.string().describe("The broadcast's id."), ...liftQuery },
+      annotations: read,
+    },
+    ({ brand, broadcast, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/email-broadcasts/{id}/lift", { params: { path: { brand: b, id: broadcast }, query } }))),
+  );
+
+  server.registerTool(
+    "get_sequence_lift",
+    {
+      title: "What a sequence added",
+      description:
+        "For a sequence with a holdout: the leads it emailed against the leads it held out, from when each was enrolled, with the same numbers as get_email_broadcast_lift. Leads with no customer record are left out.",
+      inputSchema: { brand: brandRef, sequence: z.string().describe("The sequence's id."), ...liftQuery },
+      annotations: read,
+    },
+    ({ brand, sequence, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/sequences/{id}/lift", { params: { path: { brand: b, id: sequence }, query } }))),
   );
 
   server.registerTool(
@@ -8679,6 +9064,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
             "wait",
             "branch",
             "exit",
+            "create_task",
             "set_field",
             "add_tag",
             "remove_tag",
@@ -8709,6 +9095,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
           template: z.string().optional().describe("email: a lifecycle template's handle."),
           ignore_cap: z.boolean().optional().describe("email: send even over the frequency cap (get_email_guardrails), for email a person must get."),
           quiet_hours: z.enum(["hold", "skip"]).optional().describe("email: in quiet hours, hold (default) sends when they end; skip doesn't send and goes on."),
+          due_after_seconds: z.number().int().min(0).max(31536000).optional(),
           wait_seconds: z.number().int().min(60).max(7776000).optional(),
           conditions: z.array(condition).max(20).optional(),
           match: z.enum(["all", "any"]).optional(),
@@ -9087,6 +9474,207 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
     cooldown_seconds: z.number().int().min(0).max(31536000).optional(),
     manual_edits: z.boolean().optional().describe("Let a change someone made by hand fire a change rule. Off by default."),
   };
+
+  // Products and lifecycle stages per product (docs/lifecycle.md).
+  const productFields = {
+    name: z.string().min(1).max(200).optional(),
+    churn_mode: z.enum(["cancellation", "inactivity"]).optional().describe("What makes a customer churned: a cancellation, or no usage in churn_days."),
+    at_risk_days: z.number().int().min(1).max(365).optional().describe("No usage in this many days moves an active customer to at risk (default 14)."),
+    churn_days: z.number().int().min(1).max(730).optional().describe("With churn_mode inactivity: no usage in this many days is churned (default 30)."),
+    aliases: z.array(z.string()).max(100).optional().describe("Names the brand's events (event:resi, or a bare name) or billing system (billing:prod_123) use for it. Replaces the list."),
+  };
+  const productRef = z.string().describe("The product's id (from list_products).");
+
+  server.registerTool(
+    "list_products",
+    {
+      title: "List products",
+      description: "The products a brand sells. Events name one with properties.product_id (its id or key) or properties.product (an alias), so stages are kept per product.",
+      inputSchema: { brand: brandRef, archived: z.boolean().optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/products", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "create_product",
+    {
+      title: "Add a product",
+      description: "A product the brand sells. key (made from the name when left out) never changes, so events and rules can use it.",
+      inputSchema: { brand: brandRef, ...productFields, name: z.string().min(1).max(200), key: z.string().regex(/^[a-z0-9][a-z0-9_.-]{0,62}$/).optional() },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/products", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_product",
+    {
+      title: "Change a product",
+      description: "Its name, churn mode, days or aliases. The key never changes.",
+      inputSchema: { brand: brandRef, product: productRef, ...productFields, version: z.number().int().optional() },
+      annotations: write,
+    },
+    ({ brand, product, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/products/{product}", { params: { path: { brand: b, product } }, body }))),
+  );
+
+  server.registerTool(
+    "archive_product",
+    {
+      title: "Archive or restore a product",
+      description: "An archived product keeps its history, but its events no longer move anyone and it leaves companies' overall status. restore: true brings it back.",
+      inputSchema: { brand: brandRef, product: productRef, restore: z.boolean().optional() },
+      annotations: write,
+    },
+    ({ brand, product, restore }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          restore
+            ? gtm.POST("/v1/brands/{brand}/products/{product}/restore", { params: { path: { brand: b, product } } })
+            : gtm.POST("/v1/brands/{brand}/products/{product}/archive", { params: { path: { brand: b, product } } }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "list_product_names",
+    {
+      title: "List product names seen in events and billing",
+      description: "Names the brand's events and billing connections use for its products. held ones matched no product and drive nothing until mapped with map_product_name.",
+      inputSchema: { brand: brandRef, status: z.enum(["held", "mapped", "ignored"]).optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/product-names", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "map_product_name",
+    {
+      title: "Map, ignore or add a product name",
+      description:
+        "With name (an id from list_product_names): map that name to a product, ignore it, or hold it again. With value instead: map or ignore a name before it is ever seen. " +
+        "Events already stored keep the product they had.",
+      inputSchema: {
+        brand: brandRef,
+        name: z.string().optional().describe("A name's id, to change it."),
+        value: z.string().max(200).optional().describe("A new name, to add it."),
+        source: z.enum(["event", "billing"]).optional().describe("Where a new name appears (default event)."),
+        status: z.enum(["held", "mapped", "ignored"]),
+        product_id: z.string().nullable().optional().describe("The product a mapped name is for."),
+      },
+      annotations: write,
+    },
+    ({ brand, name, ...body }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          name
+            ? gtm.PATCH("/v1/brands/{brand}/product-names/{name}", { params: { path: { brand: b, name } }, body: { status: body.status, product_id: body.product_id } })
+            : gtm.POST("/v1/brands/{brand}/product-names", { params: { path: { brand: b } }, body }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_lifecycle",
+    {
+      title: "Get lifecycle stages and moves",
+      description:
+        "Whether a brand's lifecycle stages are on, where products come from, its stages (company: billing; person: usage) and the moves between them, in the order they are tried. " +
+        "Each move emits an event (product.churned, product.reactivated, customer.became_customer…) that rules and journeys can start on.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lifecycle", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "update_lifecycle",
+    {
+      title: "Turn lifecycle stages on or off",
+      description:
+        "Turning them on starts from nothing: only events from then on move anyone, and history is never rebuilt. A brand with no stages gets the defaults. Confirm with the user first: journeys may start on the moves.",
+      inputSchema: {
+        brand: brandRef,
+        enabled: z.boolean().optional(),
+        sources: z.array(z.enum(["billing", "api", "event", "manual"])).optional().describe("Where products come from."),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/lifecycle", { params: { path: { brand: b } }, body }))),
+  );
+
+  const stageLevel = z.enum(["company", "person"]);
+  server.registerTool(
+    "set_lifecycle_stages",
+    {
+      title: "Replace lifecycle stages",
+      description: "Replaces the stages of each level sent. A stage someone is in, or a move uses, can't be removed. The highest rank wins a company's overall status.",
+      inputSchema: {
+        brand: brandRef,
+        stages: z
+          .array(
+            z.object({
+              level: stageLevel,
+              key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+              name: z.string().max(100),
+              category: z.enum(["lead", "trial", "active", "at_risk", "churned"]),
+              rank: z.number().int().min(0).max(1000),
+            }),
+          )
+          .min(1)
+          .max(50),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/lifecycle/stages", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "set_lifecycle_moves",
+    {
+      title: "Replace lifecycle moves",
+      description:
+        "Replaces the moves of each level sent, tried in the order sent (the first that fits wins). event: on that event (conditions test its properties); usage: any event the product sent about itself; " +
+        "inactivity: no usage for the product's at_risk_days or churn_days. from_stages may include none (no stage yet).",
+      inputSchema: {
+        brand: brandRef,
+        moves: z
+          .array(
+            z.object({
+              level: stageLevel,
+              key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+              name: z.string().max(100),
+              kind: z.enum(["event", "usage", "inactivity"]),
+              event: z.string().optional(),
+              after: z.enum(["at_risk_days", "churn_days"]).optional(),
+              conditions: z.array(ruleCondition).max(20).optional(),
+              from_stages: z.array(z.string()).optional(),
+              any_stage: z.boolean().optional(),
+              to_stage: z.string(),
+              churn_mode: z.enum(["cancellation", "inactivity"]).optional(),
+              emit_event: z.string(),
+            }),
+          )
+          .min(1)
+          .max(100),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/lifecycle/moves", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "get_record_lifecycle",
+    {
+      title: "Where a company or person stands with each product",
+      description: "Its stage per product and level, a company's overall status (best stage, plus flags such as partly_churned), and its latest moves.",
+      inputSchema: { brand: brandRef, record: z.string().describe("The record's id.") },
+      annotations: read,
+    },
+    ({ brand, record }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/lifecycle", { params: { path: { brand: b, record } } }))),
+  );
 
   server.registerTool(
     "list_rules",

@@ -108,6 +108,7 @@ type Server struct {
 	workspaceRoutes []WorkspaceRoute
 	menuLinks       []MenuLinks
 	aiTools         []AITool
+	supportAuto     func(ctx context.Context, workspaceID string) bool
 	middleware      []func(http.Handler) http.Handler
 	capabilities    []string
 	posthog         *posthogProxy
@@ -129,6 +130,11 @@ type Server struct {
 	// (feedback, searches with no answer) per hour.
 	helpIPLimit    *rateLimiter
 	helpWriteLimit *rateLimiter
+	// The public quote approval page, per network.
+	quoteApprovalLimit *rateLimiter
+	// Live chat: requests per visitor's network, new chats per network an
+	// hour, and messages per visitor and per network.
+	chatIPLimit, chatStartLimit, chatSendLimit, chatNetSendLimit *rateLimiter
 	// portalLimit caps partner portal sign-ups and sign-in emails per address.
 	portalLimit *rateLimiter
 	// siteFlagLimit caps the website script's flag requests per key.
@@ -157,7 +163,7 @@ type Options struct {
 	Mailboxes *mailbox.Service
 	Sending   *sending.Engine
 	Inbox     *inbox.Syncer
-	OAuth     *oauth.Tokens // nil disables OAuth connections
+	OAuth     *oauth.Tokens // "Continue with Google"; nil disables it
 	// Allocation plans which mailboxes serve which sequences; nil builds one.
 	Allocation *allocation.Service
 	Box        *secrets.Box // seals OAuth states for connectors
@@ -269,6 +275,9 @@ type Options struct {
 	MenuLinks []MenuLinks
 	// AITools name extensions' own AI calls on the usage page.
 	AITools []AITool
+	// SupportAuto says which workspaces the support assistant may answer
+	// customers in without a person; nil for none (it only drafts).
+	SupportAuto func(ctx context.Context, workspaceID string) bool
 	// TrackingTarget is the host tracking domains' CNAME records point at;
 	// empty for PUBLIC_URL's host.
 	TrackingTarget string
@@ -351,6 +360,10 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		helpIPLimit:      &rateLimiter{name: "help_ip", limit: 300, window: time.Minute},
 		helpWriteLimit:   &rateLimiter{name: "help_write", limit: 30, window: time.Hour},
 		portalLimit:      &rateLimiter{name: "partner_portal", limit: 20, window: time.Minute},
+		chatIPLimit:      &rateLimiter{name: "chat_ip", limit: 240, window: time.Minute},
+		chatStartLimit:   &rateLimiter{name: "chat_start", limit: 30, window: time.Hour},
+		chatSendLimit:    &rateLimiter{name: "chat_send", limit: 20, window: time.Minute},
+		chatNetSendLimit: &rateLimiter{name: "chat_net_send", limit: 120, window: time.Hour},
 		siteFlagLimit:    &rateLimiter{name: "site_flags", limit: 6000, window: time.Minute},
 		siteConsentLimit: &rateLimiter{name: "site_consent", limit: 6000, window: time.Minute},
 		cookieReports:    &cookies.Reporter{Pool: pool},
@@ -388,6 +401,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		workspaceRoutes:  opts.WorkspaceRoutes,
 		menuLinks:        opts.MenuLinks,
 		aiTools:          opts.AITools,
+		supportAuto:      opts.SupportAuto,
 		middleware:       opts.Middleware,
 		capabilities:     append([]string{"mailboxes", "domains", "leads", "suppression", "sequences", "inbox", "oauth", "warmup", "infrastructure", "allocation", "platforms", "connectors", "verification", "classification", "mailbox_suppliers", "mailbox_health", "imports", "reports", "outcomes", "tracking", "missions", "lists", "webhooks", "emails"}, opts.Capabilities...),
 		alloc:            alloc,
@@ -402,6 +416,11 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		signedInDomain: opts.SignedInCookieDomain,
 	}
 	s.logs = &logWriter{s: s}
+	s.quoteApprovalLimit = &rateLimiter{name: "quote_approval", limit: 30, window: time.Minute}
+	// Approval emails go through outreach sequences; follow them.
+	if s.send != nil {
+		s.send.OnStep = append(s.send.OnStep, s.quoteApprovalStepped)
+	}
 	s.watchSocialConnections()
 	s.watchPageReaders()
 	if s.crawler != nil && s.crawler.Owns == nil && s.integrations != nil {
@@ -459,6 +478,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesBatches(mux)
 	s.routesCatalog(mux)
 	s.routesRecords(mux)
+	s.routesCRM(mux)
 	s.routesCustomerEvents(mux)
 	s.routesMerges(mux)
 	s.routesQuery(mux)
@@ -484,12 +504,13 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLists(mux)
 	s.routesSmartLists(mux)
 	s.routesRules(mux)
+	s.routesProducts(mux)
+	s.routesLifecycle(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
 	s.routesReplyRules(mux)
 	s.routesAlerts(mux)
-	s.routesOAuth(mux)
 	s.routesStats(mux)
 	s.routesDomains(mux)
 	s.routesServers(mux)
@@ -516,7 +537,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesBrandCoverage(mux)
 	s.routesStories(mux)
 	s.routesStoriesAI(mux)
+	s.routesQuoteApprovals(mux)
 	s.routesStoryPitches(mux)
+	s.routesStoryPitchSequence(mux)
 	s.routesLinkReads(mux)
 	s.routesLinkPitches(mux)
 	s.routesSearchResults(mux)
@@ -570,11 +593,15 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesKnowledgeInsights(mux)
 	s.routesHelpCentres(mux)
 	s.routesHelpCentreSite(mux)
+	s.routesKnowledgeReview(mux)
+	s.routesSupportChat(mux)
 	s.routesInboundEmail(mux)
 	s.routesVerification(mux)
 	s.routesClassify(mux)
 	s.routesWorkspaceDomains(mux)
 	s.routesMissions(mux)
+	s.routesAgentRuns(mux)
+	s.routesActions(mux)
 	s.routesPlaybooks(mux)
 	s.routesPlaybookAutomations(mux)
 	s.routesLinkAssets(mux)
@@ -612,7 +639,7 @@ func (s *Server) buildHandler() http.Handler {
 		_, p := mux.Handler(r)
 		return p
 	}
-	return requestID(s.fromEdge(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(withCursorParam(withFields(h))))))))
+	return requestID(s.fromEdge(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(withFields(h)))))))
 }
 
 // testWrap, set only by this package's tests, wraps every handler the
@@ -642,10 +669,9 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 			"rest":    "/v1",
 			"openapi": "/v1/openapi.yaml",
 		},
-		"capabilities":    s.capabilities,
-		"oauth_providers": s.oauthProviders(),
-		"login_methods":   s.loginMethods(),
-		"account_email":   s.mailer.Name(),
+		"capabilities":  s.capabilities,
+		"login_methods": s.loginMethods(),
+		"account_email": s.mailer.Name(),
 	}
 	if s.posthog != nil {
 		m["product_analytics"] = s.posthog.meta()
@@ -766,9 +792,6 @@ func panicSite() string {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	if m, ok := v.(map[string]any); ok {
-		addNextCursor(m)
-	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v) //nolint:errcheck

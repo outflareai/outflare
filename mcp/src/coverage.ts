@@ -74,7 +74,7 @@ export function registerCoverageTools(
       `list_coverage_${resource}`,
       {
         title: `List coverage ${resource}`,
-        description: `Read this brand's ${resource}. Page using offset and limit. Publisher records reference existing CRM companies; agreements count spend once for all their placements.`,
+        description: `Read this brand's ${resource}. Page with limit and cursor=next_cursor. Publisher records reference existing CRM companies; agreements count spend once for all their placements.`,
         inputSchema: {
           brand,
           q: z.string().optional(),
@@ -93,7 +93,7 @@ export function registerCoverageTools(
           placement_id: id.optional(),
           agreement_id: id.optional(),
           limit: z.number().int().min(1).max(200).optional(),
-          offset: z.number().int().min(0).optional(),
+          cursor: z.string().optional().describe("next_cursor from the previous page."),
         },
         annotations: read,
       },

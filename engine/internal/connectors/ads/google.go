@@ -3,8 +3,10 @@ package ads
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -76,6 +78,14 @@ func (g GoogleAds) accessible(ctx context.Context, cl *c.Client, creds c.Creds) 
 	return out, nil
 }
 
+// googleTracking is where a Google Ads resource keeps its tracking: an
+// ad, ad group, campaign or account each may have its own, and the most
+// specific one that is set applies.
+type googleTracking struct {
+	FinalURLSuffix      string `json:"finalUrlSuffix"`
+	TrackingURLTemplate string `json:"trackingUrlTemplate"`
+}
+
 type gaqlRow struct {
 	Customer struct {
 		ID              flexInt `json:"id"`
@@ -83,6 +93,7 @@ type gaqlRow struct {
 		CurrencyCode    string  `json:"currencyCode"`
 		TimeZone        string  `json:"timeZone"`
 		Manager         bool    `json:"manager"`
+		googleTracking
 	} `json:"customer"`
 	CustomerClient struct {
 		ID              flexInt `json:"id"`
@@ -97,6 +108,7 @@ type gaqlRow struct {
 		Name                   string  `json:"name"`
 		Status                 string  `json:"status"`
 		AdvertisingChannelType string  `json:"advertisingChannelType"`
+		googleTracking
 	} `json:"campaign"`
 	ConversionAction struct {
 		ID   flexInt `json:"id"`
@@ -106,16 +118,17 @@ type gaqlRow struct {
 		ID     flexInt `json:"id"`
 		Name   string  `json:"name"`
 		Status string  `json:"status"`
+		googleTracking
 	} `json:"adGroup"`
 	AdGroupAd struct {
 		Status string `json:"status"`
 		Ad     struct {
-			ID                  flexInt  `json:"id"`
-			Name                string   `json:"name"`
-			Type                string   `json:"type"`
-			FinalURLs           []string `json:"finalUrls"`
-			TrackingURLTemplate string   `json:"trackingUrlTemplate"`
-			ResponsiveSearchAd  struct {
+			ID        flexInt  `json:"id"`
+			Name      string   `json:"name"`
+			Type      string   `json:"type"`
+			FinalURLs []string `json:"finalUrls"`
+			googleTracking
+			ResponsiveSearchAd struct {
 				Headlines    []struct{ Text string } `json:"headlines"`
 				Descriptions []struct{ Text string } `json:"descriptions"`
 			} `json:"responsiveSearchAd"`
@@ -132,8 +145,26 @@ type gaqlRow struct {
 	CampaignBudget struct {
 		AmountMicros flexInt `json:"amountMicros"`
 	} `json:"campaignBudget"`
+	AdGroupCriterion struct {
+		CriterionID flexInt `json:"criterionId"`
+		Status      string  `json:"status"`
+		Keyword     struct {
+			Text      string `json:"text"`
+			MatchType string `json:"matchType"`
+		} `json:"keyword"`
+	} `json:"adGroupCriterion"`
+	SearchTermView struct {
+		SearchTerm string `json:"searchTerm"`
+	} `json:"searchTermView"`
 	Segments struct {
-		Date string `json:"date"`
+		Date                 string `json:"date"`
+		ConversionActionName string `json:"conversionActionName"`
+		Keyword              struct {
+			Info struct {
+				Text      string `json:"text"`
+				MatchType string `json:"matchType"`
+			} `json:"info"`
+		} `json:"keyword"`
 	} `json:"segments"`
 	Metrics struct {
 		CostMicros       flexInt `json:"costMicros"`
@@ -250,6 +281,41 @@ func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct
 			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
 			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
 	}
+	acts, err := g.actions(ctx, cl, creds, acct, "campaign", "campaign.id", from, to)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Actions = acts[out[i].CampaignID+"|"+out[i].Date]
+	}
+	return out, nil
+}
+
+// actions reads conversions by conversion action per day for every row of
+// resource, keyed by its id (idField) and the day. Google reports them
+// apart from cost: the conversion action segment can't sit beside it.
+func (g GoogleAds) actions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, resource, idField, from, to string) (map[string][]c.AdAction, error) {
+	q := fmt.Sprintf("SELECT %s, segments.date, segments.conversion_action_name, metrics.conversions, metrics.conversions_value FROM %s WHERE segments.date BETWEEN '%s' AND '%s' AND metrics.conversions > 0",
+		idField, resource, mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]c.AdAction{}
+	for _, r := range rows {
+		var id int64
+		switch idField {
+		case "campaign.id":
+			id = int64(r.Campaign.ID)
+		case "ad_group.id":
+			id = int64(r.AdGroup.ID)
+		default:
+			id = int64(r.AdGroupAd.Ad.ID)
+		}
+		key := fmt.Sprint(id) + "|" + r.Segments.Date
+		out[key] = append(out[key], c.AdAction{Name: firstText(r.Segments.ConversionActionName, "conversion"),
+			Conversions: float64(r.Metrics.Conversions), ValueMicros: ptrI(c.Micros(float64(r.Metrics.ConversionsValue)))})
+	}
 	return out, nil
 }
 
@@ -270,7 +336,9 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 	case c.AdLevelGroup:
 		q = "SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group WHERE ad_group.status != 'REMOVED'"
 	case c.AdLevelAd:
-		q = "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, ad_group_ad.ad.tracking_url_template, " +
+		q = "SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, ad_group_ad.ad.type, ad_group_ad.ad.final_urls, " +
+			"ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.tracking_url_template, ad_group.final_url_suffix, ad_group.tracking_url_template, " +
+			"campaign.final_url_suffix, campaign.tracking_url_template, customer.final_url_suffix, customer.tracking_url_template, " +
 			"ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, " +
 			"ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.descriptions FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'"
 	default:
@@ -301,15 +369,24 @@ func (g GoogleAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acc
 			link = ad.FinalURLs[0]
 		}
 		headline := text(ad.ResponsiveSearchAd.Headlines, ad.ResponsiveDisplayAd.Headlines)
-		out = append(out, c.AdItem{ID: fmt.Sprint(int64(ad.ID)), ParentID: fmt.Sprint(int64(r.AdGroup.ID)), Name: firstText(ad.Name, headline),
+		suffix := firstText(ad.FinalURLSuffix, r.AdGroup.FinalURLSuffix, r.Campaign.FinalURLSuffix, r.Customer.FinalURLSuffix)
+		template := firstText(ad.TrackingURLTemplate, r.AdGroup.TrackingURLTemplate, r.Campaign.TrackingURLTemplate, r.Customer.TrackingURLTemplate)
+		it := c.AdItem{ID: fmt.Sprint(int64(ad.ID)), ParentID: fmt.Sprint(int64(r.AdGroup.ID)), Name: firstText(ad.Name, headline),
 			Status: status(r.AdGroupAd.Status), ProviderStatus: r.AdGroupAd.Status,
 			Details: adDetails(map[string]string{
-				c.AdDetailType:     strings.ToLower(ad.Type),
-				c.AdDetailHeadline: headline,
-				c.AdDetailText:     text(ad.ResponsiveSearchAd.Descriptions, ad.ResponsiveDisplayAd.Descriptions),
-				c.AdDetailURL:      link,
-				c.AdDetailURLTags:  ad.TrackingURLTemplate,
-			})})
+				c.AdDetailType:             strings.ToLower(ad.Type),
+				c.AdDetailHeadline:         headline,
+				c.AdDetailText:             text(ad.ResponsiveSearchAd.Descriptions, ad.ResponsiveDisplayAd.Descriptions),
+				c.AdDetailURL:              link,
+				c.AdDetailURLTags:          suffix,
+				c.AdDetailTrackingTemplate: template,
+			})}
+		// Ads without a link of their own (Performance Max assets, app
+		// ads) say nothing either way.
+		if link != "" {
+			it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(suffix, template, link))
+		}
+		out = append(out, it)
 	}
 	return out, nil
 }
@@ -336,6 +413,59 @@ func (g GoogleAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, 
 		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.Segments.Date, int64(m.CostMicros), int64(m.Impressions), int64(m.Clicks)
 		d.Conversions, d.ConversionValueMicros = ptrF(float64(m.Conversions)), ptrI(c.Micros(float64(m.ConversionsValue)))
 		out = append(out, d)
+	}
+	acts, err := g.actions(ctx, cl, creds, acct, it.from, it.id, from, to)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Actions = acts[out[i].ID+"|"+out[i].Date]
+	}
+	return out, nil
+}
+
+// AdKeywordDays reads each search keyword's numbers per day. Keywords
+// without impressions that day aren't reported.
+func (g GoogleAds) AdKeywordDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdKeywordDay, error) {
+	q := fmt.Sprintf("SELECT ad_group_criterion.criterion_id, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group.id, "+
+		"segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM keyword_view WHERE segments.date BETWEEN '%s' AND '%s'",
+		mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdKeywordDay, 0, len(rows))
+	for _, r := range rows {
+		k, m := r.AdGroupCriterion, r.Metrics
+		out = append(out, c.AdKeywordDay{ID: fmt.Sprint(int64(k.CriterionID)), AdGroupID: fmt.Sprint(int64(r.AdGroup.ID)), Text: k.Keyword.Text,
+			MatchType: strings.ToLower(k.Keyword.MatchType), Status: status(k.Status), Date: r.Segments.Date,
+			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
+			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
+	}
+	return out, nil
+}
+
+// AdSearchTermDays reads what people searched that showed an ad, per day,
+// with the keyword each matched. Google leaves out searches made by too
+// few people.
+func (g GoogleAds) AdSearchTermDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdSearchTermDay, error) {
+	q := fmt.Sprintf("SELECT search_term_view.search_term, segments.keyword.info.text, segments.keyword.info.match_type, ad_group.id, "+
+		"segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM search_term_view WHERE segments.date BETWEEN '%s' AND '%s'",
+		mustDate(from).Format("2006-01-02"), mustDate(to).Format("2006-01-02"))
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"], q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]c.AdSearchTermDay, 0, len(rows))
+	for _, r := range rows {
+		m, kw := r.Metrics, r.Segments.Keyword.Info
+		if r.SearchTermView.SearchTerm == "" {
+			continue
+		}
+		out = append(out, c.AdSearchTermDay{Term: r.SearchTermView.SearchTerm, AdGroupID: fmt.Sprint(int64(r.AdGroup.ID)), KeywordText: kw.Text,
+			KeywordMatchType: strings.ToLower(kw.MatchType), Date: r.Segments.Date,
+			SpendMicros: int64(m.CostMicros), Impressions: int64(m.Impressions), Clicks: int64(m.Clicks),
+			Conversions: ptrF(float64(m.Conversions)), ConversionValueMicros: ptrI(c.Micros(float64(m.ConversionsValue)))})
 	}
 	return out, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/pushlead"
 )
 
 // push_to_sequencer adds the person to the platform campaign a sequence
@@ -47,11 +48,6 @@ func checkPush(st Step) string {
 	return ""
 }
 
-// campaignLink is the platform campaign a push goes to.
-type campaignLink struct {
-	integrationID, connector, campaignID, name string
-}
-
 func pushCall(ctx context.Context, c *call) callResult {
 	s, st := c.s, c.st
 	if s.Store == nil || s.Store.Registry == nil {
@@ -68,28 +64,11 @@ func pushCall(ctx context.Context, c *call) callResult {
 	case status == "archived":
 		return failed("invalid_request", "the sequence is archived")
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT l.integration_id::text, i.connector, l.external_id, l.external_name FROM campaign_links l
-		JOIN integrations i ON i.id = l.integration_id AND i.workspace_id = l.workspace_id
-		WHERE l.workspace_id = $1 AND l.sequence_id = $2 ORDER BY l.created_at, l.id`, c.ws, st.SequenceID)
-	if err != nil {
-		return retry("internal", "the sequence's campaigns could not be read")
-	}
-	links, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (campaignLink, error) {
-		var l campaignLink
-		return l, row.Scan(&l.integrationID, &l.connector, &l.campaignID, &l.name)
-	})
-	if err != nil {
-		return retry("internal", "the sequence's campaigns could not be read")
-	}
-	var link *campaignLink
-	for i := range links {
-		if d, ok := s.Store.Registry.Definition(links[i].connector); ok && d.Has(connectors.CapPushLeads) {
-			link = &links[i]
-			break
-		}
-	}
+	link, linked, err := pushlead.LinkOf(ctx, s.Pool, s.Store.Registry, c.ws, st.SequenceID)
 	switch {
-	case len(links) == 0:
+	case err != nil:
+		return retry("internal", "the sequence's campaigns could not be read")
+	case !linked:
 		return failed("invalid_request", "the sequence sends through Outflare, not a sequencer; use an enroll_in_sequence step")
 	case link == nil:
 		return failed("connector_needed", "the sequence's campaign is in a sequencer Outflare can't add people to")
@@ -125,35 +104,21 @@ func pushCall(ctx context.Context, c *call) callResult {
 		}
 	}
 
-	o, err := s.Store.Open(ctx, s.Pool, c.ws, link.integrationID)
-	switch {
-	case errors.Is(err, connectors.ErrNotFound):
-		return failed("connector_needed", "the sequencer connection is gone: connect it again in Settings, Connections")
-	case err != nil && connectors.KindOf(err) == connectors.ErrAuth:
-		return failed("connector_auth", "the sequencer refused the connection: connect it again")
-	case err != nil:
-		return retry("connector_unavailable", shortErr(err))
-	}
-	p, ok := o.Connector.(connectors.LeadPusher)
-	if !ok {
-		return failed("connector_needed", "that connection can't add people to campaigns")
-	}
-	res, err := p.PushLead(ctx, o.Client, o.Creds, link.campaignID, connectors.PushedLead{Email: email, FirstName: first, LastName: last,
+	res, err := pushlead.Push(ctx, s.Store, c.ws, *link, connectors.PushedLead{Email: email, FirstName: first, LastName: last,
 		Company: company, Website: domain, Variables: vars, AllowElsewhere: st.AllowElsewhere})
-	_ = s.Store.Checked(ctx, s.Pool, c.ws, o.ID, nil, err)
-	if err != nil {
-		code := "connector_" + connectors.KindOf(err)
-		metrics.SequencerPushed(link.connector, "error")
-		if code == "connector_auth" || code == "connector_invalid" {
-			return failed(code, shortErr(err))
-		}
-		return retry(code, shortErr(err))
+	switch {
+	case errors.Is(err, pushlead.ErrGone):
+		return failed("connector_needed", "the sequencer connection is gone: connect it again in Settings, Connections")
+	case errors.Is(err, pushlead.ErrCannotPush):
+		return failed("connector_needed", "that connection can't add people to campaigns")
+	case err != nil && connectors.KindOf(err) == connectors.ErrAuth:
+		return failed("connector_auth", shortErr(err))
+	case err != nil && connectors.KindOf(err) == connectors.ErrInvalid:
+		return failed("connector_invalid", shortErr(err))
+	case err != nil:
+		return retry("connector_"+connectors.KindOf(err), shortErr(err))
 	}
-	metrics.SequencerPushed(link.connector, res.Outcome)
-	where := link.name
-	if where == "" {
-		where = link.campaignID
-	}
+	where := link.Where()
 	switch res.Outcome {
 	case connectors.PushAlreadyIn:
 		return callResult{outcome: "skipped", detail: "already in " + where}
@@ -162,10 +127,10 @@ func pushCall(ctx context.Context, c *call) callResult {
 	}
 	return callResult{outcome: "done", detail: "added to " + where, record: func(ctx context.Context, tx pgx.Tx) error {
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: c.ws, ActorType: "system", Action: "sequence.lead_pushed",
-			TargetType: "sequence", TargetID: st.SequenceID, Data: map[string]any{"record_id": c.r.recordID, "integration_id": link.integrationID,
-				"connector": link.connector, "campaign_id": link.campaignID, "external_id": res.ExternalID,
+			TargetType: "sequence", TargetID: st.SequenceID, Data: map[string]any{"record_id": c.r.recordID, "integration_id": link.IntegrationID,
+				"connector": link.Connector, "campaign_id": link.CampaignID, "external_id": res.ExternalID,
 				"via": "journey", "journey_id": c.j.id, "run_id": c.r.id},
-			Props: map[string]any{"connector": link.connector}})
+			Props: map[string]any{"connector": link.Connector}})
 	}}
 }
 

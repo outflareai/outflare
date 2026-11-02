@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Deal, Meeting, MeetingStatus, OutcomeRow, OutcomeSync, OutcomesReport, RecurringSpend, Sequence, SpendCategory, SpendEntry, SpendRate } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -97,7 +98,16 @@ const attributionHelp: Record<string, string> = {
 
 type Group = "sequence" | "brand" | "none";
 
-export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+// Meetings and deals belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Outcomes(props: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Meetings and deals" brands={active.length} />;
+  return <OutcomesPage key={brand.id} {...props} />;
+}
+
+function OutcomesPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [period, setPeriod] = useState<Period>("30d");
   const [group, setGroup] = useState<Group>("sequence");
   const [currency, setCurrency] = useState("USD");
@@ -127,7 +137,7 @@ export function Outcomes({ ws, canManage, go }: { ws: string; canManage: boolean
   }, [ws, from, to, group, currency, version, brandKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => data && setSequences(data.data));
+    api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } }).then(({ data }) => data && setSequences(data.data));
     api.GET("/v1/workspaces/{ws}/outcomes/syncs", { params: { path: { ws } } }).then(({ data }) => setSyncs(data?.data ?? []));
   }, [ws, version]);
 
@@ -349,6 +359,7 @@ function Breakdown({ report, group, go }: { report: OutcomesReport; group: Group
 // ---- Meetings ----
 
 function Meetings({ ws, from, to, canManage, sequences, onChange }: { ws: string; from: string; to: string; canManage: boolean; sequences: Sequence[]; onChange: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<Meeting[] | null>(null);
   const [status, setStatus] = useState<MeetingStatus | "">("");
   const [adding, setAdding] = useState(false);
@@ -356,7 +367,7 @@ function Meetings({ ws, from, to, canManage, sequences, onChange }: { ws: string
 
   const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/meetings", { params: { path: { ws }, query: { from, to, limit: 500, ...(status ? { status } : {}), ...brandQuery } } });
+    const { data } = await api.GET("/v1/brands/{brand}/meetings", { params: { path: { brand: brandId }, query: { from, to, limit: 500, ...(status ? { status } : {}), ...brandQuery } } });
     setList(data?.data ?? []);
   }, [ws, from, to, status, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -365,7 +376,7 @@ function Meetings({ ws, from, to, canManage, sequences, onChange }: { ws: string
   }, [load]);
 
   async function patch(m: Meeting, body: Record<string, unknown>, done: string) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/meetings/{id}", { params: { path: { ws, id: m.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/meetings/{id}", { params: { path: { brand: brandId, id: m.id } }, body });
     if (error) return toast(errorMessage(error), "error");
     toast(done);
     load();
@@ -375,7 +386,7 @@ function Meetings({ ws, from, to, canManage, sequences, onChange }: { ws: string
   async function remove(m: Meeting) {
     const synced = m.source !== "manual" && m.source !== "api";
     if (!(await confirmAction("Delete this meeting?", synced ? <p>It came from {sourceLabel[m.source] ?? m.source} and will come back on the next sync. To stop counting it, choose <b>Not from outreach</b> instead.</p> : <p>It stops counting toward cost per meeting.</p>, "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/meetings/{id}", { params: { path: { ws, id: m.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/meetings/{id}", { params: { path: { brand: brandId, id: m.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Meeting deleted.");
     load();
@@ -506,6 +517,7 @@ function MoveMeeting({ m, sequences, onClose, onSave }: { m: Meeting; sequences:
 }
 
 function LogMeeting({ ws, sequences, onClose, onDone }: { ws: string; sequences: Sequence[]; onClose: () => void; onDone: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [when, setWhen] = useState("");
@@ -517,8 +529,8 @@ function LogMeeting({ ws, sequences, onClose, onDone }: { ws: string; sequences:
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/meetings", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/meetings", {
+      params: { path: { brand: brandId } },
       body: {
         attendee_email: email.trim(),
         starts_at: new Date(when).toISOString(),
@@ -581,12 +593,13 @@ function LogMeeting({ ws, sequences, onClose, onDone }: { ws: string; sequences:
 // ---- Deals ----
 
 function Deals({ ws, from, to, canManage, currency, connected, onChange, go }: { ws: string; from: string; to: string; canManage: boolean; currency: string; connected: boolean; onChange: () => void; go: (t: Tab) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<Deal[] | null>(null);
   const [adding, setAdding] = useState(false);
 
   const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/deals", { params: { path: { ws }, query: { from, to, limit: 500, ...brandQuery } } });
+    const { data } = await api.GET("/v1/brands/{brand}/deals", { params: { path: { brand: brandId }, query: { from, to, limit: 500, ...brandQuery } } });
     setList(data?.data ?? []);
   }, [ws, from, to, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -642,6 +655,7 @@ function Deals({ ws, from, to, canManage, currency, connected, onChange, go }: {
 }
 
 function LogDeal({ ws, currency, onClose, onDone }: { ws: string; currency: string; onClose: () => void; onDone: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"open" | "won" | "lost">("open");
@@ -653,7 +667,7 @@ function LogDeal({ ws, currency, onClose, onDone }: { ws: string; currency: stri
     e.preventDefault();
     const cents = amount ? Math.round(parseFloat(amount) * 100) : undefined;
     if (amount && (cents === undefined || Number.isNaN(cents) || cents < 0)) return setError("Enter the amount as a number, e.g. 12000.");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/deals", { params: { path: { ws } }, body: { name, contact_email: email, state, currency: cur, ...(cents !== undefined ? { amount_cents: cents } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/deals", { params: { path: { brand: brandId } }, body: { name, contact_email: email, state, currency: cur, ...(cents !== undefined ? { amount_cents: cents } : {}) } });
     if (error) return setError(errorMessage(error));
     toast(data.attribution === "none" ? "Logged. Nobody you emailed matches that contact, so it isn't counted yet." : `Logged${data.sequence_name ? ` for ${data.sequence_name}` : ""}.`);
     onDone();

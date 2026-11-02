@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { CustomerProfile, DataPerson, DataProvider, LeadList, LeadListMember, ListRun, PeopleFilter, SmartList } from "@outflare/sdk";
 import { ArrowDown, ArrowUp, Search, X } from "lucide-react";
@@ -79,7 +80,16 @@ function credits(n: number) {
   return `${Number.isInteger(n) ? n : n.toFixed(1)} ${n === 1 ? "credit" : "credits"}`;
 }
 
-export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
+// Lead lists belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Lists(props: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Lead lists" brands={active.length} />;
+  return <ListsPage key={brand.id} {...props} />;
+}
+
+function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [lists, setLists] = useState<LeadList[] | null>(null);
   const [smart, setSmart] = useState<SmartList[] | null>(null);
   const [editingSmart, setEditingSmart] = useState<SmartList | "new" | null>(null);
@@ -95,7 +105,7 @@ export function Lists({ ws, canManage, open, setOpen, go }: { ws: string; canMan
   const brandID = picked?.id;
   const load = useCallback(async () => {
     const [l, sl, p, pr] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }),
+      api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand: brandId } } }),
       // Smart lists are a brand's: with all brands picked there are none to show.
       brandID ? api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandID } } }) : Promise.resolve({ data: { data: [] as SmartList[] } }),
       api.GET("/v1/workspaces/{ws}/data-providers", { params: { path: { ws } } }),
@@ -370,6 +380,7 @@ function ListDetail({
   ws: string; id: string; canManage: boolean; integrationName: (id?: string | null) => string | undefined;
   onBack: () => void; onEdit: (l: LeadList) => void; onChanged: () => void; go: (t: Tab) => void;
 }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<LeadList | null>(null);
   const [runs, setRuns] = useState<ListRun[]>([]);
   const [members, setMembers] = useState<LeadListMember[]>([]);
@@ -381,9 +392,9 @@ function ListDetail({
 
   const load = useCallback(async () => {
     const [l, r, m] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/lead-lists/{id}", { params: { path: { ws, id } } }),
-      api.GET("/v1/workspaces/{ws}/lead-lists/{id}/runs", { params: { path: { ws, id } } }),
-      api.GET("/v1/workspaces/{ws}/lead-lists/{id}/members", { params: { path: { ws, id }, query: { sort, limit: 200, ...(q ? { q } : {}) } } }),
+      api.GET("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: brandId, id } } }),
+      api.GET("/v1/brands/{brand}/lead-lists/{id}/runs", { params: { path: { brand: brandId, id } } }),
+      api.GET("/v1/brands/{brand}/lead-lists/{id}/members", { params: { path: { brand: brandId, id }, query: { sort, limit: 200, ...(q ? { q } : {}) } } }),
     ]);
     if (l.error) return setError(errorMessage(l.error));
     if (l.data) setList(l.data);
@@ -415,7 +426,7 @@ function ListDetail({
 
   async function start(kind: "build" | "refresh" | "enrich") {
     setStarting(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/lead-lists/{id}/runs", { params: { path: { ws, id } }, body: { kind } });
+    const { error } = await api.POST("/v1/brands/{brand}/lead-lists/{id}/runs", { params: { path: { brand: brandId, id } }, body: { kind } });
     setStarting(false);
     if (error) return toast(errorMessage(error), "error");
     toast(kind === "enrich" ? "Enrichment started." : "Build started. New leads appear as each page finishes.");
@@ -423,7 +434,7 @@ function ListDetail({
   }
 
   async function cancel(run: ListRun) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/list-runs/{run}/cancel", { params: { path: { ws, run: run.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/list-runs/{run}/cancel", { params: { path: { brand: brandId, run: run.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Stopped. Leads already added stay in the list.");
     load();
@@ -433,7 +444,7 @@ function ListDetail({
     if (!list) return;
     const ok = await confirmAction(`Delete ${list.name}?`, <p>The list is deleted. Its {plural(list.leads, "lead")} stay in Leads and in any sequence they are already in.</p>, "Delete list");
     if (!ok) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/lead-lists/{id}", { params: { path: { ws, id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: brandId, id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Deleted ${list.name}.`);
     onChanged();
@@ -441,7 +452,7 @@ function ListDetail({
   }
 
   async function removeMember(m: LeadListMember) {
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}", { params: { path: { ws, id, lead: m.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/lead-lists/{id}/leads/{lead}", { params: { path: { brand: brandId, id, lead: m.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Removed ${m.email} from the list.`);
     load();
@@ -700,6 +711,7 @@ function ListSheet({
   ws: string; list: LeadList | null; providers: DataProvider[]; profiles: CustomerProfile[];
   onConnect: (p: DataProvider) => void; onClose: () => void; onSaved: (l: LeadList) => void;
 }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const connected = providers.flatMap((p) => p.integrations.map((i) => ({ ...i, provider: p })));
   const searchers = connected.filter((i) => i.provider.capabilities.includes("data.search_people"));
   const finders = connected.filter((i) => i.provider.capabilities.includes("data.enrich_person") || i.provider.capabilities.includes("data.find_email"));
@@ -733,7 +745,7 @@ function ListSheet({
   useEffect(() => {
     if (!preview || !active(preview)) return;
     const t = setTimeout(async () => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/list-runs/{run}", { params: { path: { ws, run: preview.id } } });
+      const { data } = await api.GET("/v1/brands/{brand}/list-runs/{run}", { params: { path: { brand: brandId, run: preview.id } } });
       if (data) setPreview(data);
       if (data && !active(data)) setPreviewing(false);
     }, 1200);
@@ -743,8 +755,8 @@ function ListSheet({
   async function runPreview() {
     setPreviewing(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/lead-lists/preview", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/lead-lists/preview", {
+      params: { path: { brand: brandId } },
       body: { search_integration_id: d.search_integration_id, filters: clean(d.filters), profile_id: d.profile_id || null },
     });
     if (error) {
@@ -775,8 +787,8 @@ function ListSheet({
       refresh_every_days: search && d.refresh ? Number(d.refresh) : null,
     };
     const res = list
-      ? await api.PATCH("/v1/workspaces/{ws}/lead-lists/{id}", { params: { path: { ws, id: list.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } }, body: { ...body, name: d.name, build: build && search } });
+      ? await api.PATCH("/v1/brands/{brand}/lead-lists/{id}", { params: { path: { brand: brandId, id: list.id } }, body })
+      : await api.POST("/v1/brands/{brand}/lead-lists", { params: { path: { brand: brandId } }, body: { ...body, name: d.name, build: build && search } });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
     if (res.data) {

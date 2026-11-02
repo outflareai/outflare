@@ -33,7 +33,7 @@ func (Apollo) Definition() c.Definition {
 			Scopes: []string{"read_user_profile", "app_scopes"},
 		},
 		Fields:       apiKeyField("Apollo → Settings → Integrations → API → create a master key (search needs a master key)."),
-		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson, c.CapFindEmail, c.CapObserveMailboxes},
+		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson, c.CapFindEmail, c.CapObserveMailboxes, c.CapSearchCompanies},
 		Pricing:      "Free search; one credit per revealed email",
 	}
 }
@@ -198,6 +198,78 @@ func (a Apollo) SearchPeople(ctx context.Context, cl *c.Client, cr c.Creds, f c.
 	}
 	// Apollo serves at most 500 pages.
 	more := len(r.People) == size && page < 500
+	if out.Total != nil {
+		more = more && page*size < *out.Total
+	}
+	if more {
+		out.Next = strconv.Itoa(page + 1)
+	}
+	return out, nil
+}
+
+// SearchCompanies uses Apollo's organization search:
+// https://docs.apollo.io/reference/organization-search. Apollo counts it
+// against the plan's credits as its plan says; the response doesn't say
+// how many, so none are booked here.
+func (a Apollo) SearchCompanies(ctx context.Context, cl *c.Client, cr c.Creds, f c.CompanyFilter, cursor string, size int) (c.CompanyPage, error) {
+	page := 1
+	if cursor != "" {
+		n, err := strconv.Atoi(cursor)
+		if err != nil || n < 1 {
+			return c.CompanyPage{}, c.Errf(c.ErrInvalid, "bad page cursor %q", cursor)
+		}
+		page = n
+	}
+	size = min(max(size, 1), 100)
+	body := map[string]any{"page": page, "per_page": size}
+	set := func(k string, v []string) {
+		if len(v) > 0 {
+			body[k] = v
+		}
+	}
+	set("q_organization_keyword_tags", append(append([]string{}, f.Industries...), f.Keywords...))
+	var ranges []string
+	for _, r := range f.EmployeeRanges {
+		if lo, hi, ok := splitRange(r); ok {
+			if hi == 0 {
+				hi = 1000000
+			}
+			ranges = append(ranges, strconv.Itoa(lo)+","+strconv.Itoa(hi))
+		}
+	}
+	set("organization_num_employees_ranges", ranges)
+	set("organization_locations", f.Locations)
+	var tech []string
+	for _, t := range f.Technologies {
+		if t = strings.ToLower(strings.Join(strings.Fields(t), "_")); t != "" {
+			tech = append(tech, t)
+		}
+	}
+	set("currently_using_any_of_technology_uids", tech)
+	var r struct {
+		Organizations []apolloOrg `json:"organizations"`
+		Accounts      []apolloOrg `json:"accounts"`
+		Pagination    *struct {
+			TotalEntries *int `json:"total_entries"`
+		} `json:"pagination"`
+	}
+	if _, err := call(ctx, cl, "Apollo", a.req(postReq(a.base(cl)+"/api/v1/mixed_companies/search", body), cr), &r); err != nil {
+		return c.CompanyPage{}, err
+	}
+	out := c.CompanyPage{}
+	if r.Pagination != nil {
+		out.Total = r.Pagination.TotalEntries
+	}
+	orgs := append(r.Accounts, r.Organizations...)
+	for _, o := range orgs {
+		d := firstNonEmpty(domainOf(o.PrimaryDomain), domainOf(o.WebsiteURL))
+		if d == "" {
+			continue
+		}
+		out.Companies = append(out.Companies, c.Company{Name: o.Name, Domain: d, Website: o.WebsiteURL, Industry: o.Industry,
+			Employees: int(o.EstimatedNumEmployees), LinkedInURL: o.LinkedInURL, Location: strings.Trim(o.City+", "+o.Country, ", ")})
+	}
+	more := len(orgs) >= size && page < 500
 	if out.Total != nil {
 		more = more && page*size < *out.Total
 	}

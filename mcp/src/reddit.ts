@@ -193,14 +193,14 @@ export function registerRedditTools(
     "list_reddit_actions",
     {
       title: "List Reddit actions",
-      description: "Every comment, reply, post, thread group and upvote order, newest first: status (live, removed, gone...), Reddit link, score, days live, cost. next_before pages back.",
+      description: "Every comment, reply, post, thread group and upvote order, newest first: status (live, removed, gone...), Reddit link, score, days live, cost. Page back with cursor=next_cursor.",
       inputSchema: {
         brand: z.string().optional(),
         status: z.string().optional().describe("One or more, comma-separated: draft, approved, sending, submitted, live, frozen, removed, hidden, gone, failed, cancelled, done."),
         kind: z.enum(["comment", "reply", "post", "thread", "upvotes"]).optional(),
         subreddit: z.string().optional(),
         experiment_id: z.string().uuid().optional(),
-        before: z.string().optional().describe("next_before from the previous page."),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
         limit: z.number().int().min(1).max(200).optional(),
       },
       annotations: read,

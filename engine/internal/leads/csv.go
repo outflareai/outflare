@@ -40,11 +40,11 @@ var aliases = map[string][]string{
 	"first_name":   {"first name", "firstname", "first", "given name"},
 	"last_name":    {"last name", "lastname", "last", "surname", "family name"},
 	"name":         {"name", "full name", "contact name", "person name"},
-	"company":      {"company", "company name", "organization", "organisation", "organization name", "account name", "employer"},
+	"company":      {"company", "company name", "organization", "organisation", "organization name", "account name", "employer", "outlet", "outlet name", "publication"},
 	"title":        {"title", "job title", "position", "role", "headline"},
 	"phone":        {"phone", "phone number", "mobile", "mobile phone", "direct phone", "work phone"},
 	"linkedin_url": {"linkedin", "linkedin url", "person linkedin url", "linkedin profile", "profile url"},
-	"website":      {"website", "company website", "domain", "company domain", "website url"},
+	"website":      {"website", "company website", "domain", "company domain", "website url", "outlet website", "outlet domain", "publication website"},
 }
 
 const (

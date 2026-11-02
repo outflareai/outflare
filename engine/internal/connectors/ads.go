@@ -67,6 +67,28 @@ type AdDay struct {
 	Clicks                int64    `json:"clicks"`
 	Conversions           *float64 `json:"conversions,omitempty"`
 	ConversionValueMicros *int64   `json:"conversion_value_micros,omitempty"`
+	AdExtra
+}
+
+// AdExtra is what some platforms report beside spend, impressions and
+// clicks; nil or empty where the platform didn't say.
+type AdExtra struct {
+	// Reach is how many people saw it that day (Meta). Days don't add up
+	// to people: someone reached on two days counts twice.
+	Reach            *int64 `json:"reach,omitempty"`
+	LinkClicks       *int64 `json:"link_clicks,omitempty"`
+	LandingPageViews *int64 `json:"landing_page_views,omitempty"`
+	VideoViews       *int64 `json:"video_views,omitempty"`
+	// Actions are the day's conversions by the platform's own action or
+	// conversion name.
+	Actions []AdAction `json:"actions,omitempty"`
+}
+
+// AdAction is one kind of conversion the platform counted.
+type AdAction struct {
+	Name        string  `json:"name"`
+	Conversions float64 `json:"conversions"`
+	ValueMicros *int64  `json:"value_micros,omitempty"`
 }
 
 // AdsReader reads an ad platform. It must not change anything there.
@@ -111,6 +133,13 @@ const (
 	AdDetailURL       = "url"
 	AdDetailURLTags   = "url_tags"
 	AdDetailThumbnail = "thumbnail_url"
+	// AdDetailTemplated is "true" when the ad's links carry Outflare's
+	// tracking template (adtrack.HasTemplate), "false" when they don't,
+	// and missing when the platform didn't say.
+	AdDetailTemplated = "templated"
+	// AdDetailTrackingTemplate is a Google ad's tracking template, its own
+	// or the one it inherits.
+	AdDetailTrackingTemplate = "tracking_template"
 )
 
 // AdItemDay is one ad group's or ad's numbers for one day, like AdDay.
@@ -124,6 +153,46 @@ type AdItemDay struct {
 	Clicks                int64    `json:"clicks"`
 	Conversions           *float64 `json:"conversions,omitempty"`
 	ConversionValueMicros *int64   `json:"conversion_value_micros,omitempty"`
+	AdExtra
+}
+
+// AdKeywordDay is one search keyword's numbers for one day (Google).
+type AdKeywordDay struct {
+	ID        string `json:"id"`
+	AdGroupID string `json:"ad_group_id"`
+	Text      string `json:"text"`
+	// MatchType is exact, phrase or broad.
+	MatchType             string   `json:"match_type"`
+	Status                string   `json:"status"`
+	Date                  string   `json:"date"`
+	SpendMicros           int64    `json:"spend_micros"`
+	Impressions           int64    `json:"impressions"`
+	Clicks                int64    `json:"clicks"`
+	Conversions           *float64 `json:"conversions,omitempty"`
+	ConversionValueMicros *int64   `json:"conversion_value_micros,omitempty"`
+}
+
+// AdSearchTermDay is what people searched that showed an ad, one day
+// (Google), with the keyword it matched.
+type AdSearchTermDay struct {
+	Term                  string   `json:"term"`
+	AdGroupID             string   `json:"ad_group_id"`
+	KeywordText           string   `json:"keyword_text"`
+	KeywordMatchType      string   `json:"keyword_match_type"`
+	Date                  string   `json:"date"`
+	SpendMicros           int64    `json:"spend_micros"`
+	Impressions           int64    `json:"impressions"`
+	Clicks                int64    `json:"clicks"`
+	Conversions           *float64 `json:"conversions,omitempty"`
+	ConversionValueMicros *int64   `json:"conversion_value_micros,omitempty"`
+}
+
+// AdKeywordsReader is a search ad platform that reads keywords and the
+// searches they matched.
+type AdKeywordsReader interface {
+	AdsReader
+	AdKeywordDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, from, to string) ([]AdKeywordDay, error)
+	AdSearchTermDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, from, to string) ([]AdSearchTermDay, error)
 }
 
 // AdItemsReader is an ad platform that also reads ad groups and ads.

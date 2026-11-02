@@ -144,6 +144,54 @@ func (m txts) LookupTXT(_ context.Context, name string) ([]string, error) {
 	return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
 
+// LookupMX answers with the hosts set at "mx:" plus the name.
+func (m txts) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
+	var out []*net.MX
+	for _, h := range m["mx:"+name] {
+		out = append(out, &net.MX{Host: h + ".", Pref: 10})
+	}
+	if out == nil {
+		return nil, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
+	}
+	return out, nil
+}
+
+// Records Cloudflare would add beside the ones already there, instead of
+// replacing them, are left to a DNS host connection.
+func TestConflicts(t *testing.T) {
+	res := txts{
+		"google._domainkey.example.com": {"v=DKIM1; k=rsa; p=OLD"},
+		"_dmarc.example.com":            {"v=DMARC1; p=quarantine"},
+		"_dmarc.example.org":            {"some-other-verification=1"},
+		"mx:example.com":                {"mx.example.net"},
+	}
+	c := &Client{Resolver: res}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		rec    Rec
+		reason string
+	}{
+		{"second DKIM key", Rec{Type: "TXT", Name: "google._domainkey.example.com", Value: "v=DKIM1; k=rsa; p=NEW"}, ReasonConflict},
+		{"second DMARC policy", Rec{Type: "TXT", Name: "_dmarc.example.com", Value: "v=DMARC1; p=none;"}, ReasonConflict},
+		{"MX over the domain's own", Rec{Type: "MX", Name: "example.com", Value: "smtp.google.com", Priority: 1}, ReasonConflict},
+		{"new DKIM selector", Rec{Type: "TXT", Name: "resend._domainkey.example.com", Value: "p=KEY"}, ""},
+		{"no DMARC policy yet", Rec{Type: "TXT", Name: "_dmarc.example.org", Value: "v=DMARC1; p=none;"}, ""},
+		{"no MX yet", Rec{Type: "MX", Name: "example.org", Value: "smtp.google.com", Priority: 1}, ""},
+		{"SPF merges", Rec{Type: "TXT", Name: "example.com", Value: "v=spf1 include:_spf.google.com ~all"}, ""},
+	} {
+		err := c.Conflicts(ctx, []Rec{tc.rec})
+		if got := ""; err != nil {
+			got = ReasonOf(err)
+			if got != tc.reason {
+				t.Errorf("%s: %q", tc.name, got)
+			}
+		} else if tc.reason != "" {
+			t.Errorf("%s: no conflict", tc.name)
+		}
+	}
+}
+
 func TestDiscoverAndApply(t *testing.T) {
 	var supported bool
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +259,20 @@ func TestDiscoverAndApply(t *testing.T) {
 	sum := sha256.Sum256([]byte(signed))
 	if err := rsa.VerifyPKCS1v15(pub.(*rsa.PublicKey), crypto.SHA256, sum[:], sig); err != nil {
 		t.Fatalf("signature: %v", err)
+	}
+
+	// A subdomain CNAME never goes out without host=: Cloudflare would put
+	// it on the apex, over the site.
+	track := []Rec{{Type: "CNAME", Name: "example.com", Value: "app.outflare.ai"}}
+	p, ok := PlanFor("tracking", "example.com", track, track)
+	if !ok {
+		t.Fatal("no tracking plan")
+	}
+	if _, err := c.ApplyURL(Zone{Domain: "example.com", Settings: z.Settings}, p, "https://app.outflare.ai/", "dc.2"); ReasonOf(err) != ReasonNoTemplate {
+		t.Fatalf("apex CNAME: %v", err)
+	}
+	if link, err := c.ApplyURL(Zone{Domain: "example.com", Host: "links", Settings: z.Settings}, p, "https://app.outflare.ai/", "dc.2"); err != nil || !strings.Contains(link, "host=links") {
+		t.Fatalf("subdomain CNAME: %s %v", link, err)
 	}
 
 	res[KeyID+"."+PubKeyDomain] = key.TXT()

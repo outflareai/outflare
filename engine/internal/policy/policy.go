@@ -49,9 +49,10 @@ func CheckRecipients(ctx context.Context, q Querier, workspaceID string, emails 
 // CheckRecipientsIn is CheckRecipients for an email of one brand
 // (plans/brands/README.md, decision 5): a person's consent and review
 // count only in the brand they came from, so only that brand's people
-// with the address decide. Suppressions (unsubscribes from the link of an
-// email with no topic, bounces, complaints, the opt-out list) count for
-// every brand. An empty brand looks at every brand's people.
+// with the address decide. A suppression counts in its own brand, and one
+// for every brand (bounces, complaints, blocklists, what an admin applied
+// to every brand) everywhere. An empty brand looks at every brand's people
+// and suppressions.
 func CheckRecipientsIn(ctx context.Context, q Querier, workspaceID, brand string, emails []string) ([]Decision, error) {
 	out := make([]Decision, len(emails))
 	var check []string
@@ -72,7 +73,8 @@ func CheckRecipientsIn(ctx context.Context, q Querier, workspaceID, brand string
 		FROM unnest($2::text[]) AS e
 		JOIN suppressions s ON s.workspace_id = $1 AND (
 			(s.kind = 'email' AND s.value = e) OR
-			(s.kind = 'domain' AND s.value = split_part(e, '@', 2)))`, workspaceID, check)
+			(s.kind = 'domain' AND s.value = split_part(e, '@', 2)))
+			AND ($3 = '' OR s.brand_id IS NULL OR s.brand_id = NULLIF($3, '')::uuid)`, workspaceID, check, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +259,13 @@ const (
 // marketing email: a send of a topic someone agreed to on its own may
 // still reach them.
 func CheckContacts(ctx context.Context, q Querier, workspaceID, purpose string, emails []string) ([]Decision, error) {
-	out, err := CheckPurpose(ctx, q, workspaceID, purpose, emails)
+	return CheckContactsIn(ctx, q, workspaceID, "", purpose, emails)
+}
+
+// CheckContactsIn is CheckContacts for email of one brand (see
+// CheckRecipientsIn).
+func CheckContactsIn(ctx context.Context, q Querier, workspaceID, brand, purpose string, emails []string) ([]Decision, error) {
+	out, err := CheckPurposeIn(ctx, q, workspaceID, brand, purpose, emails)
 	if err != nil || purpose != PurposeLifecycle {
 		return out, err
 	}
@@ -314,6 +322,12 @@ type DomainDecision struct {
 // (suppressed_domain:<reason>): so a lead search can skip a competitor,
 // customer or partner company before it finds anyone's address.
 func CheckDomains(ctx context.Context, q Querier, workspaceID, purpose string, domains []string) ([]DomainDecision, error) {
+	return CheckDomainsIn(ctx, q, workspaceID, "", purpose, domains)
+}
+
+// CheckDomainsIn is CheckDomains for email of one brand: its own entries
+// and those for every brand count. An empty brand counts every entry.
+func CheckDomainsIn(ctx context.Context, q Querier, workspaceID, brand, purpose string, domains []string) ([]DomainDecision, error) {
 	out := make([]DomainDecision, len(domains))
 	lower := make([]string, len(domains))
 	for i, d := range domains {
@@ -321,7 +335,8 @@ func CheckDomains(ctx context.Context, q Querier, workspaceID, purpose string, d
 		out[i] = DomainDecision{Domain: lower[i], Allowed: true, Reasons: []string{}}
 	}
 	rows, err := queryRows(ctx, q, `SELECT s.value, s.reason, '' FROM suppressions s
-		WHERE s.workspace_id = $1 AND s.kind = 'domain' AND s.value = ANY($2::text[])`, workspaceID, lower)
+		WHERE s.workspace_id = $1 AND s.kind = 'domain' AND s.value = ANY($2::text[])
+		  AND ($3 = '' OR s.brand_id IS NULL OR s.brand_id = NULLIF($3, '')::uuid)`, workspaceID, lower, brand)
 	if err != nil {
 		return nil, err
 	}

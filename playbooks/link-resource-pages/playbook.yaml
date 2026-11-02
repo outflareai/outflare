@@ -41,7 +41,7 @@ steps:
   - say: Keep the pages the AI read as lists of resources on your topic, and delete the rest.
     tools: [getLinkProspect, deleteLinkProspect]
   - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
-    tools: [listLinkSequences, createLinkSequence, previewSequence]
+    tools: [listLinkSequences, createLinkSequence, previewBrandSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
     tools: [startLinkPitch, listLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.

@@ -95,16 +95,18 @@ func (s *Server) coverageList(w http.ResponseWriter, r *http.Request, name strin
 		return
 	}
 	where += extra
-	limit, offset := 50, 0
-	for key, dest := range map[string]*int{"limit": &limit, "offset": &offset} {
-		if q.Has(key) {
-			n, err := strconv.Atoi(q.Get(key))
-			if err != nil || n < 0 || (key == "limit" && (n < 1 || n > 200)) {
-				writeError(w, r, 400, "invalid_request", "invalid pagination")
-				return
-			}
-			*dest = n
+	limit := 50
+	if q.Has("limit") {
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, r, 400, "invalid_request", "limit must be a whole number from 1 to 200")
+			return
 		}
+		limit = n
+	}
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	var total int
 	if err := s.pool.QueryRow(r.Context(), "SELECT count(*) FROM "+res.Table+" WHERE "+where, args...).Scan(&total); err != nil {
@@ -136,7 +138,7 @@ func (s *Server) coverageList(w http.ResponseWriter, r *http.Request, name strin
 		n := offset + len(data)
 		next = &n
 	}
-	writeJSON(w, 200, map[string]any{"data": data, "total": total, "next_offset": next})
+	writeJSON(w, 200, map[string]any{"data": data, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 func (s *Server) coverageGet(w http.ResponseWriter, r *http.Request, name string, res coverageResource) {
 	a := accessFrom(r.Context())

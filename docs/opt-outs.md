@@ -41,7 +41,7 @@ A broadcast that has not started shows its audience by basis (`audience_bases`) 
 
 ## The opt-out list
 
-`GET /v1/workspaces/{ws}/suppressions` (MCP `list_suppressions`) is the one list every send checks: every unsubscribe, bounce and complaint from any tool, and the entries people add. Each entry says:
+`GET /v1/brands/{brand}/suppressions` (MCP `list_suppressions`) is the list every send of the brand checks: every unsubscribe, bounce and complaint from any tool, and the entries people add. Each entry says:
 
 - **why** (`reason`). `unsubscribed` stops cold and marketing email but not receipts. `competitor` stops cold and marketing email. `customer`, `partner` and `blocklist` (on a connected sequencer's blocklist) keep people out of cold email only. `bounced`, `complained`, `manual`, `legal` and `do_not_contact` stop every email.
 - **how** (`method`): `manual` (a person), `automated` (a bounce, an unsubscribe link, a sync) or `ai_suggested`, when the AI read a reply as an opt-out. An AI suggestion has the AI's `confidence` and the reply in `evidence`.
@@ -49,7 +49,16 @@ A broadcast that has not started shows its audience by basis (`audience_bases`) 
 
 Filter with `reason`, `method`, `source` and `integration_id`.
 
-Add up to 100,000 emails or domains at once with `POST .../suppressions` (MCP `add_suppressions`). That is how a list moves over from an old tool: give `source` (such as `hubspot_export`) and `reason` (say, `competitor` for rivals' domains).
+Add up to 100,000 emails or domains at once with `POST /v1/brands/{brand}/suppressions` (MCP `add_suppressions`). That is how a list moves over from an old tool: give `source` (such as `hubspot_export`) and `reason` (say, `competitor` for rivals' domains).
+
+### Per brand, or every brand
+
+Brands are separate businesses (`plans/brands/README.md`, decision 5), so an opt-out applies to the brand it came from: an unsubscribe link, a reply asking to stop, a lead or person deleted with "never email", a journey's do-not-contact step and an entry added under `/v1/brands/{brand}/` carry that brand (`brand_id`), and only that brand's sends and lead imports count it. Some entries apply to every brand (`brand_id` null):
+
+- hard bounces, spam complaints and sequencer blocklists, which are facts about the address and hurt sending everywhere;
+- what a workspace admin applies to every brand: `all_brands: true` on the brand route, or `POST /v1/workspaces/{ws}/suppressions`, which adds for every brand as before. A member or token kept to some brands can't (`403`). One brand's opt-in never clears an entry applied to every brand.
+
+A brand's list shows its own entries and those for every brand. A brand removes only its own entries; one for every brand is removed with `DELETE /v1/workspaces/{ws}/suppressions/{id}`. Until the brands contract step an address has one entry per workspace, so when a second brand opts out the same address, the entry widens to every brand rather than dropping either opt-out. `GET /v1/workspaces/{ws}/suppressions` is deprecated: without `?brand=` it is the workspace's first brand's view, and `?brand=all` lists everything.
 
 ## Kept in step with your sequencers
 

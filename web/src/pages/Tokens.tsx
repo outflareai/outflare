@@ -124,6 +124,7 @@ export function Tokens({ ws, open, setOpen, go }: { ws: string; open?: string; s
                   <span className="font-medium">{t.name}</span>
                   <span className="font-mono text-[11px] text-muted-foreground">{t.prefix}…</span>
                   {byId(t.brand_id) && <Badge title={`Only ${byId(t.brand_id)!.name}`}>{byId(t.brand_id)!.name}</Badge>}
+                  {t.action_gate && <Badge tone="blue" title="Its changes go through the action layer">Agent</Badge>}
                 </span>
               ),
             },
@@ -171,6 +172,7 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
   const [budget, setBudget] = useState(t?.daily_send_budget ? String(t.daily_send_budget) : "");
   const [maxPriority, setMaxPriority] = useState<"" | "low" | "normal" | "high">(t ? (t.max_priority ?? "") : "normal");
   const [mayTake, setMayTake] = useState(t?.may_take_mailboxes ?? false);
+  const [actionGate, setActionGate] = useState(t?.action_gate ?? false);
   const [team, setTeam] = useState(t?.default_team_id ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -188,7 +190,7 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
     setBusy(true);
     const limits = { daily_send_budget: budget ? Number(budget) : null, max_priority: maxPriority || null, may_take_mailboxes: mayTake, default_team_id: team || null };
     if (t) {
-      const { error } = await api.PATCH("/v1/workspaces/{ws}/api-tokens/{id}", { params: { path: { ws, id: t.id! } }, body: { name: name.trim(), scopes, ...limits } });
+      const { error } = await api.PATCH("/v1/workspaces/{ws}/api-tokens/{id}", { params: { path: { ws, id: t.id! } }, body: { name: name.trim(), scopes, action_gate: actionGate, ...limits } });
       setBusy(false);
       if (error) return setError(errorMessage(error));
       toast(`Saved "${name.trim()}". It applies on the token's next request.`);
@@ -197,7 +199,7 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
     }
     const { data, error } = await api.POST("/v1/workspaces/{ws}/api-tokens", {
       params: { path: { ws } },
-      body: { name: name.trim(), scopes, expires_in_days: expires || undefined, brand: brand || null, ...limits },
+      body: { name: name.trim(), scopes, expires_in_days: expires || undefined, brand: brand || null, action_gate: actionGate, ...limits },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -274,6 +276,14 @@ function TokenSheet({ ws, teams, token: t, onClose, onDone, onRevoked }: { ws: s
               ))}
             </div>
           </details>
+
+          <label className="flex items-start gap-2 rounded-lg border px-3 py-2.5">
+            <input type="checkbox" className="mt-0.5" checked={actionGate} onChange={(e) => setActionGate(e.target.checked)} />
+            <span>
+              <span className="block font-medium">It's an agent: send its changes through the action layer</span>
+              <span className="block text-[12px] text-muted-foreground">Each change it makes runs, waits for a person or is refused, by the grants you set on the Agents page. A new agent starts out asking for everything, and never needs a mission.</span>
+            </span>
+          </label>
 
           {!t && (
             <div className="grid gap-4 sm:grid-cols-2">

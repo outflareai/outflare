@@ -88,7 +88,7 @@ export function CRMImportDialog({ ws, integration, onClose }: { ws: string; inte
             </fieldset>
             {later && (
               <p className="text-[12px] text-muted-foreground">
-                Lists, notes and tasks ({plural(preview.lists.length, "list")}, {count(preview.notes)} notes, {count(preview.tasks)} tasks) stay in {tool} for now. They come over once Outflare's CRM has them.
+                Lists become entry objects linked to their original people or companies, preserving each list’s own fields and stages. Record-linked notes and tasks follow the objects. Review the warnings for unmatched links or owners.
               </p>
             )}
           </div>

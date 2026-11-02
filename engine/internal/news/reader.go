@@ -201,6 +201,9 @@ func (r *Reader) store(ctx context.Context, ws, articleID, domain string, a Arti
 			return err
 		}
 		journalist = person
+		if err := markJournalist(ctx, tx, ws, person, articleID); err != nil {
+			return err
+		}
 		data := map[string]any{"article_id": articleID, "outlet_record_id": outlet, "confidence": a.Confidence}
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "journalist.found",
 			TargetType: "record", TargetID: person, Data: data, Props: data})

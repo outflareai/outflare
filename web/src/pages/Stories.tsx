@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import type { Journalist, PRExpert, Story, StoryCheck, StoryPitch, StoryResult } from "@outflare/sdk";
+import type { Journalist, PRExpert, QuoteApprovalRequest, Story, StoryCheck, StoryPitch, StoryResult } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, errorMessage } from "../api";
-import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast, type tones } from "../ui";
+import { ask, Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, Menu, PageHeader, toast, type tones } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
 
@@ -33,6 +33,47 @@ const problemLabel: Record<StoryCheck["errors"][number]["code"], string> = {
   hype_phrase: "Hype",
   needs_second_look: "A finance or health claim to check",
 };
+// Why an approval email failed or a request stopped, in words.
+const requestReason: Record<string, string> = {
+  no_mailbox_allocated: "no mailbox is allocated to the sequence",
+  outside_sending_window: "it waits for the sequence's sending window",
+  mailbox_daily_limit: "the sequence's mailboxes are at their daily limit",
+  suppressed_email: "the address is suppressed",
+  suppressed_domain: "the domain is suppressed",
+  bounced: "it bounced",
+  send_failed: "the mailbox couldn't deliver it",
+  missing_variable: "the sequence's step uses a field the expert doesn't have",
+  words_changed: "the words changed",
+  withdrawn: "the quote was withdrawn",
+  approved_by_person: "someone recorded the approval",
+  replaced: "a newer request replaced it",
+};
+
+// requestLine says where a quote's latest request to its expert stands.
+function requestLine(r: QuoteApprovalRequest): string {
+  const how = r.delivery === "email" ? "Emailed" : "Link made";
+  const opened = r.opened_at ? `, opened ${ago(r.opened_at)}` : ", not opened yet";
+  const why = r.reason && requestReason[r.reason] ? `: ${requestReason[r.reason]}` : "";
+  switch (r.status) {
+    case "sending":
+      return `Waiting in the sequence${why}`;
+    case "open":
+      return `${how} ${ago(r.sent_at ?? r.created_at)}${opened}`;
+    case "failed":
+      return `The email wasn't sent${why}`;
+    case "approved":
+      return `The expert approved it ${ago(r.decided_at ?? r.created_at)}`;
+    case "changes_suggested":
+      return `The expert suggested other words ${ago(r.decided_at ?? r.created_at)}`;
+    case "declined":
+      return `The expert declined ${ago(r.decided_at ?? r.created_at)}${r.expert_note ? `: "${r.expert_note}"` : ""}`;
+    case "expired":
+      return `${how} ${ago(r.created_at)}; the link expired`;
+    default:
+      return `The last link stopped working${why}`;
+  }
+}
+
 // AI errors that need someone to set something up, worded for the button.
 const aiSetup = new Set(["connector_needed", "ai_model_needed"]);
 
@@ -199,6 +240,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   const { byId } = useBrand(ws);
   const [story, setStory] = useState<Story | null>(null);
   const [experts, setExperts] = useState<PRExpert[]>([]);
+  const [sequences, setSequences] = useState<{ id: string; name: string }[]>([]);
   const [edit, setEdit] = useState({ title: "", kind: "data" as Story["kind"], summary: "", release: "" });
   const [fact, setFact] = useState({ statement: "", source_kind: "own_data" as Fact["source_kind"], source_url: "", source_note: "" });
   const [quote, setQuote] = useState({ body: "", expert_id: "" });
@@ -221,6 +263,12 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   useEffect(() => {
     if (!story) return;
     api.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) => setExperts(data?.data ?? []));
+    // Approval emails go out through one of the brand's own active sequences.
+    if (canManage) {
+      api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) =>
+        setSequences((data?.data ?? []).filter((q) => q.status === "active")),
+      );
+    }
   }, [ws, story?.brand_id]); // eslint-disable-line react-hooks/exhaustive-deps
   // While the AI drafts, look again every few seconds.
   useEffect(() => {
@@ -309,6 +357,63 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   };
   const patchQuote = async (q: Quote, body: { status: Quote["status"]; approval_note?: string }) => {
     done(await api.PATCH("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}", { params: { path: { ...path, quote: q.id } }, body }));
+  };
+  const askExpert = async (q: Quote) => {
+    const x = experts.find((e) => e.id === q.expert_id);
+    const name = x?.name ?? "the expert";
+    const canEmail = !!x?.email && sequences.length > 0;
+    let sequence = sequences[0]?.id ?? "";
+    const r = await ask({
+      title: `Ask ${name} to approve these words`,
+      body: (
+        <div className="space-y-2">
+          <blockquote className="border-l-2 pl-3 text-[13px]">{q.body}</blockquote>
+          <p className="text-[13px] text-muted-foreground">
+            They get a page where they approve these exact words, suggest a change or decline, with no account. The link works once, for 14 days, and stops working if the words change.
+            {!x?.email && " Their record has no email address, so copy the link and send it yourself."}
+            {x?.email && sequences.length === 0 && " To email them, make an active sequence for this brand with one step that carries {{custom.approval_link}}, and allocate the brand's mailboxes to it."}
+          </p>
+          {canEmail && (
+            <label className="flex items-center gap-2 text-[13px]">
+              <span className="text-muted-foreground">Email through</span>
+              <select className={field} aria-label="Sequence" defaultValue={sequence} onChange={(e) => (sequence = e.target.value)}>
+                {sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+          )}
+        </div>
+      ),
+      choices: [
+        { label: "Cancel", value: "cancel", variant: "ghost" },
+        ...(canEmail ? [{ label: "Copy link", value: "link", variant: "ghost" as const }, { label: `Email ${name}`, value: "email" }] : [{ label: "Copy link", value: "link" }]),
+      ],
+    });
+    if (r?.choice !== "link" && r?.choice !== "email") return;
+    setBusy("ask");
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", {
+      params: { path: { ...path, quote: q.id } },
+      body: r.choice === "email" ? { delivery: "email", sequence_id: sequence } : { delivery: "link" },
+    });
+    setBusy("");
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    setReload((n) => n + 1);
+    if (r.choice === "email") return toast(`${name} is in the sequence; it emails them in its next sending window.`);
+    const url = data.url ?? "";
+    await navigator.clipboard?.writeText(url).catch(() => undefined);
+    await ask({
+      title: `Send this link to ${name}`,
+      body: (
+        <div className="space-y-2 text-[13px]">
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded border px-2 py-1 text-[12px]">{url}</code>
+            <CopyButton text={url} label="Copy link" />
+          </div>
+          <p className="text-muted-foreground">Copied. Paste it in Slack or anywhere only {name} reads. It is shown only now: ask again for a new one.</p>
+        </div>
+      ),
+      choices: [{ label: "Done", value: "ok" }],
+    });
   };
   const approveQuote = async (q: Quote) => {
     const r = await ask({
@@ -436,7 +541,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
         </div>
       </Card>
 
-      <Card title="Quotes" description="Drafted for one of the brand's experts. A quote can go in the release only once you record that the expert approved those exact words.">
+      <Card title="Quotes" description="Drafted for one of the brand's experts. A quote can go in the release only once the expert approved those exact words: ask them, and they approve from an email or a link.">
         <div className="space-y-3">
           {quotes.length === 0 && <p className="text-[13px] text-muted-foreground">No quotes yet.</p>}
           <ul className="space-y-2">
@@ -447,13 +552,28 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
                   <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
                     <span>{expertName(q.expert_id)}</span>
                     <Badge tone={quoteTone[q.status]}>{q.status === "draft" ? "Waiting for approval" : q.status === "approved" ? "Approved" : "Withdrawn"}</Badge>
+                    {q.suggested_at && <Badge tone="blue">The expert's words</Badge>}
                     {q.approval_note && <span>{q.approval_note}</span>}
                   </div>
+                  {q.approval_request && q.status !== "approved" && <div className="text-[12px] text-muted-foreground">{requestLine(q.approval_request)}</div>}
+                  {q.suggested_at && q.approval_request?.status === "changes_suggested" && (
+                    <div className="space-y-1 rounded border p-2 text-[12px]">
+                      <div className="text-muted-foreground">They changed: "{q.approval_request.body}"</div>
+                      {q.approval_request.expert_note && <div className="text-muted-foreground">Their note: {q.approval_request.expert_note}</div>}
+                      {canManage && (
+                        <Button variant="ghost" disabled={busy === "ask"} onClick={() => askExpert(q)}>Accept their words and ask again</Button>
+                      )}
+                    </div>
+                  )}
                 </div>
+                {canManage && q.status === "draft" && !q.suggested_at && q.approval_request?.status !== "open" && q.approval_request?.status !== "sending" && (
+                  <Button variant="ghost" disabled={busy === "ask"} onClick={() => askExpert(q)}>Ask the expert</Button>
+                )}
                 {canManage && (
                   <Menu
                     aria="More for this quote"
                     items={[
+                      q.status === "draft" && { label: q.approval_request?.status === "open" || q.approval_request?.status === "sending" ? "Ask the expert again" : "Ask the expert", onClick: () => askExpert(q) },
                       q.status !== "approved" && { label: "Record the expert's approval", onClick: () => approveQuote(q) },
                       q.status !== "withdrawn" && { label: "Withdraw", onClick: () => patchQuote(q, { status: "withdrawn" }) },
                       q.status === "withdrawn" && { label: "Back to draft", onClick: () => patchQuote(q, { status: "draft" }) },
@@ -524,7 +644,7 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
   }, [list]);
   useEffect(() => {
     if (!approved || !canManage) return;
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: story.brand_id } } }).then(({ data }) => {
       const open = (data?.data ?? []).filter((q) => q.status !== "archived");
       setSequences(open);
       setSequence((s) => s || open[0]?.id || "");
@@ -555,6 +675,16 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
     setError("");
     setReload((n) => n + 1);
   };
+  const createSequence = async () => {
+    setBusy("sequence");
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/pitch-sequence", { params: { path: { ws } }, body: { brand_id: story.brand_id } });
+    setBusy("");
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    setSequences((list) => [...list, { id: data.id, name: data.name }]);
+    setSequence(data.id);
+    toast(`Created ${data.name}, a draft. Give it mailboxes and activate it under Sequences before journalists get anything.`);
+  };
   const reject = async (p: StoryPitch) => {
     const { error } = await api.POST("/v1/workspaces/{ws}/story-pitches/{pitch}/reject", { params: { path: { ws, pitch: p.id } }, body: {} });
     if (error) return setError(errorMessage(error));
@@ -578,10 +708,11 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
         {approved && canManage && (
           <div className="space-y-2">
             {sequences.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
-                Make a sequence for pitches first: 1 or 2 steps that use {"{{custom.opener}}"}, stopping on reply.{" "}
+              <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
+                <span>Pitches go through a sequence: 1 or 2 steps that use {"{{custom.opener}}"}, stopping on reply.</span>
+                <Button variant="ghost" disabled={busy === "sequence"} onClick={createSequence}>Create a pitch sequence</Button>
                 <button type="button" className="underline" onClick={() => go("sequences")}>Sequences</button>
-              </p>
+              </div>
             ) : journalists.length === 0 ? (
               <p className="text-[12px] text-muted-foreground">
                 No journalists yet. They come from the articles your news searches find.{" "}
@@ -597,7 +728,7 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
                       <span className="min-w-0">
                         <span className="font-medium">{j.name || j.email}</span>
                         <span className="text-muted-foreground"> · {j.outlets.join(", ")}</span>
-                        {j.latest_article.title && <span className="block truncate text-[12px] text-muted-foreground">{j.latest_article.title}</span>}
+                        {j.latest_article?.title && <span className="block truncate text-[12px] text-muted-foreground">{j.latest_article.title}</span>}
                       </span>
                     </label>
                   ))}
@@ -609,7 +740,11 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
                   <Button disabled={picked.length === 0 || !sequence || busy === "start"} onClick={start}>
                     Pitch {picked.length || ""} journalist{picked.length === 1 ? "" : "s"}
                   </Button>
+                  <Button variant="ghost" disabled={busy === "sequence"} onClick={createSequence}>Create a pitch sequence</Button>
                 </div>
+                <p className="text-[12px] text-muted-foreground">
+                  A new pitch sequence is a draft with the headline and the opener: give it mailboxes and activate it under Sequences before journalists get anything.
+                </p>
               </>
             )}
           </div>

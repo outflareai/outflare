@@ -196,7 +196,7 @@ func (s *Server) updateInboxTag(w http.ResponseWriter, r *http.Request) {
 				return errConflict
 			}
 			if _, err := tx.Exec(ctx, `
-				UPDATE inbound_messages SET tags = array_replace(tags, $2, $3), labels = array_replace(tags, $2, $3)
+				UPDATE inbound_messages SET tags = array_replace(tags, $2, $3)
 				WHERE workspace_id = $1 AND $2 = ANY(tags)`, a.WorkspaceID, cur.Name, name); err != nil {
 				return err
 			}
@@ -228,7 +228,7 @@ func (s *Server) deleteInboxTag(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = array_remove(tags, $2), labels = array_remove(tags, $2) WHERE workspace_id = $1 AND $2 = ANY(tags)`,
+		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = array_remove(tags, $2) WHERE workspace_id = $1 AND $2 = ANY(tags)`,
 			a.WorkspaceID, cur.Name)
 		if err != nil {
 			return err

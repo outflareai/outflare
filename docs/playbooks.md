@@ -20,6 +20,10 @@ Opening one shows what it needs, its steps and the API operations each step uses
 
 Missions started from a playbook carry `playbook_id` and `playbook_version`, so results can be compared per playbook and version.
 
+### As an agent run on the action layer
+
+**Start** on a playbook in the web app starts it as an **agent run**, with a mode picker (copilot, autonomous with a budget, or dry run); the run opens on the Agents page, under **Runs**. Over the API, `POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs` (`missions.run`) starts the playbook as an agent run instead of a mission: Outflare's agent carries it out in turns as an agent token of its own, and the mode (`copilot`, `autonomous` with `max_spend_cents`, or `dry_run`) sets the token's grants, so every change it makes runs, waits for a person or is refused by the action layer and shows on the Agents page ([actions.md](actions.md), "Outflare's agent on the action layer"). `GET .../agent-runs` lists runs; people write to one with `POST .../agent-runs/{id}/updates`. Missions keep working until they are retired.
+
 ## Running one by itself
 
 A playbook can run by itself, on a schedule or when something happens. This is a **playbook automation**:
@@ -39,7 +43,7 @@ A playbook can suggest what suits it (its `automation:` section), and setting on
 - **who runs it**: Outflare's agent, with the workspace's own AI model, or your own agent's token;
 - a **spend limit per run** and **per month**, on the workspace's own connected accounts.
 
-Then each run starts by itself: a mission from the playbook, approved by the automation with that mode and those limits. It acts with the approving person's rights as they are when it runs, never more. Changing anything but the name sends the automation back to draft for approval. An agent can set one up, but only a person can approve it.
+Then each run starts by itself. When Outflare's agent runs it, each run is an **agent run** on the action layer ([actions.md](actions.md), "Outflare's agent on the action layer"): the mode becomes the run's grants (dry run refuses and keeps every change, approve each write holds every change for a person, within limits runs them with the spend limit per run as the cap), and its changes show on the Agents page. With your own agent's token, each run is a mission from the playbook, approved by the automation with that mode and those limits. It acts with the approving person's rights as they are when it runs, never more. Changing anything but the name sends the automation back to draft for approval. An agent can set one up, but only a person can approve it.
 
 **It stops for a person, never around them.** An automation is **held**, with the reason shown, when:
 
@@ -59,9 +63,9 @@ Deciding which playbooks to run toward a target, and changing course from the re
 | `POST .../playbook-automations/{id}/approve` | Turn it on, or back on (`missions.approve`, a person only) |
 | `POST .../playbook-automations/{id}/pause` | Pause it (`missions.run`) |
 | `POST .../playbook-automations/{id}/run` | Start a run now, inside its limits (`missions.run`) |
-| `GET .../playbook-automations/{id}/runs` | The missions it started |
+| `GET .../playbook-automations/{id}/runs` | The runs it started: `agent_runs` (Outflare's agent) and `data` (missions of an outside agent's runs) |
 
-The runs' missions carry `automation_id`. MCP has the same tools, except approving.
+The runs carry `automation_id`; the automation shows `last_run_id` or `last_mission_id`. MCP has the same tools, except approving.
 
 ## Setup kits
 

@@ -22,20 +22,41 @@ const linkNow = 1000
 
 // ImportResult summarises an import.
 type ImportResult struct {
-	Created    int        `json:"created"`
-	Updated    int        `json:"updated"`
-	Duplicates int        `json:"duplicates"` // rows merged into an earlier row for the same email
-	Suppressed int        `json:"suppressed"` // imported leads that are on the suppression list
+	Created    int `json:"created"`
+	Updated    int `json:"updated"`
+	Duplicates int `json:"duplicates"` // rows merged into an earlier row for the same email
+	Suppressed int `json:"suppressed"` // imported leads that are on the suppression list
+	// Addresses that are another brand's leads already, skipped until the
+	// brands contract step lets an address be a lead in two brands.
+	OtherBrand int        `json:"other_brand"`
 	Errors     []RowError `json:"errors"`
 }
 
-// Import upserts leads by email in one round trip: the rows are streamed into
-// a temporary table with COPY, then merged. Non-empty imported fields
-// overwrite stored ones, empty ones keep what is stored, and custom fields
-// are merged. When listID is set every imported lead is added to that list.
-// Leads must already be deduplicated (see Dedupe).
+// Import is ImportIn for the workspace's first brand, where leads made by
+// features that don't belong to a brand yet go.
 func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *string, leads []Lead) (ImportResult, error) {
+	return ImportIn(ctx, tx, workspaceID, "", source, listID, leads)
+}
+
+// ImportIn upserts leads of one brand by email in one round trip: the rows
+// are streamed into a temporary table with COPY, then merged. Non-empty
+// imported fields overwrite stored ones, empty ones keep what is stored,
+// and custom fields are merged. When listID is set every imported lead is
+// added to that list, which must be the brand's. An empty brand is the
+// workspace's first.
+//
+// A lead is unique per brand (plans/brands/README.md, decision 1): the
+// same address in two brands is two people. Until the contract step drops
+// the per-workspace unique index the version before 0371 upserts on, an
+// address that is already another brand's lead is skipped and counted in
+// OtherBrand. Leads must already be deduplicated (see Dedupe).
+func ImportIn(ctx context.Context, tx pgx.Tx, workspaceID, brand, source string, listID *string, leads []Lead) (ImportResult, error) {
 	res := ImportResult{Errors: []RowError{}}
+	if brand == "" {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, workspaceID).Scan(&brand); err != nil {
+			return res, err
+		}
+	}
 	if len(leads) == 0 {
 		return res, nil
 	}
@@ -69,12 +90,21 @@ func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *
 	for _, c := range cols[1:8] {
 		sets = append(sets, keep(c))
 	}
+	// Addresses that are another brand's leads stay there.
+	if err := tx.QueryRow(ctx, `
+		WITH other AS (
+			DELETE FROM lead_import i WHERE EXISTS (SELECT 1 FROM leads l
+				WHERE l.workspace_id = $1 AND lower(l.email) = lower(i.email) AND l.brand_id IS DISTINCT FROM NULLIF($2, '')::uuid)
+			RETURNING 1)
+		SELECT count(*) FROM other`, workspaceID, brand).Scan(&res.OtherBrand); err != nil {
+		return res, err
+	}
 	var ids []string
 	err := tx.QueryRow(ctx, `
 		WITH up AS (
-			INSERT INTO leads (workspace_id, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, source)
-			SELECT $1, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, $2 FROM lead_import
-			ON CONFLICT (workspace_id, lower(email)) DO UPDATE SET
+			INSERT INTO leads (workspace_id, brand_id, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, source)
+			SELECT $1, NULLIF($4, '')::uuid, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, $2 FROM lead_import
+			ON CONFLICT (brand_id, lower(email)) DO UPDATE SET
 				`+strings.Join(sets, ",\n\t\t\t\t")+`,
 				custom = leads.custom || EXCLUDED.custom,
 				updated_at = now()
@@ -85,7 +115,7 @@ func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *
 			ON CONFLICT DO NOTHING
 		)
 		SELECT count(*) FILTER (WHERE inserted), count(*) FILTER (WHERE NOT inserted), COALESCE(array_agg(id::text), '{}') FROM up`,
-		workspaceID, source, listID,
+		workspaceID, source, listID, brand,
 	).Scan(&res.Created, &res.Updated, &ids)
 	if err != nil {
 		return res, err
@@ -110,7 +140,7 @@ func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *
 	}
 	err = tx.QueryRow(ctx, `
 		SELECT count(*) FROM lead_import i
-		WHERE EXISTS (`+SuppressedSQL("$1", "i.email")+`)`, workspaceID).Scan(&res.Suppressed)
+		WHERE EXISTS (`+SuppressedInSQL("$1", "NULLIF($2, '')::uuid", "i.email")+`)`, workspaceID, brand).Scan(&res.Suppressed)
 	if err != nil {
 		return res, err
 	}
@@ -122,11 +152,28 @@ func Import(ctx context.Context, tx pgx.Tx, workspaceID, source string, listID *
 }
 
 // SuppressedSQL is a subquery body matching suppressions of an email
-// expression in a workspace, by address or by domain.
+// expression in a workspace, by address or by domain, in any brand: the
+// careful answer where no brand is known.
 func SuppressedSQL(ws, email string) string {
 	return fmt.Sprintf(`SELECT 1 FROM suppressions s WHERE s.workspace_id = %[1]s AND (
 		(s.kind = 'email' AND s.value = lower(%[2]s)) OR
 		(s.kind = 'domain' AND s.value = lower(split_part(%[2]s, '@', 2))))`, ws, email)
+}
+
+// SuppressedInSQL is SuppressedSQL for email of one brand, the uuid
+// expression brand: the brand's own entries and those for every brand
+// count (plans/brands/README.md, decision 5). A null brand counts every
+// entry.
+func SuppressedInSQL(ws, brand, email string) string {
+	return SuppressedSQL(ws, email) + fmt.Sprintf(` AND (s.brand_id IS NULL OR %[1]s IS NULL OR s.brand_id = %[1]s)`, brand)
+}
+
+// EveryBrand reports whether entries for a reason apply to every brand
+// whatever brand they came from: a hard bounce, a spam complaint and a
+// blocklist listing are facts about the address that hurt sending
+// everywhere (decision 5).
+func EveryBrand(reason string) bool {
+	return reason == "bounced" || reason == "complained" || reason == "blocklist"
 }
 
 // Suppression reasons. competitor, customer and partner are people never
@@ -214,6 +261,9 @@ type Added struct {
 	Confidence *float64
 	// Ids that show why, such as the reply's.
 	Evidence map[string]any
+	// BrandID is the brand the entries apply to; empty applies them to
+	// every brand, as do the reasons EveryBrand names.
+	BrandID string
 }
 
 // Suppress inserts entries, skipping ones already present, and returns how
@@ -244,12 +294,22 @@ func Suppress(ctx context.Context, tx pgx.Tx, workspaceID string, by Added, entr
 	for i, e := range entries {
 		kinds[i], values[i] = e.Kind, e.Value
 	}
+	brand := by.BrandID
+	if EveryBrand(reason) {
+		brand = ""
+	}
+	// An entry is one brand's, or every brand's (null). Until the brands
+	// contract step one address has one entry per workspace (the unique key
+	// the version before 0371 upserts on), so a second brand's entry for
+	// the same address widens it to every brand: never fewer opt-outs than
+	// asked for.
 	rows, err := tx.Query(ctx, `
-		INSERT INTO suppressions (workspace_id, kind, value, reason, source, note, method, added_by, added_by_type, integration_id, confidence, evidence)
-		SELECT $1, k, v, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12 FROM unnest($2::text[], $3::text[]) AS t(k, v)
-		ON CONFLICT (workspace_id, kind, value) DO NOTHING
-		RETURNING kind, value`,
-		workspaceID, kinds, values, reason, source, note, by.Method, nullable(by.ActorID), by.ActorType, nullable(by.IntegrationID), by.Confidence, string(evidence))
+		INSERT INTO suppressions (workspace_id, kind, value, reason, source, note, method, added_by, added_by_type, integration_id, confidence, evidence, brand_id)
+		SELECT $1, k, v, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12, NULLIF($13, '')::uuid FROM unnest($2::text[], $3::text[]) AS t(k, v)
+		ON CONFLICT (workspace_id, kind, value) DO UPDATE SET brand_id = NULL
+			WHERE suppressions.brand_id IS NOT NULL AND suppressions.brand_id IS DISTINCT FROM EXCLUDED.brand_id
+		RETURNING kind, value, (xmax = 0)`,
+		workspaceID, kinds, values, reason, source, note, by.Method, nullable(by.ActorID), by.ActorType, nullable(by.IntegrationID), by.Confidence, string(evidence), brand)
 	if err != nil {
 		return 0, err
 	}
@@ -257,11 +317,15 @@ func Suppress(ctx context.Context, tx pgx.Tx, workspaceID string, by Added, entr
 	var unsubs []customers.Unsubscribe
 	for rows.Next() {
 		var kind, value string
-		if err := rows.Scan(&kind, &value); err != nil {
+		var inserted bool
+		if err := rows.Scan(&kind, &value, &inserted); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		added++
+		// A widened entry isn't new, but this brand's person opted out.
+		if inserted {
+			added++
+		}
 		if kind == "email" {
 			unsubs = append(unsubs, customers.Unsubscribe{Email: value})
 		}
@@ -273,7 +337,7 @@ func Suppress(ctx context.Context, tx pgx.Tx, workspaceID string, by Added, entr
 	// An unsubscribe is also the person withdrawing consent to all
 	// marketing email, on their record, so every module sees it.
 	if reason == "unsubscribed" {
-		if _, err := customers.WithdrawEmails(ctx, tx, workspaceID, source, "", unsubs); err != nil {
+		if _, err := customers.WithdrawEmailsIn(ctx, tx, workspaceID, brand, source, "", unsubs); err != nil {
 			return 0, err
 		}
 	}

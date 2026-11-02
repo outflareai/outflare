@@ -17,6 +17,8 @@ An alert says something needs a person now. Any part of Outflare raises one, onc
 | `ab_test.ready` | A running [A/B test](ab-tests.md) has a clear result (a winner, or the control) and is safe to stop, once per test. | The owners and admins. |
 | `ab_test.split_broken` | A running A/B test's visitors split far from the flag's weights, once per test. | The owners and admins. |
 | `ab_test.guardrail_hurt` | A version of a running A/B test clearly makes one of its guardrails worse, once per guardrail and version. | The owners and admins. |
+| `story_quote.decided` | A PR expert approved a quote, suggested other words or declined it through an [approval link](stories.md#asking-the-expert), once per request. | Who asked the expert, else the owners and admins. |
+| `story_quote.approval_failed` | The email asking a PR expert to approve a quote didn't go out: its outreach sequence blocked it (a suppressed or unverified address) or it failed or bounced, once per request. | Who asked the expert, else the owners and admins. |
 
 A module adds a kind with `alerts.Register` (an id, a title, the scope needed to see it, and how to describe one) and raises it with `alerts.Raise`.
 

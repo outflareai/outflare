@@ -485,16 +485,18 @@ func (s *Server) listKnowledgeItems(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, offset := 50, 0
-	for name, dst := range map[string]*int{"limit": &limit, "offset": &offset} {
-		if v := qs.Get(name); v != "" {
-			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 || (name == "limit" && (n < 1 || n > 200)) {
-				writeError(w, r, http.StatusBadRequest, "invalid_request", name+map[string]string{"limit": " must be a whole number from 1 to 200", "offset": " must be a whole number of 0 or more"}[name])
-				return
-			}
-			*dst = n
+	limit := 50
+	if v := qs.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "limit must be a whole number from 1 to 200")
+			return
 		}
+		limit = n
+	}
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	kind, visibility, status, collection := qs.Get("kind"), qs.Get("visibility"), qs.Get("status"), qs.Get("collection_id")
 	switch {
@@ -556,7 +558,7 @@ func (s *Server) listKnowledgeItems(w http.ResponseWriter, r *http.Request) {
 		n := offset + len(list)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getKnowledgeItem(w http.ResponseWriter, r *http.Request) {

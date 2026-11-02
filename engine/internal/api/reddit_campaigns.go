@@ -478,8 +478,12 @@ func (s *Server) listRedditExperiments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, status, limit}
-	rows, err := s.pool.Query(r.Context(), redditExperimentSelect+` AND ($2 = '' OR e.status = $2)`+sel.sql("e.brand_id", &args)+
+	before, ok := beforeTime(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID, status, limit, before}
+	rows, err := s.pool.Query(r.Context(), redditExperimentSelect+` AND ($2 = '' OR e.status = $2) AND ($4::timestamptz IS NULL OR e.created_at < $4)`+sel.sql("e.brand_id", &args)+
 		` ORDER BY e.created_at DESC LIMIT $3`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -496,7 +500,11 @@ func (s *Server) listRedditExperiments(w http.ResponseWriter, r *http.Request) {
 			out = append(out, v)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	var next *time.Time
+	if len(list) == limit {
+		next = &list[len(list)-1].CreatedAt
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findRedditExperiment(w http.ResponseWriter, r *http.Request, a *access, id string) (*redditExperimentView, bool) {
@@ -805,7 +813,7 @@ func (s *Server) listRedditActions(w http.ResponseWriter, r *http.Request) {
 		n := out[limit-1].CreatedAt.Format(time.RFC3339Nano)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findRedditAction(w http.ResponseWriter, r *http.Request, a *access, id string) (*redditActionView, bool) {

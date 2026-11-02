@@ -72,6 +72,7 @@ func (s *Server) routesEmails(mux *http.ServeMux) {
 		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateEmailTopic))
 	}
 
+	mux.HandleFunc("GET /v1/brands/{brand}/email-broadcasts/{id}/lift", s.onBrand(auth.ScopeAnalyticsRead, s.emailBroadcastLift))
 	for _, b := range s.activationBases("email-broadcasts", s.inWorkspace) {
 		base, on := b.path, b.on
 		mux.HandleFunc("GET "+base, on(read, s.listEmailBroadcasts))
@@ -1487,7 +1488,7 @@ var emailTriggers = []string{"api", "test", "event", "journey", "broadcast", "sy
 
 var emailStatuses = []string{"queued", "scheduled", "sending", "sent", "delivered", "delayed", "bounced", "complained", "suppressed", "failed", "cancelled"}
 
-// listEmails pages emails newest first: ?before=<email id>&limit=<n>,
+// listEmails pages emails newest first (?cursor=&limit=),
 // filtered by status, purpose, template, topic, provider, recipient and test.
 func (s *Server) listEmails(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -1502,17 +1503,21 @@ func (s *Server) listEmails(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	var before, template, provider *string
-	for _, p := range []struct {
-		name string
-		dst  **string
-	}{{"before", &before}, {"provider_id", &provider}} {
-		if v := q.Get(p.name); v != "" {
-			if !validUUID(v) {
-				writeError(w, r, http.StatusBadRequest, "invalid_request", p.name+" must be an id")
-				return
-			}
-			*p.dst = &v
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
+		if !validUUID(v) {
+			invalidCursor(w, r)
+			return
 		}
+		before = &v
+	}
+	if v := q.Get("provider_id"); v != "" {
+		if !validUUID(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "provider_id must be an id")
+			return
+		}
+		provider = &v
 	}
 	if v := q.Get("template"); v != "" {
 		template = &v
@@ -1572,7 +1577,7 @@ func (s *Server) listEmails(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findEmail(w http.ResponseWriter, r *http.Request, ws, id string, full bool) (*emailView, bool) {
@@ -1863,7 +1868,7 @@ type emailRecipientEvent struct {
 
 // getEmailRecipient is everything one address was sent: counts, whether
 // it is suppressed, the lead it belongs to, and every email's events,
-// newest first (?before=<occurred_at of the last one>&limit=).
+// newest first (?cursor=&limit=).
 func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
@@ -1883,10 +1888,12 @@ func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	var before *time.Time
-	if v := r.URL.Query().Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be a time such as 2026-01-02T15:04:05Z")
+			invalidCursor(w, r)
 			return
 		}
 		before = &t
@@ -1963,7 +1970,7 @@ func (s *Server) getEmailRecipient(w http.ResponseWriter, r *http.Request) {
 	if len(events) == limit {
 		next = &events[len(events)-1].OccurredAt
 	}
-	out["next_before"] = next
+	out["next_cursor"] = nextCursor(pageBefore, next)
 	writeJSON(w, http.StatusOK, out)
 }
 

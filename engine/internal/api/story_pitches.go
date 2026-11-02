@@ -324,7 +324,7 @@ func (s *Server) listStoryPitches(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -347,7 +347,7 @@ func (s *Server) listStoryPitches(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []storyPitchView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) editStoryPitch(w http.ResponseWriter, r *http.Request) {
@@ -499,14 +499,19 @@ func (s *Server) approveStoryPitch(w http.ResponseWriter, r *http.Request) {
 			return conflict("the journalist has no email address")
 		}
 		first, last := firstLast(recordName)
-		if _, err := leads.Import(ctx, tx, a.WorkspaceID, "digital_pr", nil, []leads.Lead{{Email: *p.JournalistEmail, FirstName: first, LastName: last,
-			Custom: map[string]string{"opener": opener, "story_title": title}}}); err != nil {
+		// The journalist is a lead of the story's brand (brands step 5).
+		res, err := leads.ImportIn(ctx, tx, a.WorkspaceID, p.BrandID, "digital_pr", nil, []leads.Lead{{Email: *p.JournalistEmail, FirstName: first, LastName: last,
+			Custom: map[string]string{"opener": opener, "story_title": title}}})
+		if err != nil {
 			return err
+		}
+		if res.OtherBrand > 0 {
+			return conflict("the journalist is a lead of another brand; until brands are fully separated an address is a lead in one brand at a time")
 		}
 		var leadID string
 		var suppressed bool
-		if err := tx.QueryRow(ctx, `SELECT l.id::text, EXISTS (`+leads.SuppressedSQL("l.workspace_id", "l.email")+`)
-			FROM leads l WHERE l.workspace_id = $1 AND lower(l.email) = lower($2)`, a.WorkspaceID, *p.JournalistEmail).Scan(&leadID, &suppressed); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT l.id::text, EXISTS (`+leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email")+`)
+			FROM leads l WHERE l.workspace_id = $1 AND lower(l.email) = lower($2) AND l.brand_id = $3`, a.WorkspaceID, *p.JournalistEmail, p.BrandID).Scan(&leadID, &suppressed); err != nil {
 			return err
 		}
 		if suppressed {
@@ -771,7 +776,6 @@ func (s *Server) storyReplyJob(ctx context.Context, job jobs.Job) error {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = CASE WHEN $3 = ANY(tags) THEN tags ELSE array_append(tags, $3) END,
-					labels = CASE WHEN $3 = ANY(tags) THEN tags ELSE array_append(tags, $3) END,
 					needs_review = needs_review OR $4 WHERE id = $1 AND workspace_id = $2`, p.InboundID, ws, tag, review); err != nil {
 				return err
 			}

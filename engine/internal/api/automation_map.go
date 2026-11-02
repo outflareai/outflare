@@ -697,7 +697,8 @@ func mapReviewCampaigns(ctx context.Context, tx pgx.Tx, ws string, b *mapBuilder
 var sourceNames = map[string]string{
 	"browser": "Website", "api": "Your app (API)", "system": "Outflare", "lifecycle": "Lifecycle email", "partners": "Partners",
 	"conversions": "Conversions", "stripe": "Stripe", "paddle": "Paddle", "chargebee": "Chargebee", "lemonsqueezy": "Lemon Squeezy",
-	"segment": "Segment", "rudderstack": "RudderStack", "journey": "Journeys",
+	"segment": "Segment", "rudderstack": "RudderStack", "journey": "Journeys", "replies": "Cold email replies",
+	"meetings": "Meetings", "reviews": "Review requests",
 }
 
 // mapSources adds where the map's events came from in the last 30 days:

@@ -224,7 +224,7 @@ func (s *Server) listPartnerConversionLog(w http.ResponseWriter, r *http.Request
 	if list == nil {
 		list = []partnerConversionLogView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // PrunePartnerConversionLog deletes logged conversion calls older than 30

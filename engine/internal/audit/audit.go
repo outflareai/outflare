@@ -40,6 +40,7 @@ type Event struct {
 // workspace ($2).
 var brandOf = map[string]string{
 	"brand":                `SELECT id FROM brands WHERE id = $1::uuid AND workspace_id = $2`,
+	"product":              `SELECT brand_id FROM products WHERE id = $1::uuid AND workspace_id = $2`,
 	"sequence":             `SELECT brand_id FROM sequences WHERE id = $1::uuid AND workspace_id = $2`,
 	"lead_list":            `SELECT brand_id FROM lead_lists WHERE id = $1::uuid AND workspace_id = $2`,
 	"mission":              `SELECT brand_id FROM missions WHERE id = $1::uuid AND workspace_id = $2`,
@@ -47,16 +48,14 @@ var brandOf = map[string]string{
 	"memory":               `SELECT brand_id FROM memories WHERE id = $1::uuid AND workspace_id = $2`,
 	"knowledge":            `SELECT brand_id FROM knowledge_items WHERE id = $1::uuid AND workspace_id = $2`,
 	"knowledge_collection": `SELECT brand_id FROM knowledge_collections WHERE id = $1::uuid AND workspace_id = $2`,
-	"enrollment":           `SELECT s.brand_id FROM enrollments e JOIN sequences s ON s.id = e.sequence_id WHERE e.id = $1::uuid AND e.workspace_id = $2`,
-	"inbound_message": `SELECT COALESCE(s.brand_id, m.brand_id) FROM inbound_messages i
-		LEFT JOIN sequences s ON s.id = i.sequence_id LEFT JOIN mailboxes m ON m.id = i.mailbox_id
-		WHERE i.id = $1::uuid AND i.workspace_id = $2`,
-	"meeting": `SELECT s.brand_id FROM meetings x
-		LEFT JOIN sequences s ON s.id = x.sequence_id
-		WHERE x.id = $1::uuid AND x.workspace_id = $2`,
-	"deal": `SELECT s.brand_id FROM deals x
-		LEFT JOIN sequences s ON s.id = x.sequence_id
-		WHERE x.id = $1::uuid AND x.workspace_id = $2`,
+	// Outreach (brands step 5): each row carries its brand.
+	"enrollment":           `SELECT brand_id FROM enrollments WHERE id = $1::uuid AND workspace_id = $2`,
+	"inbound_message":      `SELECT brand_id FROM inbound_messages WHERE id = $1::uuid AND workspace_id = $2`,
+	"meeting":              `SELECT brand_id FROM meetings WHERE id = $1::uuid AND workspace_id = $2`,
+	"deal":                 `SELECT brand_id FROM deals WHERE id = $1::uuid AND workspace_id = $2`,
+	"lead":                 `SELECT brand_id FROM leads WHERE id = $1::uuid AND workspace_id = $2`,
+	"list_run":             `SELECT brand_id FROM list_runs WHERE id = $1::uuid AND workspace_id = $2`,
+	"suppression":          `SELECT brand_id FROM suppressions WHERE id = $1::uuid AND workspace_id = $2`,
 	"mission_action":       `SELECT m.brand_id FROM mission_actions a JOIN missions m ON m.id = a.mission_id WHERE a.id = $1::uuid AND m.workspace_id = $2`,
 	"review_page":          `SELECT brand_id FROM review_pages WHERE id = $1::uuid AND workspace_id = $2`,
 	"review":               `SELECT brand_id FROM reviews WHERE id = $1::uuid AND workspace_id = $2`,

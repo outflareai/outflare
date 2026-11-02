@@ -627,7 +627,7 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 		t := out[len(out)-1].CreatedAt.Format(time.RFC3339Nano)
 		next = &t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 type adSettings struct {

@@ -10,7 +10,7 @@ import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
 import { AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
-import { AdTrend, CampaignDetail } from "./AdDrilldown";
+import { AdTrend, CampaignDetail, ConversionActions } from "./AdDrilldown";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -163,6 +163,7 @@ export function Ads({ ws, canManage, go }: Props) {
           data={byPlatform}
           rowId={(r) => `${r.key}-${r.currency}`}
           columnsMenu={false}
+          hidden={deliveryColumns}
           empty="Nothing spent in this range yet."
           initialSort={[{ id: "spend", desc: true }]}
           columns={[
@@ -172,12 +173,15 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
+      <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card />
+
       <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its numbers by day, its ad sets and its ads (Meta and Google).`}>
         <DataTable
           data={campaigns}
           rowId={(c) => c.id}
           onRowClick={(c) => setOpen(open?.id === c.id ? null : c)}
           searchPlaceholder="Search campaigns"
+          hidden={deliveryColumns}
           empty="Campaigns appear after the first sync."
           initialSort={[{ id: "spend", desc: true }]}
           columns={[
@@ -202,7 +206,7 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
-      {open && <CampaignDetail ws={ws} campaign={open} from={range.from} to={range.to} onClose={() => setOpen(null)} />}
+      {open && <CampaignDetail key={open.id} ws={ws} campaign={open} from={range.from} to={range.to} onClose={() => setOpen(null)} />}
 
       <AdResults ws={ws} from={range.from} to={range.to} brand={brandKey} go={go} />
 
@@ -288,8 +292,17 @@ export function metricColumns<T>(totals: (r: T) => AdTotals, currency: (r: T) =>
     { id: "conversions", header: "Conv.", accessorFn: (r: T) => totals(r).conversions ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).conversions)) },
     { id: "cpa", header: "Cost / conv.", accessorFn: (r: T) => totals(r).cost_per_conversion_micros ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(money(totals(r).cost_per_conversion_micros, currency(r))) },
     { id: "roas", header: "Platform ROAS", accessorFn: (r: T) => totals(r).platform_roas ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(roas(totals(r).platform_roas)) },
+    { id: "impressions", header: "Impressions", accessorFn: (r: T) => totals(r).impressions, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).impressions)) },
+    { id: "link_clicks", header: "Link clicks", accessorFn: (r: T) => totals(r).link_clicks ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).link_clicks)) },
+    { id: "landing_page_views", header: "Page views", accessorFn: (r: T) => totals(r).landing_page_views ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).landing_page_views)) },
+    { id: "video_views", header: "Video views", accessorFn: (r: T) => totals(r).video_views ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(totals(r).video_views)) },
+    { id: "frequency", header: "Frequency", accessorFn: (r: T) => totals(r).frequency ?? -1, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(totals(r).frequency == null ? "—" : totals(r).frequency!.toFixed(2)) },
   ];
 }
+
+// deliveryColumns are metricColumns' Meta delivery numbers, hidden until
+// the viewer turns them on where most rows won't have them.
+export const deliveryColumns = ["impressions", "link_clicks", "landing_page_views", "video_views", "frequency"];
 
 // A connection that still needs a field before it can sync, such as the
 // workspace's own Google Ads or Microsoft Advertising developer token. The

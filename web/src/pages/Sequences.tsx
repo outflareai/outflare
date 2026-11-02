@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { Enrollment, Lead, LeadList, MailboxPool, Sender, Sequence, StepInput, Team } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
@@ -9,6 +10,7 @@ import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loadi
 import { ago, plural, replyRate, when } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { SequenceMailboxes } from "./SequenceMailboxes";
+import { SendLift } from "@/components/send-lift";
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const zones: string[] = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? [];
@@ -58,14 +60,22 @@ const sequenceColumns: ColumnDef<Sequence, unknown>[] = [
 
 type Props = { ws: string; canManage: boolean; open?: string; setOpen: (id: string | undefined) => void; go: (t: Tab) => void };
 
-export function Sequences({ ws, canManage, open, setOpen, go }: Props) {
+// Sequences belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Sequences(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Sequences" brands={active.length} />;
+  return <SequencesPage key={brand.id} {...props} />;
+}
+
+function SequencesPage({ ws, canManage, open, setOpen, go }: Props) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<Sequence[] | null>(null);
 
-  const brand = useBrand(ws).brand?.handle;
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } });
+    const { data } = await api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } });
     if (data) setList(data.data);
-  }, [ws, brand]);
+  }, [ws, brandId]);
 
   useEffect(() => {
     load();
@@ -80,8 +90,8 @@ export function Sequences({ ws, canManage, open, setOpen, go }: Props) {
     });
     if (!r?.value.trim()) return;
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/sequences", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/sequences", {
+      params: { path: { brand: brandId } },
       body: { name: r.value.trim(), timezone, steps: [{ subject: "Quick question, {{first_name|there}}", body: "Hi {{first_name|there}},\n\n\n\n{{sender_first_name}}" }] },
     });
     if (error) return toast(errorMessage(error), "error");
@@ -142,7 +152,8 @@ export function Sequences({ ws, canManage, open, setOpen, go }: Props) {
 }
 
 function Detail({ ws, seq, canManage, onBack, onChange, go }: { ws: string; seq: Sequence; canManage: boolean; onBack: () => void; onChange: () => void; go: (t: Tab) => void }) {
-  const path = { ws, id: seq.id };
+  const brandId = useBrand(ws).brand?.id ?? "";
+  const path = { brand: brandId, id: seq.id };
   const st = (k: string) => seq.stats[k] ?? 0;
   const [error, setError] = useState("");
   const dirty = useRef(new Set<string>());
@@ -187,7 +198,7 @@ function Detail({ ws, seq, canManage, onBack, onChange, go }: { ws: string; seq:
       if (!ok) return;
     }
     if (status === "archived" && !(await confirmAction(`Archive "${seq.name}"?`, <p>It's hidden from the list and sends nothing. Sent emails and replies are kept.</p>, "Archive"))) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/sequences/{id}", { params: { path }, body: { status } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/sequences/{id}", { params: { path }, body: { status } });
     if (error) return setError(errorMessage(error));
     setError("");
     toast(status === "active" ? `"${seq.name}" is sending.` : status === "paused" ? `Paused "${seq.name}". Leads stay where they are.` : `Archived "${seq.name}".`);
@@ -224,6 +235,7 @@ function Detail({ ws, seq, canManage, onBack, onChange, go }: { ws: string; seq:
         <Stat label="Replied" value={st("replied")} sub={replyRate(st("replied"), st("contacted")) && `${replyRate(st("replied"), st("contacted"))} reply rate`} tone={st("replied") > 0 ? "green" : undefined} />
         <Stat label="Opted out · bounced" value={`${st("unsubscribed")} · ${st("bounced")}`} sub="added to suppression" tone={st("bounced") > 0 && st("bounced") / Math.max(1, st("sent")) > 0.02 ? "red" : undefined} />
       </Stats>}
+      {!linked && seq.holdout_percent > 0 && seq.brand_id && <SendLift brand={seq.brand_id} kind="sequences" id={seq.id} />}
       {!linked && <Steps ws={ws} seq={seq} canManage={canManage} onChange={onChange} markDirty={markDirty} />}
       {!linked && <Preview ws={ws} seq={seq} />}
       <Settings ws={ws} seq={seq} canManage={canManage} onChange={onChange} markDirty={markDirty} go={go} />
@@ -243,10 +255,11 @@ function SaveBar({ dirty, onSave, msg, label = "Save" }: { dirty: boolean; onSav
 }
 
 function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string; seq: Sequence; canManage: boolean; onChange: () => void; markDirty: (p: string, d: boolean) => void; go: (t: Tab) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const initial = {
     name: seq.name, pool_id: seq.pool_id, timezone: seq.timezone, send_days: seq.send_days, send_start: seq.send_start, send_end: seq.send_end, daily_new_limit: seq.daily_new_limit, daily_send_limit: seq.daily_send_limit, stop_on_reply: seq.stop_on_reply,
     team_id: seq.team_id, priority: seq.priority, target_daily: seq.target_daily, min_daily: seq.min_daily, allocation_mode: seq.allocation_mode, preferred_sender_ids: seq.preferred_sender_ids,
-    track_clicks: seq.track_clicks, unsubscribe_header: seq.unsubscribe_header, exclude: seq.exclude ?? noExclusion,
+    track_clicks: seq.track_clicks, unsubscribe_header: seq.unsubscribe_header, exclude: seq.exclude ?? noExclusion, holdout_percent: seq.holdout_percent,
   };
   const [s, setS] = useState(initial);
   const [saved, setSaved] = useState(JSON.stringify(initial));
@@ -274,7 +287,7 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
     if (s.send_days.length === 0) return setError("Pick at least one day to send on.");
     if (s.send_start >= s.send_end) return setError("The window has to end after it starts.");
     if (s.min_daily != null && s.target_daily != null && s.min_daily > s.target_daily) return setError("The minimum can't be more than the daily send target.");
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/sequences/{id}", { params: { path: { ws, id: seq.id } }, body: s });
+    const { error } = await api.PATCH("/v1/brands/{brand}/sequences/{id}", { params: { path: { brand: brandId, id: seq.id } }, body: s });
     if (error) return setError(errorMessage(error));
     setError("");
     setSaved(JSON.stringify(s));
@@ -398,6 +411,14 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
             <input type="checkbox" className="mt-0.5" checked={s.stop_on_reply} onChange={(e) => setS({ ...s, stop_on_reply: e.target.checked })} />
             <span><span className="font-medium">Stop when they reply</span><span className="block text-xs text-muted-foreground">Recommended. Auto-replies such as out-of-office don't count.</span></span>
           </label>}
+          {!linked && <label className="block space-y-1">
+            <span className="font-medium">Hold out</span>
+            <select aria-label="Hold out" className={`${field} w-full`} value={s.holdout_percent} disabled={!canManage}
+              onChange={(e) => setS({ ...s, holdout_percent: Number(e.target.value) })}>
+              {[0, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n === 0 ? "Nobody" : `${n}% of the leads`}</option>)}
+            </select>
+            <span className="block text-xs text-muted-foreground">Leads picked at random who are enrolled but never emailed, so you can see what the sequence added. They show as stopped.</span>
+          </label>}
           {!linked && <>
           <label className="flex items-start gap-2">
             <input type="checkbox" className="mt-0.5" checked={s.unsubscribe_header} onChange={(e) => setS({ ...s, unsubscribe_header: e.target.checked })} />
@@ -427,6 +448,7 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
 }
 
 function Steps({ ws, seq, canManage, onChange, markDirty }: { ws: string; seq: Sequence; canManage: boolean; onChange: () => void; markDirty: (p: string, d: boolean) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const initial = seq.steps.map(({ delay_days, subject, body }) => ({ delay_days, subject, body }));
   const [steps, setSteps] = useState<StepInput[]>(initial);
   const [saved, setSaved] = useState(JSON.stringify(initial));
@@ -459,7 +481,7 @@ function Steps({ ws, seq, canManage, onChange, markDirty }: { ws: string; seq: S
     if (!steps[0]?.subject?.trim()) return setError("Step 1 needs a subject.");
     const empty = steps.findIndex((s) => !s.body.trim());
     if (empty >= 0) return setError(`Step ${empty + 1} has no text.`);
-    const { error } = await api.PUT("/v1/workspaces/{ws}/sequences/{id}/steps", { params: { path: { ws, id: seq.id } }, body: { steps } });
+    const { error } = await api.PUT("/v1/brands/{brand}/sequences/{id}/steps", { params: { path: { brand: brandId, id: seq.id } }, body: { steps } });
     if (error) return setError(errorMessage(error));
     setError("");
     setSaved(JSON.stringify(steps));
@@ -536,6 +558,7 @@ type Rendered = { position: number; subject: string; body: string; missing: stri
 
 // Shows exactly what one lead would get, with any variable they're missing.
 function Preview({ ws, seq }: { ws: string; seq: Sequence }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [q, setQ] = useState("");
   const [options, setOptions] = useState<Lead[]>([]);
   const [lead, setLead] = useState<Lead | null>(null);
@@ -544,7 +567,7 @@ function Preview({ ws, seq }: { ws: string; seq: Sequence }) {
 
   useEffect(() => {
     const t = setTimeout(async () => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query: { ...(q ? { q } : {}), limit: 8 } } });
+      const { data } = await api.GET("/v1/brands/{brand}/leads", { params: { path: { brand: brandId }, query: { ...(q ? { q } : {}), limit: 8 } } });
       if (data) {
         setOptions(data.data);
         setLead((cur) => cur ?? data.data[0] ?? null);
@@ -555,7 +578,7 @@ function Preview({ ws, seq }: { ws: string; seq: Sequence }) {
 
   useEffect(() => {
     if (!lead) return setOut(null);
-    api.POST("/v1/workspaces/{ws}/sequences/{id}/preview", { params: { path: { ws, id: seq.id } }, body: { lead_id: lead.id } }).then(({ data }) => setOut(data ?? null));
+    api.POST("/v1/brands/{brand}/sequences/{id}/preview", { params: { path: { brand: brandId, id: seq.id } }, body: { lead_id: lead.id } }).then(({ data }) => setOut(data ?? null));
   }, [ws, seq.id, lead, steps]);
 
   return (
@@ -622,30 +645,31 @@ const reasonText: Record<string, string> = {
 };
 
 function Leads({ ws, seq, canManage, onChange, go }: { ws: string; seq: Sequence; canManage: boolean; onChange: () => void; go: (t: Tab) => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [rows, setRows] = useState<Enrollment[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [lists, setLists] = useState<LeadList[]>([]);
   const [listId, setListId] = useState("");
   const [msg, setMsg] = useState("");
-  const path = { ws, id: seq.id };
+  const path = { brand: brandId, id: seq.id };
 
-  const load = useCallback(async (after?: string) => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/sequences/{id}/enrollments", { params: { path: { ws, id: seq.id }, query: after ? { after } : {} } });
+  const load = useCallback(async (cursor?: string) => {
+    const { data } = await api.GET("/v1/brands/{brand}/sequences/{id}/enrollments", { params: { path: { brand: brandId, id: seq.id }, query: cursor ? { cursor } : {} } });
     if (!data) return;
-    setRows((prev) => (after ? [...(prev ?? []), ...data.data] : data.data));
-    setNext(data.next_after ?? null);
+    setRows((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
+    setNext(data.next_cursor ?? null);
   }, [ws, seq.id]);
 
   useEffect(() => {
     load();
     // A brand's sequence enrolls from that brand's lists and unassigned
     // ones, never another brand's.
-    api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => data && setLists(data.data.filter((l) => !seq.brand_id || !l.brand_id || l.brand_id === seq.brand_id)));
+    api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand: brandId } } }).then(({ data }) => data && setLists(data.data.filter((l) => !seq.brand_id || !l.brand_id || l.brand_id === seq.brand_id)));
   }, [load, ws, seq.brand_id]);
 
   async function enroll(e: FormEvent) {
     e.preventDefault();
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments", { params: { path }, body: { list_id: listId } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/sequences/{id}/enrollments", { params: { path }, body: { list_id: listId } });
     if (error) return setMsg(errorMessage(error));
     const skipped = [data.already_enrolled && `${data.already_enrolled} already in`, data.suppressed && `${data.suppressed} on the suppression list`, data.excluded && `${data.excluded} left out by the exclusion`, data.active_elsewhere && `${data.active_elsewhere} in another active sequence`].filter(Boolean);
     setMsg(`Added ${plural(data.enrolled, "lead")}.${skipped.length ? ` Skipped ${skipped.join(", ")}.` : ""}${seq.status !== "active" && data.enrolled > 0 ? " They start once you start sending." : ""}`);
@@ -656,7 +680,7 @@ function Leads({ ws, seq, canManage, onChange, go }: { ws: string; seq: Sequence
 
   async function stop(en: Enrollment) {
     if (!(await confirmAction(`Stop emailing ${en.email}?`, <p>They get no more steps from this sequence. This can't be undone, but you can add them to another sequence.</p>, "Stop emailing"))) return;
-    await api.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop", { params: { path: { ...path, eid: en.id } } });
+    await api.POST("/v1/brands/{brand}/sequences/{id}/enrollments/{eid}/stop", { params: { path: { ...path, eid: en.id } } });
     toast(`Stopped emailing ${en.email}.`);
     load();
     onChange();

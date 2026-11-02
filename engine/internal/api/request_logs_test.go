@@ -82,26 +82,26 @@ func TestRequestLogs(t *testing.T) {
 
 	// Paging back and following.
 	page := owner.must(200, "GET", base+"/logs?limit=2", nil)
-	if len(page["data"].([]any)) != 2 || page["next_before"] == nil || page["next_cursor"] == nil {
+	if len(page["data"].([]any)) != 2 || page["next_cursor"] == nil {
 		t.Fatalf("page: %v", page)
 	}
 	older := owner.must(200, "GET", base+"/logs?limit=2&cursor="+page["next_cursor"].(string), nil)["data"].([]any)
 	if older[0].(map[string]any)["id"] == page["data"].([]any)[0].(map[string]any)["id"] {
 		t.Fatal("cursor did not page back")
 	}
-	tail := owner.must(200, "GET", base+"/logs?after=latest", nil)
-	if len(tail["data"].([]any)) != 0 || tail["next_after"] == nil {
+	tail := owner.must(200, "GET", base+"/logs?start=latest", nil)
+	if len(tail["data"].([]any)) != 0 || tail["next_cursor"] == nil || tail["has_more"] != false {
 		t.Fatalf("tail start: %v", tail)
 	}
 	owner.must(200, "GET", base+"/members", nil)
 	owner.must(200, "GET", base+"/leads", nil)
-	more := owner.must(200, "GET", base+"/logs?after="+tail["next_after"].(string), nil)
+	more := owner.must(200, "GET", base+"/logs?cursor="+tail["next_cursor"].(string), nil)
 	got := more["data"].([]any)
-	if len(got) != 2 || !strings.HasSuffix(got[0].(map[string]any)["path"].(string), "/members") || more["next_after"] == tail["next_after"] {
+	if len(got) != 2 || !strings.HasSuffix(got[0].(map[string]any)["path"].(string), "/members") || more["next_cursor"] == tail["next_cursor"] {
 		t.Fatalf("tail: %v", more)
 	}
-	again := owner.must(200, "GET", base+"/logs?after="+more["next_after"].(string), nil)
-	if len(again["data"].([]any)) != 0 || again["next_after"] != more["next_after"] {
+	again := owner.must(200, "GET", base+"/logs?cursor="+more["next_cursor"].(string), nil)
+	if len(again["data"].([]any)) != 0 || again["next_cursor"] != more["next_cursor"] {
 		t.Fatalf("tail again: %v", again)
 	}
 

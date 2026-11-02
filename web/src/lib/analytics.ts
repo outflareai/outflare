@@ -85,6 +85,9 @@ export type UiEvent =
  | "ui.partner_agreement_downloaded"
   | "ui.partner_proposal_composer_opened"
   | "ui.partner_coupon_composer_opened"
+ | "ui.crm_view_changed"
+ | "ui.crm_section_opened"
+ | "ui.crm_exported"
   | "ui.review_view_opened" // review module subview selected
   | "ui.review_campaign_step_opened" // review campaign editor step selected
   | "ui.coverage_view_opened"
@@ -118,6 +121,7 @@ export type UiEvent =
   | "ui.ai_account_brand_selected" // explicit subscription brand choice
   | "ui.ai_accounts_view_opened" // a view of AI accounts opened (view: accounts, spend, people, timeline, usage)
   | "ui.ai_accounts_example_shown" // the example usage data on AI accounts' Usage view turned on
+  | "ui.desktop_download_opened" // public desktop download opened (location: ai_accounts or computers)
   | "ui.ai_device_owner_opened" // linked device owner opened (user_id)
   | "ui.ai_device_link_approved" // a computer linked to Outflare for desktop from /connect/computer
   | "ui.copied" // a copy button
@@ -149,13 +153,25 @@ export type UiEvent =
   | "ui.knowledge_audience_picked" // the Ask box switched who the answer is for (audience: team, customers)
   | "ui.help_centre_template_picked" // a template applied in the help centre's Configure and style (template: classic, minimal, bold)
   | "ui.help_centre_brand_imported" // Import your brand in the help centre editor (found_logo, found_color)
+  | "ui.support_chat_made" // a website chat made in Support settings (require_email, show_articles)
+  | "ui.support_chat_saved" // a website chat's settings saved (require_email, show_articles)
   | "ui.support_sla_saved" // response times saved or turned off in Support settings (enabled, business_hours)
+  | "ui.support_assistant_tried" // a made-up question asked in Support settings (channel, action)
+  | "ui.support_assistant_draft_used" // the assistant's draft put in the composer (action: answer, clarify)
   | "ui.support_article_linked" // a help centre article's link put in a support reply (from: suggested, search, suggestion)
   | "ui.support_address_made" // a support forwarding address made from Support settings (brand: whether it is a brand's)
   | "ui.support_address_renamed" // a support forwarding address renamed (brand)
   | "ui.support_mailbox_picked" // a mailbox chosen for support from the Support settings (first: whether it was the first)
+  | "ui.knowledge_suggestion_approved" // a suggested answer approved in Knowledge, Review (source, edited)
+  | "ui.knowledge_conflict_settled" // a conflict settled by keeping one item (items)
   | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
+  | "ui.agents_view_opened" // a view of the Agents page opened (view: waiting, runs, all, grants)
+  | "ui.action_decided" // a person approved or rejected agents' held changes (decision: approve or reject; how: single, batch or remember; count; from: run when decided on a run's page)
+  | "ui.agent_run_started" // a playbook started as an agent run from the Playbooks page (playbook_id, mode, has_budget)
+  | "ui.agent_run_acted" // a person paused, resumed, stopped or wrote to an agent run on its page (action: pause, resume, stop or write; mode)
+  | "ui.action_grant_created" // a grant set on the Agents page (mode, has_daily_limit, template)
+  | "ui.action_grant_revoked" // a grant revoked on the Agents page
   | "ui.playbook_prompt_copied" // a playbook's prompt copied (playbook_id)
   | "ui.dialog_answered" // a confirm or prompt dialog: the choice, or cancelled
   | "ui.docs_opened" // a link to a guide on outflare.ai (tab, from)

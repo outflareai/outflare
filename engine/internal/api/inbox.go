@@ -18,10 +18,15 @@ import (
 
 func (s *Server) routesInbox(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox", s.inBrand(read, s.listInbox))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox/{id}", s.inBrand(read, s.getInbound))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/inbox/{id}", s.inBrand(manage, s.updateInbound))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox/{id}/reply", s.inBrand(manage, s.replyInbound))
+	// A reply belongs to one brand (brand_outreach.go): its sequence's,
+	// its lead's, or its mailbox's. Served under the brand, and under the
+	// workspace until the contract step.
+	for _, b := range s.activationBases("inbox", s.inBrand) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listInbox))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getInbound))
+		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateInbound))
+		mux.HandleFunc("POST "+b.path+"/{id}/reply", b.on(manage, s.replyInbound))
+	}
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/sync", s.inWorkspace(auth.ScopeMailboxesManage, s.syncMailbox))
 }
 
@@ -78,7 +83,7 @@ const inboundSelect = `
 	       i.lead_id, NULLIF(trim(l.first_name || ' ' || l.last_name), ''), NULLIF(l.company, ''), i.sequence_id, q.name, i.received_at,
 	       i.category, i.category_source, i.assigned_to, u.name, i.snoozed_until, i.done, i.tags,
 	       i.source, i.integration_id, i.category_confidence, i.category_reason, i.details, i.needs_review, i.classified_at,
-	       COALESCE(q.brand_id, m.brand_id), NULL::text
+	       i.brand_id, NULL::text
 	FROM inbound_messages i
 	JOIN mailboxes m ON m.id = i.mailbox_id
 	LEFT JOIN leads l ON l.id = i.lead_id
@@ -229,15 +234,19 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 		where += ` AND (lower(i.from_email) LIKE ` + n + ` OR lower(i.subject) LIKE ` + n + ` OR lower(i.from_name) LIKE ` + n +
 			` OR lower(i.body) LIKE ` + n + `)`
 	}
-	brand, ok := s.brandFilter(w, r)
+	// One brand's replies: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	brand, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
-	where += brand.sql("m.brand_id", &args)
-	if v := q.Get("before"); v != "" {
+	where += brand.sql("i.brand_id", &args)
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be an RFC 3339 time")
+			invalidCursor(w, r)
 			return
 		}
 		where += ` AND i.received_at < ` + arg(t)
@@ -264,11 +273,11 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request) {
 	var unread int
 	uargs := []any{a.WorkspaceID}
 	if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM inbound_messages i JOIN mailboxes m ON m.id = i.mailbox_id
-		WHERE i.workspace_id = $1 AND NOT i.read AND NOT i.done AND i.kind = 'reply'`+brand.sql("m.brand_id", &uargs), uargs...).Scan(&unread); err != nil {
+		WHERE i.workspace_id = $1 AND NOT i.read AND NOT i.done AND i.kind = 'reply'`+brand.sql("i.brand_id", &uargs), uargs...).Scan(&unread); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next, "unread_replies": unread})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next), "unread_replies": unread})
 }
 
 // threadEntry is one message in a conversation, in either direction.
@@ -283,17 +292,18 @@ type threadEntry struct {
 	At        time.Time `json:"at"`
 }
 
-// inboundBrand checks a brand-limited caller may see the message {id}, by
-// its mailbox's brand, and change it when write is set. Anyone else passes.
+// inboundBrand checks a brand-limited caller, or a brand route, may see
+// the message {id}, by its brand, and change it when write is set. Anyone
+// else passes.
 func (s *Server) inboundBrand(w http.ResponseWriter, r *http.Request, a *access, write bool) bool {
-	if a.Brands == nil {
+	if a.Brands == nil && a.Brand == "" {
 		return true
 	}
 	id := r.PathValue("id")
 	var brand *string
 	err := pgx.ErrNoRows
 	if validUUID(id) {
-		err = s.pool.QueryRow(r.Context(), `SELECT m.brand_id::text FROM inbound_messages i JOIN mailboxes m ON m.id = i.mailbox_id
+		err = s.pool.QueryRow(r.Context(), `SELECT i.brand_id::text FROM inbound_messages i
 			WHERE i.id = $1 AND i.workspace_id = $2`, id, a.WorkspaceID).Scan(&brand)
 	}
 	switch {
@@ -475,10 +485,10 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 			changed["done"] = *req.Done
 		}
 		if req.Tags != nil {
-			// labels is the column's old name, written until it is
-			// dropped (0363).
+			// The 0363 trigger copies tags to the old labels column for a
+			// version that still reads it.
 			t := arg(tags)
-			set = append(set, "tags = "+t, "labels = "+t)
+			set = append(set, "tags = "+t)
 			changed["tags"] = tags
 			// A new tag joins the workspace's list, so it can be picked
 			// and coloured later.

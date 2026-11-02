@@ -15,6 +15,7 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Facts } from "./Emails";
 import type { Go } from "./Lifecycle";
+import { SendLift } from "@/components/send-lift";
 
 type Status = EmailBroadcast["status"];
 const statusTone: Record<Status, "green" | "grey" | "amber" | "red" | "blue"> = { draft: "grey", scheduled: "blue", sending: "amber", sent: "green", cancelled: "grey", failed: "red" };
@@ -205,6 +206,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
             ["Topic", b.topic ? <button className="underline" onClick={() => go("topics")}>{b.topic.name}</button> : "None"],
             ["Audience", audienceText(b)],
             ["From", b.from || "The template's sender"],
+            ...(b.holdout_percent > 0 ? [["Held out", `${b.holdout_percent}% of the audience${b.held_out ? ` (${b.held_out} people)` : ""}, to measure what it adds`] as [string, React.ReactNode]] : []),
             ["Started", b.started_at ? stamp(b.started_at) : "Not yet"],
             ...(b.finished_at ? [["Finished", stamp(b.finished_at)] as [string, React.ReactNode]] : []),
           ]} />
@@ -216,6 +218,7 @@ function BroadcastDetail({ ws, id, canManage, back, go }: { ws: string; id: stri
           </div>
         </Card>
       </div>
+      {b.held_out > 0 && <SendLift brand={brandId} kind="email-broadcasts" id={b.id} />}
       {skipped.length > 0 && (
         <Card title={`Skipped (${b.skipped})`}>
           <ul className="divide-y text-[13px]">
@@ -263,6 +266,7 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   const [template, setTemplate] = useState(broadcast?.template.id ?? "");
   const [topic, setTopic] = useState<string | undefined>(broadcast ? broadcast.topic?.key ?? "" : undefined);
   const [exclude, setExclude] = useState<Exclusion>(broadcast?.exclude ?? noExclusion);
+  const [holdout, setHoldout] = useState(broadcast?.holdout_percent ?? 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -275,7 +279,7 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const body = { name, template, exclude, ...(topic !== undefined ? { topic: topic || null } : {}) };
+    const body = { name, template, exclude, holdout_percent: holdout, ...(topic !== undefined ? { topic: topic || null } : {}) };
     const res = broadcast
       ? await api.PATCH("/v1/brands/{brand}/email-broadcasts/{id}", { params: { path: { brand: brandId, id: broadcast.id } }, body })
       : await api.POST("/v1/brands/{brand}/email-broadcasts", { params: { path: { brand: brandId } }, body });
@@ -313,6 +317,13 @@ function BroadcastDialog({ ws, broadcast, onClose, onSaved }: { ws: string; broa
               <span className="block text-[12px] text-muted-foreground">Who it goes to, and what the unsubscribe link leaves. The template's topic unless you pick another.</span>
             </label>
             <ExclusionPicker ws={ws} value={exclude} onChange={setExclude} what="Skips" />
+            <label className="block space-y-1 text-[13px]">
+              <span className="font-medium">Hold out</span>
+              <select aria-label="Hold out" className={`${field} w-full`} value={holdout} onChange={(e) => setHoldout(Number(e.target.value))}>
+                {[0, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n === 0 ? "Nobody" : `${n}% of the audience`}</option>)}
+              </select>
+              <span className="block text-[12px] text-muted-foreground">People picked at random who don't get it, so you can see what the email added.</span>
+            </label>
             <ErrorText>{error}</ErrorText>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

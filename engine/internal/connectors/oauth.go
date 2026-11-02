@@ -255,7 +255,9 @@ func tokenCall(ctx context.Context, cl *Client, d Definition, form url.Values, o
 		if t.Error == "invalid_grant" {
 			return nil, Errf(ErrAuth, "%s no longer accepts this connection; connect it again", d.Name)
 		}
-		if t.Error != "" {
+		// A provider outage (5xx, such as temporarily_unavailable) is not a
+		// refusal of the connection.
+		if t.Error != "" && resp.StatusCode < 500 {
 			return nil, Errf(ErrAuth, "%s refused: %s %s", d.Name, t.Error, t.Description)
 		}
 		return nil, HTTPError(d.Name, resp.StatusCode, string(body))

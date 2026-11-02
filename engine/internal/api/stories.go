@@ -353,8 +353,16 @@ type storyQuoteView struct {
 	Status       string     `json:"status"`
 	ApprovalNote string     `json:"approval_note"`
 	ApprovedAt   *time.Time `json:"approved_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// ApprovedVia is person (recorded in Outflare) or expert_link (the
+	// expert approved through an approval link), "" until approved.
+	ApprovedVia string `json:"approved_via"`
+	// SuggestedAt is when the expert suggested these words through an
+	// approval link, until a person edits them or asks again.
+	SuggestedAt *time.Time `json:"suggested_at"`
+	// ApprovalRequest is the latest request to the expert, if any.
+	ApprovalRequest *quoteApprovalView `json:"approval_request"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
 type storyView struct {
@@ -414,18 +422,27 @@ func (s *Server) loadStory(ctx context.Context, ws, id string) (*storyView, erro
 	if err != nil {
 		return nil, err
 	}
-	rows, err = s.pool.Query(ctx, `SELECT id::text, expert_id::text, body, status, approval_note, approved_at, created_at, updated_at FROM story_quotes
+	rows, err = s.pool.Query(ctx, `SELECT id::text, expert_id::text, body, status, approval_note, approved_at, approved_via, suggested_at, created_at, updated_at FROM story_quotes
 		WHERE workspace_id = $1 AND story_id = $2 ORDER BY created_at, id`, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	quotes, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (storyQuoteView, error) {
 		var q storyQuoteView
-		err := row.Scan(&q.ID, &q.ExpertID, &q.Body, &q.Status, &q.ApprovalNote, &q.ApprovedAt, &q.CreatedAt, &q.UpdatedAt)
+		err := row.Scan(&q.ID, &q.ExpertID, &q.Body, &q.Status, &q.ApprovalNote, &q.ApprovedAt, &q.ApprovedVia, &q.SuggestedAt, &q.CreatedAt, &q.UpdatedAt)
 		return q, err
 	})
 	if err != nil {
 		return nil, err
+	}
+	latest, err := s.latestQuoteApprovals(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range quotes {
+		if a, ok := latest[quotes[i].ID]; ok {
+			quotes[i].ApprovalRequest = &a
+		}
 	}
 	if facts == nil {
 		facts = []storyFactView{}
@@ -499,7 +516,7 @@ func (s *Server) listStories(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -524,7 +541,7 @@ func (s *Server) listStories(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []storyView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": nextOffset(offset, len(list), total)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, nextOffset(offset, len(list), total))})
 }
 
 func (s *Server) getStory(w http.ResponseWriter, r *http.Request) {
@@ -966,9 +983,20 @@ func (s *Server) updateStoryQuote(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `UPDATE story_quotes SET body = $3, status = $4, approval_note = $5,
 				approved_by = CASE WHEN $4 = 'approved' THEN CASE WHEN status = 'approved' THEN approved_by ELSE $6 END END,
 				approved_at = CASE WHEN $4 = 'approved' THEN CASE WHEN status = 'approved' THEN approved_at ELSE now() END END,
+				approved_via = CASE WHEN $4 = 'approved' THEN CASE WHEN status = 'approved' THEN approved_via ELSE 'person' END ELSE '' END,
+				suggested_at = CASE WHEN $3 <> body THEN NULL ELSE suggested_at END,
 				updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, q.ID, body, status, note, actorRef(a)); err != nil {
 			return err
+		}
+		// An open request to the expert was for the old words, or for a
+		// quote that is no longer waiting on them.
+		voided := 0
+		if reason := quoteApprovalVoidReason(q.Body, body, status); reason != "" {
+			var err error
+			if voided, err = voidQuoteApprovals(ctx, tx, a.WorkspaceID, q.ID, reason); err != nil {
+				return err
+			}
 		}
 		// The story's approval covered the old words.
 		if body != q.Body || (q.Status == "approved" && status != "approved") {
@@ -984,7 +1012,10 @@ func (s *Server) updateStoryQuote(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		data := map[string]any{"brand_id": v.BrandID, "story_id": v.ID, "quote_id": q.ID, "expert_id": q.ExpertID, "status": status, "was": q.Status,
-			"body_changed": body != q.Body}
+			"body_changed": body != q.Body, "voided_requests": voided}
+		if action == "story_quote.approved" {
+			data["via"] = "person"
+		}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, action, "story", v.ID, data, data)
 	})
 	if s.allocError(w, r, err) {

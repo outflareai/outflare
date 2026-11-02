@@ -57,6 +57,22 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answerABTestAI(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "A customer asked a business a question its knowledge base couldn't answer") {
+		answerFromReply(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You answer customers for a business, by chat or email") {
+		answerSupportAssistant(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You look for the answer to a customer's question that a business's knowledge base doesn't have yet") {
+		answerFindAnswer(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You check a support reply against the articles") {
+		answerJSON(w, map[string]any{"supported": !strings.Contains(string(body), "$99"), "unsupported": []string{}})
+		return
+	}
 	if strings.Contains(string(body), "You answer questions for a business using only the passages") {
 		answerKnowledgeQuestion(w, string(body))
 		return

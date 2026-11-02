@@ -39,9 +39,10 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	// Links to the brand's own site carry the sequence's campaign
 	// (outbound_email); the tracking domain is under it but its links don't.
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
-	_, imp := owner.raw("POST", base+"/leads/import?list=L", "text/csv", "email,first_name\nli@one-io.example,Li\n")
+	// The leads and the sequence are Acme's (brands step 5).
+	_, imp := owner.raw("POST", base+"/leads/import?list=L&brand=acme", "text/csv", "email,first_name\nli@one-io.example,Li\n")
 	seq := owner.must(201, "POST", base+"/sequences", map[string]any{
-		"name": "Links", "daily_new_limit": 10, "send_days": []int{1, 2, 3, 4, 5, 6, 7}, "send_start": "00:00", "send_end": "23:59", "track_clicks": true, "unsubscribe_header": false,
+		"name": "Links", "brand_id": "acme", "daily_new_limit": 10, "send_days": []int{1, 2, 3, 4, 5, 6, 7}, "send_start": "00:00", "send_end": "23:59", "track_clicks": true, "unsubscribe_header": false,
 		"steps": []map[string]any{{"subject": "Hi", "body": "See https://acme-com.example/pricing. Docs: https://other.example/guide Or opt out: {{unsubscribe_url}}"}},
 	})
 	if seq["track_clicks"] != true || seq["unsubscribe_header"] != false {

@@ -37,7 +37,7 @@ steps:
   - say: Rank them by cost per paying customer, mark each as renew, renegotiate or stop against the target, and move them to Measured.
     tools: [updateRecord]
   - say: Draft a renewal for each one to renew, a new rate for each to renegotiate, and a short thank-you for the rest, held until a person approves them.
-    tools: [createSequence, replaceSequenceSteps, previewSequence]
+    tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Once the person decides, move each partnership to Renewed or Declined.
     tools: [updateRecord]
 guardrails:

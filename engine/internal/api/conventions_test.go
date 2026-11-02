@@ -22,6 +22,8 @@ var unpagedLists = map[string]string{
 	"getSEOHistory":             "a time series bounded by from and to",
 	"listAdCampaigns":           "a ranking by spend over from and to, capped at 1000",
 	"listAdItems":               "a ranking by spend over from and to, capped at 1000",
+	"listAdKeywords":            "a ranking by spend over from and to, capped at 1000",
+	"listAdSearchTerms":         "a ranking by spend over from and to, capped at 1000",
 	"listEmailBisonCompatCalls": "mirrors the EmailBison API's own shape",
 	"getSiteSearch":             "the top rows of a report bounded by from and to, with totals of every row",
 	"getSiteCannibalisation":    "the most shown searches, at most 200; the fixes list holds the top 50",

@@ -27,6 +27,8 @@ func (s *Server) routesPlaybooks(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/playbooks", s.inWorkspace(read, s.listPlaybooks))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/playbooks/{id}", s.inWorkspace(read, s.getPlaybook))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/playbooks/{id}/runs", s.inWorkspace(run, s.startPlaybook))
+	// Start a playbook as an agent run on the action layer (agent_runs.go).
+	mux.HandleFunc("POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs", s.inBrand(run, s.runPlaybook))
 }
 
 // playbookSource is where a playbook's file lives on GitHub.
@@ -188,25 +190,9 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	for k, v := range in.Inputs {
-		known := false
-		for _, def := range p.Inputs {
-			known = known || def.Name == k
-		}
-		if !known {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "this playbook has no input "+k)
-			return
-		}
-		if len(v) > 500 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "inputs are up to 500 characters each")
-			return
-		}
-	}
-	for _, def := range p.Inputs {
-		if !def.Optional && strings.TrimSpace(in.Inputs[def.Name]) == "" {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", def.Name+" is required ("+def.Label+")")
-			return
-		}
+	if msg := checkPlaybookInputs(p, in.Inputs); msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
+		return
 	}
 	var kit playbooks.Kit
 	if in.ApplyKit {
@@ -234,7 +220,7 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, goal := p.Title, p.Summary
-	instructions, plan := playbookBrief(p, in.Inputs)
+	instructions, plan := playbookBrief(p, in.Inputs, false)
 	mi := missionInput{Name: &name, Goal: &goal, Instructions: &instructions, Plan: &plan, Mode: in.Mode,
 		TokenID: in.TokenID, MaxSpendCents: in.MaxSpendCents,
 		playbookID: &p.ID, playbookVersion: &p.Version}
@@ -276,6 +262,30 @@ func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, v)
 }
 
+// checkPlaybookInputs checks a playbook's inputs: known names, up to 500
+// characters each, and every required one given. It answers the message
+// for the person, or "".
+func checkPlaybookInputs(p playbooks.Playbook, inputs map[string]string) string {
+	for k, v := range inputs {
+		known := false
+		for _, def := range p.Inputs {
+			known = known || def.Name == k
+		}
+		if !known {
+			return "this playbook has no input " + k
+		}
+		if len(v) > 500 {
+			return "inputs are up to 500 characters each"
+		}
+	}
+	for _, def := range p.Inputs {
+		if !def.Optional && strings.TrimSpace(inputs[def.Name]) == "" {
+			return def.Name + " is required (" + def.Label + ")"
+		}
+	}
+	return ""
+}
+
 func modeOr(m *string) string {
 	if m == nil {
 		return missions.ModeDryRun
@@ -285,10 +295,14 @@ func modeOr(m *string) string {
 
 // playbookBrief is what the agent reads: the filled-in prompt, the steps
 // with the API operations (MCP tools) each one uses, and the guardrails.
-func playbookBrief(p playbooks.Playbook, inputs map[string]string) (instructions, plan string) {
+func playbookBrief(p playbooks.Playbook, inputs map[string]string, asRun bool) (instructions, plan string) {
 	var b strings.Builder
 	b.WriteString(p.Render(inputs))
-	fmt.Fprintf(&b, "\n\nThis mission runs the playbook %q, version %d (GET /v1/playbooks/%s).", p.ID, p.Version, p.ID)
+	what := "This mission runs"
+	if asRun {
+		what = "This run carries out"
+	}
+	fmt.Fprintf(&b, "\n\n%s the playbook %q, version %d (GET /v1/playbooks/%s).", what, p.ID, p.Version, p.ID)
 	if p.Kit != "" {
 		fmt.Fprintf(&b, " It works on what its setup kit %q adds (GET /v1/kits/%s): check GET /v1/workspaces/{ws}/kits/%s/preview, and if anything is still to add, ask a person to apply it rather than building it yourself.", p.Kit, p.Kit, p.Kit)
 	}

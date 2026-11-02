@@ -67,12 +67,13 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Fatal("moved mailboxes still unassigned")
 	}
 
-	// Leads count for a brand when they are on its lists.
+	// A lead belongs to one brand (brands step 5): one made without a
+	// brand is the workspace's first brand's.
 	var list, lead string
 	if err := e.pool.QueryRow(ctx, `INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, 'Geonode list', $2) RETURNING id::text`, ws, geo).Scan(&list); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.pool.QueryRow(ctx, `INSERT INTO leads (workspace_id, email) VALUES ($1, 'dee@acme.example') RETURNING id::text`, ws).Scan(&lead); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO leads (workspace_id, email, brand_id) VALUES ($1, 'dee@acme.example', $2) RETURNING id::text`, ws, geo).Scan(&lead); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.pool.Exec(ctx, `INSERT INTO leads (workspace_id, email) VALUES ($1, 'eve@acme.example')`, ws); err != nil {
@@ -85,8 +86,8 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Helper()
 		return owner.must(200, "GET", base+"/leads"+q, nil)["total"].(float64)
 	}
-	if leads("") != 2 || leads("?brand=geonode") != 1 || leads("?brand=repocket") != 0 || leads("?brand=none") != 1 {
-		t.Fatalf("leads: %v %v %v %v", leads(""), leads("?brand=geonode"), leads("?brand=repocket"), leads("?brand=none"))
+	if leads("?brand=all") != 2 || leads("") != 1 || leads("?brand=geonode") != 1 || leads("?brand=repocket") != 0 || leads("?brand=none") != 0 {
+		t.Fatalf("leads: %v %v %v %v %v", leads("?brand=all"), leads(""), leads("?brand=geonode"), leads("?brand=repocket"), leads("?brand=none"))
 	}
 	owner.must(200, "GET", base+"/allocation/attention?brand=geonode", nil)
 	owner.must(200, "GET", base+"/infra-plans?brand=geonode", nil)

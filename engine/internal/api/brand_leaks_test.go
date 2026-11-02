@@ -23,28 +23,26 @@ import (
 // else that returns another brand's records under ?brand= fails
 // TestNoBrandLeaks.
 var brandWide = map[string]string{
-	"/v1/workspaces/{ws}/brands":            "the brand list itself, for the switcher",
-	"/v1/workspaces/{ws}/brand-rules":       "workspace rules about every brand",
-	"/v1/workspaces/{ws}/members":           "people and the brands they may see",
-	"/v1/workspaces/{ws}/invites":           "invites and the brands they give",
-	"/v1/workspaces/{ws}/api-tokens":        "tokens and the brand each is kept to",
-	"/v1/workspaces/{ws}/agent-apps":        "connected AI apps and the brand each is kept to",
-	"/v1/workspaces/{ws}/senders":           "senders are the team's people and personas; their mailboxes carry the brand",
-	"/v1/workspaces/{ws}/connectors":        "the connector catalog with every connection",
-	"/v1/workspaces/{ws}/oauth-connections": "sign-ins held for the workspace",
-	"/v1/workspaces/{ws}/spend":             "spend is the workspace's bill",
-	"/v1/workspaces/{ws}/spend-recurring":   "spend is the workspace's bill",
-	"/v1/workspaces/{ws}/ai-usage":          "AI spend is the workspace's bill",
-	"/v1/workspaces/{ws}/jobs":              "background work of the whole server",
-	"/v1/workspaces/{ws}/export":            "a full export of the workspace",
-	"/v1/workspaces/{ws}/query/tables":      "the table list, not rows",
-	"/v1/workspaces/{ws}/context":           "the company context names every brand, so agents know how they relate",
-	"/v1/workspaces/{ws}/sending-servers":   "sending servers are shared by every brand",
-	"/v1/workspaces/{ws}/suppressions":      "an unsubscribe counts for every brand",
-	"/v1/workspaces/{ws}/imports":           "imports bring in the workspace's records",
-	"/v1/workspaces/{ws}/verifications":     "an address checked once is known for every brand",
-	"/v1/workspaces/{ws}/digests/preview":   "digests report on the whole workspace",
-	"/v1/workspaces/{ws}/digests":           "digests report on the whole workspace",
+	"/v1/workspaces/{ws}/brands":          "the brand list itself, for the switcher",
+	"/v1/workspaces/{ws}/brand-rules":     "workspace rules about every brand",
+	"/v1/workspaces/{ws}/members":         "people and the brands they may see",
+	"/v1/workspaces/{ws}/invites":         "invites and the brands they give",
+	"/v1/workspaces/{ws}/api-tokens":      "tokens and the brand each is kept to",
+	"/v1/workspaces/{ws}/agent-apps":      "connected AI apps and the brand each is kept to",
+	"/v1/workspaces/{ws}/senders":         "senders are the team's people and personas; their mailboxes carry the brand",
+	"/v1/workspaces/{ws}/connectors":      "the connector catalog with every connection",
+	"/v1/workspaces/{ws}/spend":           "spend is the workspace's bill",
+	"/v1/workspaces/{ws}/spend-recurring": "spend is the workspace's bill",
+	"/v1/workspaces/{ws}/ai-usage":        "AI spend is the workspace's bill",
+	"/v1/workspaces/{ws}/jobs":            "background work of the whole server",
+	"/v1/workspaces/{ws}/export":          "a full export of the workspace",
+	"/v1/workspaces/{ws}/query/tables":    "the table list, not rows",
+	"/v1/workspaces/{ws}/context":         "the company context names every brand, so agents know how they relate",
+	"/v1/workspaces/{ws}/sending-servers": "sending servers are shared by every brand",
+	"/v1/workspaces/{ws}/imports":         "imports bring in the workspace's records",
+	"/v1/workspaces/{ws}/verifications":   "an address checked once is known for every brand",
+	"/v1/workspaces/{ws}/digests/preview": "digests report on the whole workspace",
+	"/v1/workspaces/{ws}/digests":         "digests report on the whole workspace",
 }
 
 // sweepQuery is the rest of the query string the sweep sends, for
@@ -387,6 +385,10 @@ var seedValues = map[string]string{
 	"record_relationships.kind":      "bravo_link",
 	"record_merge_candidates.reason": "email",
 	"import_items.kind":              "campaign",
+	"lifecycle_stages.key":           "bravo_stage",
+	"lifecycle_moves.key":            "bravo_move",
+	"lifecycle_moves.kind":           "usage",
+	"product_aliases.status":         "mapped",
 }
 
 // seedPairs are tables that point at two different rows of one table (a
@@ -423,6 +425,9 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, "https://bravo.example/"
 	case "emit_event":
 		return cast, "bravo.emitted"
+	}
+	if tbl == "support_chat_widgets" && c.name == "key" {
+		return cast, "ofw_bravobravobravobravobrav"
 	}
 	if tbl == "rules" && c.name == "trigger" {
 		return cast, `{"kind": "event", "event": "bravo.happened"}`

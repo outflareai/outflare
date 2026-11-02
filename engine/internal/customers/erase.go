@@ -12,6 +12,8 @@ import (
 // (identities, links, history) go with the record itself.
 var Erased = []Ref{
 	{"partner_proposals", "record_id"},
+	{"crm_activities", "record_id"},
+	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"},
 	{"customer_events", "record_id"}, {"consents", "record_id"},

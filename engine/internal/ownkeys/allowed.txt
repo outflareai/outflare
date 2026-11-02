@@ -24,8 +24,8 @@ env CLOUDFLARE_ACCOUNT_ID       engine/internal/sysmail/sysmail.go  the account 
 # its own connection.
 env GOOGLE_OAUTH_CLIENT_ID         engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Google OAuth app (sign-in, Gmail, and Google connectors on the workspace's own account)
 env GOOGLE_OAUTH_CLIENT_SECRET     engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Google OAuth app (sign-in, Gmail, and Google connectors on the workspace's own account)
-env MICROSOFT_OAUTH_CLIENT_ID      engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
-env MICROSOFT_OAUTH_CLIENT_SECRET  engine/internal/config/config.go,engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
+env MICROSOFT_OAUTH_CLIENT_ID      engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
+env MICROSOFT_OAUTH_CLIENT_SECRET  engine/internal/connectors/oauth.go  Outflare's Microsoft OAuth app (Outlook mailboxes and calendars on the workspace's own account)
 dynamic *CLIENT_ID      engine/internal/connectors/oauth.go  CONNECTOR_<ID>_CLIENT_ID: each vendor's OAuth app, which signs the workspace in to its own account
 dynamic *CLIENT_SECRET  engine/internal/connectors/oauth.go  CONNECTOR_<ID>_CLIENT_SECRET: each vendor's OAuth app, which signs the workspace in to its own account
 dynamic *SCOPES         engine/internal/connectors/oauth.go  CONNECTOR_<ID>_SCOPES: the scopes those OAuth apps ask for

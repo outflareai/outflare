@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -22,13 +24,24 @@ const (
 	metaVersion = "v24.0"
 )
 
-// metaConversions are Meta's standard conversion actions, counted as
-// conversions. Everything else (link clicks, video views) is engagement.
-var metaConversions = map[string]bool{
-	"purchase": true, "omni_purchase": true, "lead": true, "complete_registration": true,
-	"start_trial": true, "subscribe": true, "offsite_conversion.fb_pixel_purchase": true,
-	"offsite_conversion.fb_pixel_lead": true, "offsite_conversion.fb_pixel_complete_registration": true,
+// metaConversions maps Meta's standard conversion actions to the kind of
+// conversion they count. Meta reports one purchase several times (as
+// purchase, omni_purchase and the pixel's own), so each kind counts once,
+// at its largest. Everything else (link clicks, video views) is
+// engagement; custom conversions are listed by kind but not counted.
+var metaConversions = map[string]string{
+	"purchase": "purchase", "omni_purchase": "purchase", "offsite_conversion.fb_pixel_purchase": "purchase",
+	"lead": "lead", "offsite_conversion.fb_pixel_lead": "lead", "onsite_web_lead": "lead",
+	"complete_registration": "complete_registration", "omni_complete_registration": "complete_registration",
+	"offsite_conversion.fb_pixel_complete_registration": "complete_registration",
+	"start_trial": "start_trial", "omni_start_trial": "start_trial", "start_trial_total": "start_trial",
+	"offsite_conversion.fb_pixel_start_trial": "start_trial",
+	"subscribe": "subscribe", "omni_subscribe": "subscribe", "subscribe_total": "subscribe",
+	"offsite_conversion.fb_pixel_subscribe": "subscribe",
 }
+
+// metaCustom is the prefix of a custom conversion's action type.
+const metaCustom = "offsite_conversion.custom."
 
 func (MetaAds) Definition() c.Definition {
 	d := def("meta_ads", "Meta Ads", "https://www.facebook.com/business/ads",
@@ -151,7 +164,7 @@ func (m MetaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c
 		"level":          {"campaign"},
 		"time_increment": {"1"},
 		"time_range":     {string(tr)},
-		"fields":         {"campaign_id,campaign_name,spend,impressions,clicks,actions,action_values"},
+		"fields":         {"campaign_id,campaign_name,spend,impressions,clicks,reach,actions,action_values"},
 		"limit":          {"500"},
 	}
 	var out []c.AdDay
@@ -163,16 +176,17 @@ func (m MetaAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c
 			Spend        string       `json:"spend"`
 			Impressions  flexInt      `json:"impressions"`
 			Clicks       flexInt      `json:"clicks"`
+			Reach        *flexInt     `json:"reach"`
 			Actions      []metaAction `json:"actions"`
 			ActionValues []metaAction `json:"action_values"`
 		}
 		if json.Unmarshal(raw, &r) != nil || r.CampaignID == "" {
 			return nil
 		}
-		conv, value := metaResults(r.Actions, r.ActionValues)
+		conv, value, extra := metaResults(r.Actions, r.ActionValues, r.Reach)
 		out = append(out, c.AdDay{CampaignID: r.CampaignID, CampaignName: r.CampaignName, Date: r.DateStart,
 			SpendMicros: c.MicrosOf(r.Spend), Impressions: int64(r.Impressions), Clicks: int64(r.Clicks),
-			Conversions: ptrF(conv), ConversionValueMicros: ptrI(c.Micros(value))})
+			Conversions: ptrF(conv), ConversionValueMicros: ptrI(c.Micros(value)), AdExtra: extra})
 		return nil
 	})
 	return out, err
@@ -241,6 +255,11 @@ func (m MetaAds) AdItems(ctx context.Context, cl *c.Client, creds c.Creds, acct 
 				c.AdDetailURLTags:   cr.URLTags,
 				c.AdDetailThumbnail: cr.ThumbnailURL,
 			})
+			// A creative whose link Meta keeps elsewhere (dynamic creative,
+			// catalog ads) says nothing either way.
+			if it.Details[c.AdDetailURL] != "" || cr.URLTags != "" {
+				it.Details[c.AdDetailTemplated] = strconv.FormatBool(adtrack.HasTemplate(cr.URLTags, it.Details[c.AdDetailURL]))
+			}
 		}
 		out = append(out, it)
 		return nil
@@ -264,7 +283,7 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 		"level":          {metaLevel},
 		"time_increment": {"1"},
 		"time_range":     {string(tr)},
-		"fields":         {fields + ",spend,impressions,clicks,actions,action_values"},
+		"fields":         {fields + ",spend,impressions,clicks,reach,actions,action_values"},
 		"limit":          {"500"},
 	}
 	var out []c.AdItemDay
@@ -279,6 +298,7 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 			Spend        string       `json:"spend"`
 			Impressions  flexInt      `json:"impressions"`
 			Clicks       flexInt      `json:"clicks"`
+			Reach        *flexInt     `json:"reach"`
 			Actions      []metaAction `json:"actions"`
 			ActionValues []metaAction `json:"action_values"`
 		}
@@ -292,7 +312,8 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 		if d.ID == "" {
 			return nil
 		}
-		conv, value := metaResults(r.Actions, r.ActionValues)
+		conv, value, extra := metaResults(r.Actions, r.ActionValues, r.Reach)
+		d.AdExtra = extra
 		d.Date, d.SpendMicros, d.Impressions, d.Clicks = r.DateStart, c.MicrosOf(r.Spend), int64(r.Impressions), int64(r.Clicks)
 		d.Conversions, d.ConversionValueMicros = ptrF(conv), ptrI(c.Micros(value))
 		out = append(out, d)
@@ -301,19 +322,58 @@ func (m MetaAds) AdItemDays(ctx context.Context, cl *c.Client, creds c.Creds, ac
 	return out, err
 }
 
-// metaResults adds up Meta's standard conversions and their value.
-func metaResults(actions, values []metaAction) (conv, value float64) {
+// metaResults reads a row's actions: its standard conversions and their
+// value, each kind once, the conversions by kind (custom conversions
+// too), and its link clicks, landing page views, 3-second video views and
+// reach.
+func metaResults(actions, values []metaAction, reach *flexInt) (conv, value float64, extra c.AdExtra) {
+	kind := func(t string) string {
+		if k := metaConversions[t]; k != "" {
+			return k
+		}
+		if strings.HasPrefix(t, metaCustom) {
+			return "custom." + strings.TrimPrefix(t, metaCustom)
+		}
+		return ""
+	}
+	counts, worth := map[string]float64{}, map[string]float64{}
+	var order []string
 	for _, a := range actions {
-		if metaConversions[a.ActionType] {
-			conv += float64(a.Value)
+		switch a.ActionType {
+		case "link_click":
+			extra.LinkClicks = ptrI(int64(a.Value))
+		case "landing_page_view":
+			extra.LandingPageViews = ptrI(int64(a.Value))
+		case "video_view":
+			extra.VideoViews = ptrI(int64(a.Value))
+		}
+		if k := kind(a.ActionType); k != "" {
+			if _, ok := counts[k]; !ok {
+				order = append(order, k)
+			}
+			counts[k] = max(counts[k], float64(a.Value))
 		}
 	}
 	for _, a := range values {
-		if metaConversions[a.ActionType] {
-			value += float64(a.Value)
+		if k := kind(a.ActionType); k != "" {
+			worth[k] = max(worth[k], float64(a.Value))
 		}
 	}
-	return conv, value
+	for _, k := range order {
+		x := c.AdAction{Name: k, Conversions: counts[k]}
+		if v, ok := worth[k]; ok {
+			x.ValueMicros = ptrI(c.Micros(v))
+		}
+		extra.Actions = append(extra.Actions, x)
+		if !strings.HasPrefix(k, "custom.") {
+			conv += counts[k]
+			value += worth[k]
+		}
+	}
+	if reach != nil {
+		extra.Reach = ptrI(int64(*reach))
+	}
+	return conv, value, extra
 }
 
 // minorUnits is how many of a currency's smallest unit make one: 100 for

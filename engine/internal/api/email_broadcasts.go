@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emails"
+	"github.com/outflareai/outflare/engine/internal/holdout"
 	"github.com/outflareai/outflare/engine/internal/missions"
 )
 
@@ -68,14 +69,18 @@ type emailBroadcastView struct {
 		Opens  *bool `json:"opens"`
 		Clicks *bool `json:"clicks"`
 	} `json:"track"`
-	SendAt     *time.Time     `json:"send_at"`
-	StartedAt  *time.Time     `json:"started_at"`
-	FinishedAt *time.Time     `json:"finished_at"`
-	Recipients int            `json:"recipients"`
-	Skipped    int            `json:"skipped"`
-	Stats      broadcastStats `json:"stats"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	SendAt     *time.Time `json:"send_at"`
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	Recipients int        `json:"recipients"`
+	Skipped    int        `json:"skipped"`
+	// The share of the audience held out on purpose, and how many people
+	// were (not counted in skipped).
+	HoldoutPercent int            `json:"holdout_percent"`
+	HeldOut        int            `json:"held_out"`
+	Stats          broadcastStats `json:"stats"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
 type templateRef struct {
@@ -87,7 +92,7 @@ type templateRef struct {
 const emailBroadcastSelect = `
 	SELECT b.id, b.name, b.status, b.status_reason, t.id, t.handle, t.name, b.template_version, tp.id, tp.key, tp.name,
 	       b.from_address, b.provider_id, b.brand_id, b.audience_kind, b.record_ids::text[], b.audience_ref, b.data, b.exclude,
-	       b.track_opens, b.track_clicks, b.send_at, b.started_at, b.finished_at, b.recipients, b.skipped,
+	       b.track_opens, b.track_clicks, b.send_at, b.started_at, b.finished_at, b.recipients, b.skipped, b.holdout_percent, b.held_out,
 	       COALESCE(st.emails, 0), COALESCE(st.sent, 0), COALESCE(st.delivered, 0), COALESCE(st.opened, 0), COALESCE(st.clicked, 0),
 	       COALESCE(st.bounced, 0), COALESCE(st.complained, 0), COALESCE(st.not_sent, 0),
 	       (SELECT count(DISTINCT ev.email_id) FROM email_events ev JOIN emails ue ON ue.id = ev.email_id
@@ -114,7 +119,7 @@ func scanEmailBroadcast(row pgx.Row) (emailBroadcastView, error) {
 	var data, exclude []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Status, &v.StatusReason, &v.Template.ID, &v.Template.Handle, &v.Template.Name, &v.TemplateVersion,
 		&topic.ID, &topic.Key, &topic.Name, &v.From, &v.ProviderID, &v.BrandID, &v.Audience.Kind, &v.Audience.RecordIDs, &v.Audience.Ref, &data, &exclude,
-		&v.Track.Opens, &v.Track.Clicks, &v.SendAt, &v.StartedAt, &v.FinishedAt, &v.Recipients, &v.Skipped,
+		&v.Track.Opens, &v.Track.Clicks, &v.SendAt, &v.StartedAt, &v.FinishedAt, &v.Recipients, &v.Skipped, &v.HoldoutPercent, &v.HeldOut,
 		&v.Stats.Emails, &v.Stats.Sent, &v.Stats.Delivered, &v.Stats.Opened, &v.Stats.Clicked, &v.Stats.Bounced, &v.Stats.Complained,
 		&v.Stats.NotSent, &v.Stats.Unsubscribed, &v.CreatedAt, &v.UpdatedAt)
 	v.Topic = topic.ref()
@@ -223,6 +228,8 @@ type broadcastFields struct {
 		Opens  optional[bool] `json:"opens"`
 		Clicks optional[bool] `json:"clicks"`
 	} `json:"track"`
+	// The share of the audience to hold out on purpose, 0 to 50 percent.
+	HoldoutPercent *int `json:"holdout_percent"`
 }
 
 // broadcastRow is what a create or update writes.
@@ -233,6 +240,7 @@ type broadcastRow struct {
 	data                             map[string]any
 	exclude                          customers.Exclusion
 	trackOpens, trackClicks          *bool
+	holdout                          int
 }
 
 // apply checks f and applies it to b.
@@ -337,6 +345,12 @@ func (s *Server) applyBroadcast(r *http.Request, ws string, f broadcastFields, b
 		}
 		b.exclude = x
 	}
+	if f.HoldoutPercent != nil {
+		if *f.HoldoutPercent < 0 || *f.HoldoutPercent > holdout.Max {
+			return errInvalid("holdout_percent must be 0 to 50")
+		}
+		b.holdout = *f.HoldoutPercent
+	}
 	if f.Track != nil {
 		if f.Track.Opens.Set {
 			b.trackOpens = f.Track.Opens.Value
@@ -379,14 +393,14 @@ func (s *Server) createEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 			createdBy = &a.ActorID
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO email_broadcasts (workspace_id, name, template_id, topic_id, from_address, provider_id, brand_id,
-			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude, mission_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15, NULLIF($16, '')::uuid) RETURNING id`,
+			audience_kind, record_ids, data, track_opens, track_clicks, created_by, request_id, exclude, mission_id, holdout_percent)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, NULLIF($14, ''), $15, NULLIF($16, '')::uuid, $17) RETURNING id`,
 			a.WorkspaceID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID, b.audience, b.recordIDs, data,
-			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude, missions.ID(ctx)).Scan(&id); err != nil {
+			b.trackOpens, b.trackClicks, createdBy, RequestID(ctx), b.exclude, missions.ID(ctx), b.holdout).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.created", "email_broadcast", id,
-			map[string]any{"audience": b.audience, "has_topic": b.topicID != nil})
+			map[string]any{"audience": b.audience, "has_topic": b.topicID != nil, "holdout_percent": b.holdout})
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -409,13 +423,14 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &f) {
 		return
 	}
-	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil && f.Exclude == nil
+	onlyName := f.Template == nil && !f.Topic.Set && f.From == nil && !f.ProviderID.Set && !f.BrandID.Set && f.Audience == nil && f.Data == nil && f.Track == nil && f.Exclude == nil && f.HoldoutPercent == nil
 	if cur.Status != "draft" && !onlyName {
 		writeError(w, r, http.StatusConflict, "conflict", "the broadcast is "+cur.Status+"; only its name can change")
 		return
 	}
 	b := broadcastRow{name: cur.Name, templateID: cur.Template.ID, from: cur.From, audience: cur.Audience.Kind, providerID: cur.ProviderID,
-		brandID: cur.BrandID, recordIDs: cur.Audience.RecordIDs, data: cur.Data, exclude: cur.Exclude, trackOpens: cur.Track.Opens, trackClicks: cur.Track.Clicks}
+		brandID: cur.BrandID, recordIDs: cur.Audience.RecordIDs, data: cur.Data, exclude: cur.Exclude, trackOpens: cur.Track.Opens, trackClicks: cur.Track.Clicks,
+		holdout: cur.HoldoutPercent}
 	if cur.Topic != nil {
 		b.topicID = &cur.Topic.ID
 	}
@@ -433,9 +448,10 @@ func (s *Server) updateEmailBroadcast(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		data, _ := json.Marshal(b.data)
 		if _, err := tx.Exec(ctx, `UPDATE email_broadcasts SET name = $3, template_id = $4, topic_id = $5, from_address = $6, provider_id = $7,
-			brand_id = $8, audience_kind = $9, record_ids = $10::uuid[], data = $11, track_opens = $12, track_clicks = $13, exclude = $14, updated_at = now()
+			brand_id = $8, audience_kind = $9, record_ids = $10::uuid[], data = $11, track_opens = $12, track_clicks = $13, exclude = $14,
+			holdout_percent = $15, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, cur.ID, b.name, b.templateID, b.topicID, b.from, b.providerID, b.brandID,
-			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks, b.exclude); err != nil {
+			b.audience, b.recordIDs, data, b.trackOpens, b.trackClicks, b.exclude, b.holdout); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "email_broadcast.updated", "email_broadcast", cur.ID, nil)
@@ -549,9 +565,12 @@ func (s *Server) listEmailBroadcastRecipients(w http.ResponseWriter, r *http.Req
 		return
 	}
 	q := r.URL.Query()
-	after := q.Get("after")
+	after, ok := pageCursor(w, r, pageAfter)
+	if !ok {
+		return
+	}
 	if after != "" && !validUUID(after) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "after must be a record id")
+		invalidCursor(w, r)
 		return
 	}
 	skipped := q.Get("skipped")
@@ -597,5 +616,5 @@ func (s *Server) listEmailBroadcastRecipients(w http.ResponseWriter, r *http.Req
 	if list == nil {
 		list = []broadcastRecipientView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageAfter, next)})
 }

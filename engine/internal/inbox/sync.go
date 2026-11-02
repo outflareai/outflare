@@ -510,6 +510,14 @@ func OptedOut(ctx context.Context, tx pgx.Tx, ws, inboundID, leadID, email strin
 			by.IntegrationID = *integration
 		}
 	}
+	// The opt-out applies to the brand the reply (or its lead) belongs to
+	// (plans/brands/README.md, decision 5).
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(
+			(SELECT brand_id::text FROM inbound_messages WHERE workspace_id = $1 AND id = NULLIF($2, '')::uuid),
+			(SELECT brand_id::text FROM leads WHERE workspace_id = $1 AND id = NULLIF($3, '')::uuid), '')`,
+		ws, inboundID, leadID).Scan(&by.BrandID); err != nil {
+		return err
+	}
 	if _, err := leads.Suppress(ctx, tx, ws, by, []leads.Suppression{{Kind: "email", Value: email}}); err != nil {
 		return err
 	}

@@ -141,11 +141,11 @@ export function HookEvents({ ws, integrationId, canManage, compact, names }: { w
   const [events, setEvents] = useState<HookEvent[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const load = useCallback(
-    async (before?: string) => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/hook-events", { params: { path: { ws }, query: { integration_id: integrationId, status: status || undefined, before, limit: compact ? 10 : 50 } } });
+    async (cursor?: string) => {
+      const { data, error } = await api.GET("/v1/workspaces/{ws}/hook-events", { params: { path: { ws }, query: { integration_id: integrationId, status: status || undefined, cursor, limit: compact ? 10 : 50 } } });
       if (error) return toast(errorMessage(error), "error");
-      setEvents((cur) => (before ? [...(cur ?? []), ...data.data] : data.data));
-      setNext(compact ? null : (data.next_before ?? null));
+      setEvents((cur) => (cursor ? [...(cur ?? []), ...data.data] : data.data));
+      setNext(compact ? null : (data.next_cursor ?? null));
     },
     [ws, integrationId, status, compact],
   );

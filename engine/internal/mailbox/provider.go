@@ -63,7 +63,7 @@ func Simulate(r *Row) {
 	r.SMTPHost, r.SMTPPort, r.IMAPHost, r.IMAPPort = SimulatedHost, 465, SimulatedHost, 993
 	r.SMTPUsername, r.IMAPUsername = r.Email, r.Email
 	r.SMTPPassword, r.IMAPPassword = "", ""
-	r.IntegrationID, r.ConnectionID, r.RefreshToken = nil, nil, ""
+	r.IntegrationID = nil
 }
 
 // Resolver is the subset of net.Resolver used here, so tests can fake DNS.

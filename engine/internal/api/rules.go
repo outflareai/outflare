@@ -564,11 +564,13 @@ func (s *Server) listRuleFirings(w http.ResponseWriter, r *http.Request) {
 	}
 	args := []any{a.WorkspaceID, cur.ID, limit}
 	where := ``
-	if b := r.URL.Query().Get("before"); b != "" {
+	if b, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if b != "" {
 		at, id, found := strings.Cut(b, "|")
 		t, err := time.Parse(time.RFC3339Nano, at)
 		if !found || err != nil || !validUUID(id) {
-			writeError(w, r, http.StatusBadRequest, "invalid_cursor", "before is not one this API gave out: pass next_before from the previous page unchanged")
+			invalidCursor(w, r)
 			return
 		}
 		args = append(args, t, id)
@@ -605,7 +607,7 @@ func (s *Server) listRuleFirings(w http.ResponseWriter, r *http.Request) {
 		c := last.FiredAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID
 		next = &c
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // isStatementTimeout reports whether err is Postgres stopping a statement

@@ -15,6 +15,7 @@ import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhr
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent, softDeleteRecord } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
+import { Products, RecordLifecycle } from "./Products";
 import { RecentlyDeleted } from "./RecentlyDeleted";
 import { Batches, RecordMerges } from "./Undo";
 import { RecordPartners } from "./Partners";
@@ -30,7 +31,8 @@ type PrivacyExport = Schemas["PrivacyExport"];
 
 // People and Companies are the two built-in record types; the item part of
 // the URL picks the view: "" for people, "companies", "duplicates", "events"
-// (the brand's product events as received), "batches" (imports and sends
+// (the brand's product events as received), "products" (its products and
+// lifecycle stages), "batches" (imports and sends
 // of events, each undoable in one step), "deleted" (Recently deleted,
 // restorable for 7 days), or a record's id.
 type View = "person" | "account";
@@ -44,22 +46,24 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 export function People({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "batches" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (open === "products") return <Products ws={ws} canManage={canManage} tabs={tabs} />;
   if (open === "batches") return <Batches ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "batches" | "deleted"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "batches" || v === "deleted" ? v : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
         <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
         <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
+        <TabsTrigger value="products" className="px-3 text-[12px]">Products</TabsTrigger>
         <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
         <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
       </TabsList>
@@ -90,7 +94,7 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
   const filterKey = JSON.stringify(filters);
 
   const load = useCallback(
-    async (before?: string) => {
+    async (cursor?: string) => {
       if (!brandID) return;
       const attribute = Object.entries(filters).filter(([, v]) => v).map(([k, v]) => `${k}:${v}`);
       const { data, error } = await api.GET("/v1/brands/{brand}/records", {
@@ -103,15 +107,15 @@ function RecordList({ ws, view, cat, canManage, tabs, onOpen }: { ws: string; vi
             ...(attribute.length ? { attribute } : {}),
             ...(show === "review" ? { review: "needs_review" as const } : {}),
             ...(show === "archived" ? { archived: "true" as const } : {}),
-            ...(before ? { before } : {}),
+            ...(cursor ? { cursor } : {}),
           },
         },
       });
       setLoaded(true);
       if (!data) return setError(errorMessage(error));
       setError("");
-      setRows((prev) => (before ? [...prev, ...data.data] : data.data));
-      setNext(data.next_before ?? null);
+      setRows((prev) => (cursor ? [...prev, ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
     },
     [brandID, view, q, show, filterKey], // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -424,6 +428,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           <Links links={links} fields={fields} onOpen={onOpen} />
           {people && <Consents key={`c${tick}`} brand={brand} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
+          {rec.brand_id && <RecordLifecycle key={`l${tick}`} brand={rec.brand_id} record={id} />}
           {rec.brand_id && !rec.merged_into && <PrivacyExports key={`p${tick}`} brand={rec.brand_id} record={id} canManage={canManage} />}
           {rec.brand_id && <RecordMerges key={`m${tick}`} brand={rec.brand_id} record={id} canManage={canManage} onOpen={onOpen} onChange={changed} />}
         </div>
@@ -684,14 +689,14 @@ function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string
   const company = rec.type === "account";
 
   const load = useCallback(
-    async (before?: string) => {
+    async (cursor?: string) => {
       const { data, error } = await api.GET("/v1/brands/{brand}/records/{record}/timeline", {
-        params: { path: { brand, record: rec.id }, query: { limit: 50, ...(kind ? { kinds: kind } : {}), ...(company && !people ? { people: "false" as const } : {}), ...(before ? { before } : {}) } },
+        params: { path: { brand, record: rec.id }, query: { limit: 50, ...(kind ? { kinds: kind } : {}), ...(company && !people ? { people: "false" as const } : {}), ...(cursor ? { cursor } : {}) } },
       });
       if (!data) return setError(errorMessage(error));
       setError("");
-      setItems((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
-      setNext(data.next_before ?? null);
+      setItems((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
     },
     [brand, rec.id, kind, people, company],
   );
@@ -803,16 +808,16 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
 
 function History({ brand, rec, cat, names, onOpen }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void }) {
   const [list, setList] = useState<Change[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState("");
   const fields = cat.fields(rec.type);
 
   const load = useCallback(
-    async (before?: number) => {
-      const { data, error } = await api.GET("/v1/brands/{brand}/records/{record}/history", { params: { path: { brand, record: rec.id }, query: { limit: 50, ...(before ? { before } : {}) } } });
+    async (cursor?: string) => {
+      const { data, error } = await api.GET("/v1/brands/{brand}/records/{record}/history", { params: { path: { brand, record: rec.id }, query: { limit: 50, ...(cursor ? { cursor } : {}) } } });
       if (!data) return setError(errorMessage(error));
-      setList((prev) => (before ? [...(prev ?? []), ...data.data] : data.data));
-      setNext(data.next_before ?? null);
+      setList((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
+      setNext(data.next_cursor ?? null);
     },
     [brand, rec.id],
   );

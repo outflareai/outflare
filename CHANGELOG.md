@@ -6,6 +6,63 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.80.0] - 2026-11-02
+
+### Changed
+
+- A grant that lets an agent run paid ads changes on its own gets spend caps of $50 a day and $500 a month unless you set your own, so a first autonomous grant on ad spend can't surprise you.
+
+### Fixed
+
+- The changes from v0.79.0, which didn't pass the release checks, are now published.
+
+## [0.79.0] - 2026-11-02
+
+### Added
+
+- Agent actions: turn on the action layer for an API token and set what that agent may change on its own. Everything else waits for a person, who approves changes one at a time or in batches. Every change the agent made is kept.
+- A playbook can run as an agent run: Outflare's agent carries it out in turns on the action layer, and the mode you choose (copilot, autonomous with a spend cap, or dry run) sets what it may change on its own. Its changes show on the Agents page, and you write to the run and it answers in its next turn.
+- Agents page: see what your agents changed, approve what waits for you one at a time or in a batch, let changes like one you approve run from then on, and set what each agent may do on its own. Mark a token as an agent under API tokens.
+- Knowledge now fills its own gaps, with you approving: when your team answers a support question the knowledge couldn't, Outflare suggests that answer (without the customer's details) for Knowledge, Review. AI agents can suggest answers they find on your website or in Slack, and articles that disagree are flagged so you can keep the right one. Nothing is used until you approve it.
+- Digital PR: add the journalists you already know, one at a time or from a CSV (with a check first), with their outlet, its tier and the beats they cover. Beats are suggested from the news searches their articles came up in, and the Journalists tab and media lists filter by beat and outlet tier.
+- Experts approve their own quotes: on a draft quote, Ask the expert emails them through one of your brand's outreach sequences or gives you a link for Slack. They approve the exact words, suggest a change or decline on a simple page with no account, and you're alerted when they decide.
+- Products and lifecycle stages: list the products each brand sells, and Outflare keeps every company and person in a stage per product (trial, active, at risk, churned), so a customer who cancels one product but keeps another is never treated as churned. Each move is an event journeys can start on. Find it under People → Products.
+- A labelled cold email reply is now a `reply.labeled` event on the sender's record, so a journey can start when a lead replies interested (to hand them to sales or open a deal), and the automation map shows replies as a source.
+- Broadcasts and sequences can hold back a share of their audience on purpose, and then show what they added: who converted and what they paid in the 30 days after, against the people held back, and whether the difference is real. Set it when you draft a broadcast or in a sequence's settings.
+- Slack (knowledge): a read-only Slack connection for the support assistant, which reads only the channels you pick to find answers your team already gave. It is separate from the Slack connection that posts alerts.
+- Support assistant: Outflare answers customers' chats and emails in a few short sentences from your approved knowledge, asks one question back, or hands the conversation to your team, drafting for your team to send. When it can't answer, it looks on your website and in the Slack channels you pick, and suggests the answer in Knowledge for you to approve.
+- Live chat on your website: add a chat button to your site from Support settings. Visitors can search your help centre, then message your team; chats land in the support inbox with email, assignment and response times, and your replies show in their chat within seconds. It shows only on the sites you list, and your site can vouch for signed-in users.
+
+### Changed
+
+- Paid ads: Meta and Google conversions by type, Google keywords and search terms, Meta link clicks, page views, video views and frequency, Outflare's own results beside each ad set and ad, and the ads missing the tracking template. Meta purchases reported several ways now count once.
+- Agent actions: approve a pattern once. When you approve an agent's held change, you can let changes like it run on their own from then on, within a daily limit. Held, approved and rejected agent changes can also go to webhooks.
+- Start a playbook from the app and Outflare's agent runs it: pick copilot, autonomous with a budget, or a dry run. The Agents page's Runs view shows each run's turns and changes, lets you write to it, and pauses or stops it; an automation's last run opens there too.
+- A grant that lets an agent run changes on its own can cap what those changes spend on your own accounts a day and a month. Spend booked while a change runs is linked to it, each change shows what it spent, and once the day's or month's spend plus what the next change is likely to cost would pass the cap, changes wait for a person.
+- Analytics → Channels credits companies and deals: what each company's people brought and the deals it won, and the value of won deals per channel, spread by the credit its people earned before the deal closed.
+- Leads, lead lists, sequences, replies, meetings and deals now belong to one brand, with API routes under `/v1/brands/{brand}/`: a sequence enrols only its brand's leads, and an opt-out applies to the brand it came from, while bounces, complaints and what an admin applies to every brand stop every brand's email.
+- Let approved salespeople connect their own Google account with read-only consent. Select contacts and accounts for private email capture, with internal-mail exclusions, separate sharing controls, draft protection and owner-only disconnect. Deleted copies stay deleted. Administrators manage eligibility; Google Workspace approval remains an external setup step.
+- Import personal customer emails with private defaults, explicit sharing and internal-email exclusions. Choose activity-only or full content for specific people or the brand. Exclusions revoke access to older imports; record merges reset sharing. Personal mail stays separate from the shared outreach inbox. Provider sync is not included yet.
+- Manage relationships in a sales workspace with editable tables, pipeline boards, saved views, tasks, notes and sales summaries. Add leads using existing companies and contact details, import Attio list entries and linked history, and create follow-ups from workflows.
+- Every list in the API now pages one way: pass `next_cursor` back as `cursor` until it is null. The per-list `before`, `after` and `offset` parameters and their `next_before`, `next_after` and `next_offset` fields are gone. The events feed and following logs start from now with `start=latest`.
+- AI accounts and Computers include a public Mac installer download for every workspace member. The installer is labelled as a one-upgrade automatic update test.
+- Approving DNS records at Cloudflare now works for domains on Cloudflare DNS. When a domain already has a DKIM key at the same selector, a DMARC policy or its own MX record, Outflare offers the other ways to add the records instead, so the approval never puts a second record beside one you already have.
+- Pipelines that add people to a campaign can now use a campaign that runs in Smartlead, Instantly or EmailBison. People are pushed into it on your own connection, after the same opt-out and exclusion checks, and the sequencer sends.
+- The lead finder page lets you choose where a search looks for companies, add your own list of companies, and compare the places on new companies, fit, replies and cost.
+- Google and Microsoft mailboxes connected before mailbox sign-ins were connections now sign in through Gmail and Outlook connections: they are moved automatically, keep sending, and show with your other connections. The older `/oauth-connections` and `/oauth/{provider}/authorize` routes, and `oauth_providers` in `/v1/meta`, are gone.
+- The partners table shows each partner's email under their name. The Tolt import skips a promotion that has neither a code nor a partner (a program-wide discount) without listing it as something to check.
+- Stories: create a pitch sequence for a brand in one click. It passes every pitch rule (the headline and your AI's opener, one short follow-up, stops on any reply) and waits as a draft for you to add mailboxes and activate it.
+
+### Fixed
+
+- "Approve in Cloudflare" is now a real link you can hover or open in a new tab, and it's the main action on DNS cards. Connecting the Cloudflare API is a secondary option under it. When one-click approval isn't offered, the card says why.
+- The Tolt import no longer marks commissions as paid just because they sit in a Tolt payout. Commissions in payouts Tolt hasn't paid yet (pending or "not eligible") keep their own status, and the next import run takes back any it marked paid before, removing the payouts it made for them.
+- Tracking domains on Cloudflare DNS can now be added with one click: "Cloudflare (one click)" opens Cloudflare's approval screen with the CNAME record, instead of asking for an API token.
+
+### Upgrading
+
+- nothing to do. The move runs once when the server starts; a mailbox that cannot be moved is logged and needs connecting again.
+
 ## [0.78.0] - 2026-11-01
 
 ### Added

@@ -11,6 +11,7 @@
 // load a page at a time from the server, with bulk actions that take
 // everything matching a filter.
 
+import { useBrand } from "@/lib/brand";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { CustomerProfile, Sequence } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -43,10 +44,18 @@ type Run = {
   provider_cents: number; ai_cents: number; error_code: string | null; error: string | null; created_at: string; finished_at: string | null;
   // Only on a single run (and the front page's latest runs).
   pipeline?: Pipeline; contacts?: Counts; campaign?: RunCampaign;
-  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; verify_credits?: number; people_cents?: number; verify_cents?: number; unpriced?: string[] };
+  spend?: { ai_cents: number; web_cents: number; web_tokens: number; people_credits: number; company_credits?: number; verify_credits?: number; people_cents?: number; verify_cents?: number; unpriced?: string[] };
   results?: { in_campaign: number; sent: number; replied: number };
   to_review?: number;
+  sources?: string[]; source_stats?: SourceStat[];
 };
+// SourceStat is one source's scorecard (Outflare Cloud): what it found and
+// what that cost.
+type SourceStat = {
+  source: string; name: string; searches: number; proposed: number; new: number; checked: number; fit: number; added: number;
+  people: number; emails: number; in_campaign: number; replied: number; ai_cents: number; web_cents: number; web_tokens: number; credit_cents?: number; cents_per_fit: number | null;
+};
+type SourceInfo = { key: string; name: string; kind: "web" | "strategy" | "accounts" | string; needs?: string };
 type Pipeline = { state: "running" | "paused" | "cancelled" | "finished"; pause_code?: string; pause_reason?: string; stages: StageCount[] };
 type StageCount = {
   stage: string; waiting: number; working: number; done: number; skipped: number; held: number; failed: number;
@@ -54,7 +63,7 @@ type StageCount = {
 };
 type Candidate = {
   id: string; domain: string; name: string; facts: Record<string, unknown>; emails: string[]; verdict: "accept" | "maybe" | "reject" | "unread";
-  score: number | null; reasons: string[]; query: string; status: "pending" | "added" | "dismissed"; record_id: string | null; from_index: boolean;
+  score: number | null; reasons: string[]; query: string; source?: string; evidence?: string; status: "pending" | "added" | "dismissed"; record_id: string | null; from_index: boolean;
   picked?: boolean; blocked?: string | null; warnings?: string[];
 };
 type Totals = { runs: number; found: number; fit: number; added: number; people: number; emails: number; in_campaign: number; replied: number; ai_cents: number; web_cents: number; web_tokens: number;
@@ -64,7 +73,7 @@ type Totals = { runs: number; found: number; fit: number; added: number; people:
 const spentOf = (t: Totals) => t.ai_cents + t.web_cents + (t.credit_cents ?? 0);
 type Need = { kind: "paused" | "ready" | "review" | "waiting"; run_id: string; profile_id: string | null; profile_name: string; count: number; code?: string; reason?: string; campaign?: string };
 type Search = Totals & { profile_id: string; profile_name: string; campaign: RunCampaign | null; last_run: Run | null };
-type Summary = { days: number; needs: Need[]; totals: Totals; searches: Search[] };
+type Summary = { days: number; needs: Need[]; totals: Totals; searches: Search[]; sources?: SourceStat[] };
 type Failure = { error: { code: string; message: string } };
 
 // call reaches the lead finder's routes, with the same session as the
@@ -237,6 +246,7 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }:
         <>
           {summary && summary.needs.length > 0 && <NeedsYou needs={summary.needs} canManage={canManage} onOpen={(id, tab, filter) => setOpen({ id, tab, filter })} onConnectors={onConnectors} />}
           {summary && <Results totals={summary.totals} days={days} onDays={setDays} onRates={onRates} />}
+          {summary?.sources && summary.sources.length > 0 && <SourcesTable stats={summary.sources} title="Where it found them" />}
           <div className="space-y-3">
             {summary && (
               <div className="flex gap-1 border-b text-[13px]" role="tablist">
@@ -378,6 +388,49 @@ function SearchesTable({ searches, canManage, onOpen, onRunAgain }: { searches: 
   );
 }
 
+// finderSource names a source key for people (the scorecard has the names).
+function finderSource(key: string) {
+  if (key === "accounts") return "your list";
+  return key.replace(/^web:/, "").replace(/_/g, " ");
+}
+
+// SourcesTable compares where companies came from: what each source
+// proposed, what fit, what came of the people, and what it cost.
+function SourcesTable({ stats, title }: { stats: SourceStat[]; title?: string }) {
+  return (
+    <section className="space-y-2">
+      {title && <h2 className="text-[13px] font-semibold">{title}</h2>}
+      <div className="overflow-x-auto rounded-lg border bg-card shadow-xs">
+        <table className="w-full text-[13px]">
+          <thead className="text-left font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+            <tr className="border-b">
+              <th className="px-3 py-2 font-medium">Source</th><th className="px-3 py-2 text-right font-medium">Searches</th>
+              <th className="px-3 py-2 text-right font-medium">New</th><th className="px-3 py-2 text-right font-medium">Fit</th>
+              <th className="px-3 py-2 text-right font-medium">People</th><th className="px-3 py-2 text-right font-medium">Replied</th>
+              <th className="px-3 py-2 text-right font-medium">Spent</th><th className="px-3 py-2 text-right font-medium">Per fit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.map((x) => (
+              <tr key={x.source} className="border-b last:border-0">
+                <td className="px-3 py-2.5 font-medium">{x.name}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{n(x.searches)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums" title={`${n(x.proposed)} proposed`}>{n(x.new)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums" title={`${n(x.checked)} checked, ${n(x.added)} added`}>{n(x.fit)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums" title={`${n(x.emails)} with an email, ${n(x.in_campaign)} in a campaign`}>{n(x.people)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{n(x.replied)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums" title={`${n(x.web_tokens)} Geonode tokens`}>{money(x.ai_cents + x.web_cents + (x.credit_cents ?? 0))}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{x.cents_per_fit == null ? "—" : money(Math.round(x.cents_per_fit))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[12px] text-muted-foreground">New companies are ones no other source, search or your CRM already had. Spent counts reading and checking each source's companies too, on your own accounts.</p>
+    </section>
+  );
+}
+
 function RunsTable({ runs, profileName, onOpen }: { runs: Run[]; profileName: Record<string, string>; onOpen: (id: string) => void }) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-card shadow-xs">
@@ -421,9 +474,14 @@ function Notice({ canManage, onAccept }: { canManage: boolean; onAccept: () => v
 // workspace's sequences, and whether they go in without asking.
 function CampaignFields({ ws, campaign, onChange }: { ws: string; campaign: Campaign; onChange: (c: Campaign) => void }) {
   const [sequences, setSequences] = useState<Sequence[]>([]);
+  // A sequence is one brand's: the picked brand's, or every brand's to choose from.
+  const brandId = useBrand(ws).brand?.id;
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => setSequences((data?.data ?? []).filter((q) => q.status !== "archived")));
-  }, [ws]);
+    const req = brandId
+      ? api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } })
+      : api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: "all" } } });
+    req.then(({ data }) => setSequences((data?.data ?? []).filter((q) => q.status !== "archived")));
+  }, [ws, brandId]);
   return (
     <div className="space-y-3">
       <label className="block space-y-1 text-[13px]">
@@ -467,9 +525,21 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
   const [qualifier, setQualifier] = useState<Qualifier | null>(null);
   // Null on a server without campaigns: that step only shows review.
   const [campaign, setCampaign] = useState<Campaign | null>(null);
+  // Null on a server without sources: that step is left out.
+  const [sources, setSources] = useState<SourceInfo[] | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [accounts, setAccounts] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const p = profiles.find((x) => x.id === profile);
+
+  useEffect(() => {
+    call<{ data: SourceInfo[] }>("GET", `${base}/sources`).then(({ data }) => {
+      if (!data) return;
+      setSources(data.data);
+      setChosen(new Set(data.data.filter((x) => x.kind !== "accounts" && !x.needs).map((x) => x.key)));
+    });
+  }, [base]);
 
   useEffect(() => {
     if (target < 1 || target > 1000) return setEstimate(null);
@@ -496,14 +566,22 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
       const c = await call<Campaign>("PUT", `${base}/profiles/${profile}/campaign`, { sequence_id: campaign.sequence_id ?? "", auto_add: campaign.auto_add });
       if (c.error) return fail(c.error);
     }
-    const { data, error } = await call<Run>("POST", `${base}/runs`, { profile_id: profile, target, review });
+    const list = accounts.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+    const body: Record<string, unknown> = { profile_id: profile, target, review };
+    if (sources) {
+      body.sources = [...chosen].filter((k) => k !== "accounts");
+      if (list.length > 0) body.accounts = list;
+    }
+    const { data, error } = await call<Run>("POST", `${base}/runs`, body);
     if (error) return fail(error);
     setBusy(false);
     toast("Started. The page updates as it goes.");
     onStarted(data!.id);
   }
 
-  const steps = ["Who", "Where they go", "How many"];
+  const steps = sources ? ["Who", "Where to look", "Where they go", "How many"] : ["Who", "Where they go", "How many"];
+  const at = (name: string) => steps.indexOf(name);
+  const last = steps.length - 1;
   const f = p?.filters;
   const chips = (title: string, vals?: string[]) => vals && vals.length > 0 && (
     <div className="text-[12px]"><span className="text-muted-foreground">{title}: </span>{vals.join(", ")}</div>
@@ -546,7 +624,28 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
               )}
             </>
           )}
-          {step === 1 && (
+          {step === at("Where to look") && sources && (
+            <>
+              <p className="text-[12px] text-muted-foreground">Each place proposes companies with the page that shows why; every company is then read and checked the same way. Searches move to the places finding the most companies that fit for what they cost.</p>
+              <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                {sources.filter((x) => x.kind !== "accounts").map((x) => (
+                  <label key={x.key} className="flex cursor-pointer items-start gap-2 text-[13px]">
+                    <Checkbox checked={chosen.has(x.key)} disabled={!!x.needs} onCheckedChange={() => setChosen((c) => { const y = new Set(c); if (y.has(x.key)) y.delete(x.key); else y.add(x.key); return y; })} />
+                    <span>
+                      <span className="block">{x.name}</span>
+                      {x.needs && <span className="block text-[12px] text-muted-foreground">{x.needs}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <label className="block space-y-1 text-[13px]">
+                <span className="font-medium">Your own list of companies (optional)</span>
+                <textarea className={`${field} h-20 w-full`} placeholder={"acme.example\nnorthpeak.example"} value={accounts} onChange={(e) => setAccounts(e.target.value)} />
+                <span className="block text-[12px] text-muted-foreground">Websites or domains, one a line. Each is read and checked against the profile.</span>
+              </label>
+            </>
+          )}
+          {step === at("Where they go") && (
             <>
               {campaign && (
                 <div className="space-y-1">
@@ -563,7 +662,7 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
               </label>
             </>
           )}
-          {step === 2 && (
+          {step === at("How many") && (
             <>
               <label className="block space-y-1 text-[13px]">
                 <span className="font-medium">Companies to find that fit</span>
@@ -580,7 +679,7 @@ function SetupDialog({ ws, base, profiles, settings, initial, onClose, onStarted
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-between gap-2">
             <Button variant="ghost" onClick={step === 0 ? onClose : () => setStep(step - 1)}>{step === 0 ? "Cancel" : "Back"}</Button>
-            {step < 2 ? <Button onClick={() => setStep(step + 1)} disabled={!profile}>Next</Button> : <Button onClick={start} disabled={busy || !profile || target < 1}>Start</Button>}
+            {step < last ? <Button onClick={() => setStep(step + 1)} disabled={!profile || (step === at("Where to look") && chosen.size === 0 && !accounts.trim())}>Next</Button> : <Button onClick={start} disabled={busy || !profile || target < 1}>Start</Button>}
           </div>
         </div>
       </DialogContent>
@@ -629,7 +728,7 @@ function SettingsDialog({ base, settings, onClose, onSaved }: { base: string; se
   );
 }
 
-type Tab = "companies" | "people" | "spend" | "details";
+type Tab = "companies" | "people" | "sources" | "spend" | "details";
 
 function RunView({ ws, base, id, tab: initialTab, filter, canManage, profiles, onBack, onConnectors, onRates, onRunAgain }: {
   ws: string; base: string; id: string; tab?: Tab; filter?: string; canManage: boolean; profiles: CustomerProfile[];
@@ -729,13 +828,14 @@ function RunView({ ws, base, id, tab: initialTab, filter, canManage, profiles, o
       <Funnel run={run} people={people} onPick={(t, f) => { setTab(t); if (t === "companies") setCompanyFilter(f); else setPeopleFilter(f); }} />
       <div className="space-y-3">
         <div className="flex gap-1 overflow-x-auto border-b text-[13px]" role="tablist">
-          {([["companies", `Companies ${n(run.found)}`], ["people", `People ${n(people)}`], ["spend", `Spend ${money(run.ai_cents + run.provider_cents)}`], ["details", "Details"]] as [Tab, string][]).map(([t, l]) => (
+          {([["companies", `Companies ${n(run.found)}`], ["people", `People ${n(people)}`], ...(run.source_stats && run.source_stats.length > 0 ? [["sources", `Sources ${n(run.source_stats.length)}`]] : []), ["spend", `Spend ${money(run.ai_cents + run.provider_cents)}`], ["details", "Details"]] as [Tab, string][]).map(([t, l]) => (
             <button key={t} type="button" role="tab" aria-selected={shown === t} onClick={() => setTab(t)}
               className={`-mb-px shrink-0 border-b-2 px-3 py-2 ${shown === t ? "border-foreground font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{l}</button>
           ))}
         </div>
         {shown === "companies" && <Companies base={base} run={run} canManage={canManage} filter={companyFilter} onFilter={setCompanyFilter} onChanged={load} />}
         {shown === "people" && <People base={base} run={run} canManage={canManage} filter={shownPeopleFilter} onFilter={(f) => { setTab("people"); setPeopleFilter(f ?? ""); }} onChanged={load} onCampaign={() => setEditingCampaign(true)} />}
+        {shown === "sources" && run.source_stats && <SourcesTable stats={run.source_stats} />}
         {shown === "spend" && <Spend run={run} onRates={onRates} />}
         {shown === "details" && <Details run={run} />}
       </div>
@@ -777,10 +877,10 @@ function Funnel({ run, people, onPick }: { run: Run; people: number; onPick: (t:
 // usePage loads one page of a list from the server, again when its query
 // changes or the run moves on.
 function usePage<T>(path: string, version: string) {
-  const [data, setData] = useState<(T & { total: number; offset: number }) | null>(null);
+  const [data, setData] = useState<(T & { total: number; next_cursor?: string | null }) | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const r = await call<T & { total: number; offset: number }>("GET", path);
+    const r = await call<T & { total: number; next_cursor?: string | null }>("GET", path);
     if (r.error) return setError(errorMessage(r.error));
     setError("");
     setData(r.data!);
@@ -793,14 +893,30 @@ function usePage<T>(path: string, version: string) {
 
 const pageSize = 50;
 
-function Pager({ offset, total, onOffset }: { offset: number; total: number; onOffset: (o: number) => void }) {
-  if (total <= pageSize) return total > 0 ? <p className="text-[12px] text-muted-foreground">{plural(total, "row")}</p> : null;
+// useCursors keeps the cursor of each page up to this one, so Previous can
+// go back: lists page forward by next_cursor only. A new filter (key)
+// starts again from the first page.
+function useCursors(key: string) {
+  const [state, setState] = useState<{ key: string; cursors: string[] }>({ key, cursors: [] });
+  const cursors = state.key === key ? state.cursors : [];
+  const cursor = cursors[cursors.length - 1];
+  return {
+    page: cursors.length,
+    params: cursor ? { cursor } : ({} as Record<string, string>),
+    next: (c: string) => setState({ key, cursors: [...cursors, c] }),
+    previous: () => setState({ key, cursors: cursors.slice(0, -1) }),
+  };
+}
+
+function Pager({ page, total, next, onNext, onPrevious }: { page: number; total: number; next?: string | null; onNext: (c: string) => void; onPrevious: () => void }) {
+  if (page === 0 && !next) return total > 0 ? <p className="text-[12px] text-muted-foreground">{plural(total, "row")}</p> : null;
+  const start = page * pageSize;
   return (
     <div className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground">
-      <span className="tabular-nums">{n(offset + 1)}–{n(Math.min(total, offset + pageSize))} of {n(total)}</span>
+      <span className="tabular-nums">{n(Math.min(total, start + 1))}–{n(Math.min(total, start + pageSize))} of {n(total)}</span>
       <span className="flex gap-2">
-        <Button variant="ghost" disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - pageSize))}>Previous</Button>
-        <Button variant="ghost" disabled={offset + pageSize >= total} onClick={() => onOffset(offset + pageSize)}>Next</Button>
+        <Button variant="ghost" disabled={page === 0} onClick={onPrevious}>Previous</Button>
+        <Button variant="ghost" disabled={!next} onClick={() => next && onNext(next)}>Next</Button>
       </span>
     </div>
   );
@@ -831,14 +947,14 @@ const candidateStates = [
 function Companies({ base, run, canManage, filter, onFilter, onChanged }: { base: string; run: Run; canManage: boolean; filter?: string; onFilter: (f?: string) => void; onChanged: () => void }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
-  const [offset, setOffset] = useState(0);
   const [minScore, setMinScore] = useState(0);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const state = filter ?? "";
-  const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset), ...(state ? { state } : {}), ...(dq ? { q: dq } : {}) });
+  const pages = useCursors(JSON.stringify([state, dq]));
+  const params = new URLSearchParams({ limit: String(pageSize), ...pages.params, ...(state ? { state } : {}), ...(dq ? { q: dq } : {}) });
   const version = `${run.found}/${run.added}/${run.accepted}`;
   const { data, error, load } = usePage<{ data: Candidate[]; states: Record<string, number> }>(`${base}/runs/${run.id}/candidates?${params}`, version);
-  useEffect(() => { setOffset(0); setPicked(new Set()); }, [state, dq]);
+  useEffect(() => { setPicked(new Set()); }, [state, dq]);
   const states = data?.states ?? {};
   const all = Object.values(states).reduce((a, b) => a + b, 0);
 
@@ -901,6 +1017,7 @@ function Companies({ base, run, canManage, filter, onFilter, onChanged }: { base
                     <td className="max-w-md px-3 py-2">
                       <span className="block truncate font-medium">{c.name || c.domain} <a className="font-normal text-muted-foreground hover:underline" href={`https://${c.domain}`} target="_blank" rel="noreferrer noopener">{c.domain}</a></span>
                       {typeof c.facts.summary === "string" && c.facts.summary && <span className="block truncate text-[12px] text-muted-foreground">{c.facts.summary}</span>}
+                      {c.source && c.source !== "web" && <span className="block truncate text-[12px] text-muted-foreground" title={c.evidence}>Via {finderSource(c.source)}{c.evidence ? `: ${c.evidence}` : ""}</span>}
                     </td>
                     <td className="px-3 py-2"><Badge tone={verdictTone[c.verdict]}>{c.verdict === "unread" ? "Not read" : `${c.verdict === "accept" ? "Fits" : c.verdict === "maybe" ? "Maybe" : "No"}${c.score != null ? ` · ${c.score}` : ""}`}</Badge></td>
                     <td className="max-w-sm px-3 py-2"><span className="block truncate text-[12px] text-muted-foreground" title={c.reasons.join("\n")}>{c.reasons[0] ?? ""}</span></td>
@@ -917,7 +1034,7 @@ function Companies({ base, run, canManage, filter, onFilter, onChanged }: { base
           </table>
         </div>
       )}
-      {data && <Pager offset={offset} total={data.total} onOffset={setOffset} />}
+      {data && <Pager page={pages.page} total={data.total} next={data.next_cursor} onNext={pages.next} onPrevious={pages.previous} />}
     </div>
   );
 }
@@ -933,17 +1050,17 @@ function People({ base, run, canManage, filter, onFilter, onChanged, onCampaign 
 }) {
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
-  const [offset, setOffset] = useState(0);
   const [confirmed, setConfirmed] = useState("");
   const [stopCode, setStopCode] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const status = filter ?? "";
-  const params = new URLSearchParams({ limit: String(pageSize), offset: String(offset), ...(status ? { status } : {}), ...(dq ? { q: dq } : {}),
+  const pages = useCursors(JSON.stringify([status, dq, confirmed, stopCode]));
+  const params = new URLSearchParams({ limit: String(pageSize), ...pages.params, ...(status ? { status } : {}), ...(dq ? { q: dq } : {}),
     ...(confirmed ? { confirmed } : {}), ...(status === "stopped" && stopCode ? { stop_code: stopCode } : {}) });
   const k = run.contacts;
   const version = k ? `${k.finding}/${k.added}/${k.ready}/${k.enrolled}/${k.stopped}` : "";
   const { data, error, load } = usePage<{ data: Contact[]; statuses: Record<string, number>; stop_codes: Record<string, number> }>(`${base}/runs/${run.id}/contacts?${params}`, version);
-  useEffect(() => { setOffset(0); setPicked(new Set()); }, [status, dq, confirmed, stopCode]);
+  useEffect(() => { setPicked(new Set()); }, [status, dq, confirmed, stopCode]);
   const statuses = data?.statuses ?? {};
   const all = Object.values(statuses).reduce((a, b) => a + b, 0);
   const rows = data?.data ?? [];
@@ -1041,7 +1158,7 @@ function People({ base, run, canManage, filter, onFilter, onChanged, onCampaign 
           </table>
         </div>
       )}
-      {data && <Pager offset={offset} total={data.total} onOffset={setOffset} />}
+      {data && <Pager page={pages.page} total={data.total} next={data.next_cursor} onNext={pages.next} onPrevious={pages.previous} />}
     </div>
   );
 }
@@ -1061,7 +1178,7 @@ function Spend({ run, onRates }: { run: Run; onRates?: () => void }) {
       <Stats cols={5}>
         <Stat label="AI" value={money(sp.ai_cents)} sub={`your AI key, up to ${money(run.max_ai_cents)}`} />
         <Stat label="Web (Geonode)" value={sp.web_cents ? money(sp.web_cents) : `${n(sp.web_tokens)} tokens`} sub={`${plural(run.searches, "search", "searches")}, ${plural(run.pages, "page")}`} />
-        <Stat label="Data provider" value={credits(sp.people_credits, sp.people_cents)} sub="for people searches" />
+        <Stat label="Data provider" value={credits(sp.people_credits, sp.people_cents)} sub={sp.company_credits ? `${n(sp.company_credits)} for company searches, the rest for people` : "for people searches"} />
         <Stat label="Email verifier" value={credits(sp.verify_credits ?? 0, sp.verify_cents)} sub="for checking addresses" />
         <Stat label="Per result" value={inCampaign ? usd(money$ / inCampaign) : fit ? usd(money$ / fit) : "–"}
           sub={inCampaign ? "a person in the campaign" : "a company that fits"} />

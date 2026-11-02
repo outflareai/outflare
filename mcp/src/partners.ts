@@ -250,7 +250,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         outcome: z.enum(["credited", "not_credited", "duplicate", "rejected", "error"]).optional(),
         q: z.string().max(200).optional(),
         limit: z.number().int().min(1).max(200).optional(),
-        before: z.string().optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
       },
       annotations: read,
     },

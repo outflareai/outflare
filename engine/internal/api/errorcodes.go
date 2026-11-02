@@ -29,6 +29,8 @@ var errorCodes = []errorCode{
 	{"live_workspace", []int{409}, "Only possible in a test workspace, such as simulating a reply. Create one with POST /v1/workspaces and test: true.", false},
 	{"idempotency_in_progress", []int{409}, "A request with this Idempotency-Key is still running. Retry shortly with the same key.", true},
 	{"idempotency_key_reused", []int{422}, "This Idempotency-Key was already used for a different request.", false},
+	{"already_suggested", []int{409}, "An answer to this question is already waiting for review, or a person rejected it.", false},
+	{"already_decided", []int{409}, "Someone already approved or rejected this suggestion.", false},
 	{"rate_limited", []int{429}, "Too many requests. Wait for Retry-After, then retry.", true},
 	{"internal", []int{500}, "A server error. Quote the request_id.", true},
 	{"unavailable", []int{503}, "A dependency is down or the server is starting. Retry later.", true},
@@ -105,6 +107,7 @@ var errorCodes = []errorCode{
 	{"batch_undo_running", []int{409}, "The batch is being undone in the background. GET the batch: its undo.status says when it is done.", false},
 	{"deletion_expired", []int{410}, "The deletion is past its 7 days and is being purged for good; it can no longer be restored.", false},
 	{"mission_required", []int{403}, "This app or token makes changes only inside a mission. Start one, and once a person approves it send its id in the Outflare-Mission header. Reads need no mission.", false},
+	{"feature_locked", []int{403}, "This is part of Outflare Cloud, not the open-source engine. The message says what is available here instead.", false},
 	{"not_a_member", []int{403}, "The link is for members of the workspace that made it. Sign in with the account you use there, or ask an admin to invite you.", false},
 
 	// Sequences, mailboxes and infrastructure.
@@ -117,6 +120,8 @@ var errorCodes = []errorCode{
 	{"price_mismatch", []int{409}, "The amounts sent do not match the plan's quote. Send once_cents and monthly_cents as the quote shows them.", false},
 
 	// Missions.
+	{"action_refused", []int{403}, "A grant a person set for this agent token refuses this change. A person can change the token's grants (createActionGrant).", false},
+	{"action_state", []int{409}, "The action is not held any more: someone already decided it, or it ran.", false},
 	{"mission_not_found", []int{404}, "The Outflare-Mission header names no mission in this workspace.", false},
 	{"mission_paused", []int{409}, "The mission is paused, so calls inside it are refused.", false},
 	{"mission_ended", []int{409}, "The mission is finished or stopped.", false},
@@ -130,6 +135,7 @@ var errorCodes = []errorCode{
 	{"email_provider_purpose", []int{409}, "The email provider is not set to send this purpose (transactional or lifecycle). Choose another provider or change its purposes.", false},
 	{"domain_not_ready", []int{409}, "The provider hasn't sent the sending domain's DNS records yet. Try again in a few seconds.", true},
 	{"nothing_to_add", []int{409}, "Every DNS record the brand needs is already in place, so there is nothing to add.", false},
+	{"email_required", []int{400}, "This website chat asks for an email before the first message.", false},
 	{"email_domain_not_verified", []int{409}, "The from address's domain is not a verified sending domain for the provider. Add it under Lifecycle, Sending domains, and add its DNS records.", false},
 	{"template_not_published", []int{409}, "The template has no published version. Publish it, or send with draft: true to test it.", false},
 	{"template_variables_missing", []int{422}, "data is missing variables the template requires. The message names them.", false},
@@ -154,6 +160,7 @@ var errorCodes = []errorCode{
 	{"merge_refused", []int{409}, "Both records have their own user id, so they are two accounts in your product and are never merged. Link them as the same human instead (POST .../records/duplicates/{candidate}/link).", false},
 	{"record_changed", []int{409}, "The record changed since the version you sent. Read it again, check your change still makes sense, and send it with the new version.", false},
 	{"event_name_in_other_brand", []int{409}, "Another brand of this workspace defines this event name. Each brand has its own catalog, but until a later release an event name is defined in one brand at a time: rename the event in this brand's product, or deprecate it in the other brand.", false},
+	{"lead_in_other_brand", []int{409}, "This address is already a lead of another brand in this workspace. Each brand has its own leads, but until a later release an address is a lead in one brand at a time: add it in the brand that has it, or delete it there first.", false},
 	{"version_required", []int{400}, "Agents (MCP, connected AI apps and missions) send the record's version with every change to it, so one agent never overwrites another's. Read the record and send its version.", false},
 
 	// Query.

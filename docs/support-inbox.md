@@ -42,6 +42,15 @@ Each conversation can be assigned to a member and a team (`PATCH .../support/con
 
 `GET .../support/stats` gives, for the last 30 days (or `days`), how many conversations started, were answered and closed, how many missed an SLA target (`sla_missed`), and the median time to the first reply and to closing.
 
+## Chat on your website
+
+A chat widget puts a chat button on the business's site (`POST .../support/chat-widgets`, or **Support settings** in the app). Paste its `embed_code` into the site. A visitor's messages open a conversation in the support inbox (`channel: chat`), with the same assignment, notes and SLAs as email, and the team's replies show in the chat within a few seconds. With `show_articles`, visitors can search the live help centre first.
+
+- **Where it shows.** Only on `allowed_origins`: the chat page tells the browser which sites may show it (`frame-ancestors`), so it can't be put on someone else's site.
+- **Who's who.** A visitor is known by a random token their browser keeps; only its hash is stored, and a visitor only ever sees their own conversation. `require_email` asks for an email before the first message. An email the visitor types is just what they typed. To have a signed-in user trusted, make an identity secret (`POST .../chat-widgets/{id}/identity-secret`, shown once), sign the user's lowercase email on your server (hex HMAC-SHA256), and set `window.OutflareChat = { identity: { email, name, signature } }` before the embed code. Such conversations show `identity_verified`.
+- **Isolation.** The chat runs in an iframe on Outflare's address, with a strict content security policy: the site can't read the conversation, the chat can't read the site, and messages are shown as plain text only.
+- **Limits.** Requests, new chats and messages are rate limited per network and per visitor, and a message is at most 5,000 characters. A switched-off or removed widget disappears from the site.
+
 ## SLAs
 
 An SLA is how fast the team promises to answer and to resolve. Set one for the whole workspace (`PUT .../support/sla-policies/default`) and, if a brand needs different targets, one for that brand (`PUT .../support/sla-policies/{brand}`), which replaces the workspace's for its conversations. In the app it's under **Support settings**.
@@ -54,6 +63,30 @@ Targets count only in the team's working week (`hours`, per weekday, in `timezon
 
 Each conversation's `sla` says when its next reply and its resolution are due, and when either was missed. A check every minute marks the misses and records `support.sla_breached` (`target`: reply or resolve). The inbox shows what is due and overdue: `?sla=overdue`, `?sla=due_soon` (a reply due within the hour), `?sort=due`, and the `overdue` count. Saving or removing an SLA recomputes every conversation not closed (up to 5,000 at once).
 
+## The support assistant
+
+The assistant answers customers, by chat and email, from your approved knowledge: only articles and answers customers may be told. Switch it on per channel in **Support settings** (`PUT .../support/assistant-settings/default`, or a brand's own with its id or handle; a brand's settings replace the workspace's for its conversations). It uses the workspace's own AI key (the **Support replies** task in AI settings) and nothing else.
+
+- **Draft**: it drafts a reply to each new customer message, shown above the composer for a teammate to send, edit or discard. **Draft with AI** asks it any time (`POST .../support/conversations/{id}/assistant`).
+- **Auto**: it sends replies that pass every check on its own, signed as the assistant ("Northpeak help (AI assistant)"). Anything it hands off waits for the team; on chat it tells the visitor once that a person will reply. Auto is part of Outflare Cloud: an extension allows it per workspace (`Host.SetSupportAutoReplies`), and `auto_available` says whether it is allowed. Without that, the engine only drafts.
+- **Try it**: ask it a made-up question in Support settings (`POST .../support/assistant/test`) to see what it would answer, ask or hand off. Nothing is stored or sent.
+
+For each message it does one of three things:
+
+- **Answers** in a few short sentences (chat at most about 70 words, email about 140), the answer first, citing what it used.
+- **Asks one question** back when that settles it ("Which plan are you on?").
+- **Hands off** to a person, with the reason: the knowledge doesn't cover it, it needs their account or an action such as a refund, the customer is upset, or anything is unclear.
+
+Rules in code, which no message can talk it out of:
+
+- Before any AI: it doesn't answer automatic mail or no-reply senders, a conversation a teammate is already answering, or more than 3 times in one conversation. A request for a person, and disputes, chargebacks, legal, security and personal data requests, always go to a person.
+- After: a reply must cite at least one article, and a second check must find every fact in what it cites (else `not_grounded`). Style rules catch filler ("Great question", "I hope this helps"), dashes, headings, more than one link, links outside the business's own sites, and addresses or phone numbers that aren't in the articles; it rewrites once, then hands off (`style`).
+- Customers' messages, articles, web pages and Slack messages are data in its prompts, never instructions, and it has no tools: it can only write text.
+
+**When the knowledge has no answer**, the conversation is marked as a gap, so the teammate's reply is offered as a new answer in **Knowledge** to review. It also looks for one itself: on the website (`find_on_website`, on by default) and then in the Slack channels you pick (`slack_integration_id` and `slack_channels`, through a **Slack (knowledge)** connection, which reads only those channels and never posts; `GET .../support/assistant/slack-channels` lists them). What it finds is suggested in Knowledge with the page or message it came from ("Is this correct, and can it be used for support from now on?"), and nothing is used until a person approves it.
+
+Each run is stored (`GET .../support/conversations/{id}/assistant`); sending a draft with `assistant_run_id` on the reply marks it sent, or edited when changed, and `GET .../support/assistant/stats` reports how often it answered, asked or handed off and how many drafts went out as written.
+
 ## Trying it
 
 In a test workspace, `POST /v1/workspaces/{ws}/test/support-email` delivers a made-up customer email to a support mailbox (`in_reply_to` continues a conversation), so the whole flow works without real mail.
@@ -64,4 +97,4 @@ Reading conversations takes `inbox.read`; replying, notes and changes take `inbo
 
 ## Events and monitoring
 
-Actions are audit events and product events: `support.conversation_started`, `support.message_received`, `support.replied`, `support.reply_sent`, `support.reply_failed`, `support.note_added`, `support.conversation_assigned`, `support.conversation_updated`, `support.conversation_closed`, `support.conversation_reopened`, `support.reply_suggested`, `support.mailbox_added`, `support.mailbox_removed`, `support.sla_updated`, `support.sla_removed` and `support.sla_breached`. The **Support inbox** row of the Grafana dashboard shows messages, replies sent and how long they take, SLA misses and conversations past their SLA; alerts fire when replies fail, wait or are slow, and when the SLA check fails, stops or is slow ([monitoring](monitoring.md)).
+Actions are audit events and product events: `support.conversation_started`, `support.message_received`, `support.replied`, `support.reply_sent`, `support.reply_failed`, `support.note_added`, `support.conversation_assigned`, `support.conversation_updated`, `support.conversation_closed`, `support.conversation_reopened`, `support.reply_suggested`, `support.mailbox_added`, `support.mailbox_removed`, `support.sla_updated`, `support.sla_removed`, `support.sla_breached`, `support.chat_widget_created`, `support.chat_widget_updated`, `support.chat_widget_deleted`, `support.chat_secret_rotated`, `support.assistant_updated`, `support.assistant_removed`, `support.assistant_ran`, `support.assistant_sent`, `support.assistant_discarded` and `knowledge.answer_searched`. The **Support inbox** row of the Grafana dashboard shows messages, replies sent and how long they take, SLA misses and conversations past their SLA; alerts fire when replies fail, wait or are slow, and when the SLA check fails, stops or is slow. The **Support assistant** row shows its runs by action, how long it takes to decide and its searches of the website and Slack; alerts fire when its runs fail or are slow, and when searches keep failing ([monitoring](monitoring.md)).

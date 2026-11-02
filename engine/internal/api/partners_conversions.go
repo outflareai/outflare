@@ -1173,7 +1173,7 @@ func (s *Server) listPartnerConversions(w http.ResponseWriter, r *http.Request) 
 	if list == nil {
 		list = []partnerConversionView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 type partnerReferralView struct {
@@ -1238,7 +1238,7 @@ func (s *Server) listPartnerReferrals(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerReferralView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // rewardApproval is when a flow's reward is due and whether it is then

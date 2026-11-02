@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -1015,12 +1014,9 @@ func (s *Server) listAIRuns(w http.ResponseWriter, r *http.Request) {
 	if s.badQuery(w, r, err) {
 		return
 	}
-	offset := 0
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
-			return
-		}
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	list, err := s.loadAIRuns(r.Context(), a.WorkspaceID, nil, cohort, sel, limit+1, offset)
 	if err != nil {
@@ -1033,7 +1029,7 @@ func (s *Server) listAIRuns(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // aiRunFor loads the {run} path value's run, or writes a 404.
@@ -1245,12 +1241,9 @@ func (s *Server) listAISamples(w http.ResponseWriter, r *http.Request) {
 	if s.badQuery(w, r, err) {
 		return
 	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
-			return
-		}
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	list, err := s.loadAISamples(r.Context(), a.WorkspaceID, where, args, limit+1, offset)
 	if err != nil {
@@ -1263,7 +1256,7 @@ func (s *Server) listAISamples(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getAISample(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { Connection as Connected, Connector, ImportResult, Integration } from "@outflare/sdk";
+import type { Connector, ImportResult, Integration } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Button, Card, confirmAction, ErrorText, toast } from "../ui";
 import { authOption, startConnectorOAuth } from "./Connectors";
@@ -10,7 +10,7 @@ const field = "rounded-md border border-neutral-300 bg-transparent px-3 py-1.5 d
 // Google service account or a Microsoft Entra app) adds any mailbox of its
 // organisation.
 const mailConnectors = ["google_mail", "outlook_mail"] as const;
-const label: Record<string, string> = { google_mail: "Google Workspace", outlook_mail: "Microsoft 365", google: "Google Workspace", microsoft: "Microsoft 365" };
+const label: Record<string, string> = { google_mail: "Google Workspace", outlook_mail: "Microsoft 365" };
 const admin: Record<string, string> = { google_mail: "service account", outlook_mail: "Entra app" };
 
 // OAuth connects Google Workspace and Microsoft 365 mailboxes without
@@ -19,33 +19,21 @@ const admin: Record<string, string> = { google_mail: "service account", outlook_
 export function OAuthConnect({ ws, onDone }: { ws: string; onDone: () => void }) {
   const [defs, setDefs] = useState<Connector[]>([]);
   const [connections, setConnections] = useState<Integration[]>([]);
-  // Admin connections made before mailbox sign-ins were connectors.
-  const [older, setOlder] = useState<Connected[]>([]);
   const [pool, setPool] = useState("");
   const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
-    const [cat, list, old] = await Promise.all([
+    const [cat, list] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/connectors", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws }, query: { category: "mailbox_provider" } } }),
-      api.GET("/v1/workspaces/{ws}/connections", { params: { path: { ws }, query: { category: "mailbox_provider" } } }),
     ]);
     setDefs((cat.data?.data ?? []).filter((d) => (mailConnectors as readonly string[]).includes(d.id)));
     setConnections((list.data?.data ?? []).filter((i) => (mailConnectors as readonly string[]).includes(i.connector) && i.auth_method === "api_key"));
-    setOlder((old.data?.data ?? []).filter((c) => c.kind === "mailbox_oauth"));
   }, [ws]);
 
   useEffect(() => {
     load();
   }, [load]);
-
-  async function removeOlder(c: Connected) {
-    if (!(await confirmAction(`Remove the connection ${c.name}?`, <p>Its stored credentials are deleted. You can only remove it once no mailbox uses it.</p>, "Remove connection"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/oauth-connections/{id}", { params: { path: { ws, id: c.id } } });
-    if (error) toast(errorMessage(error), "error");
-    else toast(`Removed ${c.name}.`);
-    load();
-  }
 
   async function remove(c: Integration) {
     if (!(await confirmAction(`Remove the connection ${c.name}?`, <p>Its stored credentials are deleted. You can only remove it once no mailbox uses it.</p>, "Remove connection"))) return;
@@ -77,9 +65,6 @@ export function OAuthConnect({ ws, onDone }: { ws: string; onDone: () => void })
         {adding && <NewConnection ws={ws} defs={admins} onDone={() => { setAdding(false); load(); }} onCancel={() => setAdding(false)} />}
         {connections.map((c) => (
           <Connection key={c.id} name={c.name} kind={`${label[c.connector]} ${admin[c.connector]}`} add={(body) => api.POST("/v1/workspaces/{ws}/integrations/{id}/mailboxes", { params: { path: { ws, id: c.id } }, body })} onRemove={() => remove(c)} onAdded={() => { load(); onDone(); }} />
-        ))}
-        {older.map((c) => (
-          <Connection key={c.id} name={c.name} kind={label[c.connector] ?? c.connector} add={(body) => api.POST("/v1/workspaces/{ws}/oauth-connections/{id}/mailboxes", { params: { path: { ws, id: c.id } }, body })} onRemove={() => removeOlder(c)} onAdded={() => { load(); onDone(); }} />
         ))}
       </div>
     </Card>

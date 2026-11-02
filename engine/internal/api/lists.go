@@ -22,20 +22,29 @@ import (
 // from a search at a connected data provider.
 func (s *Server) routesLists(mux *http.ServeMux) {
 	read, manage := auth.ScopeLeadsRead, auth.ScopeLeadsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists", s.inBrand(read, s.listLeadLists))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists", s.inBrand(manage, s.createLeadList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/preview", s.inBrand(manage, s.previewLeadList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(read, s.getLeadList))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(manage, s.updateLeadList))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}", s.inBrand(manage, s.deleteLeadList))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/members", s.inBrand(read, s.listLeadListMembers))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/leads", s.inBrand(manage, s.addToLeadList))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/lead-lists/{id}/leads/{lead}", s.inBrand(manage, s.removeFromLeadList))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inBrand(manage, s.startListRun))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/lead-lists/{id}/runs", s.inBrand(read, s.listListRuns))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/list-runs/{run}", s.inBrand(read, s.getListRun))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/list-runs/{run}/cancel", s.inBrand(manage, s.cancelListRun))
+	// A lead list and its builds belong to one brand (brand_outreach.go):
+	// served under the brand, and under the workspace until the contract
+	// step.
+	for _, b := range s.activationBases("lead-lists", s.inBrand) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listLeadLists))
+		mux.HandleFunc("POST "+base, on(manage, s.createLeadList))
+		mux.HandleFunc("POST "+base+"/preview", on(manage, s.previewLeadList))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getLeadList))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateLeadList))
+		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.deleteLeadList))
+		mux.HandleFunc("GET "+base+"/{id}/members", on(read, s.listLeadListMembers))
+		mux.HandleFunc("POST "+base+"/{id}/leads", on(manage, s.addToLeadList))
+		mux.HandleFunc("DELETE "+base+"/{id}/leads/{lead}", on(manage, s.removeFromLeadList))
+		mux.HandleFunc("POST "+base+"/{id}/runs", on(manage, s.startListRun))
+		mux.HandleFunc("GET "+base+"/{id}/runs", on(read, s.listListRuns))
+	}
+	for _, b := range s.activationBases("list-runs", s.inBrand) {
+		mux.HandleFunc("GET "+b.path+"/{run}", b.on(read, s.getListRun))
+		mux.HandleFunc("POST "+b.path+"/{run}/cancel", b.on(manage, s.cancelListRun))
+	}
 	mux.HandleFunc("GET /v1/workspaces/{ws}/data-providers", s.inBrand(read, s.listDataProviders))
+	mux.HandleFunc("GET /v1/brands/{brand}/leads/{id}/sources", s.onBrand(read, s.listLeadSources))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/leads/{id}/sources", s.inWorkspace(read, s.listLeadSources))
 }
 
@@ -131,14 +140,15 @@ func (s *Server) loadLists(ctx context.Context, where string, args ...any) ([]li
 }
 
 // listScope returns the SQL condition limiting lists (alias l) or their
-// runs (alias r) to a brand-limited caller's brands and the shared ones.
+// runs (alias r) to the route's brand on a brand route, else to a
+// brand-limited caller's brands and the shared ones.
 func listScope(a *access, alias string, args *[]any) string {
+	col := alias + `.brand_id`
+	if a.Brand != "" {
+		return brandSel{id: a.Brand, in: []string{a.Brand}}.sql(col, args)
+	}
 	if a.Brands == nil {
 		return ""
-	}
-	col := alias + `.brand_id`
-	if alias == "r" {
-		col = `(SELECT b.brand_id FROM lead_lists b WHERE b.id = r.list_id)`
 	}
 	return brandSel{in: a.Brands}.sql(col, args)
 }
@@ -147,7 +157,9 @@ func (s *Server) listLeadLists(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	where := ` WHERE l.workspace_id = $1`
 	args := []any{a.WorkspaceID}
-	brand, ok := s.brandFilter(w, r)
+	// One brand's lists: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	brand, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -223,6 +235,9 @@ type listInput struct {
 	RefreshEveryDays     optional[int]            `json:"refresh_every_days"`
 	// Create only: queue the first build straight away.
 	Build bool `json:"build"`
+	// Create only, on the workspace route: the brand (id or handle) the
+	// list belongs to; the workspace's first when left out.
+	BrandID *string `json:"brand_id"`
 }
 
 // apply checks in and writes it onto v.
@@ -405,7 +420,9 @@ func (s *Server) createLeadList(w http.ResponseWriter, r *http.Request) {
 	}
 	var run *lists.Run
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		brand, berr := brandWrite(ctx, tx, a, nil)
+		// A list belongs to one brand: the route's, the one named, or the
+		// workspace's first.
+		brand, berr := s.activationBrand(ctx, a, in.BrandID)
 		if berr != nil {
 			return berr
 		}
@@ -561,10 +578,12 @@ func (s *Server) listLeadListMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	if x := q.Get("offset"); x != "" {
+	if x, ok := pageCursor(w, r, pageOffset); !ok {
+		return
+	} else if x != "" {
 		n, err := strconv.Atoi(x)
 		if err != nil || n < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
+			invalidCursor(w, r)
 			return
 		}
 		offset = n
@@ -622,7 +641,7 @@ func (s *Server) listLeadListMembers(w http.ResponseWriter, r *http.Request) {
 		var reasons []byte
 		l := &m.leadView
 		if err := rows.Scan(&l.ID, &l.Email, &l.Domain, &l.FirstName, &l.LastName, &l.Company, &l.Title, &l.Phone,
-			&l.LinkedInURL, &l.Website, &l.Custom, &l.Source, &l.Suppressed, &l.Verification, &l.ListIDs, &l.CreatedAt, &l.UpdatedAt, &l.RecordID,
+			&l.LinkedInURL, &l.Website, &l.Custom, &l.Source, &l.Suppressed, &l.Verification, &l.ListIDs, &l.CreatedAt, &l.UpdatedAt, &l.RecordID, &l.BrandID,
 			&m.Score, &reasons, &m.AddedAt, &m.RunID); err != nil {
 			rows.Close()
 			s.internal(w, r, err)
@@ -642,7 +661,7 @@ func (s *Server) listLeadListMembers(w http.ResponseWriter, r *http.Request) {
 		n := offset + len(out)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) addToLeadList(w http.ResponseWriter, r *http.Request) {
@@ -664,11 +683,12 @@ func (s *Server) addToLeadList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var added int64
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// Only leads in this workspace are added; unknown ids are ignored.
+		// Only the list's brand's leads are added; unknown ids and other
+		// brands' leads are ignored.
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO lead_list_members (list_id, lead_id)
-			SELECT $1, l.id FROM leads l WHERE l.workspace_id = $2 AND l.id = ANY($3::uuid[])
-			ON CONFLICT DO NOTHING`, v.ID, a.WorkspaceID, req.LeadIDs)
+			SELECT $1, l.id FROM leads l WHERE l.workspace_id = $2 AND l.id = ANY($3::uuid[]) AND ($4::uuid IS NULL OR l.brand_id = $4)
+			ON CONFLICT DO NOTHING`, v.ID, a.WorkspaceID, req.LeadIDs, v.BrandID)
 		if err != nil {
 			return err
 		}
@@ -856,7 +876,7 @@ func (s *Server) cancelListRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if a.Brands != nil && run.ListID != nil {
+	if (a.Brands != nil || a.Brand != "") && run.ListID != nil {
 		if _, ok := s.changeList(w, r, a, *run.ListID); !ok {
 			return
 		}
@@ -1027,7 +1047,7 @@ type leadSourceView struct {
 // and for compliance.
 func (s *Server) listLeadSources(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	l, ok := s.findLead(w, r, a.WorkspaceID, r.PathValue("id"))
+	l, ok := s.findLead(w, r, r.PathValue("id"))
 	if !ok {
 		return
 	}

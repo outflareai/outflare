@@ -38,6 +38,13 @@ func optedIn(source string) bool { return slices.Contains(OptInSources, strings.
 // the address's unsubscribe suppression to them. It returns how many
 // consents it recorded.
 func WithdrawEmails(ctx context.Context, tx pgx.Tx, workspaceID, source, requestID string, unsubs []Unsubscribe) (int, error) {
+	return WithdrawEmailsIn(ctx, tx, workspaceID, "", source, requestID, unsubs)
+}
+
+// WithdrawEmailsIn is WithdrawEmails for the people of one brand, who
+// opted out of it (plans/brands/README.md, decision 5); an empty brand is
+// the workspace's first.
+func WithdrawEmailsIn(ctx context.Context, tx pgx.Tx, workspaceID, brand, source, requestID string, unsubs []Unsubscribe) (int, error) {
 	if len(unsubs) == 0 {
 		return 0, nil
 	}
@@ -45,7 +52,7 @@ func WithdrawEmails(ctx context.Context, tx pgx.Tx, workspaceID, source, request
 	for i, u := range unsubs {
 		people[i] = Person{Email: u.Email}
 	}
-	owners, err := EnsurePeople(ctx, tx, workspaceID, "prospect", "unsubscribe", people)
+	owners, err := EnsurePeopleIn(ctx, tx, workspaceID, brand, "prospect", "unsubscribe", people)
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +73,7 @@ func WithdrawEmails(ctx context.Context, tx pgx.Tx, workspaceID, source, request
 		records, emails, ats = append(records, r), append(emails, e), append(ats, at)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE suppressions s SET record_id = t.r FROM unnest($2::text[], $3::uuid[]) AS t(e, r)
-		WHERE s.workspace_id = $1 AND s.kind = 'email' AND s.value = t.e`, workspaceID, emails, records); err != nil {
+		WHERE s.workspace_id = $1 AND s.kind = 'email' AND s.value = t.e AND (s.record_id IS NULL OR s.brand_id IS NOT NULL)`, workspaceID, emails, records); err != nil {
 		return 0, err
 	}
 	// A withdrawal is skipped when the person's latest decision is already
@@ -127,9 +134,13 @@ func OptedIn(ctx context.Context, q Querier, workspaceID, recordID, channel, top
 	if !ok {
 		return 0, nil
 	}
+	// The person's own brand's unsubscribe clears, and one for every brand
+	// unless an admin applied it to every brand (all_brands): one brand's
+	// opt-in never undoes that.
 	rows, err := tx.Query(ctx, `DELETE FROM suppressions s USING record_identities i
 		WHERE s.workspace_id = $1 AND s.kind = 'email' AND s.reason = 'unsubscribed'
 		  AND i.workspace_id = $1 AND i.record_id = $2 AND i.namespace = 'email' AND i.valid_to IS NULL AND s.value = i.value
+		  AND (s.brand_id = i.brand_id OR (s.brand_id IS NULL AND NOT s.evidence ? 'all_brands'))
 		RETURNING s.id::text, s.value`, workspaceID, recordID)
 	if err != nil {
 		return 0, err

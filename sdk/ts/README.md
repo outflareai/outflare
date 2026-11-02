@@ -64,7 +64,7 @@ Each call returns `{ data, error, response }`, as [openapi-fetch](https://openap
 import { ok, OutflareError } from "@outflare/sdk";
 
 try {
-  ok(await gtm.DELETE("/v1/workspaces/{ws}/oauth-connections/{id}", { params: { path: { ws, id } } }));
+  ok(await gtm.DELETE("/v1/workspaces/{ws}/integrations/{id}", { params: { path: { ws, id } } }));
 } catch (e) {
   if (e instanceof OutflareError && e.code === "conflict") console.log(e.message);
   else throw e;

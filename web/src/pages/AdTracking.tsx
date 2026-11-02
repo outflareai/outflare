@@ -67,7 +67,7 @@ export function AdTrackingHealthCard({ ws, brand }: { ws: string; brand?: string
   }, [ws, brand]);
   if (error) return <Card title="Tracking health"><ErrorText>{error}</ErrorText></Card>;
   if (!h) return null;
-  if (h.networks.length === 0 && h.sends.length === 0 && h.campaigns_without_visits.length === 0) return null;
+  if (h.networks.length === 0 && h.sends.length === 0 && h.campaigns_without_visits.length === 0 && h.ads_without_template.length === 0) return null;
   const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n * 100) / of)}%` : "—");
   return (
     <Card
@@ -91,6 +91,21 @@ export function AdTrackingHealthCard({ ws, brand }: { ws: string; brand?: string
               </li>
             ))}
           </ul>
+        )}
+        {h.ads_without_template.length > 0 && (
+          <div className="divide-y rounded-md border">
+            <div className="px-3 py-1.5 text-[12px] text-muted-foreground">Ads without the tracking template</div>
+            {h.ads_without_template.map((a) => (
+              <div key={a.ad_entity_id} className="flex flex-wrap items-baseline justify-between gap-x-3 px-3 py-1.5">
+                <span className="min-w-0 truncate">
+                  {a.name || a.external_id} <span className="text-muted-foreground">· {a.campaign_name}</span>
+                </span>
+                <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+                  {a.spend.map((m) => `${(m.amount_cents / 100).toLocaleString(undefined, { style: "currency", currency: m.currency })}`).join(" · ") || "No spend yet"}
+                </span>
+              </div>
+            ))}
+          </div>
         )}
         {h.networks.length > 0 && (
           <div className="divide-y rounded-md border">

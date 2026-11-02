@@ -2,7 +2,7 @@
 
 The news watch reads the news for you. Save a search, and Outflare runs it on a schedule through your own web search connection and keeps every article it finds. A **topic** search follows a subject, such as "residential proxies", so you can see what is being written and who writes it. A **coverage** search looks for a brand, such as "Northpeak", and keeps each article about it as that brand's **coverage**.
 
-It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. It also finds the journalists who write the articles and makes media lists of them. [Stories](stories.md) turn what you find into a release with sourced facts and approved quotes; pitching comes next.
+It is the first part of digital PR in Outflare: finding a story only your brand can tell, getting it to the journalists who cover the topic, and counting the coverage it wins. It also finds the journalists who write the articles, keeps the ones you already know, and makes media lists of them. [Stories](stories.md) turn what you find into a release with sourced facts and approved quotes; pitching comes next.
 
 ## What it needs
 
@@ -38,19 +38,26 @@ OutflareBot reads each new article once, up to 20 from each run, for its byline 
 
 When the byline is one person's name, the free email finder looks for their address at the outlet's own domain. When it is fairly sure (a confidence of 40 or more), the author becomes a **journalist**: a person record on the outlet's company record, like any contact, with the articles they wrote. Outflare never buys journalist data; a paid database can be connected later on your own account.
 
-The **Journalists** list (`GET /v1/workspaces/{ws}/journalists`, MCP `list_journalists`) shows each one with how many articles they wrote, their latest, their outlets and the searches their articles came up in, most articles first. Narrow it to one search to see who covers that topic. `GET /v1/workspaces/{ws}/news-articles?journalist_id=` lists what one journalist wrote.
+A journalist is a fact on their person record: the [catalog's](customers.md) built-in **journalist** field is true. Their **beats** (the topics they cover) are a field of their own, and each outlet's **tier** (`national`, `trade`, `regional`, `local`, or `newsletter` for a newsletter or blog) is on its company record, so lists, filters and imports use them like any other field.
+
+- **Beats are suggested.** When the news watch finds a journalist, it adds the names of the topic searches their article came up in to their beats; the list shows the names of other topic searches they came up in as `suggested_beats`. Change their beats and the news watch never touches them again.
+- **Add a journalist you know** (`POST /v1/workspaces/{ws}/journalists`, MCP `add_journalist`, or **Add journalist** on the Journalists tab): their name, email, outlet (its website, or a company record you have), job title, beats and the outlet's tier. The person with that email in the brand is the same record, or a new one; the outlet is the company with that domain, or a new prospect company. They show on the list with no articles until the news watch finds some.
+- **Import a list** (`POST /v1/workspaces/{ws}/journalists/import` with the CSV file as the body, MCP `import_journalists_csv`, or **Import CSV** on the tab): columns for email (required), name, title, outlet, outlet website, beats (separated by semicolons) and outlet tier, under common names. `?dry_run=true` checks the file and says how many would be new, already there, or can't be added, saving nothing. An import adds beats and never removes them, takes up to 5,000 journalists in a 5 MB file, and is one [batch](customers.md) you can undo in one step.
+- **Change one** (`PATCH /v1/workspaces/{ws}/journalists/{record}`, MCP `update_journalist`): replace their beats, set their title, or take them off the list (`"journalist": false`), even one the news watch found. A company's tier is changed on its record.
+
+The **Journalists** list (`GET /v1/workspaces/{ws}/journalists`, MCP `list_journalists`) shows each one with their beats, how many articles they wrote, their latest, their outlets with each one's tier, and the searches their articles came up in, most articles first, then the newest added. Narrow it to one search to see who covers that topic, to one beat (`beat=`), or to outlets of some tiers (`tier=national,trade`). With a search or `since`, only journalists with articles in view are listed. `GET /v1/workspaces/{ws}/news-articles?journalist_id=` lists what one journalist wrote.
 
 ### Media lists
 
-A media list is a [smart list](lists.md#smart-lists) with a news search rule: "wrote an article this search found", ever or in the last so many days. It keeps itself up to date as the news watch finds new articles, and can be used like any other list. **Make a media list** on the Journalists tab creates one for a search; or create it through the API with the rule `{"news_search": "<search id>", "op": "exists", "within_days": 90}`.
+A media list is a [smart list](lists.md#smart-lists) of journalists. A news search rule picks those who "wrote an article this search found", ever or in the last so many days, and keeps itself up to date as the news watch finds new articles. Beat and tier rules pick by what you know of them: `{"attribute": "beats", "op": "contains", "value": "Proxies"}` for a beat, `{"company_attribute": "outlet_tier", "op": "eq", "value": "national"}` for national outlets, and `{"attribute": "journalist", "op": "eq", "value": true}` for every journalist. **Make a media list** on the Journalists tab creates one for the search, beat and tier you picked; or create it through the API, for example with the rule `{"news_search": "<search id>", "op": "exists", "within_days": 90}`.
 
 ## Permissions
 
-Reading searches, articles and coverage needs `seo.read`; saving, changing and running searches, and confirming or adding coverage, need `seo.manage`. A member limited to some brands sees and changes only their brands' searches and coverage, and the shared topics.
+Reading searches, articles, coverage and journalists needs `seo.read`; saving, changing and running searches, confirming or adding coverage, and adding, importing or changing journalists need `seo.manage`. A member limited to some brands sees and changes only their brands' searches and coverage, and the shared topics. They see the journalists who wrote articles their searches found, and the journalists in their brands; they add journalists only to their brands.
 
 ## Events
 
-Saving, changing and deleting a search are `news_search.created`, `.updated` and `.deleted`. Each run is `news_search.ran`, with `results`, `kept`, `new_articles` and `new_coverage`, or `news_search.run_failed` with its error code. Each new coverage item is `mention.found`; confirming or dismissing it is `coverage.confirmed` or `coverage.dismissed`. Each article read is `news_article.read`, with its `status` and whether it found a byline and a journalist, and each new journalist is `journalist.found`.
+Saving, changing and deleting a search are `news_search.created`, `.updated` and `.deleted`. Each run is `news_search.ran`, with `results`, `kept`, `new_articles` and `new_coverage`, or `news_search.run_failed` with its error code. Each new coverage item is `mention.found`; confirming or dismissing it is `coverage.confirmed` or `coverage.dismissed`. Each article read is `news_article.read`, with its `status` and whether it found a byline and a journalist, and each new journalist is `journalist.found`. Adding a journalist is `journalist.added`, importing a file `journalist.imported`, and changing one `journalist.updated`.
 
 ## Monitoring
 

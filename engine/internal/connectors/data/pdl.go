@@ -24,8 +24,8 @@ func (PDL) Definition() c.Definition {
 		Website:     "https://www.peopledatalabs.com", DocsURL: "https://docs.peopledatalabs.com/docs/person-search-api",
 		KeyURL: "https://dashboard.peopledatalabs.com/api-keys", Auth: c.AuthAPIKey,
 		Fields:       apiKeyField("People Data Labs dashboard → API Keys."),
-		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson, c.CapRevealCompany},
-		Pricing:      "One credit per person returned; one per company found from a website visitor's address",
+		Capabilities: []string{c.CapSearchPeople, c.CapEnrichPerson, c.CapRevealCompany, c.CapSearchCompanies},
+		Pricing:      "One credit per person or company returned; one per company found from a website visitor's address",
 	}
 }
 
@@ -173,6 +173,86 @@ func pdlQuery(f c.PeopleFilter) map[string]any {
 	// Only people PDL holds a work email for are worth a credit.
 	must = append(must, map[string]any{"exists": map[string]any{"field": "work_email"}})
 	return map[string]any{"bool": map[string]any{"must": must}}
+}
+
+type pdlCompany struct {
+	Name        string `json:"name"`
+	Website     string `json:"website"`
+	Industry    string `json:"industry"`
+	Size        string `json:"size"`
+	Employees   *int   `json:"employee_count"`
+	LinkedInURL string `json:"linkedin_url"`
+	Location    *struct {
+		Name string `json:"name"`
+	} `json:"location"`
+}
+
+// SearchCompanies uses PDL's company search, one credit per company
+// returned: https://docs.peopledatalabs.com/docs/company-search-api
+func (p PDL) SearchCompanies(ctx context.Context, cl *c.Client, cr c.Creds, f c.CompanyFilter, cursor string, size int) (c.CompanyPage, error) {
+	size = min(max(size, 1), 100)
+	var must []any
+	anyOf := func(field string, vals []string) {
+		if len(vals) == 0 {
+			return
+		}
+		var should []any
+		for _, v := range vals {
+			should = append(should, map[string]any{"match": map[string]any{field: strings.ToLower(v)}})
+		}
+		must = append(must, map[string]any{"bool": map[string]any{"should": should}})
+	}
+	anyOf("industry", f.Industries)
+	anyOf("location.name", f.Locations)
+	anyOf("summary", append(append([]string{}, f.Keywords...), f.Technologies...))
+	var sizes []string
+	for _, r := range f.EmployeeRanges {
+		if v, ok := pdlSize[r]; ok {
+			sizes = append(sizes, v)
+		}
+	}
+	if len(sizes) > 0 {
+		must = append(must, map[string]any{"terms": map[string]any{"size": sizes}})
+	}
+	// Only companies with a website can be read and contacted.
+	must = append(must, map[string]any{"exists": map[string]any{"field": "website"}})
+	body := map[string]any{"query": map[string]any{"bool": map[string]any{"must": must}}, "size": size, "titlecase": true}
+	if cursor != "" {
+		body["scroll_token"] = cursor
+	}
+	var r struct {
+		Data        []pdlCompany `json:"data"`
+		Total       *int         `json:"total"`
+		ScrollToken string       `json:"scroll_token"`
+	}
+	status, err := call(ctx, cl, "People Data Labs", p.req(postReq(p.base(cl)+"/v5/company/search", body), cr), &r, http.StatusNotFound)
+	if err != nil {
+		return c.CompanyPage{}, err
+	}
+	if status == http.StatusNotFound {
+		return c.CompanyPage{Total: ptr(0)}, nil
+	}
+	out := c.CompanyPage{Total: r.Total, Credits: float64(len(r.Data))}
+	for _, x := range r.Data {
+		d := domainOf(x.Website)
+		if d == "" {
+			continue
+		}
+		co := c.Company{Name: titleCase(x.Name), Domain: d, Website: withScheme(x.Website), Industry: x.Industry, LinkedInURL: withScheme(x.LinkedInURL)}
+		if x.Employees != nil {
+			co.Employees = *x.Employees
+		} else if lo, hi, ok := splitRange(x.Size); ok {
+			co.Employees = (lo + max(hi, lo)) / 2
+		}
+		if x.Location != nil {
+			co.Location = titleCase(x.Location.Name)
+		}
+		out.Companies = append(out.Companies, co)
+	}
+	if r.ScrollToken != "" && len(r.Data) == size {
+		out.Next = r.ScrollToken
+	}
+	return out, nil
 }
 
 func (p PDL) SearchPeople(ctx context.Context, cl *c.Client, cr c.Creds, f c.PeopleFilter, cursor string, size int) (c.SearchPage, error) {

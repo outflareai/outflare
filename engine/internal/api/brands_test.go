@@ -322,13 +322,15 @@ func TestBrandAccess(t *testing.T) {
 		}
 		return out
 	}
-	if p := ids(agent, base+"/sequences"); len(p) != 2 || !p[rpSeq] || !p[shared] {
+	// Outreach has no shared rows since brands step 5: a sequence or list
+	// made without a brand is the workspace's first brand's.
+	if p := ids(agent, base+"/sequences"); len(p) != 1 || !p[rpSeq] {
 		t.Fatalf("agent sequences: %v", p)
 	}
 	if b := ids(agent, base+"/brands"); len(b) != 1 || !b[rp] {
 		t.Fatalf("agent brands: %v", b)
 	}
-	if l := ids(agent, base+"/lead-lists"); len(l) != 1 || !l[sharedList] {
+	if l := ids(agent, base+"/lead-lists"); len(l) != 0 {
 		t.Fatalf("agent lists: %v", l)
 	}
 	agent.must(404, "GET", base+"/sequences/"+geoSeq, nil)
@@ -347,8 +349,8 @@ func TestBrandAccess(t *testing.T) {
 	}
 
 	// It changes only its brand's records, and creates in its brand.
-	agent.must(403, "PATCH", base+"/sequences/"+shared, map[string]any{"name": "Everywhere"})
-	agent.must(403, "PATCH", base+"/lead-lists/"+sharedList, map[string]any{"name": "Mine"})
+	agent.must(404, "PATCH", base+"/sequences/"+shared, map[string]any{"name": "Everywhere"})
+	agent.must(404, "PATCH", base+"/lead-lists/"+sharedList, map[string]any{"name": "Mine"})
 	agent.must(200, "PATCH", base+"/sequences/"+rpSeq, map[string]any{"name": "Students"})
 	if m := agent.must(201, "POST", base+"/memories", map[string]any{"text": "Students love it"}); m["brand_id"] != rp {
 		t.Fatalf("agent's memory: %v", m)
@@ -380,7 +382,7 @@ func TestBrandAccess(t *testing.T) {
 	if b := op.must(200, "GET", "/v1/me", nil)["workspaces"].([]any)[0].(map[string]any)["brand_ids"].([]any); len(b) != 1 || b[0] != geo {
 		t.Fatalf("me brands: %v", b)
 	}
-	if p := ids(op, base+"/sequences"); len(p) != 2 || !p[geoSeq] || !p[shared] {
+	if p := ids(op, base+"/sequences"); len(p) != 1 || !p[geoSeq] {
 		t.Fatalf("operator sequences: %v", p)
 	}
 	op.must(404, "GET", base+"/sequences/"+rpSeq, nil)
@@ -434,6 +436,13 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 			"steps": []map[string]any{{"subject": "Hi {{first_name}}", "body": "Hi {{first_name}}"}},
 		})["id"].(string)
 		owner.must(200, "POST", base+"/brands/"+brand+"/add", map[string]any{"sequence_ids": []string{id}})
+		// A sequence enrols its brand's leads only, and a lead is one
+		// brand's (brands step 5): the people move to the brand that
+		// emails them, as if the brand had taken them over.
+		if _, err := e.pool.Exec(context.Background(), `UPDATE leads SET brand_id = (SELECT id FROM brands WHERE handle = $2 AND workspace_id = leads.workspace_id)
+			WHERE workspace_id::text = $1`, strings.TrimPrefix(base, "/v1/workspaces/"), brand); err != nil {
+			t.Fatal(err)
+		}
 		owner.must(200, "POST", base+"/sequences/"+id+"/enrollments", map[string]any{"list_id": list})
 		return id
 	}

@@ -84,6 +84,13 @@ const (
 	// Approving is starting a mission, approving or rejecting the writes
 	// it holds, changing its limits, and resuming it.
 	ScopeMissionsApprove = "missions.approve"
+	// The action layer (ADR 13): reading what agent tokens did and what
+	// waits, approving or rejecting held changes, and setting what each
+	// agent token may do. Setting grants is a signed-in person's alone, so
+	// no agent can widen its own room.
+	ScopeActionsRead    = "actions.read"
+	ScopeActionsApprove = "actions.approve"
+	ScopeActionsManage  = "actions.manage"
 	// SEO: sites, ownership checks and crawls. Managing is adding sites and
 	// starting crawls, which visit the site as OutflareBot.
 	ScopeCoverageRead          = "coverage.read"
@@ -174,6 +181,9 @@ var AllScopes = []string{
 	ScopeMissionsRead,
 	ScopeMissionsRun,
 	ScopeMissionsApprove,
+	ScopeActionsRead,
+	ScopeActionsApprove,
+	ScopeActionsManage,
 	ScopeCoverageRead, ScopeCoverageManage, ScopeCoverageFinanceRead, ScopeCoverageFinanceManage, ScopeCoverageApprove,
 	ScopeSEORead,
 	ScopeSEOManage,
@@ -208,20 +218,20 @@ const (
 // PersonOnly are scopes that only a signed-in person uses: taking
 // someone's access away and changing roles. No API token or connected app
 // ever holds them.
-var PersonOnly = []string{ScopeMembersRemove, ScopeRolesManage, ScopeCoverageApprove}
+var PersonOnly = []string{ScopeMembersRemove, ScopeRolesManage, ScopeCoverageApprove, ScopeActionsManage}
 
 var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
-	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
+	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeActionsRead, ScopeActionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeActionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,
 // roles, tokens and the audit log. A role holding any of them can't be
 // kept to some brands.
-var workspaceWide = []string{ScopeWorkspaceManage, ScopeMembersManage, ScopeMembersRemove, ScopeRolesManage, ScopeTokensManage, ScopeAuditRead}
+var workspaceWide = []string{ScopeWorkspaceManage, ScopeMembersManage, ScopeMembersRemove, ScopeRolesManage, ScopeTokensManage, ScopeAuditRead, ScopeActionsManage}
 
 // BrandLimitable reports whether someone holding scopes may be kept to
 // some brands.
@@ -321,6 +331,9 @@ const (
 	// A support view lets a staff member see one account read-only, beside
 	// their own session (outflare_view cookie).
 	PrefixSupportView = "ofsv_"
+	// A quote approval link lets one expert approve, change or decline
+	// one quote, once.
+	PrefixQuoteApproval = "ofqa_"
 )
 
 // NewToken returns a random secret with the given prefix and its hash for

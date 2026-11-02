@@ -63,6 +63,7 @@ type Host struct {
 	dataNetwork     *datanetwork.Service
 	stages          *pipeline.Runner
 	inboundEmail    *inboundemail.Service
+	supportAuto     func(ctx context.Context, workspaceID string) bool
 }
 
 type route struct {
@@ -113,6 +114,17 @@ func (h *Host) EnableInboundEmail(domain string, secret []byte) {
 // unix second ts.
 func SignInboundEmail(secret []byte, ts int64, raw []byte) string {
 	return inboundemail.Sign(secret, ts, raw)
+}
+
+// SetSupportAutoReplies decides which workspaces the support assistant may
+// answer customers in without a person (Auto mode). Without it the
+// assistant only drafts replies for the team to send. fn runs before every
+// automatic send and when settings are read or saved, so keep it quick.
+// The engine still runs every check on each reply and signs it as the
+// assistant; fn only says whether Auto is allowed at all.
+func (h *Host) SetSupportAutoReplies(fn func(ctx context.Context, workspaceID string) bool) {
+	h.supportAuto = fn
+	h.AddCapability("support_auto_replies")
 }
 
 // Metrics is the registry the engine's private metrics port serves

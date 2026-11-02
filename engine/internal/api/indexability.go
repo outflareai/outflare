@@ -94,7 +94,7 @@ func (s *Server) listIndexabilityPages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -126,5 +126,5 @@ func (s *Server) listIndexabilityPages(w http.ResponseWriter, r *http.Request) {
 			next = &end
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }

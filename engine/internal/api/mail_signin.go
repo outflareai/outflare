@@ -120,6 +120,9 @@ func (s *Server) finishMailSignIn(ctx context.Context, st integrationState, def 
 	return id, "", nil
 }
 
+// maxConnectionMailboxes bounds one bulk add.
+const maxConnectionMailboxes = 5000
+
 // addIntegrationMailboxes adds mailboxes that sign in through an admin
 // connection: a Google service account or a Microsoft Entra app.
 func (s *Server) addIntegrationMailboxes(w http.ResponseWriter, r *http.Request) {

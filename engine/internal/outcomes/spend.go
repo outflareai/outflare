@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/actionctx"
 	"regexp"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ type Entry struct {
 	WorkspaceID   string    `json:"-"`
 	SequenceID    *string   `json:"sequence_id"`
 	MissionID     *string   `json:"mission_id"`
+	ActionID      *string   `json:"action_id"`
 	MailboxID     *string   `json:"mailbox_id"`
 	Domain        string    `json:"domain"`
 	Category      string    `json:"category"`
@@ -150,13 +152,13 @@ func (e *Entry) normalize() error {
 }
 
 const entryCols = `id, sequence_id, mission_id, mailbox_id, domain, category, provider, integration_id,
-	units::float8, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, created_at`
+	units::float8, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, created_at, action_id::text`
 
 func scanEntry(row pgx.Row, ws string) (Entry, error) {
 	e := Entry{WorkspaceID: ws}
 	err := row.Scan(&e.ID, &e.SequenceID, &e.MissionID, &e.MailboxID, &e.Domain, &e.Category, &e.Provider,
 		&e.IntegrationID, &e.Units, &e.UnitName, &e.AmountCents, &e.Currency, &e.OccurredAt, &e.Source, &e.Ref, &e.Note,
-		&e.ActorID, &e.CreatedAt)
+		&e.ActorID, &e.CreatedAt, &e.ActionID)
 	return e, err
 }
 
@@ -174,17 +176,22 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 	if err := e.normalize(); err != nil {
 		return Entry{}, false, err
 	}
+	if e.ActionID == nil {
+		if id := actionctx.ID(ctx); id != "" {
+			e.ActionID = &id
+		}
+	}
 	created, err := scanEntry(q.QueryRow(ctx, `
 		INSERT INTO spend_entries (workspace_id, sequence_id, mission_id, mailbox_id, domain, category, provider,
-			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, action_id)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		WHERE ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE id = $2 AND workspace_id = $1))
 		  AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM mailboxes WHERE id = $4 AND workspace_id = $1))
 		  AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM integrations WHERE id = $8 AND workspace_id = $1))
 		ON CONFLICT (workspace_id, ref) WHERE ref IS NOT NULL DO NOTHING
 		RETURNING `+entryCols,
 		e.WorkspaceID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
-		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID), e.WorkspaceID)
+		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID, e.ActionID), e.WorkspaceID)
 	if err == nil {
 		// A connection's charge counts toward its usage limits, which
 		// warn the workspace at 80% and when one is reached.

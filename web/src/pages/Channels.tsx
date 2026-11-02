@@ -208,6 +208,7 @@ export function Channels({ ws, canManage, go }: Props) {
             />
           </Card>
           <PeopleAndCohorts ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} />
+          <AccountsAndDeals ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} />
         </>
       )}
       <AttributionModels ws={ws} canManage={canManage} defaultModel={settings?.model} onChanged={load} />
@@ -344,6 +345,82 @@ function PeopleAndCohorts({ ws, query }: { ws: string; query: { from: string; to
               <span className="block min-w-0">
                 <span className="block truncate text-[13px] font-medium">{r.label}</span>
                 <span className="block truncate text-[12px] text-muted-foreground">{num(r.people)} people · {money(r.revenue_per_person)} each</span>
+              </span>
+            )}
+          />
+        )}
+      </Card>
+    </>
+  );
+}
+
+type AccountRow = { record_id: string; name: string; people: number; conversions: number; revenue: Money[]; top_channel: string; top_channel_label: string; deals_won: number; deal_value: Money[] };
+type DealRow = { channel: string; label: string; deals: number; value: Money[] };
+
+// AccountsAndDeals is the B2B view: credit rolled up to each company, and
+// won deals spread across the channels their people came from.
+function AccountsAndDeals({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" } }) {
+  const [accounts, setAccounts] = useState<AccountRow[] | null>(null);
+  const [deals, setDeals] = useState<DealRow[] | null>(null);
+  const [unattributed, setUnattributed] = useState<{ deals: number; value: Money[] } | null>(null);
+  const [error, setError] = useState("");
+  const key = JSON.stringify(query);
+  useEffect(() => {
+    const q = JSON.parse(key) as typeof query;
+    Promise.all([
+      api.GET("/v1/workspaces/{ws}/attribution/deals", { params: { path: { ws }, query: q } }),
+      api.GET("/v1/workspaces/{ws}/attribution/accounts", { params: { path: { ws }, query: q } }),
+    ]).then(([d, a]) => {
+      setError(d.error || a.error ? errorMessage(d.error ?? a.error) : "");
+      setDeals(d.data?.data ?? []);
+      setUnattributed(d.data?.unattributed ?? null);
+      setAccounts(a.data?.data ?? []);
+    });
+  }, [ws, key]);
+
+  const dealColumns: ColumnDef<DealRow>[] = [
+    { id: "channel", header: "Channel", accessorFn: (r) => r.label, cell: ({ row: { original: r } }) => <span className="font-medium">{r.label}</span> },
+    { id: "deals", header: "Deals won", accessorFn: (r) => r.deals, cell: ({ row: { original: r } }) => num(r.deals) },
+    { id: "value", header: "Value", accessorFn: (r) => r.value[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.value) },
+  ];
+  const accountColumns: ColumnDef<AccountRow>[] = [
+    { id: "name", header: "Company", accessorFn: (r) => r.name, cell: ({ row: { original: r } }) => <span className="font-medium">{r.name || "Unnamed company"}</span> },
+    { id: "people", header: "People", accessorFn: (r) => r.people, cell: ({ row: { original: r } }) => num(r.people) },
+    { id: "conversions", header: "Conversions", accessorFn: (r) => r.conversions, cell: ({ row: { original: r } }) => num(r.conversions) },
+    { id: "revenue", header: "Revenue", accessorFn: (r) => r.revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.revenue) },
+    { id: "top", header: "Top channel", accessorFn: (r) => r.top_channel_label, cell: ({ row: { original: r } }) => r.top_channel_label || "—" },
+    { id: "won", header: "Deals won", accessorFn: (r) => r.deals_won, cell: ({ row: { original: r } }) => num(r.deals_won) },
+    { id: "value", header: "Deal value", accessorFn: (r) => r.deal_value[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }) => money(r.deal_value) },
+  ];
+  return (
+    <>
+      <ErrorText>{error}</ErrorText>
+      <Card title="Won deals by channel" description="Each deal won in these dates, split across channels by the credit its people (its contacts and everyone at its company) earned before it closed.">
+        {!deals ? <Loading /> : (
+          <>
+            <DataTable columns={dealColumns} data={deals} rowId={(r) => r.channel} empty="No won deals with credited people in these dates."
+              mobile={(r) => (
+                <span className="block min-w-0">
+                  <span className="block truncate text-[13px] font-medium">{r.label}</span>
+                  <span className="block truncate text-[12px] text-muted-foreground">{num(r.deals)} deals · {money(r.value)}</span>
+                </span>
+              )}
+            />
+            {unattributed && unattributed.deals > 0 && (
+              <p className="mt-2 text-[12px] text-muted-foreground">
+                {num(unattributed.deals)} won {unattributed.deals === 1 ? "deal" : "deals"} ({money(unattributed.value)}) had nobody with a tracked visit.
+              </p>
+            )}
+          </>
+        )}
+      </Card>
+      <Card title="Companies" description="What each company's people brought under this model, the channel that brought the most, and the deals it won in these dates.">
+        {!accounts ? <Loading /> : (
+          <DataTable columns={accountColumns} data={accounts} rowId={(r) => r.record_id} empty="No company's people converted in these dates."
+            mobile={(r) => (
+              <span className="block min-w-0">
+                <span className="block truncate text-[13px] font-medium">{r.name || "Unnamed company"}</span>
+                <span className="block truncate text-[12px] text-muted-foreground">{num(r.conversions)} conversions · {num(r.deals_won)} won · {money(r.deal_value)}</span>
               </span>
             )}
           />

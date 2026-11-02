@@ -4,7 +4,8 @@
 // run in this order:
 //
 //	known          the workspace already has the company: link the item to
-//	               its record and stop
+//	               its record and stop, unless the feature keeps it
+//	               (Config.Keep), when it goes on like a new one
 //	contact_rules  the domain is on the opt-out list as an opt-out or a
 //	               bounce: stop; a competitor, customer or partner entry
 //	               goes on with a warning
@@ -63,6 +64,12 @@ type Config struct {
 	Stopped func(ctx context.Context, it pipeline.Item, code string, reasons []string) error
 	// Next is the step after add_to_crm; "" finishes the item there.
 	Next string
+	// Keep says whether an item whose company the workspace already has
+	// goes on anyway: through the contact rules, then add_to_crm links it
+	// to the existing record (Linked with existed false) and sends it to
+	// Next, for a feature that works with companies the workspace knows,
+	// such as finding more people at them. Nil: known companies stop.
+	Keep func(ctx context.Context, it pipeline.Item) (bool, error)
 }
 
 // Stages are the steps for c, to register on the pipeline runner.
@@ -137,6 +144,17 @@ func (s steps) known(ctx context.Context, items []pipeline.Item) ([]pipeline.Res
 			case !ok:
 				out = append(out, pipeline.Result{ItemID: it.ID, Outcome: pipeline.Advance, Next: ContactRules})
 			default:
+				if s.c.Keep != nil {
+					keep, err := s.c.Keep(ctx, it)
+					if err != nil {
+						out = append(out, retry(it, err))
+						continue
+					}
+					if keep {
+						out = append(out, pipeline.Result{ItemID: it.ID, Outcome: pipeline.Advance, Next: ContactRules})
+						continue
+					}
+				}
 				if err := s.link(ctx, it, id, true, nil); err != nil {
 					out = append(out, retry(it, err))
 					continue

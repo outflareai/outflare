@@ -10,6 +10,7 @@ import { track } from "@/lib/analytics";
 import { BrandBadge } from "@/components/brand-badge";
 import { Markdown, MarkdownEditor } from "@/components/markdown-editor";
 import { KnowledgeAsk } from "@/components/knowledge-ask";
+import { KnowledgeReview } from "@/components/knowledge-review";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -70,6 +71,8 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
   const { brand, query: brandQuery } = useBrand(ws);
   const [folders, setFolders] = useState<KnowledgeCollection[] | null>(null);
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
+  // Suggested answers and conflicts waiting for a person.
+  const [waiting, setWaiting] = useState(0);
   const [view, setView] = useState<View>({ kind: "overview" });
   const [peek, setPeek] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -86,6 +89,8 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
   const loadStats = useCallback(async () => {
     const { data } = await api.GET("/v1/workspaces/{ws}/knowledge/stats", { params: { path: { ws }, query: brandQuery } });
     if (data) setStats(data);
+    const r = await api.GET("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: { ws }, query: brandQuery } });
+    if (r.data) setWaiting(r.data.counts.answers + r.data.counts.conflicts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand?.id]);
   useEffect(() => void loadFolders(), [loadFolders]);
@@ -199,8 +204,9 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
           <div className="space-y-0.5">
             <NavItem active={view.kind === "overview"} onClick={() => setView({ kind: "overview" })}>Overview</NavItem>
             <NavItem active={view.kind === "gaps"} onClick={() => setView({ kind: "gaps" })}>
-              <span className="flex-1">Unanswered questions</span>
-              {!!stats?.gaps && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400">{stats.gaps}</span>}
+              <span className="flex-1">Review</span>
+              {!!waiting && <span className="rounded-full bg-violet-500/15 px-1.5 text-[11px] font-medium text-violet-700 dark:text-violet-300" title="Answers and conflicts to review">{waiting}</span>}
+              {!!stats?.gaps && <span className="rounded-full bg-amber-500/15 px-1.5 text-[11px] font-medium text-amber-700 dark:text-amber-400" title="Unanswered questions">{stats.gaps}</span>}
             </NavItem>
           </div>
           <div>
@@ -841,9 +847,11 @@ function Gaps({ ws, canManage, tick, onWrite, onChanged, onTest }: { ws: string;
   }
 
   return (
-    <section className="space-y-3">
-      <SectionTitle
-        title="Unanswered questions"
+    <div className="space-y-8">
+      <KnowledgeReview ws={ws} canManage={canManage} tick={tick} onChanged={onChanged} />
+      <section className="space-y-3">
+        <SectionTitle
+          title="Unanswered questions"
         hint="Questions from the last 90 days that nothing in your knowledge answered. Write the answer once, and every AI answers it from then on."
       />
       <ErrorText>{error}</ErrorText>
@@ -886,7 +894,8 @@ function Gaps({ ws, canManage, tick, onWrite, onChanged, onTest }: { ws: string;
           </table>
         </div>
       )}
-    </section>
+      </section>
+    </div>
   );
 }
 

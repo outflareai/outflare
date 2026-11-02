@@ -724,15 +724,15 @@ func scanSocialItem(row pgx.Row) (socialItemView, error) {
 
 var socialItemStatuses = []string{"new", "drafted", "handled", "ignored"}
 
-// beforeTime reads ?before, a time from next_before.
+// beforeTime reads ?cursor= for a list that pages newest first by time.
 func beforeTime(w http.ResponseWriter, r *http.Request) (*time.Time, bool) {
-	before := r.URL.Query().Get("before")
-	if before == "" {
-		return nil, true
+	before, ok := pageCursor(w, r, pageBefore)
+	if !ok || before == "" {
+		return nil, ok
 	}
 	t, err := time.Parse(time.RFC3339Nano, before)
 	if err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a time, such as next_before from the previous page")
+		invalidCursor(w, r)
 		return nil, false
 	}
 	return &t, true
@@ -802,7 +802,7 @@ func (s *Server) listSocialItems(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []socialItemView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findSocialItem(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialItemView, bool) {
@@ -1077,7 +1077,7 @@ func (s *Server) listSocialActions(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []socialActionView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findSocialAction(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialActionView, bool) {

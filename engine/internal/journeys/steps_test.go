@@ -98,3 +98,15 @@ func TestReviewRequestEmailConditions(t *testing.T) {
 		t.Fatalf("review email cannot be used by a later condition: %s", msg)
 	}
 }
+
+func TestCRMTaskStep(t *testing.T) {
+	valid := Step{ID: "follow_up", Kind: "create_task", Title: "Follow up after the demo", DueAfterSeconds: 86400}
+	if msg := Check([]Step{valid}); msg != "" {
+		t.Fatal(msg)
+	}
+	for _, st := range []Step{{ID: "task", Kind: "create_task"}, {ID: "task", Kind: "create_task", Title: "Call", DueAfterSeconds: -1}, {ID: "task", Kind: "create_task", Title: strings.Repeat("x", 301)}} {
+		if msg := Check([]Step{st}); msg == "" {
+			t.Fatalf("invalid task accepted: %+v", st)
+		}
+	}
+}

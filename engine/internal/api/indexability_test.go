@@ -170,10 +170,10 @@ func TestIndexability(t *testing.T) {
 		t.Fatalf("search: %v", l)
 	}
 	p1 := owner.must(200, "GET", path+"/pages?limit=5", nil)
-	if len(p1["data"].([]any)) != 5 || p1["next_offset"] != 5.0 {
+	if len(p1["data"].([]any)) != 5 || p1["next_cursor"] == nil {
 		t.Fatalf("page 1: %v", p1)
 	}
-	if p2 := owner.must(200, "GET", path+"/pages?limit=5&offset=5", nil); len(p2["data"].([]any)) != 2 || p2["next_offset"] != nil {
+	if p2 := owner.must(200, "GET", path+"/pages?limit=5&cursor="+p1["next_cursor"].(string), nil); len(p2["data"].([]any)) != 2 || p2["next_cursor"] != nil {
 		t.Fatalf("page 2: %v", p2)
 	}
 	owner.must(400, "GET", path+"/pages?verdict=maybe", nil)

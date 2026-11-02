@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeopleView, SpendView, TimelineView, UsageView } from "./AIAccountsViews";
 import { ReceiptsView } from "./AIAccountsReceipts";
 import { ComputersView } from "./AIAccountsComputers";
+import { DesktopDownloadLink } from "@/components/desktop-download";
 import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
 
 type Props = {
@@ -133,7 +134,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
       <PageHeader
         title="AI accounts"
         description={seeAll ? "Every AI subscription and API account people here pay for: what each costs, when it renews and who it belongs to." : "The AI subscriptions and API accounts you use: what each costs, when it renews and who else is on it."}
-        action={canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}
+        action={<div className="flex flex-wrap gap-2"><DesktopDownloadLink location="ai_accounts" />{canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}</div>}
       />
       <ErrorText>{error}</ErrorText>
       {view !== "computers" && view !== "receipts" && <label className="flex items-center gap-3 text-[13px]">Report scope

@@ -17,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/allocation"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/holdout"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -26,16 +27,26 @@ import (
 
 func (s *Server) routesSequences(mux *http.ServeMux) {
 	read, manage := auth.ScopeSequencesRead, auth.ScopeSequencesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences", s.inBrand(read, s.listSequences))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences", s.inBrand(manage, s.createSequence))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}", s.inBrand(read, s.getSequence))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/sequences/{id}", s.inBrand(manage, s.brandSequence(s.updateSequence)))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/sequences/{id}", s.inBrand(manage, s.brandSequence(s.deleteSequence)))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/sequences/{id}/steps", s.inBrand(manage, s.brandSequence(s.putSteps)))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/preview", s.inBrand(read, s.brandSequence(s.previewSequence)))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inBrand(read, s.listEnrollments))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments", s.inBrand(manage, s.brandSequence(s.enroll)))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/sequences/{id}/enrollments/{eid}/stop", s.inBrand(manage, s.brandSequence(s.stopEnrollment)))
+	// A sequence, its enrollments and its messages belong to one brand
+	// (brand_outreach.go): served under the brand, and under the workspace
+	// until the contract step.
+	for _, b := range s.activationBases("sequences", s.inBrand) {
+		base, on := b.path, b.on
+		mux.HandleFunc("GET "+base, on(read, s.listSequences))
+		mux.HandleFunc("POST "+base, on(manage, s.createSequence))
+		mux.HandleFunc("GET "+base+"/{id}", on(read, s.getSequence))
+		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.brandSequence(s.updateSequence)))
+		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.brandSequence(s.deleteSequence)))
+		mux.HandleFunc("PUT "+base+"/{id}/steps", on(manage, s.brandSequence(s.putSteps)))
+		mux.HandleFunc("POST "+base+"/{id}/preview", on(read, s.brandSequence(s.previewSequence)))
+		mux.HandleFunc("GET "+base+"/{id}/enrollments", on(read, s.listEnrollments))
+		mux.HandleFunc("POST "+base+"/{id}/enrollments", on(manage, s.brandSequence(s.enroll)))
+		mux.HandleFunc("POST "+base+"/{id}/enrollments/{eid}/stop", on(manage, s.brandSequence(s.stopEnrollment)))
+	}
+	// What the sequence's holdout shows: a report, so analytics.read, and
+	// on the brand only.
+	mux.HandleFunc("GET /v1/brands/{brand}/sequences/{id}/lift", s.onBrand(auth.ScopeAnalyticsRead, s.sequenceLift))
+	mux.HandleFunc("GET /v1/brands/{brand}/messages", s.onBrand(read, s.listMessages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/messages", s.inWorkspace(read, s.listMessages))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/{id}/test-send", s.inWorkspace(auth.ScopeMailboxesManage, s.testSend))
 	// Public: the links in sent emails.
@@ -82,6 +93,9 @@ type sequenceView struct {
 	// Optional link settings; see the tracking package.
 	TrackClicks       bool `json:"track_clicks"`
 	UnsubscribeHeader bool `json:"unsubscribe_header"`
+	// The share of enrollments held out on purpose, 0 to 50 percent: they
+	// stop before their first email (status stopped, reason holdout).
+	HoldoutPercent int `json:"holdout_percent"`
 	// Platform campaigns this sequence runs as; empty when Outflare sends.
 	Links     []linkView     `json:"links"`
 	Steps     []stepView     `json:"steps"`
@@ -198,15 +212,17 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string) ([]se
 	// Link settings, and leads who clicked a tracked link (scanner clicks
 	// left out).
 	var track, header bool
+	var hold int
 	rows, err = s.pool.Query(ctx, `
-		SELECT q.id::text, q.track_clicks, q.unsubscribe_header,
+		SELECT q.id::text, q.track_clicks, q.unsubscribe_header, q.holdout_percent,
 		       (SELECT count(DISTINCT t.enrollment_id)::int FROM tracked_links t JOIN link_clicks c ON c.link_id = t.id AND NOT c.likely_bot WHERE t.sequence_id = q.id)
 		FROM sequences q WHERE q.id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return nil, err
 	}
-	_, err = pgx.ForEachRow(rows, []any{&sid, &track, &header, &n}, func() error {
+	_, err = pgx.ForEachRow(rows, []any{&sid, &track, &header, &hold, &n}, func() error {
 		byID[sid].TrackClicks, byID[sid].UnsubscribeHeader, byID[sid].Stats["clicked"] = track, header, n
+		byID[sid].HoldoutPercent = hold
 		return nil
 	})
 	return list, err
@@ -214,7 +230,9 @@ func (s *Server) loadSequences(ctx context.Context, ws string, id *string) ([]se
 
 func (s *Server) listSequences(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	brand, ok := s.brandFilter(w, r)
+	// One brand's sequences: the route's, or on the workspace route the
+	// one ?brand= picks, else the first brand's.
+	brand, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -257,6 +275,9 @@ func (s *Server) findSequence(w http.ResponseWriter, r *http.Request, ws, id str
 // sequenceSettings are the fields shared by create and update. Pointers are
 // "leave as is" when absent.
 type sequenceSettings struct {
+	// Create only, on the workspace route: the brand (id or handle) the
+	// sequence belongs to; the workspace's first when left out.
+	BrandID       *string          `json:"brand_id"`
 	Name          *string          `json:"name"`
 	PoolID        optional[string] `json:"pool_id"`
 	Timezone      *string          `json:"timezone"`
@@ -279,17 +300,18 @@ type sequenceSettings struct {
 
 	TrackClicks       *bool `json:"track_clicks"`
 	UnsubscribeHeader *bool `json:"unsubscribe_header"`
+	HoldoutPercent    *int  `json:"holdout_percent"`
 }
 
 // saveLinkSettings applies the optional link settings and the daily send
 // limit, kept apart from the main insert and update so they stay simple.
 func saveLinkSettings(ctx context.Context, tx pgx.Tx, id string, q *sequenceSettings) error {
-	if q.TrackClicks == nil && q.UnsubscribeHeader == nil && !q.DailySendLimit.Set {
+	if q.TrackClicks == nil && q.UnsubscribeHeader == nil && !q.DailySendLimit.Set && q.HoldoutPercent == nil {
 		return nil
 	}
 	_, err := tx.Exec(ctx, `UPDATE sequences SET track_clicks = COALESCE($2, track_clicks), unsubscribe_header = COALESCE($3, unsubscribe_header),
-		daily_send_limit = CASE WHEN $4 THEN $5::int ELSE daily_send_limit END WHERE id = $1`,
-		id, q.TrackClicks, q.UnsubscribeHeader, q.DailySendLimit.Set, q.DailySendLimit.Value)
+		daily_send_limit = CASE WHEN $4 THEN $5::int ELSE daily_send_limit END, holdout_percent = COALESCE($6, holdout_percent) WHERE id = $1`,
+		id, q.TrackClicks, q.UnsubscribeHeader, q.DailySendLimit.Set, q.DailySendLimit.Value, q.HoldoutPercent)
 	return err
 }
 
@@ -309,6 +331,9 @@ func (q *sequenceSettings) priority() *int {
 }
 
 func (q *sequenceSettings) validate() error {
+	if q.HoldoutPercent != nil && (*q.HoldoutPercent < 0 || *q.HoldoutPercent > holdout.Max) {
+		return errInvalid("holdout_percent must be 0 to 50")
+	}
 	if q.Name != nil {
 		*q.Name = strings.TrimSpace(*q.Name)
 		if *q.Name == "" || len(*q.Name) > 200 {
@@ -498,7 +523,9 @@ func (s *Server) insertSequence(ctx context.Context, tx pgx.Tx, a *access, q *se
 	if err := s.checkAllocation(ctx, tx, a, q, true); err != nil {
 		return "", err
 	}
-	brand, err := brandWrite(ctx, tx, a, nil)
+	// A sequence belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.activationBrand(ctx, a, q.BrandID)
 	if err != nil {
 		return "", err
 	}
@@ -536,7 +563,7 @@ func (s *Server) insertSequence(ctx context.Context, tx pgx.Tx, a *access, q *se
 func (s *Server) brandSequence(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a := accessFrom(r.Context())
-		if a.Brands != nil {
+		if a.Brands != nil || a.Brand != "" {
 			if !validUUID(r.PathValue("id")) {
 				writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 				return
@@ -858,7 +885,7 @@ func (s *Server) previewSequence(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	l, ok := s.findLead(w, r, a.WorkspaceID, req.LeadID)
+	l, ok := s.findLead(w, r, req.LeadID)
 	if !ok {
 		return
 	}
@@ -962,7 +989,7 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		} else if p != "" {
 			return errLinked(p)
 		}
-		if a.Brands != nil && req.ListID != nil && validUUID(*req.ListID) {
+		if (a.Brands != nil || a.Brand != "") && req.ListID != nil && validUUID(*req.ListID) {
 			var brand *string
 			err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE id = $1 AND workspace_id = $2`, *req.ListID, a.WorkspaceID).Scan(&brand)
 			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
@@ -978,12 +1005,13 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 			WITH cand AS (
 				SELECT l.id, l.email,
 					EXISTS (SELECT 1 FROM enrollments e WHERE e.sequence_id = $1 AND e.lead_id = l.id) AS here,
-					EXISTS (`+leads.SuppressedSQL("l.workspace_id", "l.email")+`) AS suppressed,
+					EXISTS (`+leads.SuppressedInSQL("l.workspace_id", "(SELECT q.brand_id FROM sequences q WHERE q.id = $1)", "l.email")+`) AS suppressed,
 					`+customers.ExcludedByColumnSQL("l.record_id", "(SELECT q.exclude FROM sequences q WHERE q.id = $1)")+` AS excluded,
 					EXISTS (SELECT 1 FROM enrollments e JOIN sequences q ON q.id = e.sequence_id
 						WHERE e.lead_id = l.id AND e.status = 'active' AND e.sequence_id <> $1 AND q.status IN ('active', 'paused')) AS elsewhere
 				FROM leads l
-				WHERE l.workspace_id = $2 AND (
+				-- Only the sequence's brand's leads.
+				WHERE l.workspace_id = $2 AND l.brand_id IS NOT DISTINCT FROM COALESCE((SELECT q.brand_id FROM sequences q WHERE q.id = $1), l.brand_id) AND (
 					l.id = ANY($3::uuid[]) OR
 					($4::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
 						WHERE m.lead_id = l.id AND m.list_id = $4 AND ll.workspace_id = $2)))
@@ -1039,7 +1067,7 @@ func (s *Server) listEnrollments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "sequence not found")
 		return
 	}
-	if a.Brands != nil {
+	if a.Brands != nil || a.Brand != "" {
 		if _, ok := s.findSequence(w, r, a.WorkspaceID, id); !ok {
 			return
 		}
@@ -1060,7 +1088,9 @@ func (s *Server) listEnrollments(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("status"); v != "" {
 		where += ` AND e.status = ` + arg(v)
 	}
-	if v := q.Get("after"); v != "" {
+	if v, ok := pageCursor(w, r, pageAfter); !ok {
+		return
+	} else if v != "" {
 		where += ` AND lower(l.email) > ` + arg(strings.ToLower(v))
 	}
 	rows, err := s.pool.Query(r.Context(), `
@@ -1083,7 +1113,7 @@ func (s *Server) listEnrollments(w http.ResponseWriter, r *http.Request) {
 		e := strings.ToLower(list[limit-1].Email)
 		next = &e
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 func (s *Server) stopEnrollment(w http.ResponseWriter, r *http.Request) {
@@ -1170,20 +1200,23 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	if v := q.Get("status"); v != "" {
 		where += ` AND status = ` + arg(v)
 	}
-	if v := q.Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be an RFC 3339 time")
+			invalidCursor(w, r)
 			return
 		}
 		where += ` AND created_at < ` + arg(t)
 	}
-	sel, ok := s.brandFilter(w, r)
+	// One brand's messages: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
-	// A message belongs to its sequence's brand.
-	where += sel.sql(`(SELECT q.brand_id FROM sequences q WHERE q.id = messages.sequence_id)`, &args)
+	where += sel.sql(`brand_id`, &args)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT id, sequence_id, enrollment_id, step_position, lead_id, mailbox_id, from_email, to_email, subject, body,
 		       message_id, status, error, created_at, sent_at
@@ -1203,7 +1236,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 		t := list[limit-1].CreatedAt.Format(time.RFC3339Nano)
 		next = &t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // testSend sends one email from a mailbox now, through the send policy.

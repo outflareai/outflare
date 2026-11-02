@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import type { Coverage, Journalist, NewsArticle, NewsSearch } from "@outflare/sdk";
+import type { Coverage, Journalist, JournalistImportResult, JournalistInput, NewsArticle, NewsSearch, OutletTier, SmartListRule } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, errorMessage } from "../api";
-import { Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast, type tones } from "../ui";
+import { Badge, Button, confirmAction, Empty, ErrorText, field, FilePicker, Loading, Menu, PageHeader, toast, type tones } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
 
@@ -12,8 +13,9 @@ import type { Tab } from "../App";
 // workspace's own web search connection (Geonode), the articles they find,
 // and coverage: articles about a brand, each on its outlet's company
 // record, to confirm or dismiss; and journalists: the articles' authors
-// whose address was found, as person records, and media lists of them
-// (smart lists with a news search rule). The first part of digital PR.
+// whose address was found and the ones people added, as person records
+// with beats and outlet tiers, and media lists of them (smart lists with
+// news search, beat and tier rules). The first part of digital PR.
 
 type Props = { ws: string; canManage: boolean; canLists: boolean; go: (tab: Tab, item?: string) => void };
 type Tone = keyof typeof tones;
@@ -59,7 +61,7 @@ export function News({ ws, canManage, canLists, go }: Props) {
       </Tabs>
       {section === "coverage" && <CoverageList ws={ws} canManage={canManage} brand={brand} />}
       {section === "articles" && <Articles ws={ws} brand={brand} />}
-      {section === "journalists" && <Journalists ws={ws} canLists={canLists} brand={brand} />}
+      {section === "journalists" && <Journalists ws={ws} canManage={canManage} canLists={canLists} brand={brand} />}
       {section === "searches" && <Searches ws={ws} canManage={canManage} brand={brand} go={go} />}
     </div>
   );
@@ -263,105 +265,389 @@ function Articles({ ws, brand }: { ws: string; brand: { brand?: string } }) {
   );
 }
 
-function Journalists({ ws, canLists, brand }: { ws: string; canLists: boolean; brand: { brand?: string } }) {
+const tierLabel: Record<OutletTier, string> = { national: "National", trade: "Trade", regional: "Regional", local: "Local", newsletter: "Newsletter or blog" };
+const tiers = Object.keys(tierLabel) as OutletTier[];
+const splitBeats = (s: string) => s.split(/[;,|]/).map((b) => b.trim()).filter(Boolean);
+
+function Journalists({ ws, canManage, canLists, brand }: { ws: string; canManage: boolean; canLists: boolean; brand: { brand?: string } }) {
   const brandID = useBrand(ws).brand?.id;
   const [list, setList] = useState<Journalist[] | null>(null);
   const [searches, setSearches] = useState<NewsSearch[]>([]);
   const [search, setSearch] = useState("");
+  const [beat, setBeat] = useState("");
+  const [tier, setTier] = useState<OutletTier | "">("");
+  const [beats, setBeats] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  const [dialog, setDialog] = useState<"add" | "import" | Journalist | null>(null);
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query: brand } }).then(({ data }) => setSearches(data?.data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand.brand]);
   useEffect(() => {
-    setList(null);
-    api.GET("/v1/workspaces/{ws}/journalists", { params: { path: { ws }, query: { ...brand, ...(search ? { search_id: search } : {}), limit: 200 } } })
-      .then(({ data, error }) => {
-        if (error || !data) return setError(errorMessage(error));
-        setError("");
-        setList(data.data);
+    api.GET("/v1/workspaces/{ws}/journalists", {
+      params: { path: { ws }, query: { ...brand, ...(search ? { search_id: search } : {}), ...(beat ? { beat } : {}), ...(tier ? { tier } : {}), limit: 200 } },
+    }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setError("");
+      setList(data.data);
+      // The beats to filter by: every one seen so far.
+      setBeats((have) => {
+        const seen = new Map(have.map((b) => [b.toLowerCase(), b]));
+        for (const j of data.data) for (const b of j.beats) if (!seen.has(b.toLowerCase())) seen.set(b.toLowerCase(), b);
+        return [...seen.values()].sort((a, b) => a.localeCompare(b));
       });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ws, search, brand.brand]);
+  }, [ws, search, beat, tier, brand.brand, reload]);
 
-  // A media list is a smart list of whoever wrote about the search's topic
-  // in the last year; it keeps itself up to date.
+  // A media list is a smart list of the journalists picked here: who wrote
+  // about the search's topic in the last year, with the beat, on outlets of
+  // the tier. It keeps itself up to date.
   const mediaList = async () => {
     const s = searches.find((x) => x.id === search);
-    if (!s) return;
     // A media list is a smart list, which belongs to one brand.
     if (!brandID) return setError("Pick a brand in the brand switcher first: a media list belongs to one brand.");
+    const rules: SmartListRule[] = s ? [{ news_search: s.id, op: "exists", within_days: 365 }] : [{ attribute: "journalist", op: "eq", value: true }];
+    if (beat) rules.push({ attribute: "beats", op: "contains", value: beat });
+    if (tier) rules.push({ company_attribute: "outlet_tier", op: "eq", value: tier });
+    const name = ["Journalists", s?.name, beat, tier && tierLabel[tier]].filter(Boolean).join(": ");
+    const about = [s && `wrote an article the "${s.name}" news search found in the last year`, beat && `cover ${beat}`, tier && `write for ${tierLabel[tier].toLowerCase()} outlets`].filter(Boolean).join(", ");
     setBusy(true);
     const { error } = await api.POST("/v1/brands/{brand}/smart-lists", {
       params: { path: { brand: brandID } },
-      body: { name: `Journalists: ${s.name}`.slice(0, 200), description: `People who wrote an article the "${s.name}" news search found in the last year.`.slice(0, 2000),
-        rules: [{ news_search: s.id, op: "exists", within_days: 365 }] },
+      body: { name: name.slice(0, 200), description: `Journalists who ${about}.`.slice(0, 2000), rules },
     });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast("Media list made. It's under Lists and keeps itself up to date.");
   };
+  const patch = async (j: Journalist, body: { beats?: string[]; job_title?: string | null; journalist?: boolean }) => {
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/journalists/{record}", { params: { path: { ws, record: j.record_id } }, body });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setReload((n) => n + 1);
+  };
+  const unmark = async (j: Journalist) => {
+    if (!(await confirmAction(`Take ${j.name || j.email} off the list?`, "Their person record stays. The news watch won't add them back.", "Take off"))) return;
+    await patch(j, { journalist: false });
+  };
+
   if (!list) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
+  const filtered = search || beat || tier;
   return (
     <div className="space-y-2">
       {error && <ErrorText>{error}</ErrorText>}
       <p className="text-[12px] text-muted-foreground">
-        The authors of the articles your searches found, once the free email finder found their address at the outlet. Each is a person record on the outlet's company.
+        The authors of the articles your searches found, once the free email finder found their address at the outlet, and the journalists you added. Each is a person record on their outlet's company.
       </p>
       <DataTable
         data={list}
         rowId={(j) => j.record_id}
         searchPlaceholder="Search journalists"
         toolbar={
-          searches.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {searches.length > 0 && (
               <select className={field} aria-label="Topic" value={search} onChange={(e) => setSearch(e.target.value)}>
                 <option value="">Every topic</option>
                 {searches.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
-              {canLists && search && <Button variant="ghost" disabled={busy} onClick={mediaList}>Make a media list</Button>}
-            </div>
-          )
+            )}
+            {(beats.length > 0 || beat) && (
+              <select className={field} aria-label="Beat" value={beat} onChange={(e) => setBeat(e.target.value)}>
+                <option value="">Every beat</option>
+                {beats.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            )}
+            <select className={field} aria-label="Outlet tier" value={tier} onChange={(e) => setTier(e.target.value as OutletTier | "")}>
+              <option value="">Every outlet tier</option>
+              {tiers.map((t) => <option key={t} value={t}>{tierLabel[t]}</option>)}
+            </select>
+            {canLists && filtered && <Button variant="ghost" disabled={busy} onClick={mediaList}>Make a media list</Button>}
+            {canManage && <Button variant="ghost" onClick={() => setDialog("import")}>Import CSV</Button>}
+            {canManage && <Button onClick={() => setDialog("add")}>Add journalist</Button>}
+          </div>
         }
-        empty={searches.length === 0 ? "No journalists yet. Save a search under Searches; its articles' authors show here once their addresses are found." :
-          "No journalists yet. They show once a search's articles have been read and their authors' addresses found."}
+        empty={filtered ? "No journalists match." : searches.length === 0 ? "No journalists yet. Add the ones you know, or save a search under Searches; its articles' authors show here once their addresses are found." :
+          "No journalists yet. Add the ones you know; the authors of your searches' articles show here once their addresses are found."}
         mobile={(j) => (
           <div className="space-y-1">
             <div className="font-medium">{j.name || j.email}</div>
             <div className="text-xs text-muted-foreground">{[j.outlets.join(", "), `${j.articles} article${j.articles === 1 ? "" : "s"}`].join(" · ")}</div>
-            <div className="text-[12px]">{j.latest_article.title}</div>
+            {j.beats.length > 0 && <div className="text-[12px]">{j.beats.join(", ")}</div>}
+            {j.latest_article && <div className="text-[12px]">{j.latest_article.title}</div>}
           </div>
         )}
         columns={[
           {
             id: "name",
             header: "Journalist",
-            accessorFn: (j) => `${j.name} ${j.email ?? ""}`,
+            accessorFn: (j) => `${j.name} ${j.email ?? ""} ${j.job_title ?? ""}`,
             cell: ({ row: { original: j } }) => (
               <div className="min-w-0 space-y-0.5">
                 <div className="font-medium">{j.name || j.email}</div>
-                {j.email && <div className="font-mono text-[12px] text-muted-foreground" title={`The email finder was ${j.confidence}% sure`}>{j.email}</div>}
+                {j.job_title && <div className="text-[12px] text-muted-foreground">{j.job_title}</div>}
+                {j.email && <div className="font-mono text-[12px] text-muted-foreground" title={j.confidence ? `The email finder was ${j.confidence}% sure` : undefined}>{j.email}</div>}
               </div>
             ),
           },
-          { id: "outlets", header: "Writes for", accessorFn: (j) => j.outlets.join(", "), cell: ({ row }) => <span className="text-[12px]">{row.original.outlets.join(", ")}</span> },
+          {
+            id: "beats",
+            header: "Beats",
+            accessorFn: (j) => j.beats.join(", "),
+            cell: ({ row: { original: j } }) => (
+              <div className="flex max-w-72 flex-wrap gap-1">
+                {j.beats.map((b) => <Badge key={b} tone="blue">{b}</Badge>)}
+                {canManage && j.suggested_beats.map((b) => (
+                  <button key={b} type="button" className="rounded-full border border-dashed px-2 text-[11px] text-muted-foreground hover:text-foreground" title="Suggested from the searches their articles came up in: add it" onClick={() => patch(j, { beats: [...j.beats, b] })}>
+                    + {b}
+                  </button>
+                ))}
+              </div>
+            ),
+          },
+          {
+            id: "outlets",
+            header: "Writes for",
+            accessorFn: (j) => j.outlets.join(", "),
+            cell: ({ row: { original: j } }) => (
+              <div className="space-y-0.5 text-[12px]">
+                {j.outlet_records.map((o) => (
+                  <div key={o.record_id} className="flex flex-wrap items-center gap-1">
+                    <span>{o.domain ?? o.name}</span>
+                    {o.tier && <Badge tone="grey">{tierLabel[o.tier]}</Badge>}
+                  </div>
+                ))}
+                {j.outlets.filter((d) => !j.outlet_records.some((o) => o.domain === d)).map((d) => <div key={d}>{d}</div>)}
+              </div>
+            ),
+          },
           { id: "articles", header: "Articles", accessorFn: (j) => j.articles, meta: { align: "right", mono: true }, cell: ({ row }) => row.original.articles },
           {
             id: "latest",
             header: "Latest",
-            accessorFn: (j) => j.latest_article.published_at ?? "",
-            cell: ({ row: { original: j } }) => (
-              <div className="min-w-0 space-y-0.5">
-                <a className="block max-w-80 truncate text-[13px] underline-offset-2 hover:underline" href={j.latest_article.url} target="_blank" rel="noreferrer noopener nofollow" title={j.latest_article.title}>{j.latest_article.title || path(j.latest_article.url)}</a>
-                {j.latest_article.published_at && <div className="text-[11px] text-muted-foreground">{day(j.latest_article.published_at)}</div>}
-              </div>
-            ),
+            accessorFn: (j) => j.latest_article?.published_at ?? "",
+            cell: ({ row: { original: j } }) =>
+              j.latest_article ? (
+                <div className="min-w-0 space-y-0.5">
+                  <a className="block max-w-80 truncate text-[13px] underline-offset-2 hover:underline" href={j.latest_article.url} target="_blank" rel="noreferrer noopener nofollow" title={j.latest_article.title}>{j.latest_article.title || path(j.latest_article.url)}</a>
+                  {j.latest_article.published_at && <div className="text-[11px] text-muted-foreground">{day(j.latest_article.published_at)}</div>}
+                </div>
+              ) : <span className="text-[12px] text-muted-foreground">None found yet</span>,
           },
           { id: "topics", header: "Topics", accessorFn: (j) => j.topics.map((t) => t.name).join(", "), cell: ({ row }) => <span className="text-[12px]">{row.original.topics.map((t) => t.name).join(", ")}</span> },
+          {
+            id: "actions",
+            header: () => <span className="sr-only">Actions</span>,
+            enableSorting: false,
+            meta: { align: "right" },
+            cell: ({ row: { original: j } }) =>
+              canManage && (
+                <Menu
+                  aria={`More for ${j.name || j.email}`}
+                  items={[
+                    { label: "Edit beats and title", onClick: () => setDialog(j) },
+                    { label: "Take off the list", onClick: () => unmark(j), danger: true },
+                  ]}
+                />
+              ),
+          },
         ]}
       />
+      {dialog === "add" && <AddJournalist ws={ws} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setReload((n) => n + 1); }} />}
+      {dialog === "import" && <ImportJournalists ws={ws} brand={brand} onClose={() => setDialog(null)} onDone={() => { setDialog(null); setReload((n) => n + 1); }} />}
+      {dialog && typeof dialog === "object" && (
+        <EditJournalist j={dialog} onClose={() => setDialog(null)} onSave={async (body) => { await patch(dialog, body); setDialog(null); }} />
+      )}
     </div>
+  );
+}
+
+function AddJournalist({ ws, onClose, onDone }: { ws: string; onClose: () => void; onDone: () => void }) {
+  const { active, brand: current } = useBrand(ws);
+  const [v, setV] = useState({ name: "", email: "", job_title: "", outlet_website: "", outlet_name: "", outlet_tier: "" as OutletTier | "", beats: "", brand_id: current?.id ?? active[0]?.id ?? "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    const body: JournalistInput = {
+      name: v.name.trim(),
+      email: v.email.trim(),
+      ...(v.job_title.trim() ? { job_title: v.job_title.trim() } : {}),
+      ...(v.outlet_website.trim() ? { outlet_website: v.outlet_website.trim() } : {}),
+      ...(v.outlet_name.trim() ? { outlet_name: v.outlet_name.trim() } : {}),
+      ...(v.outlet_tier ? { outlet_tier: v.outlet_tier } : {}),
+      ...(splitBeats(v.beats).length ? { beats: splitBeats(v.beats) } : {}),
+      ...(v.brand_id ? { brand_id: v.brand_id } : {}),
+    };
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/journalists", { params: { path: { ws } }, body });
+    setBusy(false);
+    if (error || !data) return setError(errorMessage(error));
+    toast(`${data.name || data.email} is on the list.`);
+    onDone();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form className="space-y-3 text-sm" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>Add a journalist</DialogTitle>
+            <DialogDescription>Someone you already know. If they are already a person here, they're marked as a journalist and keep their record.</DialogDescription>
+          </DialogHeader>
+          {error && <ErrorText>{error}</ErrorText>}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block font-medium">Name</span>
+              <input required autoFocus className={`${field} w-full`} maxLength={200} placeholder="Ana Diaz" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Email</span>
+              <input required type="email" className={`${field} w-full`} placeholder="ana@news.example.org" value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Job title</span>
+              <input className={`${field} w-full`} maxLength={200} placeholder="Technology reporter" value={v.job_title} onChange={(e) => setV({ ...v, job_title: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Beats</span>
+              <input className={`${field} w-full`} placeholder="Proxies; Privacy" value={v.beats} onChange={(e) => setV({ ...v, beats: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Outlet website</span>
+              <input className={`${field} w-full`} placeholder="news.example.org" value={v.outlet_website} onChange={(e) => setV({ ...v, outlet_website: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Outlet name</span>
+              <input className={`${field} w-full`} maxLength={200} placeholder="Example News" value={v.outlet_name} onChange={(e) => setV({ ...v, outlet_name: e.target.value })} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium">Outlet tier</span>
+              <select className={`${field} w-full`} disabled={!v.outlet_website.trim()} value={v.outlet_tier} onChange={(e) => setV({ ...v, outlet_tier: e.target.value as OutletTier | "" })}>
+                <option value="">Not set</option>
+                {tiers.map((t) => <option key={t} value={t}>{tierLabel[t]}</option>)}
+              </select>
+            </label>
+            {active.length > 1 && (
+              <label className="block">
+                <span className="mb-1 block font-medium">Brand</span>
+                <select className={`${field} w-full`} value={v.brand_id} onChange={(e) => setV({ ...v, brand_id: e.target.value })}>
+                  {active.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button disabled={busy || !v.name.trim() || !v.email.trim()}>{busy ? "Adding…" : "Add journalist"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ImportJournalists({ ws, brand, onClose, onDone }: { ws: string; brand: { brand?: string }; onClose: () => void; onDone: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [check, setCheck] = useState<JournalistImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // First a dry run, which saves nothing, then the import itself.
+  const send = async (dry: boolean) => {
+    if (!file) return;
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/journalists/import", {
+      params: { path: { ws }, query: { ...brand, dry_run: dry } },
+      body: await file.text(),
+      bodySerializer: (b: string) => b,
+      headers: { "Content-Type": "text/csv" },
+    });
+    setBusy(false);
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    if (dry) return setCheck(data);
+    toast(`Imported: ${data.created} new, ${data.updated} already here.${data.errors.length ? ` ${data.errors.length} rows couldn't be added.` : ""}`);
+    onDone();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <div className="space-y-3 text-sm">
+          <DialogHeader>
+            <DialogTitle>Import journalists</DialogTitle>
+            <DialogDescription>
+              A CSV with an email column, and any of name, title, outlet, outlet website, beats (separated by semicolons) and outlet tier (national, trade, regional, local or newsletter). People already here keep their records; their beats are added to.
+            </DialogDescription>
+          </DialogHeader>
+          {error && <ErrorText>{error}</ErrorText>}
+          <FilePicker file={file} onChange={(f) => { setFile(f); setCheck(null); }} accept=".csv,text/csv"
+            example={{ name: "journalists-example.csv", content: "email,name,title,outlet,outlet website,beats,outlet tier\nana@news.example.org,Ana Diaz,Technology reporter,Example News,news.example.org,Proxies;Privacy,national\n" }} />
+          {check && (
+            <div className="space-y-1 rounded-md border p-3 text-[13px]">
+              <div>{check.created} new, {check.updated} already here{check.duplicates ? `, ${check.duplicates} repeated rows merged` : ""}.</div>
+              {check.errors.length > 0 && (
+                <ul className="max-h-40 space-y-0.5 overflow-y-auto text-[12px] text-destructive">
+                  {check.errors.slice(0, 50).map((e) => <li key={`${e.line}-${e.email ?? ""}`}>Line {e.line}: {e.error}</li>)}
+                </ul>
+              )}
+            </div>
+          )}
+          <DialogFooter className="flex-row justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            {check ? (
+              <Button disabled={busy || check.created + check.updated === 0} onClick={() => send(false)}>{busy ? "Importing…" : `Import ${check.created + check.updated}`}</Button>
+            ) : (
+              <Button disabled={busy || !file} onClick={() => send(true)}>{busy ? "Checking…" : "Check the file"}</Button>
+            )}
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditJournalist({ j, onClose, onSave }: { j: Journalist; onClose: () => void; onSave: (body: { beats: string[]; job_title: string | null }) => Promise<void> }) {
+  const [beats, setBeats] = useState(j.beats.join("; "));
+  const [title, setTitle] = useState(j.job_title ?? "");
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    await onSave({ beats: splitBeats(beats), job_title: title.trim() || null });
+    setBusy(false);
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <form className="space-y-3 text-sm" onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{j.name || j.email}</DialogTitle>
+            <DialogDescription>Your changes are kept: the news watch only suggests beats, and never changes ones you set.</DialogDescription>
+          </DialogHeader>
+          <label className="block">
+            <span className="mb-1 block font-medium">Job title</span>
+            <input className={`${field} w-full`} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block font-medium">Beats <span className="font-normal text-muted-foreground">(separated by semicolons)</span></span>
+            <input className={`${field} w-full`} value={beats} onChange={(e) => setBeats(e.target.value)} />
+          </label>
+          {j.suggested_beats.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 text-[12px] text-muted-foreground">
+              Suggested:
+              {j.suggested_beats.map((b) => (
+                <button key={b} type="button" className="rounded-full border border-dashed px-2 hover:text-foreground" onClick={() => setBeats(splitBeats(beats).concat(b).join("; "))}>+ {b}</button>
+              ))}
+            </div>
+          )}
+          <DialogFooter className="flex-row justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

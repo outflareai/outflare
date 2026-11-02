@@ -353,8 +353,9 @@ func (s *Service) campaign(ctx context.Context, ws, integrationID string, o *con
 				limit = &k.DailyLimit
 			}
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO sequences (workspace_id, name, timezone, daily_new_limit) VALUES ($1, $2, $3, $4) RETURNING id`,
-				ws, uniqueName(k.Name, o.Connector.Definition().Name), tz, limit).Scan(&seqID); err != nil {
+				INSERT INTO sequences (workspace_id, name, timezone, daily_new_limit, brand_id)
+				VALUES ($1, $2, $3, $4, COALESCE((SELECT brand_id FROM integrations WHERE id = $5), outflare_first_brand($1))) RETURNING id`,
+				ws, uniqueName(k.Name, o.Connector.Definition().Name), tz, limit, integrationID).Scan(&seqID); err != nil {
 				return err
 			}
 			for i, st := range steps {
@@ -452,7 +453,12 @@ func (s *Service) leadBatch(ctx context.Context, ws, seqID, tool, campaign strin
 	in, _ = leads.Dedupe(in)
 	enrolled := 0
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		r, err := leads.Import(ctx, tx, ws, strings.ToLower(tool)+"_import", nil, in)
+		// The campaign's leads are its sequence's brand's.
+		var brand string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(brand_id::text, '') FROM sequences WHERE id = $1`, seqID).Scan(&brand); err != nil {
+			return err
+		}
+		r, err := leads.ImportIn(ctx, tx, ws, brand, strings.ToLower(tool)+"_import", nil, in)
 		if err != nil {
 			return err
 		}
@@ -464,7 +470,7 @@ func (s *Service) leadBatch(ctx context.Context, ws, seqID, tool, campaign strin
 		if err != nil {
 			return err
 		}
-		n2, err := leads.AddSuppressions(ctx, tx, ws, "unsubscribed", strings.ToLower(tool)+"_import", note, unsubscribed)
+		n2, err := leads.Suppress(ctx, tx, ws, leads.Added{Reason: "unsubscribed", Source: strings.ToLower(tool) + "_import", Note: note, BrandID: brand}, unsubscribed)
 		if err != nil {
 			return err
 		}
@@ -473,7 +479,7 @@ func (s *Service) leadBatch(ctx context.Context, ws, seqID, tool, campaign strin
 		for _, l := range in {
 			emails = append(emails, l.Email)
 		}
-		rows, err := tx.Query(ctx, `SELECT lower(email), id FROM leads WHERE workspace_id = $1 AND lower(email) = ANY($2)`, ws, emails)
+		rows, err := tx.Query(ctx, `SELECT lower(email), id FROM leads WHERE workspace_id = $1 AND lower(email) = ANY($2) AND brand_id = NULLIF($3, '')::uuid`, ws, emails, brand)
 		if err != nil {
 			return err
 		}

@@ -633,7 +633,7 @@ function Pitches({ ws, canManage, brand, onWaiting }: { ws: string; canManage: b
     api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { ...brand, ...(status ? { status } : {}), limit: 200 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
-      if (status === "draft" && data.next_offset === null) onWaiting?.(data.data.length);
+      if (status === "draft" && data.next_cursor === null) onWaiting?.(data.data.length);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, status, reload, brand.brand]);

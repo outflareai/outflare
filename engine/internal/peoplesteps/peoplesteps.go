@@ -31,11 +31,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/emailfind"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 	"github.com/outflareai/outflare/engine/internal/policy"
+	"github.com/outflareai/outflare/engine/internal/pushlead"
 )
 
 // Step names, in order. The first is where a feature sends an item.
@@ -56,9 +58,14 @@ const (
 	RiskyEmail    = "risky_email"
 	// InAnotherCampaign: the person is active in another sequence.
 	InAnotherCampaign = "in_another_campaign"
-	// CampaignUnavailable: the sequence is gone, archived or runs in a
-	// connected sequencer, so the run pauses until the feature picks another.
+	// CampaignUnavailable: the sequence is gone or archived, or runs in a
+	// connected sequencer Outflare can't add people to, or that sequencer's
+	// connection is gone or refused, so the run pauses until someone fixes
+	// it or the feature picks another.
 	CampaignUnavailable = "campaign_unavailable"
+	// SequencerRefused: the connected sequencer left the person out (in
+	// another of its campaigns, unsubscribed or blocked there).
+	SequencerRefused = "sequencer_refused"
 	// CampaignReady: held at enroll until the feature releases the item.
 	CampaignReady = "campaign_ready"
 )
@@ -125,7 +132,7 @@ type Finder interface {
 }
 
 // Stages are the steps for c, to register on the pipeline runner.
-func Stages(pool *pgxpool.Pool, finder Finder, c Config) []pipeline.Stage {
+func Stages(pool *pgxpool.Pool, finder Finder, store *connectors.Store, c Config) []pipeline.Stage {
 	if c.Finder != nil {
 		finder = c.Finder
 	}
@@ -135,7 +142,7 @@ func Stages(pool *pgxpool.Pool, finder Finder, c Config) []pipeline.Stage {
 	if (c.Campaign == nil) != (c.Enrolled == nil) {
 		panic(fmt.Sprintf("peoplesteps: %q needs both Campaign and Enrolled, or neither", c.Pipeline))
 	}
-	s := steps{pool: pool, finder: finder, c: c}
+	s := steps{pool: pool, finder: finder, store: store, c: c}
 	stages := []pipeline.Stage{
 		// One finder call takes a whole batch, up to its own limit.
 		{Pipeline: c.Pipeline, Name: FindEmail, Work: s.findEmail, Batch: 25},
@@ -159,7 +166,9 @@ func (s steps) done(it pipeline.Item) pipeline.Result {
 type steps struct {
 	pool   *pgxpool.Pool
 	finder Finder
-	c      Config
+	// store reaches connected sequencers, for campaigns that send there.
+	store *connectors.Store
+	c     Config
 }
 
 func retry(it pipeline.Item, err error) pipeline.Result {
@@ -436,12 +445,16 @@ func (s steps) enrollOne(ctx context.Context, it pipeline.Item, seq string) (pip
 	var linked bool
 	err = tx.QueryRow(ctx, `SELECT status, EXISTS (SELECT 1 FROM campaign_links l WHERE l.sequence_id = s.id) FROM sequences s
 		WHERE s.workspace_id = $1 AND s.id = $2`, ws, seq).Scan(&status, &linked)
-	if errors.Is(err, pgx.ErrNoRows) || status == "archived" || linked {
+	if errors.Is(err, pgx.ErrNoRows) || status == "archived" {
 		return pipeline.Result{ItemID: it.ID, Outcome: pipeline.Pause, Code: CampaignUnavailable,
-			Reason: "The campaign was removed, archived or runs in a connected sequencer. Pick another campaign, then resume."}, nil
+			Reason: "The campaign was removed or archived. Pick another campaign, then resume."}, nil
 	}
 	if err != nil {
 		return pipeline.Result{}, err
+	}
+	if linked {
+		_ = tx.Rollback(ctx)
+		return s.pushOne(ctx, it, seq, ct)
 	}
 	leadID, err := s.lead(ctx, tx, ws, ct)
 	if err != nil {
@@ -482,6 +495,96 @@ func (s steps) enrollOne(ctx context.Context, it pipeline.Item, seq string) (pip
 		return pipeline.Result{ItemID: it.ID, Outcome: pipeline.Skip, Code: stop}, nil
 	}
 	if err := s.c.Enrolled(ctx, tx, it, seq, leadID); err != nil {
+		return pipeline.Result{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return pipeline.Result{}, err
+	}
+	return s.done(it), nil
+}
+
+// pause stops the run at enroll with a reason a person can act on.
+func pause(it pipeline.Item, reason string) pipeline.Result {
+	return pipeline.Result{ItemID: it.ID, Outcome: pipeline.Pause, Code: CampaignUnavailable, Reason: reason}
+}
+
+// pushOne adds the person to the platform campaign a sequence is linked to
+// (Smartlead, Instantly, EmailBison), on the workspace's own connection,
+// after the same checks enrolling and journeys make: the opt-out list and
+// the sequence's exclusion. The sequencer paces and sends from there.
+func (s steps) pushOne(ctx context.Context, it pipeline.Item, seq string, ct Contact) (pipeline.Result, error) {
+	ws := it.WorkspaceID
+	var reg *connectors.Registry
+	if s.store != nil {
+		reg = s.store.Registry
+	}
+	link, _, err := pushlead.LinkOf(ctx, s.pool, reg, ws, seq)
+	if err != nil {
+		return pipeline.Result{}, err
+	}
+	if link == nil {
+		return pause(it, "The campaign runs in a sequencer Outflare can't add people to. Pick another campaign, then resume."), nil
+	}
+	email := strings.ToLower(strings.TrimSpace(ct.Email))
+	var suppressed bool
+	var exclude customers.Exclusion
+	var company string
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (`+leads.SuppressedSQL("$1::uuid", "$2::text")+`), q.exclude,
+			COALESCE((SELECT name FROM records WHERE id = NULLIF($4, '')::uuid AND workspace_id = $1), '')
+		FROM sequences q WHERE q.workspace_id = $1 AND q.id = $3`, ws, email, seq, ct.CompanyID).Scan(&suppressed, &exclude, &company); err != nil {
+		return pipeline.Result{}, err
+	}
+	stop := ""
+	if suppressed {
+		stop = OptedOut
+	} else if why, err := customers.Excluded(ctx, s.pool, ws, ct.RecordID, exclude); err != nil {
+		return pipeline.Result{}, err
+	} else if why != "" {
+		stop = OptedOut
+	}
+	var res connectors.LeadPushed
+	if stop == "" {
+		res, err = pushlead.Push(ctx, s.store, ws, *link, connectors.PushedLead{Email: email, FirstName: strings.TrimSpace(ct.FirstName),
+			LastName: strings.TrimSpace(ct.LastName), Company: company, Website: customers.CompanyDomain(ct.Domain)})
+		switch {
+		case errors.Is(err, pushlead.ErrGone):
+			return pause(it, "The sequencer connection for this campaign is gone. Connect it again on the Connectors page, then resume."), nil
+		case errors.Is(err, pushlead.ErrCannotPush):
+			return pause(it, "That sequencer connection can't add people to campaigns. Pick another campaign, then resume."), nil
+		case err != nil && (connectors.KindOf(err) == connectors.ErrAuth || connectors.KindOf(err) == connectors.ErrInvalid):
+			return pause(it, "The sequencer refused the connection or the campaign. Check it on the Connectors page, then resume."), nil
+		case err != nil:
+			return pipeline.Result{}, err
+		}
+		if res.Outcome == connectors.PushRefused {
+			stop = SequencerRefused
+		}
+	}
+	if stop != "" {
+		var reasons []string
+		if r := strings.TrimSpace(res.Reason); r != "" {
+			reasons = []string{r}
+		}
+		if err := s.c.Stopped(ctx, it, stop, reasons); err != nil {
+			return pipeline.Result{}, err
+		}
+		return pipeline.Result{ItemID: it.ID, Outcome: pipeline.Skip, Code: stop}, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return pipeline.Result{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if res.Outcome == connectors.PushAdded {
+		if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "sequence.lead_pushed",
+			TargetType: "sequence", TargetID: seq, Data: map[string]any{"record_id": ct.RecordID, "integration_id": link.IntegrationID,
+				"connector": link.Connector, "campaign_id": link.CampaignID, "external_id": res.ExternalID, "via": s.c.Via},
+			Props: map[string]any{"connector": link.Connector}}); err != nil {
+			return pipeline.Result{}, err
+		}
+	}
+	// No Outflare lead: the sequencer holds the person now.
+	if err := s.c.Enrolled(ctx, tx, it, seq, ""); err != nil {
 		return pipeline.Result{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

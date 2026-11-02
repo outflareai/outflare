@@ -54,7 +54,36 @@ func answerKnowledgeQuestion(w http.ResponseWriter, body string) {
 			}
 		}
 	}
+	// Two passages giving different refund windows: a conflict.
+	if len(question) == 2 && strings.Contains(strings.ToLower(question[1]), "refund window") && len(passages) >= 2 {
+		answer = map[string]any{"answered": false, "answer": "The passages disagree on the refund window.", "cited": []int{},
+			"conflicting": []int{1, 2}, "conflict_note": "They give different refund windows."}
+	}
 	answerJSON(w, answer)
+}
+
+// answerFromReply stands in for the model that turns a teammate's support
+// reply into a general answer: a reply that only acted for that customer
+// isn't reusable.
+func answerFromReply(w http.ResponseWriter, body string) {
+	reply := body
+	if i := strings.Index(body, `\u003creply\u003e`); i >= 0 {
+		reply = body[i:]
+	} else if i := strings.Index(body, "<reply>"); i >= 0 {
+		reply = body[i:]
+	}
+	if i := strings.Index(reply, `\u003c/reply\u003e`); i >= 0 {
+		reply = reply[:i]
+	}
+	if i := strings.Index(reply, "</reply>"); i >= 0 {
+		reply = reply[:i]
+	}
+	if strings.Contains(reply, "refunded you") {
+		answerJSON(w, map[string]any{"reusable": false, "title": "", "answer": "", "sensitive": false})
+		return
+	}
+	answerJSON(w, map[string]any{"reusable": true, "title": "Can I export a chart to CSV?",
+		"answer": "Yes: open the chart, then More, Export CSV.", "sensitive": false})
 }
 
 func TestKnowledgeRetrieval(t *testing.T) {

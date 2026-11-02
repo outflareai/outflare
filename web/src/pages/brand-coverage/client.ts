@@ -56,7 +56,7 @@ export async function list(
     { params: { path: { brand }, query } },
   );
   if (error || !data) throw new Error(errorMessage(error));
-  return data as unknown as { data: Row[]; total: number };
+  return data as unknown as { data: Row[]; total: number; next_cursor: string | null };
 }
 export async function save(
   brand: string,

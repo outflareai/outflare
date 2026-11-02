@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>{{if eq .State "ask"}}Approve your quote{{else if eq .State "done"}}Thank you{{else}}This link no longer works{{end}}</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fafaf9; --card: #fff; --text: #1c1917; --muted: #57534e; --line: #e7e5e4; --accent: #1d4ed8; --accent-text: #fff; --warn: #92400e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0c0a09; --card: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --line: #292524; --accent: #3b82f6; --warn: #fbbf24; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 16px 48px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+  h1 { font-size: 22px; line-height: 1.3; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .warn { color: var(--warn); font-size: 14px; }
+  blockquote { margin: 16px 0; padding: 12px 16px; border-left: 4px solid var(--accent); background: var(--bg); font-size: 18px; white-space: pre-wrap; }
+  .context { margin: 0 0 16px; padding: 12px 16px; border: 1px dashed var(--line); border-radius: 8px; font-size: 14px; color: var(--muted); white-space: pre-wrap; }
+  .label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 4px; }
+  form { margin: 0; }
+  button { font: inherit; font-weight: 600; border-radius: 8px; padding: 10px 16px; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); width: 100%; font-size: 17px; padding: 12px 16px; }
+  details { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+  summary { cursor: pointer; font-weight: 600; }
+  textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); margin: 8px 0; }
+  .error { border: 1px solid var(--warn); color: var(--warn); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }
+  footer { margin-top: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+{{if eq .State "ask"}}
+  <p class="muted">{{.Brand}}</p>
+  <h1>{{.Expert}}, please check your quote</h1>
+  <p>{{.Brand}} would like to quote you in <strong>{{.Headline}}</strong>. Your words appear only once you approve them, exactly as they are.</p>
+  {{if .Embargo}}<p class="warn">Embargoed until {{.Embargo}}: please keep the story to yourself until then.</p>{{end}}
+  {{if .Message}}<div class="error" role="alert">{{.Message}}</div>{{end}}
+  <div class="label">Your quote</div>
+  <blockquote>{{.Quote}}</blockquote>
+  {{if .Context}}<div class="label">Where it appears in the release</div>
+  <div class="context">{{.Context}}</div>{{end}}
+  <form method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="decision" value="approve">
+    <button class="primary" type="submit">Approve these words</button>
+  </form>
+  <details {{if .OpenSuggest}}open{{end}}>
+    <summary>Suggest a change</summary>
+    <form method="post" action="{{.Action}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="decision" value="suggest">
+      <label class="muted" for="body">Edit the words as you would say them. {{.Brand}} reviews them and asks you again.</label>
+      <textarea id="body" name="body" rows="6" maxlength="2000" required>{{.Suggested}}</textarea>
+      <label class="muted" for="note">A note for the team (optional)</label>
+      <textarea id="note" name="note" rows="2" maxlength="1000">{{.Note}}</textarea>
+      <button type="submit">Send my words</button>
+    </form>
+  </details>
+  <details>
+    <summary>Decline</summary>
+    <form method="post" action="{{.Action}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="decision" value="decline">
+      <label class="muted" for="why">Why, for the team (optional)</label>
+      <textarea id="why" name="note" rows="2" maxlength="1000"></textarea>
+      <button type="submit">Decline this quote</button>
+    </form>
+  </details>
+  <p class="muted" style="margin-top:16px">This link works once and stops working on {{.Expires}}.</p>
+{{else if eq .State "done"}}
+  <h1>Thank you</h1>
+  {{if eq .Done "approved"}}<p>You approved your quote. {{.Brand}} can now use these exact words, and only these.</p>
+  {{else if eq .Done "changes_suggested"}}<p>{{.Brand}} has your words. They will review them and ask you to approve the final version.</p>
+  {{else}}<p>You declined the quote. {{.Brand}} won't use it.</p>{{end}}
+  <p class="muted">You can close this page.</p>
+{{else if eq .State "limited"}}
+  <h1>Too many tries</h1>
+  <p>Please wait a minute, then open the link again.</p>
+{{else}}
+  <h1>This link no longer works</h1>
+  <p>It may have been used already, expired, or replaced because the quote changed. If you still need to approve a quote, ask the person who sent it for a new link.</p>
+{{end}}
+</div>
+<footer class="muted">Sent with Outflare</footer>
+</main>
+</body>
+</html>

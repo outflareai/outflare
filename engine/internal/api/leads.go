@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,15 +24,27 @@ import (
 
 func (s *Server) routesLeads(mux *http.ServeMux) {
 	read, manage := auth.ScopeLeadsRead, auth.ScopeLeadsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/leads", s.inBrand(read, s.listLeads))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/leads", s.inBrand(manage, s.upsertLead))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/leads/import", s.inBrand(manage, s.importLeads))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/leads/{id}", s.inBrand(read, s.getLead))
+	// A lead belongs to one brand (brand_outreach.go): served under the
+	// brand, and under the workspace until the contract step.
+	for _, b := range s.activationBases("leads", s.inBrand) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listLeads))
+		mux.HandleFunc("POST "+b.path, b.on(manage, s.upsertLead))
+		mux.HandleFunc("POST "+b.path+"/import", b.on(manage, s.importLeads))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getLead))
+	}
+	mux.HandleFunc("PATCH /v1/brands/{brand}/leads/{id}", s.onBrand(manage, s.updateLead))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/leads/{id}", s.onBrand(manage, s.deleteLead))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/leads/{id}", s.inWorkspace(manage, s.updateLead))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/leads/{id}", s.inWorkspace(manage, s.deleteLead))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/suppressions", s.inBrand(read, s.listSuppressions))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/suppressions", s.inBrand(manage, s.addSuppressions))
+	// A suppression is one brand's, or every brand's: the brand route adds
+	// to its brand, and the workspace route (for admins) to every brand.
+	for _, b := range s.activationBases("suppressions", s.inBrand) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listSuppressions))
+		mux.HandleFunc("POST "+b.path, b.on(manage, s.addSuppressions))
+	}
+	mux.HandleFunc("DELETE /v1/brands/{brand}/suppressions/{id}", s.onBrand(auth.ScopeSuppressionsManage, s.removeSuppression))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/suppressions/{id}", s.inWorkspace(auth.ScopeSuppressionsManage, s.removeSuppression))
+	mux.HandleFunc("POST /v1/brands/{brand}/recipients/check", s.onBrand(read, s.checkRecipients))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/suppression-syncs", s.inWorkspace(read, s.listSuppressionSyncs))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/suppression-syncs/{integration}", s.inWorkspace(auth.ScopeSuppressionsManage, s.updateSuppressionSync))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/contact-rules", s.inWorkspace(auth.ScopeWorkspaceRead, s.getContactRules))
@@ -62,15 +75,17 @@ type leadView struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 	// The person record this lead is, once linked.
 	RecordID *string `json:"record_id"`
+	// The brand the lead belongs to.
+	BrandID *string `json:"brand_id"`
 }
 
 var leadSelect = `
 	SELECT l.id, l.email, l.domain, l.first_name, l.last_name, l.company, l.title, l.phone,
 	       l.linkedin_url, l.website, l.custom, l.source,
-	       EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `),
+	       EXISTS (` + leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email") + `),
 	       (SELECT v.status FROM email_verifications v WHERE v.workspace_id = l.workspace_id AND v.email = lower(l.email)),
 	       ARRAY(SELECT m.list_id::text FROM lead_list_members m WHERE m.lead_id = l.id ORDER BY m.added_at),
-	       l.created_at, l.updated_at, l.record_id::text
+	       l.created_at, l.updated_at, l.record_id::text, l.brand_id::text
 	FROM leads l`
 
 const maxPage = 500
@@ -94,18 +109,13 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 	where := ` WHERE l.workspace_id = $1`
 	args := []any{a.WorkspaceID}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
-	// A lead is a brand's when it is on one of the brand's lists; with
-	// brand=none, when it is on no brand's list.
-	sel, ok := s.brandFilter(w, r)
+	// One brand's leads: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
-	switch {
-	case sel.id == "none":
-		where += ` AND NOT EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists x ON x.id = m.list_id WHERE m.lead_id = l.id AND x.brand_id IS NOT NULL)`
-	case sel.id != "":
-		where += ` AND EXISTS (SELECT 1 FROM lead_list_members m JOIN lead_lists x ON x.id = m.list_id WHERE m.lead_id = l.id AND x.brand_id = ` + arg(sel.id) + `)`
-	}
+	where += sel.sql("l.brand_id", &args)
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		p := arg("%" + escapeLike(strings.ToLower(v)) + "%")
 		where += ` AND (lower(l.email) LIKE ` + p + ` OR lower(l.first_name || ' ' || l.last_name) LIKE ` + p + ` OR lower(l.company) LIKE ` + p + `)`
@@ -123,7 +133,9 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := where
-	if v := q.Get("after"); v != "" {
+	if v, ok := pageCursor(w, r, pageAfter); !ok {
+		return
+	} else if v != "" {
 		page += ` AND lower(l.email) > ` + arg(strings.ToLower(v))
 	}
 	rows, err := s.pool.Query(ctx, leadSelect+page+` ORDER BY lower(l.email) LIMIT `+arg(limit+1), args...)
@@ -142,7 +154,7 @@ func (s *Server) listLeads(w http.ResponseWriter, r *http.Request) {
 		e := strings.ToLower(list[limit-1].Email)
 		next = &e
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 // leadStateFilters is the SQL for the suppressed and verification query
@@ -154,9 +166,9 @@ func leadStateFilters(q url.Values, arg func(any) string) (string, string) {
 	switch q.Get("suppressed") {
 	case "":
 	case "true":
-		where += ` AND EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
+		where += ` AND EXISTS (` + leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email") + `)`
 	case "false":
-		where += ` AND NOT EXISTS (` + leads.SuppressedSQL("l.workspace_id", "l.email") + `)`
+		where += ` AND NOT EXISTS (` + leads.SuppressedInSQL("l.workspace_id", "l.brand_id", "l.email") + `)`
 	default:
 		return "", "suppressed must be true or false"
 	}
@@ -177,23 +189,28 @@ func escapeLike(s string) string {
 }
 
 func (s *Server) getLead(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	if l, ok := s.findLead(w, r, a.WorkspaceID, r.PathValue("id")); ok {
+	if l, ok := s.findLead(w, r, r.PathValue("id")); ok {
 		writeJSON(w, http.StatusOK, l)
 	}
 }
 
-func (s *Server) findLead(w http.ResponseWriter, r *http.Request, ws, id string) (*leadView, bool) {
+// findLead loads a lead the caller may see: on a brand route only the
+// route's brand's.
+func (s *Server) findLead(w http.ResponseWriter, r *http.Request, id string) (*leadView, bool) {
+	a := accessFrom(r.Context())
 	if !validUUID(id) {
 		writeError(w, r, http.StatusNotFound, "not_found", "lead not found")
 		return nil, false
 	}
-	rows, err := s.pool.Query(r.Context(), leadSelect+` WHERE l.workspace_id = $1 AND l.id = $2`, ws, id)
+	rows, err := s.pool.Query(r.Context(), leadSelect+` WHERE l.workspace_id = $1 AND l.id = $2`, a.WorkspaceID, id)
 	if err != nil {
 		s.internal(w, r, err)
 		return nil, false
 	}
 	l, err := pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByPos[leadView])
+	if err == nil && !a.sees(l.BrandID) {
+		err = pgx.ErrNoRows
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "lead not found")
 		return nil, false
@@ -235,34 +252,35 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	// The leads are one brand's: the route's, or on the workspace route the
+	// one ?brand= names, else the first brand.
+	var ref *string
+	if b := r.URL.Query().Get("brand"); b != "" {
+		ref = &b
+	}
+	brand, err := s.activationBrand(ctx, a, ref)
+	if !s.activationError(w, r, err) {
+		return
+	}
 	var res leads.ImportResult
 	var listID *string
-	var batchID, listBrand string
+	var batchID string
+	listBrand := brand
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if listName != "" {
-			// Someone kept to some brands imports into their brands' lists.
-			var brand *string
-			if a.Brands != nil {
-				var cur *string
-				err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE workspace_id = $1 AND lower(name) = lower($2)`, a.WorkspaceID, listName).Scan(&cur)
-				switch {
-				case err == nil && !a.writes(cur):
-					return errInvalid("a list with that name belongs to another brand, or to every brand; pick another name")
-				case err == nil:
-				case errors.Is(err, pgx.ErrNoRows):
-					if brand, err = brandWrite(ctx, tx, a, nil); err != nil {
-						return err
-					}
-				default:
-					return err
-				}
-			}
+			// The list is the brand's: a name another brand uses is refused
+			// (until the contract step a list name is used in one brand of a
+			// workspace at a time).
 			var id string
+			var cur *string
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, $2, $3)
-				ON CONFLICT (workspace_id, lower(name)) DO UPDATE SET name = lead_lists.name
-				RETURNING id, COALESCE(brand_id::text, '')`, a.WorkspaceID, listName, brand).Scan(&id, &listBrand); err != nil {
+				ON CONFLICT (workspace_id, lower(name)) DO UPDATE SET brand_id = COALESCE(lead_lists.brand_id, EXCLUDED.brand_id)
+				RETURNING id, brand_id::text`, a.WorkspaceID, listName, brand).Scan(&id, &cur); err != nil {
 				return err
+			}
+			if cur == nil || *cur != brand {
+				return errInvalid("a list with that name belongs to another brand; pick another name")
 			}
 			listID = &id
 		}
@@ -275,7 +293,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if res, err = leads.Import(ctx, tx, a.WorkspaceID, "csv", listID, unique); err != nil {
+		if res, err = leads.ImportIn(ctx, tx, a.WorkspaceID, brand, "csv", listID, unique); err != nil {
 			return err
 		}
 		res.Duplicates = dups
@@ -288,7 +306,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "leads.imported", "lead_list", deref(listID), map[string]any{
 			"created": res.Created, "updated": res.Updated, "duplicates": res.Duplicates,
-			"suppressed": res.Suppressed, "failed": len(res.Errors), "batch_id": batchID,
+			"suppressed": res.Suppressed, "other_brand": res.OtherBrand, "failed": len(res.Errors), "batch_id": batchID, "brand_id": brand,
 		})
 	})
 	if s.allocError(w, r, err) {
@@ -296,7 +314,8 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"created": res.Created, "updated": res.Updated, "duplicates": res.Duplicates,
-		"suppressed": res.Suppressed, "errors": res.Errors, "list_id": listID, "batch_id": nullIfEmpty(batchID),
+		"suppressed": res.Suppressed, "other_brand": res.OtherBrand, "errors": res.Errors, "list_id": listID, "batch_id": nullIfEmpty(batchID),
+		"brand_id": brand,
 	})
 }
 
@@ -308,16 +327,18 @@ func deref(s *string) string {
 }
 
 type leadInput struct {
-	Email       string            `json:"email"`
-	FirstName   string            `json:"first_name"`
-	LastName    string            `json:"last_name"`
-	Company     string            `json:"company"`
-	Title       string            `json:"title"`
-	Phone       string            `json:"phone"`
-	LinkedInURL string            `json:"linkedin_url"`
-	Website     string            `json:"website"`
-	Custom      map[string]string `json:"custom"`
-	ListID      *string           `json:"list_id"`
+	CompanyRecordID *string           `json:"company_record_id"`
+	Email           string            `json:"email"`
+	FirstName       string            `json:"first_name"`
+	LastName        string            `json:"last_name"`
+	Company         string            `json:"company"`
+	Title           string            `json:"title"`
+	Phone           string            `json:"phone"`
+	LinkedInURL     string            `json:"linkedin_url"`
+	Website         string            `json:"website"`
+	Custom          map[string]string `json:"custom"`
+	ListID          *string           `json:"list_id"`
+	BrandID         *string           `json:"brand_id"`
 }
 
 // upsertLead adds one lead, or updates the lead with that email.
@@ -355,39 +376,85 @@ func (s *Server) upsertLead(w http.ResponseWriter, r *http.Request) {
 	var res leads.ImportResult
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// A lead is one brand's: the list's, the route's, the one named, or
+		// the workspace's first.
+		ref := req.BrandID
 		if req.ListID != nil {
 			var brand *string
 			err := tx.QueryRow(ctx, `SELECT brand_id::text FROM lead_lists WHERE id = $1 AND workspace_id = $2`, *req.ListID, a.WorkspaceID).Scan(&brand)
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!a.writes(brand) || brand == nil)) {
 				return errInvalid("list not found")
 			}
 			if err != nil {
 				return err
 			}
+			if ref != nil && *ref != "" {
+				if id, err := s.brandIDFor(ctx, a.WorkspaceID, *ref); err != nil || id != *brand {
+					return errInvalid("brand_id must be the list's brand")
+				}
+			}
+			ref = brand
 		}
-		var err error
-		if res, err = leads.Import(ctx, tx, a.WorkspaceID, "api", req.ListID, []leads.Lead{l}); err != nil {
+		var company recordView
+		if req.CompanyRecordID != nil {
+			var err error
+			company, err = loadRecord(ctx, tx, a, *req.CompanyRecordID)
+			if err != nil {
+				return err
+			}
+			if company.Type != "account" || company.Archived || !a.writes(company.BrandID) {
+				return errInvalid("choose an active company in your brand")
+			}
+			if ref == nil {
+				ref = company.BrandID
+			}
+			l.Company = company.Name
+			if l.Website == "" {
+				l.Website, _ = company.Attributes["website"].(string)
+			}
+		}
+		brand, err := s.activationBrand(ctx, a, ref)
+		if err == nil && req.CompanyRecordID != nil && deref(company.BrandID) != brand {
+			return errInvalid("the lead and company must belong to the same brand")
+		}
+		if err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `SELECT id FROM leads WHERE workspace_id = $1 AND lower(email) = lower($2)`, a.WorkspaceID, l.Email).Scan(&id); err != nil {
+		if res, err = leads.ImportIn(ctx, tx, a.WorkspaceID, brand, "api", req.ListID, []leads.Lead{l}); err != nil {
 			return err
 		}
+		if res.OtherBrand > 0 {
+			return errLeadInOtherBrand
+		}
+		if err := tx.QueryRow(ctx, `SELECT id FROM leads WHERE workspace_id = $1 AND brand_id = $2 AND lower(email) = lower($3)`,
+			a.WorkspaceID, brand, l.Email).Scan(&id); err != nil {
+			return err
+		}
+		if req.CompanyRecordID != nil {
+			if err := s.linkLeadCompany(ctx, tx, a, id, company); err != nil {
+				return err
+			}
+		}
+
 		action := "lead.updated"
 		if res.Created == 1 {
 			action = "lead.created"
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "lead", id, map[string]any{"email": l.Email})
 	})
+	if errors.Is(err, errLeadInOtherBrand) {
+		writeError(w, r, http.StatusConflict, "lead_in_other_brand", errLeadInOtherBrand.Error())
+		return
+	}
 	var inv errInvalid
 	if errors.As(err, &inv) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", string(inv))
 		return
 	}
-	if err != nil {
-		s.internal(w, r, err)
+	if s.recordError(w, r, err) {
 		return
 	}
-	lv, ok := s.findLead(w, r, a.WorkspaceID, id)
+	lv, ok := s.findLead(w, r, id)
 	if !ok {
 		return
 	}
@@ -406,14 +473,15 @@ func (s *Server) updateLead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		FirstName   *string            `json:"first_name"`
-		LastName    *string            `json:"last_name"`
-		Company     *string            `json:"company"`
-		Title       *string            `json:"title"`
-		Phone       *string            `json:"phone"`
-		LinkedInURL *string            `json:"linkedin_url"`
-		Website     *string            `json:"website"`
-		Custom      map[string]*string `json:"custom"` // null removes a field
+		CompanyRecordID *string            `json:"company_record_id"`
+		FirstName       *string            `json:"first_name"`
+		LastName        *string            `json:"last_name"`
+		Company         *string            `json:"company"`
+		Title           *string            `json:"title"`
+		Phone           *string            `json:"phone"`
+		LinkedInURL     *string            `json:"linkedin_url"`
+		Website         *string            `json:"website"`
+		Custom          map[string]*string `json:"custom"` // null removes a field
 	}
 	if !decode(w, r, &req) {
 		return
@@ -434,6 +502,21 @@ func (s *Server) updateLead(w http.ResponseWriter, r *http.Request) {
 	setJSON, _ := json.Marshal(set)
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := s.lockLead(ctx, tx, a, id); err != nil {
+			return err
+		}
+		var company recordView
+		if req.CompanyRecordID != nil {
+			var err error
+			company, err = loadRecord(ctx, tx, a, *req.CompanyRecordID)
+			if err != nil {
+				return err
+			}
+			if company.Type != "account" || company.Archived || !a.writes(company.BrandID) {
+				return errInvalid("choose an active company in your brand")
+			}
+			req.Company = &company.Name
+		}
 		tag, err := tx.Exec(ctx, `
 			UPDATE leads SET
 				first_name = COALESCE($3, first_name), last_name = COALESCE($4, last_name),
@@ -452,6 +535,11 @@ func (s *Server) updateLead(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := customers.SyncLeads(ctx, tx, a.WorkspaceID, []string{id}); err != nil {
 			return err
+		}
+		if req.CompanyRecordID != nil {
+			if err := s.linkLeadCompany(ctx, tx, a, id, company); err != nil {
+				return err
+			}
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "lead.updated", "lead", id, nil)
 	})
@@ -479,18 +567,23 @@ func (s *Server) deleteLead(w http.ResponseWriter, r *http.Request) {
 	suppress := r.URL.Query().Get("suppress") == "true"
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		brand, err := s.lockLead(ctx, tx, a, id)
+		if err != nil {
+			return err
+		}
 		var email string
-		err := tx.QueryRow(ctx, `DELETE FROM leads WHERE id = $1 AND workspace_id = $2 RETURNING email`, id, a.WorkspaceID).Scan(&email)
+		err = tx.QueryRow(ctx, `DELETE FROM leads WHERE id = $1 AND workspace_id = $2 RETURNING email`, id, a.WorkspaceID).Scan(&email)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
 		if err != nil {
 			return err
 		}
-		data := map[string]any{"email": email, "suppressed": suppress}
+		data := map[string]any{"email": email, "suppressed": suppress, "brand_id": brand}
 		if suppress {
+			// The lead's brand stops contacting them (decision 5).
 			if _, err := leads.Suppress(ctx, tx, a.WorkspaceID, leads.Added{Reason: "do_not_contact", Source: "lead_deleted",
-				Method: leads.MethodManual, ActorID: a.ActorID, ActorType: a.ActorType},
+				Method: leads.MethodManual, ActorID: a.ActorID, ActorType: a.ActorType, BrandID: deref(brand)},
 				[]leads.Suppression{{Kind: "email", Value: strings.ToLower(email)}}); err != nil {
 				return err
 			}
@@ -527,6 +620,8 @@ type suppressionView struct {
 	Evidence      map[string]any `json:"evidence"`
 	RecordID      *string        `json:"record_id"`
 	CreatedAt     time.Time      `json:"created_at"`
+	// The brand the entry applies to; null for every brand.
+	BrandID *string `json:"brand_id"`
 }
 
 func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
@@ -544,6 +639,20 @@ func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
 	where := ` WHERE workspace_id = $1`
 	args := []any{a.WorkspaceID}
 	arg := func(v any) string { args = append(args, v); return "$" + strconv.Itoa(len(args)) }
+	// What applies in one brand: its own entries and those for every
+	// brand. The workspace route keeps ?brand=all for every entry.
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	if sel.id != "" && sel.id != "none" {
+		where += ` AND (brand_id IS NULL OR brand_id = ` + arg(sel.id) + `)`
+	} else if sel.id == "none" {
+		where += ` AND brand_id IS NULL`
+	}
+	if sel.in != nil {
+		where += ` AND (brand_id IS NULL OR brand_id = ANY(` + arg(sel.in) + `::uuid[]))`
+	}
 	if v := q.Get("kind"); v != "" {
 		where += ` AND kind = ` + arg(v)
 	}
@@ -572,11 +681,13 @@ func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if v := q.Get("after"); v != "" {
+	if v, ok := pageCursor(w, r, pageAfter); !ok {
+		return
+	} else if v != "" {
 		where += ` AND value > ` + arg(strings.ToLower(v))
 	}
 	rows, err := s.pool.Query(ctx, `SELECT id, kind, value, reason, note, source, method, added_by::text, added_by_type,
-		integration_id::text, confidence::float8, evidence, record_id::text, created_at FROM suppressions`+where+
+		integration_id::text, confidence::float8, evidence, record_id::text, created_at, brand_id::text FROM suppressions`+where+
 		` ORDER BY value LIMIT `+arg(limit+1), args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -592,7 +703,7 @@ func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
 		list = list[:limit]
 		next = &list[limit-1].Value
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 func (s *Server) addSuppressions(w http.ResponseWriter, r *http.Request) {
@@ -603,9 +714,36 @@ func (s *Server) addSuppressions(w http.ResponseWriter, r *http.Request) {
 		Note   string   `json:"note"`
 		Source string   `json:"source"`
 		Method string   `json:"method"`
+		// AllBrands applies the entries to every brand of the workspace,
+		// for someone who can see every brand. On the workspace route it
+		// is the default.
+		AllBrands *bool `json:"all_brands"`
 	}
 	if !decodeLarge(w, r, &req, 10<<20) {
 		return
+	}
+	// An entry is the brand's it was added in (decision 5); a workspace
+	// admin can apply it to every brand.
+	brand := ""
+	everyBrand := a.Brand == "" && a.Brands == nil
+	if req.AllBrands != nil {
+		everyBrand = *req.AllBrands
+	}
+	if everyBrand && a.Brands != nil {
+		writeError(w, r, http.StatusForbidden, "forbidden", "only someone who sees every brand can apply a suppression to every brand")
+		return
+	}
+	if !everyBrand {
+		id, err := s.defaultBrand(r.Context(), a)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if id == "none" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "the workspace has no brand yet: add one first")
+			return
+		}
+		brand = id
 	}
 	if req.Reason == "" {
 		req.Reason = "manual"
@@ -669,14 +807,23 @@ func (s *Server) addSuppressions(w http.ResponseWriter, r *http.Request) {
 	var added int
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if added, err = leads.Suppress(ctx, tx, a.WorkspaceID, leads.Added{Reason: req.Reason, Source: req.Source, Note: req.Note,
-			Method: req.Method, ActorID: a.ActorID, ActorType: a.ActorType}, entries); err != nil {
+		by := leads.Added{Reason: req.Reason, Source: req.Source, Note: req.Note,
+			Method: req.Method, ActorID: a.ActorID, ActorType: a.ActorType, BrandID: brand}
+		if everyBrand {
+			// One brand's opt-in never clears what an admin applied to
+			// every brand (customers.OptedIn).
+			by.Evidence = map[string]any{"all_brands": true}
+		}
+		if added, err = leads.Suppress(ctx, tx, a.WorkspaceID, by, entries); err != nil {
 			return err
 		}
 		if added == 0 {
 			return nil
 		}
-		data := map[string]any{"added": added, "reason": req.Reason, "method": req.Method, "source": req.Source}
+		data := map[string]any{"added": added, "reason": req.Reason, "method": req.Method, "source": req.Source, "all_brands": everyBrand}
+		if brand != "" {
+			data["brand_id"] = brand
+		}
 		if len(entries) == 1 {
 			data["value"] = entries[0].Value
 		}
@@ -686,7 +833,7 @@ func (s *Server) addSuppressions(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"added": added, "existing": len(entries) - added, "invalid": invalids})
+	writeJSON(w, http.StatusOK, map[string]any{"added": added, "existing": len(entries) - added, "invalid": invalids, "brand_id": nullIfEmpty(brand)})
 }
 
 func (s *Server) removeSuppression(w http.ResponseWriter, r *http.Request) {
@@ -698,9 +845,13 @@ func (s *Server) removeSuppression(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// A brand removes only its own entries; one for every brand is
+		// removed on the workspace route.
 		var kind, value, reason string
-		err := tx.QueryRow(ctx, `DELETE FROM suppressions WHERE id = $1 AND workspace_id = $2 RETURNING kind, value, reason`,
-			id, a.WorkspaceID).Scan(&kind, &value, &reason)
+		var brand *string
+		err := tx.QueryRow(ctx, `DELETE FROM suppressions WHERE id = $1 AND workspace_id = $2
+			AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid) RETURNING kind, value, reason, brand_id::text`,
+			id, a.WorkspaceID, a.Brand).Scan(&kind, &value, &reason, &brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -708,7 +859,7 @@ func (s *Server) removeSuppression(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "suppression.removed", "suppression", id,
-			map[string]any{"kind": kind, "value": value, "reason": reason})
+			map[string]any{"kind": kind, "value": value, "reason": reason, "brand_id": brand})
 	})
 	if errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "suppression not found")
@@ -748,20 +899,34 @@ func (s *Server) checkRecipients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	out, err := policy.CheckContacts(ctx, s.pool, a.WorkspaceID, req.Purpose, req.Emails)
-	if err != nil {
-		s.internal(w, r, err)
-		return
+	// On a brand route the brand is the route's.
+	b := strings.TrimSpace(req.Brand)
+	if a.Brand != "" {
+		b = a.Brand
 	}
-	if b := strings.TrimSpace(req.Brand); b != "" {
-		brand, err := s.brandIDFor(ctx, a.WorkspaceID, strings.ToLower(b))
-		if err == nil && !a.sees(&brand) {
+	brand := ""
+	if b != "" {
+		id, err := s.brandIDFor(ctx, a.WorkspaceID, strings.ToLower(b))
+		if err == nil && !a.sees(&id) {
 			err = errNotFound
 		}
 		if errors.Is(err, errNotFound) {
 			writeError(w, r, http.StatusNotFound, "not_found", "brand not found: brand is a brand's id or handle")
 			return
 		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		brand = id
+	}
+	// A brand's own opt-outs count, and those for every brand.
+	out, err := policy.CheckContactsIn(ctx, s.pool, a.WorkspaceID, brand, req.Purpose, req.Emails)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if brand != "" {
 		var days *int
 		if err == nil {
 			err = s.pool.QueryRow(ctx, `SELECT cross_brand_days FROM workspaces WHERE id = $1`, a.WorkspaceID).Scan(&days)
@@ -781,4 +946,67 @@ func (s *Server) checkRecipients(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// A chosen company is a relationship, committed with the lead's own fields.
+func (s *Server) linkLeadCompany(ctx context.Context, tx pgx.Tx, a *access, id string, company recordView) error {
+	if _, err := customers.LinkLeads(ctx, tx, a.WorkspaceID, []string{id}, 1); err != nil {
+		return err
+	}
+	var personID string
+	if err := tx.QueryRow(ctx, `SELECT record_id::text FROM leads WHERE workspace_id=$1 AND id=$2`, a.WorkspaceID, id).Scan(&personID); err != nil {
+		return err
+	}
+	person, err := lockRecord(ctx, tx, a, personID)
+	if err != nil {
+		return err
+	}
+	if deref(person.BrandID) != deref(company.BrandID) {
+		return errInvalid("the person and company must belong to the same brand")
+	}
+	c, err := loadCatalog(ctx, tx, a.WorkspaceID, deref(company.BrandID), false)
+	if err != nil {
+		return err
+	}
+	refs := []string{}
+	if old, ok := person.Attributes["companies"].([]any); ok {
+		for _, v := range old {
+			if key, ok := v.(string); ok {
+				refs = append(refs, key)
+			}
+		}
+	}
+	if !slices.Contains(refs, company.ID) {
+		refs = append(refs, company.ID)
+	}
+	raw, _ := json.Marshal(refs)
+	changed, err := applyAttributes(ctx, tx, c, c.recordType("person"), a, &person, map[string]json.RawMessage{"companies": raw}, "manual")
+	if err != nil {
+		return err
+	}
+	if changed {
+		if _, err = tx.Exec(ctx, `UPDATE records SET attributes=$3,attribute_sources=$4,version=version+1,updated_at=now() WHERE workspace_id=$1 AND id=$2`, a.WorkspaceID, person.ID, person.Attributes, person.AttributeSources); err != nil {
+			return err
+		}
+		if err = record(ctx, tx, &a.principal, a.WorkspaceID, "record.updated", "record", person.ID, map[string]any{"type": "person", "fields": []string{"companies"}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// errLeadInOtherBrand: until the brands contract step drops the
+// per-workspace unique index on leads (the version before 0371 upserts on
+// it), an address is a lead in one brand of a workspace at a time.
+var errLeadInOtherBrand = errors.New("this address is a lead of another brand in this workspace; until brands are fully separated an address can be a lead in one brand at a time")
+
+// lockLead locks a lead the caller may change and returns its brand, or
+// errNotFound: on a brand route only the route's brand's.
+func (s *Server) lockLead(ctx context.Context, tx pgx.Tx, a *access, id string) (*string, error) {
+	var brand *string
+	err := tx.QueryRow(ctx, `SELECT brand_id::text FROM leads WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&brand)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
+		return nil, errNotFound
+	}
+	return brand, err
 }

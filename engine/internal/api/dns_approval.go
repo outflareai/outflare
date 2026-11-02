@@ -110,16 +110,19 @@ func (s *Server) approvalFor(ctx context.Context, sub dnsSubject, redirect strin
 	if err == nil {
 		err = dc.Supports(ctx, zone.Settings, plan.Template.ServiceID)
 	}
+	if err == nil {
+		err = dc.Conflicts(ctx, sub.Want)
+	}
+	link := ""
+	if err == nil {
+		link, err = dc.ApplyURL(zone, plan, redirect, "dc."+sub.ID)
+	}
 	if err != nil {
 		v := dnsApprovalView{Reason: domainconnect.ReasonOf(err), Provider: zone.Settings.Name()}
 		if v.Reason != domainconnect.ReasonLookupFailed {
 			err = nil
 		}
 		return v, err
-	}
-	link, err := dc.ApplyURL(zone, plan, redirect, "dc."+sub.ID)
-	if err != nil {
-		return dnsApprovalView{Reason: domainconnect.ReasonLookupFailed}, err
 	}
 	return dnsApprovalView{Available: true, Provider: zone.Settings.Name(), URL: link}, nil
 }
@@ -226,7 +229,10 @@ func (s *Server) trackingSubject(w http.ResponseWriter, r *http.Request) (*acces
 		return nil, dnsSubject{}, false
 	}
 	rec := domainconnect.Rec{Type: "CNAME", Name: d.Domain.Domain, Value: d.Target}
-	sub := dnsSubject{Subject: "tracking_domain", ID: d.ID, Kind: "tracking", FQDN: d.Domain.Domain, All: []domainconnect.Rec{rec}}
+	// The tracking template points at app.outflare.ai only; a server whose
+	// tracking domains point elsewhere (OUTFLARE_TRACKING_TARGET) uses the
+	// general subdomain template, which takes the target as a variable.
+	sub := dnsSubject{Subject: "tracking_domain", ID: d.ID, Kind: "tracking,any", FQDN: d.Domain.Domain, All: []domainconnect.Rec{rec}}
 	if d.Status != "verified" {
 		sub.Want = sub.All
 	}

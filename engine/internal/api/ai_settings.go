@@ -84,6 +84,7 @@ var aiTasks = []aiTask{
 	{taskABTests, "A/B tests", "Suggesting A/B tests, writing versions of a page from a prompt and summarising results, for a person to review."},
 	{taskLinkPages, "Link page reading", "Reading pages that could link to your site: what kind of page each is, its topic and how well it fits, and which of your pages to offer."},
 	{taskKnowledge, "Knowledge answers", "Answering questions from your knowledge base, with the articles it used, in the Ask box and for agents."},
+	{taskSupport, "Support replies", "The support assistant: drafting short answers to customers by chat and email from your approved knowledge, or handing them to a person."},
 	{taskJourneys, "Journey AI steps", "Answering a journey's AI steps about a person: sorting them into choices or writing a short text for later steps."},
 	{taskStories, "PR stories", "Suggesting story ideas from your coverage and the news, and drafting press releases from a story's sourced facts and approved quotes, for a person to check and approve."},
 	{taskLinkPitches, "Link pitches", "Writing openers for link pitches, for a person to approve, and reading the replies: agreed, declined or asking for payment."},
@@ -93,7 +94,7 @@ var aiTasks = []aiTask{
 // taskTier says which of the provider's cheaper models a task defaults to.
 func taskTier(task string, p llm.Provider) string {
 	switch task {
-	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskJourneys, taskStories:
+	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories:
 		return p.LightModel
 	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages:
 		if p.CheapModel != "" {

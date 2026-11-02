@@ -311,16 +311,16 @@ function ActivityBars({ activity }: { activity: Activity }) {
 function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; endpoint: WebhookEndpoint; canManage: boolean; back: () => void; onTest: () => Promise<void> }) {
   const brandId = useBrand(ws).brand?.id ?? "";
   const [rows, setRows] = useState<WebhookDelivery[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [status, setStatus] = useState<"" | WebhookDelivery["status"]>("");
   const [open, setOpen] = useState<{ delivery: WebhookDelivery; attempts: Attempt[] } | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
 
-  const load = useCallback(async (before?: number) => {
-    const { data } = await api.GET("/v1/brands/{brand}/webhooks/{id}/deliveries", { params: { path: { brand: brandId, id: endpoint.id }, query: { before, status: status || undefined, limit: 50 } } });
-    setRows((r) => (before ? [...(r ?? []), ...(data?.data ?? [])] : data?.data ?? []));
-    setNext(data?.next_before ?? null);
-    if (!before) {
+  const load = useCallback(async (cursor?: string) => {
+    const { data } = await api.GET("/v1/brands/{brand}/webhooks/{id}/deliveries", { params: { path: { brand: brandId, id: endpoint.id }, query: { cursor, status: status || undefined, limit: 50 } } });
+    setRows((r) => (cursor ? [...(r ?? []), ...(data?.data ?? [])] : data?.data ?? []));
+    setNext(data?.next_cursor ?? null);
+    if (!cursor) {
       const a = await api.GET("/v1/brands/{brand}/webhooks/{id}/activity", { params: { path: { brand: brandId, id: endpoint.id }, query: { days: 7 } } });
       setActivity(a.data ?? null);
     }

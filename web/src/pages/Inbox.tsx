@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { InboundMessage, InboxTag, InboxView, Member, ThreadEntry } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -101,7 +102,16 @@ type Props = { ws: string; canManage: boolean; open?: string; setOpen: (id: stri
 type Filters = { status: Status; kind: Kind; category: string; group: string; source: string; tag: string; assigned_to: string; unread: string; needs_review: string; q: string };
 const noFilters: Filters = { status: "open", kind: "", category: "", group: "", source: "", tag: "", assigned_to: "", unread: "", needs_review: "", q: "" };
 
-export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
+// Replies belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Inbox(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Replies" brands={active.length} />;
+  return <InboxPage key={brand.id} {...props} />;
+}
+
+function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [list, setList] = useState<InboundMessage[] | null>(null);
   const [f, setF] = useState<Filters>(noFilters);
   const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }));
@@ -112,12 +122,11 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
   const [managingTags, setManagingTags] = useState(false);
   const [managingRules, setManagingRules] = useState(false);
 
-  const { query: brandQuery } = useBrand(ws);
   const load = useCallback(async () => {
-    const query = { ...Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")), ...brandQuery };
-    const { data } = await api.GET("/v1/workspaces/{ws}/inbox", { params: { path: { ws }, query } });
+    const query = { ...Object.fromEntries(Object.entries(f).filter(([, v]) => v !== "")) };
+    const { data } = await api.GET("/v1/brands/{brand}/inbox", { params: { path: { brand: brandId }, query } });
     if (data) setList(data.data);
-  }, [ws, f, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ws, f, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTags = useCallback(() => {
     api.GET("/v1/workspaces/{ws}/inbox-tags", { params: { path: { ws } } }).then(({ data }) => setTags(data?.data ?? []));
@@ -303,21 +312,22 @@ export function Inbox({ ws, canManage, open, setOpen, onRead }: Props) {
 }
 
 function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRead }: { ws: string; id: string; canManage: boolean; members: Member[]; tags: InboxTag[]; onBack: () => void; onChange: () => void; onRead: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [msg, setMsg] = useState<InboundMessage | null>(null);
   const [missing, setMissing] = useState(false);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const path = { ws, id };
+  const path = { brand: brandId, id };
 
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: brandId, id } } });
     if (!data) return setMissing(true);
     setMsg(data.message);
     setThread(data.thread);
     if (!data.message.read && canManage) {
-      await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path: { ws, id } }, body: { read: true } });
+      await api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path: { brand: brandId, id } }, body: { read: true } });
       onRead();
       onChange();
     }
@@ -331,7 +341,7 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
     e?.preventDefault();
     if (!body.trim() || busy) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/inbox/{id}/reply", { params: { path }, body: { body } });
+    const { error } = await api.POST("/v1/brands/{brand}/inbox/{id}/reply", { params: { path }, body: { body } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     setError("");
@@ -341,19 +351,19 @@ function Conversation({ ws, id, canManage, members, tags, onBack, onChange, onRe
   }
 
   async function addReferral() {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/inbox/{id}/referral", { params: { path }, body: {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/inbox/{id}/referral", { params: { path }, body: {} });
     if (error) return toast(errorMessage(error), "error");
     toast(data.created ? `Added ${data.email} as a lead, referred by this reply.` : `${data.email} was already a lead; marked as referred by this reply.`);
   }
   async function markUnread() {
-    await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body: { read: false } });
+    await api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path }, body: { read: false } });
     onChange();
     onBack();
   }
 
   type Patch = { category?: Category | null; assigned_to?: string | null; snoozed_until?: string | null; done?: boolean; tags?: string[]; needs_review?: boolean };
   async function triage(body: Patch, said?: string, close = false) {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/inbox/{id}", { params: { path }, body });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/inbox/{id}", { params: { path }, body });
     if (error || !data) return toast(errorMessage(error), "error");
     setMsg(data);
     onChange();
@@ -595,6 +605,7 @@ type ReplyRule = { action?: string; days?: number; sequence_id?: string; deal?: 
 type DealSetup = { type: string; typeName: string; field: string; stages: { key: string; label: string }[] };
 
 function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [rules, setRules] = useState<Record<string, ReplyRule> | null>(null);
   const [overrides, setOverrides] = useState(0);
   const [sequences, setSequences] = useState<{ id: string; name: string }[]>([]);
@@ -606,7 +617,7 @@ function RulesDialog({ ws, onClose }: { ws: string; onClose: () => void }) {
   useEffect(() => {
     Promise.all([
       api.GET("/v1/workspaces/{ws}/reply-rules", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } }),
       api.GET("/v1/workspaces/{ws}/catalog", { params: { path: { ws } } }),
     ]).then(([r, q, c]) => {
       if (r.error) return setError(errorMessage(r.error));

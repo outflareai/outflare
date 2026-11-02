@@ -214,7 +214,7 @@ func (s *Server) listSocialPublications(w http.ResponseWriter, r *http.Request) 
 	if list == nil {
 		list = []socialPublicationView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) findSocialPublication(w http.ResponseWriter, r *http.Request, a *access, id string) (*socialPublicationView, bool) {

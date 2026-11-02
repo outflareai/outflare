@@ -40,8 +40,8 @@ func TestPrivacyExportSources(t *testing.T) {
 			t.Errorf("%s is read twice", s.table)
 		}
 		seen[s.table] = true
-		if s.table == "privacy_exports" {
-			t.Error("an export includes the exports")
+		if s.table == "privacy_exports" || s.table == "crm_mail_messages" || s.table == "crm_mail_sharing" || s.table == "crm_mail_capture_targets" {
+			t.Error("an export includes exports or personal correspondence")
 		}
 	}
 	for _, want := range []string{"customer_events", "consents", "emails", "messages", "inbound_messages", "meetings", "deals",

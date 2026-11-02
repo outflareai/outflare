@@ -18,6 +18,7 @@ func (s *Server) routesReplyRules(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reply-rules", s.inWorkspace(read, s.getReplyRules))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/reply-rules", s.inWorkspace(manage, s.setReplyRules))
+	mux.HandleFunc("POST /v1/brands/{brand}/inbox/{id}/referral", s.onBrand(manage, s.addReferral))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox/{id}/referral", s.inBrand(manage, s.addReferral))
 }
 
@@ -193,6 +194,8 @@ func (s *Server) addReferral(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "message not found")
 	case errors.Is(err, inbox.ErrNoReferral):
 		writeError(w, r, http.StatusUnprocessableEntity, "no_referral", err.Error())
+	case errors.Is(err, inbox.ErrReferralOtherBrand):
+		writeError(w, r, http.StatusConflict, "lead_in_other_brand", err.Error())
 	case errors.As(err, &inv):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", string(inv))
 	case err != nil:

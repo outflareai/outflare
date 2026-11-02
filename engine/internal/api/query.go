@@ -91,7 +91,7 @@ var queryTables = []queryTable{
 	{"consents", auth.ScopeCustomersRead, "Every consent grant and withdrawal; the latest per record, channel, topic and purpose is current."},
 	{"subscriptions", auth.ScopeCustomersRead, "Payment subscriptions from Stripe and other payment connections; monthly_minor is MRR in minor units."},
 	{"brands", auth.ScopeWorkspaceRead, "The workspace's brands."},
-	{"leads", auth.ScopeLeadsRead, "Leads for outreach; hidden from callers kept to some brands."},
+	{"leads", auth.ScopeLeadsRead, "Leads for outreach; each belongs to one brand (brand_id)."},
 	{"sequences", auth.ScopeSequencesRead, "Outreach sequences."},
 	{"enrollments", auth.ScopeSequencesRead, "Leads in sequences and where each is."},
 	{"messages", auth.ScopeSequencesRead, "Outreach emails sent or queued, without bodies."},
@@ -101,6 +101,10 @@ var queryTables = []queryTable{
 	{"spend", auth.ScopeOutcomesRead, "Money spent, by channel, category and provider, in minor units."},
 	{"rules", auth.ScopeCustomersRead, "Rules of the rules engine: each turns what happens to records into an event of its own."},
 	{"rule_firings", auth.ScopeCustomersRead, "Each time a rule fired: for which record, in which episode, and the event it emitted."},
+	{"products", auth.ScopeCustomersRead, "The brand's products: key never changes; churn_mode says whether cancelling or no usage churns a customer."},
+	{"lifecycle_states", auth.ScopeCustomersRead, "Where each company (level company: billing) and person (level person: usage) stands with each product."},
+	{"lifecycle_moves", auth.ScopeCustomersRead, "Each move between lifecycle stages, with the event that caused it and the event it emitted; level overall is a company's overall status."},
+	{"lifecycle_overall", auth.ScopeCustomersRead, "Each company's overall status across products: its best stage, flags such as partly_churned, and how many products it pays for."},
 	{"journeys", auth.ScopeCustomersRead, "Journeys: lifecycle flows people go through; steps is how many steps the live version has."},
 	{"journey_runs", auth.ScopeCustomersRead, "People's ways through journeys: where each is (step), and how it ended."},
 	{"emails", auth.ScopeEmailsRead, "Lifecycle and transactional emails, without bodies or addresses."},
@@ -131,12 +135,7 @@ func queryReadable(a *access, t queryTable) bool {
 		return false
 	}
 	// A support view never reads email content, sent or received.
-	if a.ViewID != "" && t.Name == "messages" {
-		return false
-	}
-	// Leads have no brand, so a caller kept to some brands, or a query
-	// for one brand, sees none.
-	return t.Name != "leads" || a.seenBrands() == nil
+	return a.ViewID == "" || t.Name != "messages"
 }
 
 func (s *Server) listQueryTables(w http.ResponseWriter, r *http.Request) {
@@ -306,7 +305,7 @@ func (s *Server) execQuery(ctx context.Context, a *access, sql string, limit, ma
 		if mentioned {
 			msg := s.missingScope(a, t.Scope)
 			if a.has(t.Scope) {
-				msg = t.Name + " has no brand, so it is hidden from callers kept to some brands"
+				msg = t.Name + " is not readable here"
 			}
 			return queryResult{}, nil, &queryError{http.StatusForbidden, "forbidden", "this query reads " + t.Name + ": " + msg}
 		}

@@ -882,7 +882,7 @@ type StepBody = { subject?: string; body?: string; delay_days?: number };
 
 // A readable view of what a held change will do: the emails of a sequence,
 // how many leads it adds, and its other settings.
-function ChangePreview({ body }: { body: unknown }) {
+export function ChangePreview({ body }: { body: unknown }) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
   const b = body as Record<string, unknown>;
   const steps = Array.isArray(b.steps) ? (b.steps as StepBody[]) : [];

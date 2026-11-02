@@ -22,8 +22,8 @@ const api = "https://slack.com/api"
 // joined, and to list them.
 var scopes = []string{"chat:write", "chat:write.public", "channels:read", "groups:read"}
 
-// All returns Slack.
-func All() []c.Connector { return []c.Connector{Slack{}} }
+// All returns Slack for alerts and Slack for knowledge.
+func All() []c.Connector { return []c.Connector{Slack{}, Knowledge{}} }
 
 // Slack posts alerts to a channel.
 type Slack struct{}

@@ -147,6 +147,45 @@ groups:
         annotations:
           summary: "Some smart lists' last refresh failed, usually query_timeout (rules too broad to count in two minutes). The list shows the error; its owner can narrow the rules."
 
+      - alert: OutflareMCPClientFailing
+        expr: sum(increase(outflare_mcp_client_calls_total{outcome="error"}[30m])) > 20 and sum(increase(outflare_mcp_client_calls_total{outcome="error"}[30m])) > 0.5 * sum(increase(outflare_mcp_client_calls_total[30m]))
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of Outflare's calls to MCP servers failed in the last 30 minutes. A server is down, refuses its credentials, or is on a private address; the MCP servers row shows which operation fails."
+      - alert: OutflareActionsWaiting
+        expr: max(outflare_actions_oldest_held_seconds) > 172800
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "An agent's change has waited over two days for a person. The agent is blocked on it; the approval inbox is GET .../actions?status=held, and the Agent actions row shows how many wait."
+
+      - alert: OutflareActionsStuckRunning
+        expr: max(outflare_actions_running_stuck) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "An agent change was claimed to run over 15 minutes ago and never recorded how it ended: an engine stopped mid-change. Check the action's result in the engine log (action result) and what the change did in the audit log by its request_id."
+
+      - alert: OutflareActionsFailing
+        expr: sum(increase(outflare_actions_finished_total{outcome="failed"}[1h])) > 50
+        labels: { severity: info }
+        annotations:
+          summary: "Over 50 agent changes an hour ran and got an error answer. An agent is repeating a request the API refuses; list its actions with status=failed and look at result."
+
+      - alert: OutflareAgentRunsOverdue
+        expr: max(outflare_agent_runs_overdue_seconds) > 900
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A running agent run's next turn is over 15 minutes overdue: the runner (RunMissions in the engine) isn't taking agent run turns. Check the engine log for agent run turns errors."
+
+      - alert: OutflareAgentRunTurnsFailing
+        expr: sum(increase(outflare_agent_runs_turns_total{outcome="failed"}[1h])) > sum(increase(outflare_agent_runs_turns_total{outcome="done"}[1h])) and sum(increase(outflare_agent_runs_turns_total{outcome="failed"}[1h])) >= 3
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "More agent run turns fail than finish (last hour): a model or the API is broken for several runs. agent_run.turn_failed events carry the error code; each run's turn_error says what happened."
+
       - alert: OutflareRuleTimersBehind
         expr: max(outflare_rules_oldest_due_seconds) > 900
         for: 10m
@@ -166,6 +205,26 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Rule jobs ({{ $labels.kind }}) are failing and retrying, so rules fire late or not at all. Find the job's error in the logs (job.failed with this kind)."
+
+      - alert: OutflareLifecycleSweepBehind
+        expr: max(outflare_lifecycle_oldest_due_seconds) > 900
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "A lifecycle inactivity check (at risk, churned for no usage) has been due for over 15 minutes (normal is under two): no worker is running the lifecycle sweep, or it keeps failing. Check lifecycle.sweep_failed in the logs and the Lifecycle stages row."
+
+      - alert: OutflareLifecycleDuePiling
+        expr: max(outflare_lifecycle_due) > 10000
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 10,000 lifecycle inactivity checks are due and waiting. The sweep handles 200 at a time per worker; a brand that just changed a product's days or its moves rechecks every state. See the Lifecycle stages row, and add workers if it doesn't drain."
+
+      - alert: OutflareLifecycleJobsFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind="lifecycle.event",outcome=~"retried|dead"}[15m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "lifecycle.event jobs are failing and retrying, so companies and people move between product stages late or not at all. Find the job's error in the logs (job.failed with kind lifecycle.event)."
 
       - alert: OutflareEmailsCappedMany
         expr: sum(increase(outflare_emails_guarded_total{outcome="frequency_cap"}[1h])) > 5000
@@ -222,6 +281,12 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half the people journeys tried to add to {{ $labels.connector }} campaigns in 30 minutes failed. One workspace's key expired or its campaign was deleted (the run's history says why); if it is every workspace, {{ $labels.connector }} is down or changed its API. journey_step.called failures with kind push_to_sequencer in the logs name the journey."
+
+      - alert: OutflareMailSignInsNotMoved
+        expr: sum by (kind) (increase(outflare_mailboxes_sign_ins_moved_total{outcome="failed"}[1h])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "An older {{ $labels.kind }} mailbox sign-in could not be moved into a Gmail or Outlook connection at start-up, so its mailboxes cannot sign in. mailbox.sign_in_move_failed in the logs names the workspace and why (usually credentials sealed under a key the server no longer has); fix it and restart, or connect those mailboxes again."
 
       - alert: OutflareJobsDying
         expr: sum by (kind) (increase(outflare_jobs_processed_total{outcome="dead"}[15m])) > 10
@@ -548,6 +613,15 @@ groups:
         annotations:
           summary: "Answers from the knowledge base take over 20 seconds at the 95th percentile; the AI providers are slow, or the workspaces' Knowledge answers model is a slow one (Settings, AI model)."
 
+      - alert: OutflareKnowledgeSuggestionsFailing
+        # Turning teammates' support replies into suggested answers keeps
+        # failing: the review queue stops filling from support.
+        expr: sum(increase(outflare_knowledge_suggestions_total{outcome="error"}[1h])) > 5 and sum(increase(outflare_knowledge_suggestions_total{outcome="error"}[1h])) > sum(increase(outflare_knowledge_suggestions_total{outcome=~"created|not_reusable"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most support replies fail to become suggested answers; check knowledge.reply_captured failures and knowledge.from_reply job errors in the engine log (the provider's error, or AI limits reached)."
+
       - alert: OutflareHelpCentreErrors
         # Public help centre pages failing: usually the database.
         expr: sum(increase(outflare_help_centre_requests_total{outcome="error"}[15m])) > 10 and sum(increase(outflare_help_centre_requests_total{outcome="error"}[15m])) / sum(increase(outflare_help_centre_requests_total[15m])) > 0.05
@@ -609,12 +683,52 @@ groups:
         annotations:
           summary: "The support SLA check hasn't run in 15 minutes; check that a worker process (role all or worker) is running."
 
+      - alert: OutflareSupportChatFailing
+        # Website chats erroring: visitors can't send messages or see replies.
+        expr: sum(rate(outflare_support_chat_requests_total{outcome="error"}[15m])) / sum(rate(outflare_support_chat_requests_total[15m])) > 0.05 and sum(increase(outflare_support_chat_requests_total{outcome="error"}[15m])) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 5% of website chat requests fail; visitors may not reach support. Look for support.chat_failed and errors on /chat/ in the engine log."
+
+      - alert: OutflareSupportChatLimited
+        expr: sum(increase(outflare_support_chat_requests_total{outcome="limited"}[15m])) > 300
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Many website chat requests are rate limited; a busy site behind one network, or someone flooding a chat. See the Support inbox row's refused panel."
+
       - alert: OutflareSupportSLACheckSlow
         expr: histogram_quantile(0.95, sum by (le) (rate(outflare_support_sla_check_seconds_bucket[30m]))) > 5
         for: 30m
         labels: { severity: info }
         annotations:
           summary: "One support SLA check takes over 5 seconds at the 95th percentile; many conversations fall due at once, or the database is slow. See the Support inbox row."
+
+      - alert: OutflareSupportAssistantFailing
+        # The support assistant's AI calls keep breaking: customers' messages
+        # get no draft and go to a person.
+        expr: sum(increase(outflare_support_assistant_runs_total{action="failed"}[30m])) > 5 and sum(rate(outflare_support_assistant_runs_total{action="failed"}[30m])) / sum(rate(outflare_support_assistant_runs_total[30m])) > 0.2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over 20% of support assistant runs fail, so customers' messages get no draft; look for support.assistant_failed in the engine log (often a workspace's AI provider erroring)."
+
+      - alert: OutflareSupportAssistantSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_support_assistant_seconds_bucket[30m]))) > 45 and sum(increase(outflare_support_assistant_runs_total[30m])) > 5
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "The support assistant takes over 45 seconds to decide at the 95th percentile; AI providers are slow or the job queue is busy. See the Support assistant row."
+
+      - alert: OutflareKnowledgeAnswerSearchFailing
+        # Searching the website and Slack for answers the knowledge lacks
+        # keeps failing: no suggestions reach the review queue.
+        expr: sum(increase(outflare_knowledge_answer_searches_total{outcome="error"}[1h])) > 5 and sum(increase(outflare_knowledge_answer_searches_total{outcome="error"}[1h])) > sum(increase(outflare_knowledge_answer_searches_total{outcome=~"found|none"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most searches of websites and Slack for missing support answers fail, so nothing is suggested in Knowledge; look for knowledge.answer_searched errors in the engine log (a Slack connection that lost access, or an AI provider erroring)."
 
       - alert: OutflareAdConversionsFailing
         # Ad platforms refusing conversions sent back: a sign-in, token or
@@ -800,6 +914,22 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over half of news article reads fail to reach the page; check the news_article.read events by error code and OutflareBot's crawl metrics."
+
+      - alert: OutflareQuoteApprovalEmailsFailing
+        # Experts aren't getting the emails asking them to approve quotes:
+        # their outreach sequences' mailboxes can't deliver them.
+        expr: sum(increase(outflare_stories_quote_approval_emails_total{outcome=~"failed|bounced"}[6h])) > 3 and sum(increase(outflare_stories_quote_approval_emails_total{outcome=~"failed|bounced"}[6h])) / sum(increase(outflare_stories_quote_approval_emails_total[6h])) > 0.5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of quote approval emails fail or bounce in their outreach sequences; check story_quote.approval_send_failed events (error_code send_failed) and the sequences' mailboxes on the Sending rows. People can still copy the link instead."
+
+      - alert: OutflareQuoteApprovalPageErrors
+        expr: sum(increase(outflare_stories_quote_approval_pages_total{outcome="error"}[30m])) > 5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "The public quote approval page is failing (internal errors on /quote-approval/), so experts can't approve their quotes; look for internal errors on that route in the engine log (usually the database)."
 
       - alert: OutflareStoryAIFailing
         # A workspace without a model or past its budget is its own to fix;
@@ -1005,3 +1135,17 @@ groups:
           severity: warning
         annotations:
           summary: "Coverage accuracy reviews are failing; inspect workspace model responses and coverage.review logs."
+
+      - alert: OutflarePersonalGoogleCaptureFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind="crm_mail.google_sync",outcome=~"retried|dead"}[15m])) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Personal CRM Google capture is failing; check Google app access, connection status and crm_mail.google_sync jobs."
+
+      - alert: OutflarePersonalGoogleCaptureDelayed
+        expr: max(outflare_jobs_oldest_due_seconds{kind="crm_mail.google_sync"}) > 900
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Personal CRM Google capture jobs are over fifteen minutes late; check worker capacity and database access."

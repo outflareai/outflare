@@ -110,9 +110,8 @@ func (s *Server) listAdItems(w http.ResponseWriter, r *http.Request) {
 		var x adItemOut
 		var details []byte
 		t := &x.Totals
-		if err := rows.Scan(&x.ID, &x.Level, &x.ParentID, &x.ParentName, &x.CampaignID, &x.CampaignName, &x.AdAccountID, &x.Connector, &x.AccountName,
-			&x.ExternalID, &x.Name, &x.Status, &x.ProviderStatus, &x.DailyBudgetMicros, &details, &x.BrandID, &x.Currency,
-			&t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros); err != nil {
+		if err := rows.Scan(append([]any{&x.ID, &x.Level, &x.ParentID, &x.ParentName, &x.CampaignID, &x.CampaignName, &x.AdAccountID, &x.Connector, &x.AccountName,
+			&x.ExternalID, &x.Name, &x.Status, &x.ProviderStatus, &x.DailyBudgetMicros, &details, &x.BrandID, &x.Currency}, t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return
 		}

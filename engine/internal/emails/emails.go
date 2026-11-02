@@ -929,8 +929,7 @@ func (s *Service) Unsubscribe(ctx context.Context, emailID, requestID string) er
 		}
 		// Also on their customer record in the email's brand, so every
 		// feature there sees it (decision 5: an unsubscribe applies to the
-		// brand it came from). The suppression below is still for every
-		// brand until suppressions move to brands with outreach.
+		// brand it came from), as is the suppression below.
 		for _, a := range to {
 			rec, err := customers.EnsurePersonIn(ctx, tx, ws, brand, "email", a, true, requestID)
 			if err != nil {
@@ -945,7 +944,7 @@ func (s *Service) Unsubscribe(ctx context.Context, emailID, requestID string) er
 		for _, a := range to {
 			entries = append(entries, leads.Suppression{Kind: "email", Value: strings.ToLower(a)})
 		}
-		n, err := leads.AddSuppressions(ctx, tx, ws, "unsubscribed", "email_link", "", entries)
+		n, err := leads.Suppress(ctx, tx, ws, leads.Added{Reason: "unsubscribed", Source: "email_link", BrandID: brand}, entries)
 		if err != nil || n == 0 {
 			return err
 		}

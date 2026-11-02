@@ -221,6 +221,15 @@ until it is sent, now or at `send_at` (within 30 days).
   basis (`audience_bases`) and plain-words `warnings`.
   `GET .../email-broadcasts/{id}/recipients?skipped=true` lists who was
   skipped and why.
+- **Holdout.** `holdout_percent` (0 to 50, 0 by default) holds a share of
+  the audience out on purpose: among the people who could get it, picked
+  at random and the same way every time for the same broadcast and
+  person. They get no email; their recipient row says `skipped: holdout`,
+  and `held_out` counts them apart from `skipped`.
+  `GET /v1/brands/{brand}/email-broadcasts/{id}/lift` (MCP
+  `get_email_broadcast_lift`) compares them with the people it was sent
+  to, as a journey's holdout does (below), from when the broadcast
+  reached each person.
 - **Sending.** Sending checks the email can go (published template,
   verified sender domain, a provider that sends lifecycle email) and
   freezes the template's published version. A job then goes through the
@@ -501,7 +510,9 @@ workspace as one picture, laid out left to right:
   or query can hold a token), the Slack channels they post to, the CRM,
   ad audiences and review campaigns
 - where events come from in the last 30 days: the website, your app
-  through the API, a payments provider such as Stripe, partners and so on
+  through the API, a payments provider such as Stripe, cold email replies
+  (`reply.labeled`, see [customers](customers.md#reply-labels-as-events)),
+  meetings, partners and so on
 
 Each card shows its last 7 days: how often an event happened, how often
 a rule fired, how many people entered a journey. Pick a card to light up

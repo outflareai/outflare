@@ -27,7 +27,7 @@ test("sends the token and builds the path", async () => {
 test("ok throws the API error", async () => {
   const { fetch } = fakeFetch(409, { error: { code: "conflict", message: "remove the mailboxes first", request_id: "req-9" } });
   const gtm = createClient({ token: "oft_abc", baseUrl: "http://x", fetch });
-  const res = await gtm.DELETE("/v1/workspaces/{ws}/oauth-connections/{id}", { params: { path: { ws: "w", id: "c" } } });
+  const res = await gtm.DELETE("/v1/workspaces/{ws}/integrations/{id}", { params: { path: { ws: "w", id: "c" } } });
   assert.throws(() => ok(res), (e) => e instanceof OutflareError && e.status === 409 && e.code === "conflict" && e.requestId === "req-9" && e.message === "remove the mailboxes first");
 });
 

@@ -113,6 +113,9 @@ func (s *Server) RunMissions(ctx context.Context, every time.Duration) {
 		if _, err := s.RunDueTurns(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "mission.runner_failed", ActorType: "system", Surface: "mission"}, "internal", err)
 		}
+		if _, err := s.RunDueAgentTurns(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "agent_run.runner_failed", ActorType: "system", Surface: "agent"}, "internal", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

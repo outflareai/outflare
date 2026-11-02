@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"math"
 	"net/http"
 	"sort"
@@ -42,6 +43,138 @@ type liftPath struct {
 // liftMinPeople is the fewest people in each group before a verdict.
 const liftMinPeople = 30
 
+// liftQuery is what a lift report reads: the days and event from the
+// query string.
+func liftQuery(w http.ResponseWriter, r *http.Request) (days int, event string, ok bool) {
+	q := r.URL.Query()
+	days, event = 30, q.Get("event")
+	if v := q.Get("days"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 180 {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "days must be 1 to 180")
+			return 0, "", false
+		}
+		days = n
+	}
+	if len(event) > 200 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "event is at most 200 characters")
+		return 0, "", false
+	}
+	return days, event, true
+}
+
+// liftPaths compares each group in taken with the control. taken is a
+// SELECT of (run_id text, outcome text, at timestamptz, record_id uuid),
+// one row per person per exposure, whose $1 is the workspace; paths are
+// the groups in order, with whether each is a holdout. A conversion counts
+// for a row when it comes after at and within days.
+func (s *Server) liftPaths(ctx context.Context, taken string, args []any, days int, event string,
+	paths []journeys.Path, control string) ([]*liftPath, error) {
+	n := len(args)
+	args = append(args, days, event)
+	cte := `WITH taken AS (` + taken + `),
+		won AS (
+			SELECT t.run_id, t.outcome, c.currency, c.value_minor, c.name
+			FROM taken t JOIN attribution_conversions c ON c.workspace_id = $1 AND c.record_id = t.record_id
+				AND c.occurred_at > t.at AND c.occurred_at <= t.at + make_interval(days => $` + strconv.Itoa(n+1) + `)
+				AND ($` + strconv.Itoa(n+2) + ` = '' OR c.name = $` + strconv.Itoa(n+2) + ` OR c.name = 'payment.refunded'))`
+	byID := map[string]*liftPath{}
+	path := func(id string) *liftPath {
+		if byID[id] == nil {
+			byID[id] = &liftPath{ID: id, revenue: map[string]float64{}}
+		}
+		return byID[id]
+	}
+	for _, p := range paths {
+		path(p.ID).Holdout = p.Holdout
+	}
+	rows, err := s.pool.Query(ctx, cte+`
+		SELECT t.outcome, count(*)::int,
+			count(*) FILTER (WHERE EXISTS (SELECT 1 FROM won x WHERE x.run_id = t.run_id AND x.name <> 'payment.refunded'))::int
+		FROM taken t GROUP BY t.outcome`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		var people, converted int
+		if err := rows.Scan(&id, &people, &converted); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		x := path(id)
+		x.People, x.Converted = people, converted
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows, err = s.pool.Query(ctx, cte+`
+		SELECT outcome, currency, sum(value_minor)::float8 FROM won
+		WHERE value_minor IS NOT NULL AND currency <> '' GROUP BY outcome, currency`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id, cur string
+		var v float64
+		if err := rows.Scan(&id, &cur, &v); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		path(id).revenue[cur] += v
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	perPerson := func(x *liftPath) map[string]float64 {
+		out := map[string]float64{}
+		for cur, v := range x.revenue {
+			if x.People > 0 {
+				out[cur] = v / float64(x.People)
+			}
+		}
+		return out
+	}
+	c := path(control)
+	cPer := perPerson(c)
+	out := make([]*liftPath, 0, len(byID))
+	for _, x := range byID {
+		if x.People > 0 {
+			x.Rate = round4(float64(x.Converted) / float64(x.People))
+		}
+		per := perPerson(x)
+		x.Revenue, x.RevenuePerPerson = moneyList(x.revenue), moneyList(per)
+		if x.ID != control {
+			x.Lift, x.PValue, x.Verdict = liftVerdict(x.Converted, x.People, c.Converted, c.People)
+			inc := map[string]float64{}
+			for _, cur := range currencyKeys(per, cPer) {
+				inc[cur] = (per[cur] - cPer[cur]) * float64(x.People)
+			}
+			x.IncrementalRevenue = moneyList(inc)
+		}
+		out = append(out, x)
+	}
+	order := map[string]int{}
+	for i, p := range paths {
+		order[p.ID] = i
+	}
+	sort.Slice(out, func(i, k int) bool {
+		oi, iok := order[out[i].ID]
+		ok2, kok := order[out[k].ID]
+		if iok != kok {
+			return iok
+		}
+		if oi != ok2 {
+			return oi < ok2
+		}
+		return out[i].ID < out[k].ID
+	})
+	return out, nil
+}
+
 // journeyLift compares a random split's paths with its control.
 func (s *Server) journeyLift(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -50,7 +183,7 @@ func (s *Server) journeyLift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	stepID, event, control := q.Get("step"), q.Get("event"), q.Get("control")
+	stepID, control := q.Get("step"), q.Get("control")
 	var split *journeys.Step
 	for i := range j.Steps {
 		if j.Steps[i].ID == stepID {
@@ -76,134 +209,77 @@ func (s *Server) journeyLift(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "control is one of the step's paths; it defaults to its holdout path, and this step has none")
 		return
 	}
-	days := 30
-	if v := q.Get("days"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 180 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "days must be 1 to 180")
-			return
-		}
-		days = n
-	}
-	if len(event) > 200 {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "event is at most 200 characters")
+	days, event, ok := liftQuery(w, r)
+	if !ok {
 		return
 	}
-	ctx := r.Context()
 	// Each run counts once, on the first time it took the step; a person
 	// in the journey more than once counts each time.
-	taken := `WITH taken AS (
-			SELECT DISTINCT ON (rs.run_id) rs.run_id, rs.outcome, rs.at, jr.record_id
-			FROM journey_run_steps rs JOIN journey_runs jr ON jr.id = rs.run_id
-			WHERE rs.workspace_id = $1 AND rs.journey_id = $2 AND rs.step = $3 AND rs.kind = 'split'
-			ORDER BY rs.run_id, rs.at, rs.id),
-		won AS (
-			SELECT t.run_id, t.outcome, c.currency, c.value_minor, c.name
-			FROM taken t JOIN attribution_conversions c ON c.workspace_id = $1 AND c.record_id = t.record_id
-				AND c.occurred_at > t.at AND c.occurred_at <= t.at + make_interval(days => $4)
-				AND ($5 = '' OR c.name = $5 OR c.name = 'payment.refunded'))`
-	args := []any{a.WorkspaceID, j.ID, stepID, days, event}
-	paths := map[string]*liftPath{}
-	path := func(id string) *liftPath {
-		if paths[id] == nil {
-			paths[id] = &liftPath{ID: id, revenue: map[string]float64{}}
-		}
-		return paths[id]
-	}
-	for _, p := range split.Paths {
-		path(p.ID).Holdout = p.Holdout
-	}
-	rows, err := s.pool.Query(ctx, taken+`
-		SELECT t.outcome, count(*)::int,
-			count(*) FILTER (WHERE EXISTS (SELECT 1 FROM won x WHERE x.run_id = t.run_id AND x.name <> 'payment.refunded'))::int
-		FROM taken t GROUP BY t.outcome`, args...)
+	taken := `SELECT DISTINCT ON (rs.run_id) rs.run_id::text AS run_id, rs.outcome, rs.at, jr.record_id
+		FROM journey_run_steps rs JOIN journey_runs jr ON jr.id = rs.run_id
+		WHERE rs.workspace_id = $1 AND rs.journey_id = $2 AND rs.step = $3 AND rs.kind = 'split'
+		ORDER BY rs.run_id, rs.at, rs.id`
+	out, err := s.liftPaths(r.Context(), taken, []any{a.WorkspaceID, j.ID, stepID}, days, event, split.Paths, control)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	for rows.Next() {
-		var id string
-		var people, converted int
-		if err := rows.Scan(&id, &people, &converted); err != nil {
-			rows.Close()
-			s.internal(w, r, err)
-			return
-		}
-		x := path(id)
-		x.People, x.Converted = people, converted
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	rows, err = s.pool.Query(ctx, taken+`
-		SELECT outcome, currency, sum(value_minor)::float8 FROM won
-		WHERE value_minor IS NOT NULL AND currency <> '' GROUP BY outcome, currency`, args...)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	for rows.Next() {
-		var id, cur string
-		var v float64
-		if err := rows.Scan(&id, &cur, &v); err != nil {
-			rows.Close()
-			s.internal(w, r, err)
-			return
-		}
-		path(id).revenue[cur] += v
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		s.internal(w, r, err)
-		return
-	}
-
-	perPerson := func(x *liftPath) map[string]float64 {
-		out := map[string]float64{}
-		for cur, v := range x.revenue {
-			if x.People > 0 {
-				out[cur] = v / float64(x.People)
-			}
-		}
-		return out
-	}
-	c := path(control)
-	cPer := perPerson(c)
-	out := make([]*liftPath, 0, len(paths))
-	for _, x := range paths {
-		if x.People > 0 {
-			x.Rate = round4(float64(x.Converted) / float64(x.People))
-		}
-		per := perPerson(x)
-		x.Revenue, x.RevenuePerPerson = moneyList(x.revenue), moneyList(per)
-		if x.ID != control {
-			x.Lift, x.PValue, x.Verdict = liftVerdict(x.Converted, x.People, c.Converted, c.People)
-			inc := map[string]float64{}
-			for _, cur := range currencyKeys(per, cPer) {
-				inc[cur] = (per[cur] - cPer[cur]) * float64(x.People)
-			}
-			x.IncrementalRevenue = moneyList(inc)
-		}
-		out = append(out, x)
-	}
-	order := map[string]int{}
-	for i, p := range split.Paths {
-		order[p.ID] = i
-	}
-	sort.Slice(out, func(i, k int) bool {
-		oi, iok := order[out[i].ID]
-		ok2, kok := order[out[k].ID]
-		if iok != kok {
-			return iok
-		}
-		if oi != ok2 {
-			return oi < ok2
-		}
-		return out[i].ID < out[k].ID
-	})
 	writeJSON(w, http.StatusOK, map[string]any{"step": stepID, "control": control, "event": event, "days": days, "paths": out})
+}
+
+// sendGroups are a broadcast's or sequence's two sides.
+var sendGroups = []journeys.Path{{ID: "sent"}, {ID: "held_out", Holdout: true}}
+
+// emailBroadcastLift compares the people a broadcast was sent to with the
+// people it held out, from when each was reached.
+func (s *Server) emailBroadcastLift(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	b, ok := s.findEmailBroadcast(w, r, a.WorkspaceID, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	days, event, ok := liftQuery(w, r)
+	if !ok {
+		return
+	}
+	taken := `SELECT x.record_id::text AS run_id, CASE WHEN x.skipped = 'holdout' THEN 'held_out' ELSE 'sent' END AS outcome,
+			x.created_at AS at, x.record_id
+		FROM email_broadcast_recipients x
+		WHERE x.workspace_id = $1 AND x.broadcast_id = $2 AND (x.skipped = 'holdout' OR x.email_id IS NOT NULL)`
+	out, err := s.liftPaths(r.Context(), taken, []any{a.WorkspaceID, b.ID}, days, event, sendGroups, "held_out")
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"holdout_percent": b.HoldoutPercent, "control": "held_out", "event": event, "days": days, "paths": out})
+}
+
+// sequenceLift compares the leads a sequence emailed with the ones it held
+// out, from when each was enrolled. Leads without a customer record can't
+// be followed, so they are left out.
+func (s *Server) sequenceLift(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	q, ok := s.findSequence(w, r, a.WorkspaceID, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	days, event, ok := liftQuery(w, r)
+	if !ok {
+		return
+	}
+	taken := `SELECT en.id::text AS run_id,
+			CASE WHEN en.status = 'stopped' AND en.status_reason = 'holdout' THEN 'held_out' ELSE 'sent' END AS outcome,
+			en.created_at AS at, l.record_id
+		FROM enrollments en JOIN leads l ON l.id = en.lead_id
+		WHERE en.workspace_id = $1 AND en.sequence_id = $2 AND l.record_id IS NOT NULL
+		  AND ((en.status = 'stopped' AND en.status_reason = 'holdout')
+		       OR EXISTS (SELECT 1 FROM messages m WHERE m.enrollment_id = en.id AND m.status = 'sent'))`
+	out, err := s.liftPaths(r.Context(), taken, []any{a.WorkspaceID, q.ID}, days, event, sendGroups, "held_out")
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"holdout_percent": q.HoldoutPercent, "control": "held_out", "event": event, "days": days, "paths": out})
 }
 
 // liftVerdict compares a path's conversion rate with the control's: the

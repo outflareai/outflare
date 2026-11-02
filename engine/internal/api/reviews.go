@@ -504,10 +504,12 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var before *time.Time
-	if b := q.Get("before"); b != "" {
+	if b, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if b != "" {
 		t, err := time.Parse(time.RFC3339Nano, b)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a time, like 2026-10-01T00:00:00Z")
+			invalidCursor(w, r)
 			return
 		}
 		before = &t
@@ -531,9 +533,9 @@ func (s *Server) listReviews(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []reviewView{}
 	}
-	out := map[string]any{"data": list, "next_before": nil}
+	out := map[string]any{"data": list, "next_cursor": nil}
 	if len(list) == limit {
-		out["next_before"] = list[len(list)-1].PostedAt
+		out["next_cursor"] = nextCursor(pageBefore, list[len(list)-1].PostedAt)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

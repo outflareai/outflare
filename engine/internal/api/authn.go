@@ -54,6 +54,8 @@ type principal struct {
 	TokenGrantID string
 	// The token makes changes only inside a mission (Outflare-Mission).
 	TokenRequiresMission bool
+	// The token's changes go through the action layer (actionGate).
+	TokenActionGate bool
 
 	// A support view: a staff member (ViewerID, signed in with SessionID)
 	// sees UserID's account read-only, without inbox or email content.
@@ -190,8 +192,8 @@ func (s *Server) authenticateSession(r *http.Request) (*principal, error) {
 			  -- A disabled account's tokens stop with it.
 			  AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = api_tokens.created_by AND u.disabled_at IS NOT NULL)
 			RETURNING id, actor_id, workspace_id, scopes, brand_id::text, coalesce(created_by::text, ''),
-				coalesce((SELECT g.id::text FROM oauth_grants g WHERE g.api_token_id = api_tokens.id), ''), require_mission`, hash,
-		).Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenBrandID, &p.TokenOwnerID, &p.TokenGrantID, &p.TokenRequiresMission)
+				coalesce((SELECT g.id::text FROM oauth_grants g WHERE g.api_token_id = api_tokens.id), ''), require_mission, action_gate`, hash,
+		).Scan(&p.TokenID, &p.ActorID, &p.TokenWorkspaceID, &p.TokenScopes, &p.TokenBrandID, &p.TokenOwnerID, &p.TokenGrantID, &p.TokenRequiresMission, &p.TokenActionGate)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
@@ -380,7 +382,7 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 		noteAccessScope(r, a)
 		r = r.WithContext(context.WithValue(r.Context(), ctxAccessKey{}, a))
 		m := r.Header.Get(missions.Header)
-		if p.TokenRequiresMission && m == "" && r.Method != http.MethodGet && r.Method != http.MethodHead && !isMissionRoute(r) && !readsOnly(r) {
+		if p.TokenRequiresMission && !p.TokenActionGate && m == "" && r.Method != http.MethodGet && r.Method != http.MethodHead && !isMissionRoute(r) && !readsOnly(r) {
 			// Its changes wait for a mission a person approved, where they
 			// follow the mission's mode: dry run, approvals or running.
 			msg := "this app makes changes only inside a mission: start one (POST /v1/workspaces/{ws}/missions, or create_mission), and once a person approves it send its id in the " + missions.Header + " header"
@@ -391,6 +393,14 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 				}
 			}
 			writeError(w, r, http.StatusForbidden, "mission_required", msg)
+			return
+		}
+		// An agent token's changes go through the action layer, whatever
+		// headers it sends, except a held change a person approved, which
+		// is replaying now.
+		_, replaying := r.Context().Value(ctxActionReplayKey{}).(string)
+		if p.TokenActionGate && !replaying && r.Method != http.MethodGet && r.Method != http.MethodHead && !isActionRoute(r) && !isAgentRunRoute(r) && !readsOnly(r) {
+			s.idempotent(w, r, a, func(w http.ResponseWriter, r *http.Request) { s.actionGate(w, r, a, next) })
 			return
 		}
 		if m != "" && !isMissionRoute(r) && !readsOnly(r) {

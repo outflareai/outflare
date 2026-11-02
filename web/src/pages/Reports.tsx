@@ -35,8 +35,8 @@ export function Reports({ ws }: { ws: string }) {
   const brandKey = brandQuery.brand ?? "";
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => setSequences(data?.data ?? []));
-  }, [ws]);
+    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: brandKey || "all" } } }).then(({ data }) => setSequences(data?.data ?? []));
+  }, [ws, brandKey]);
 
   useEffect(() => {
     const from = new Date(Date.now() - days * 86400000).toISOString();

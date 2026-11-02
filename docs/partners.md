@@ -335,7 +335,7 @@ Operators get all three. Viewers get `partners.read`.
 | `GET`/`POST .../partners`, `GET`/`PATCH .../partners/{id}`, `POST`/`DELETE .../promo-codes`, `POST .../fees`, `POST .../adjustments` | read / manage |
 | `POST .../partner-conversions`, `POST .../partner-programs/{id}/widget-sessions` | conversions |
 | `GET .../partner-conversion-log`: every conversion call from the last 30 days, with `program`, `source`, `outcome` and `q` (50 a page, up to 200) | read |
-| `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` (newest first, 100 a page by default, up to 500; `before` is the last page's `next_before`; payouts filter by `program` too) | read |
+| `GET .../partner-conversions`, `GET .../partner-referrals`, `GET .../partner-rewards`, `GET .../partner-payouts` (newest first, 100 a page by default, up to 500; pass `next_cursor` as `cursor` for the next page; payouts filter by `program` too) | read |
 | `POST .../partner-rewards/{id}/approve`, `.../reject`, `POST .../partner-rewards/bulk` | manage |
 | `POST .../partner-rewards/{id}/fulfil` | conversions |
 | `POST .../partner-payouts`, `.../{id}/paid`, `.../{id}/cancel` | manage |

@@ -216,7 +216,7 @@ func TestSmartLists(t *testing.T) {
 	if len(next["data"].([]any)) != 1 || next["data"].([]any)[0].(map[string]any)["id"] == page["data"].([]any)[0].(map[string]any)["id"] {
 		t.Fatalf("next page = %v", next)
 	}
-	owner.must(400, "GET", base+"/smart-lists/"+id+"/members?before=nope", nil)
+	owner.must(400, "GET", base+"/smart-lists/"+id+"/members?cursor=nope", nil)
 
 	owner.must(204, "DELETE", base+"/smart-lists/"+id, nil)
 	owner.must(404, "GET", base+"/smart-lists/"+id, nil)

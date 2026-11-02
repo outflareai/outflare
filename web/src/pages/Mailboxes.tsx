@@ -16,7 +16,7 @@ import { warmupPlatform, warmupScore } from "@/lib/warmup";
 // Lifecycle stage: only ready mailboxes send cold email.
 const stageTone = { warming: "blue", ready: "green", resting: "grey", retired: "grey" } as const;
 
-export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canManage: boolean; openOAuth?: boolean; go: (tab: Tab, item?: string) => void }) {
+export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void }) {
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [domains, setDomains] = useState<SendingDomain[]>([]);
   const [senders, setSenders] = useState<Sender[]>([]);
@@ -30,7 +30,7 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
     takeConnectOutcome();
     return back;
   });
-  const [adding, setAdding] = useState<boolean | null>(openOAuth || signedIn ? true : null);
+  const [adding, setAdding] = useState<boolean | null>(signedIn ? true : null);
   const [filter, setFilter] = useState<"" | MailboxStatus>("");
   // Connected sequencers that can run warm-up themselves.
   const [warmupPlatforms, setWarmupPlatforms] = useState<{ id: string; name: string; config: Record<string, unknown> }[]>([]);
@@ -155,7 +155,7 @@ export function Mailboxes({ ws, canManage, openOAuth, go }: { ws: string; canMan
     <div className="space-y-6">
       <PageHeader
         title="Mailboxes"
-        description="The inboxes your sequences send from. Each one sends up to its daily limit, and replies to it land in the Inbox."
+        description="Shared outreach mailboxes for your sequences. People with access to the shared Inbox can read their replies. Personal CRM email imports have separate privacy controls."
         action={canManage && mailboxes.length > 0 && <Button variant={showAdd ? "ghost" : "primary"} onClick={() => setAdding(!showAdd)}>{showAdd ? "Close" : "Add mailboxes"}</Button>}
       />
 

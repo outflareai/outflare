@@ -24,9 +24,17 @@ type reviewRequestView struct {
 func (s *Server) listReviewRequests(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	campaign, status, after := q.Get("campaign"), q.Get("status"), q.Get("after")
-	if campaign != "" && !validUUID(campaign) || after != "" && !validUUID(after) {
-		writeError(w, r, 400, "invalid_request", "campaign and after must be valid ids")
+	campaign, status := q.Get("campaign"), q.Get("status")
+	if campaign != "" && !validUUID(campaign) {
+		writeError(w, r, 400, "invalid_request", "campaign must be a campaign id")
+		return
+	}
+	before, ok := pageCursor(w, r, pageBefore)
+	if !ok {
+		return
+	}
+	if before != "" && !validUUID(before) {
+		invalidCursor(w, r)
 		return
 	}
 	from := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -52,7 +60,7 @@ func (s *Server) listReviewRequests(w http.ResponseWriter, r *http.Request) {
 	// unsubscribe links and security-scanner clicks, unlike email-wide clicks.
 	const base = ` FROM review_requests r JOIN review_request_campaigns c ON c.id=r.campaign_id AND c.workspace_id=r.workspace_id AND c.brand_id=r.brand_id JOIN records p ON p.id=r.record_id AND p.workspace_id=r.workspace_id AND p.brand_id=r.brand_id LEFT JOIN emails e ON e.id=r.email_id AND e.workspace_id=r.workspace_id LEFT JOIN LATERAL(SELECT min(lc.clicked_at) AS clicked_at FROM tracked_links tl JOIN link_clicks lc ON lc.link_id=tl.id WHERE tl.email_id=e.id AND lc.workspace_id=r.workspace_id AND NOT lc.likely_bot AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.destinations) d WHERE d->>'url'=tl.url)) clicks ON true WHERE r.workspace_id=$1 AND r.brand_id=$2 AND ($3='' OR c.id::text=$3) AND r.created_at>=$4 AND r.created_at<$5`
 	const state = `CASE WHEN r.status IN ('skipped','failed','pending') THEN r.status WHEN e.status='suppressed' THEN 'skipped' ELSE COALESCE(e.status,r.status) END`
-	args := []any{a.WorkspaceID, a.Brand, campaign, from, to, status, after}
+	args := []any{a.WorkspaceID, a.Brand, campaign, from, to, status, before}
 	rows, err := s.pool.Query(r.Context(), `SELECT r.id::text,r.record_id::text,p.name,c.id::text,c.config->>'name',r.platforms,`+state+`,COALESCE(NULLIF(r.reason,''),e.status_reason,''),r.created_at,e.sent_at,clicks.clicked_at,r.email_id::text`+base+` AND ($6='' OR (`+state+`)=$6 OR ($6='clicked' AND clicks.clicked_at IS NOT NULL)) AND ($7='' OR (r.created_at,r.id)<(SELECT created_at,id FROM review_requests WHERE workspace_id=$1 AND brand_id=$2 AND id=NULLIF($7,'')::uuid)) ORDER BY r.created_at DESC,r.id DESC LIMIT 101`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -105,5 +113,5 @@ func (s *Server) listReviewRequests(w http.ResponseWriter, r *http.Request) {
 		byPlatform = []platformClicks{}
 	}
 	report = map[string]any{"total": total, "sent": sent, "delivered": delivered, "clicked": clicked, "skipped": skipped, "failed": failed, "pending": pending, "platforms": byPlatform}
-	writeJSON(w, 200, map[string]any{"data": list, "next": next, "report": report})
+	writeJSON(w, 200, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next), "report": report})
 }

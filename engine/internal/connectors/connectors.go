@@ -719,3 +719,26 @@ type ExternalMailbox struct {
 	WarmupEnabled bool   `json:"warmup_enabled"`
 	Status        string `json:"status,omitempty"`
 }
+
+// CRMActivityImporter optionally brings record-linked notes and tasks with a CRM import.
+// A short page is the last. Each source id is stable across retries and reruns.
+type CRMActivityImporter interface {
+	CRMActivities(ctx context.Context, c *Client, creds Creds, kind string, offset, limit int) ([]CRMActivityRecord, error)
+}
+type CRMActivityRecord struct {
+	ID         string
+	Kind       string
+	Title      string
+	Body       string
+	Records    []CRMRef
+	AssignedTo string
+	DueAt      *time.Time
+	Completed  bool
+	CreatedAt  *time.Time
+}
+
+// CRMListImporter reads list entries and their per-entry values. An import
+// represents each list as an entry object linked to its original parent record.
+type CRMListImporter interface {
+	CRMListEntries(ctx context.Context, c *Client, creds Creds, list string, offset, limit int) ([]CRMRecord, error)
+}

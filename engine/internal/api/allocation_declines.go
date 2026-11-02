@@ -71,14 +71,9 @@ func (s *Server) listDeclines(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
-			return
-		}
-		offset = n
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	sel, ok := s.brandFilter(w, r)
 	if !ok {
@@ -96,7 +91,7 @@ func (s *Server) listDeclines(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // clearDecline removes one decline, so the allocator may give that mailbox

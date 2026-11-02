@@ -73,11 +73,15 @@ Every lead in a searched list gets a 0 to 100 fit score, with the reasons. It is
 
 ## Clay, spreadsheets and other tools
 
-Anything that can send an HTTP request can add leads: a Clay HTTP API column, Zapier, n8n or a script can `POST /v1/workspaces/{ws}/leads` with `"list_id"` set, or `POST /leads/import?list=<name>` with a CSV. Upserts are by email, so sending the same person twice updates them.
+Anything that can send an HTTP request can add leads: a Clay HTTP API column, Zapier, n8n or a script can `POST /v1/brands/{brand}/leads` with `"list_id"` set, or `POST /v1/brands/{brand}/leads/import?list=<name>` with a CSV. Upserts are by email within the brand, so sending the same person twice updates them.
 
 ## Permissions
 
-Reading lists and runs needs `leads.read`; creating, editing, running and deleting needs `leads.manage`. A brand token sees only its brand's lists and the shared ones, and creates lists in its brand.
+Reading lists and runs needs `leads.read`; creating, editing, running and deleting needs `leads.manage`.
+
+## Brands
+
+Leads, lead lists and their builds belong to one brand (`plans/brands/README.md`), and live under `/v1/brands/{brand}/` (`leads`, `lead-lists`, `list-runs`). A list holds its brand's leads only, a build fills its list's brand, and a sequence enrols its brand's leads only. A lead is unique per brand: the same address in two brands is two people. Until the brands contract step drops the older per-workspace index, an address is a lead in one brand of a workspace at a time: adding it in another brand answers `409 lead_in_other_brand`, and imports and builds skip it (`other_brand`). The `/v1/workspaces/{ws}/` lead and list routes are deprecated: lists default to the workspace's first brand (`?brand=` picks one, `all` every brand), and new leads and lists go to the brand named in `brand_id`, else the first brand.
 
 ## Agents
 
@@ -101,6 +105,7 @@ Each rule tests one thing about a person:
 - **An event** they did, such as `payment_succeeded`: did or didn't, ever or in the last N days. Events from the website tracker don't count, because anyone with the site key can send them.
 - **A lead list** they are in, or aren't: a fixed list can feed a smart list.
 - **A news search** they wrote an article for, or didn't, ever or in the last so many days: a media list of the [journalists](news-watch.md#journalists) who cover a topic.
+- **A company field** on a company they are on (`company_attribute`), such as a journalist's outlet tier: `{"company_attribute": "outlet_tier", "op": "eq", "value": "national"}`. It passes when any of their companies passes; is not and is not set pass when none of them has the value.
 
 A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
 

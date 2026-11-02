@@ -195,7 +195,7 @@ func (s *Server) listLinkProspects(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -224,7 +224,7 @@ func (s *Server) listLinkProspects(w http.ResponseWriter, r *http.Request) {
 		n := offset + len(list)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getLinkProspect(w http.ResponseWriter, r *http.Request) {

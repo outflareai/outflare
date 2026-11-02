@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -54,12 +56,38 @@ func (m *claudeModel) Chat(ctx context.Context, req Request) (Response, error) {
 		}
 		var blocks []anthropic.BetaContentBlockParamUnion
 		for _, r := range msg.ToolResults {
-			blocks = append(blocks, anthropic.NewBetaToolResultBlock(r.CallID, r.Content, r.IsError))
+			if len(r.Images) == 0 {
+				blocks = append(blocks, anthropic.NewBetaToolResultBlock(r.CallID, r.Content, r.IsError))
+				continue
+			}
+			tr := anthropic.BetaToolResultBlockParam{ToolUseID: r.CallID, IsError: anthropic.Bool(r.IsError)}
+			if r.Content != "" {
+				tr.Content = append(tr.Content, anthropic.BetaToolResultBlockParamContentUnion{OfText: &anthropic.BetaTextBlockParam{Text: r.Content}})
+			}
+			for _, img := range r.Images {
+				ib := claudeImage(img)
+				tr.Content = append(tr.Content, anthropic.BetaToolResultBlockParamContentUnion{OfImage: &ib})
+			}
+			blocks = append(blocks, anthropic.BetaContentBlockParamUnion{OfToolResult: &tr})
+		}
+		for _, img := range msg.Images {
+			ib := claudeImage(img)
+			blocks = append(blocks, anthropic.BetaContentBlockParamUnion{OfImage: &ib})
 		}
 		if msg.Text != "" {
 			blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Text))
 		}
 		if msg.Role == "assistant" {
+			// An assistant message rebuilt from stored state (not the
+			// provider's own) still carries the tool calls it made, or the
+			// tool results that follow would answer calls the API never saw.
+			for _, c := range msg.ToolCalls {
+				var input any = map[string]any{}
+				if len(c.Input) > 0 {
+					_ = json.Unmarshal(c.Input, &input)
+				}
+				blocks = append(blocks, anthropic.NewBetaToolUseBlock(c.ID, input, c.Name))
+			}
 			messages = append(messages, anthropic.BetaMessageParam{Role: anthropic.BetaMessageParamRoleAssistant, Content: blocks})
 		} else {
 			messages = append(messages, anthropic.NewBetaUserMessage(blocks...))
@@ -97,9 +125,35 @@ func (m *claudeModel) Chat(ctx context.Context, req Request) (Response, error) {
 		params.Fallbacks = anthropic.BetaFallbacksParamUnion{OfDefault: constant.ValueOf[constant.Default]()}
 		params.Betas = []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01}
 	}
-	msg, err := client.Beta.Messages.New(ctx, params)
-	if err != nil {
-		return Response{Usage: Usage{Model: m.c.Model}}, claudeErr(err, m.c.Key)
+	var msg *anthropic.BetaMessage
+	if req.OnText == nil {
+		var err error
+		if msg, err = client.Beta.Messages.New(ctx, params); err != nil {
+			return Response{Usage: Usage{Model: m.c.Model}}, claudeErr(err, m.c.Key)
+		}
+	} else {
+		// Stream: hand each piece of text on as it comes, and build the
+		// same message the call without streaming returns.
+		stream := client.Beta.Messages.NewStreaming(ctx, params)
+		acc := anthropic.BetaMessage{}
+		for stream.Next() {
+			ev := stream.Current()
+			if err := acc.Accumulate(ev); err != nil {
+				stream.Close()
+				return Response{Usage: Usage{Model: m.c.Model}}, claudeErr(err, m.c.Key)
+			}
+			if d, ok := ev.AsAny().(anthropic.BetaRawContentBlockDeltaEvent); ok {
+				if t, ok := d.Delta.AsAny().(anthropic.BetaTextDelta); ok && t.Text != "" {
+					req.OnText(t.Text)
+				}
+			}
+		}
+		err := stream.Err()
+		stream.Close()
+		if err != nil {
+			return Response{Usage: Usage{Model: m.c.Model}}, claudeErr(err, m.c.Key)
+		}
+		msg = &acc
 	}
 	res := Response{
 		Message: Message{Role: "assistant", native: *msg},
@@ -159,4 +213,9 @@ func listClaudeModels(ctx context.Context, c Config) ([]ModelInfo, error) {
 		out = append(out, ModelInfo{ID: m.ID, Name: m.DisplayName})
 	}
 	return out, nil
+}
+
+func claudeImage(img Image) anthropic.BetaImageBlockParam {
+	return anthropic.BetaImageBlockParam{Source: anthropic.BetaImageBlockParamSourceUnion{OfBase64: &anthropic.BetaBase64ImageSourceParam{
+		Data: base64.StdEncoding.EncodeToString(img.Data), MediaType: anthropic.BetaBase64ImageSourceMediaType(img.MediaType)}}}
 }

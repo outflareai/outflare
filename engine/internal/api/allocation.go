@@ -404,14 +404,9 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	offset := 0
-	if v := q.Get("offset"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
-			return
-		}
-		offset = n
+	offset, ok := pageOffsetParam(w, r)
+	if !ok {
+		return
 	}
 	sel, ok := s.brandFilter(w, r)
 	if !ok {
@@ -429,7 +424,7 @@ func (s *Server) listChanges(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // undoChange reverses one change, through the same checks as any other.

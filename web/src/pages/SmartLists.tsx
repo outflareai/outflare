@@ -29,7 +29,7 @@ export function useRuleChoices(ws: string, brand: string) {
       setFields((person?.fields ?? []).filter((f) => !f.archived).map((f) => ({ key: f.key, label: f.label })));
       setEvents((data?.events ?? []).filter((e) => e.status === "approved").map((e) => e.name));
     });
-    api.GET("/v1/workspaces/{ws}/lead-lists", { params: { path: { ws } } }).then(({ data }) => setLeadLists(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand } } }).then(({ data }) => setLeadLists(data?.data ?? []));
     api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
   }, [ws, brand]);
   return { fields, events, leadLists, newsSearches };

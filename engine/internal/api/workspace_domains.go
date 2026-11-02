@@ -11,7 +11,6 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
-	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 )
 
@@ -176,10 +175,8 @@ func (s *Server) listWorkspaceDomains(w http.ResponseWriter, r *http.Request) {
 
 // A connected account in one shape.
 type connectedAccount struct {
-	// integration (the connector framework, GET /integrations/{id}),
-	// including Gmail and Outlook mailbox sign-ins, or mailbox_oauth (an
-	// admin connection made before mailbox sign-ins were connectors,
-	// /oauth-connections, until it is moved to integrations).
+	// integration: the connector framework, GET /integrations/{id},
+	// Gmail and Outlook mailbox sign-ins among them.
 	Kind      string    `json:"kind"`
 	ID        string    `json:"id"`
 	Connector string    `json:"connector"`
@@ -190,10 +187,8 @@ type connectedAccount struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// listAllConnections lists every account the workspace has connected:
-// the connector framework's integrations and the older mailbox admin
-// connections that still sit beside it, so a connections page and an
-// agent read one list.
+// listAllConnections lists every account the workspace has connected, so
+// a connections page and an agent read one list.
 func (s *Server) listAllConnections(w http.ResponseWriter, r *http.Request) {
 	if !s.needIntegrations(w, r) {
 		return
@@ -215,25 +210,6 @@ func (s *Server) listAllConnections(w http.ResponseWriter, r *http.Request) {
 		v := s.view(i)
 		out = append(out, connectedAccount{Kind: "integration", ID: v.ID, Connector: v.Connector, Name: v.Name, Category: v.Category,
 			Status: v.Status, BrandID: v.BrandID, CreatedAt: v.CreatedAt})
-	}
-	// Mailbox sign-ins belong to the whole workspace, so a picked brand or
-	// a brand-limited caller does not see them.
-	if sel.id == "" && sel.in == nil {
-		rows, err := s.pool.Query(ctx, `SELECT id::text, provider, name, created_at FROM oauth_connections WHERE workspace_id = $1 ORDER BY created_at`, a.WorkspaceID)
-		if err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		oauth, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (connectedAccount, error) {
-			v := connectedAccount{Kind: "mailbox_oauth", Category: connectors.CategoryMailbox, Status: "connected"}
-			err := row.Scan(&v.ID, &v.Connector, &v.Name, &v.CreatedAt)
-			return v, err
-		})
-		if err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		out = append(out, oauth...)
 	}
 	if c := r.URL.Query().Get("category"); c != "" {
 		out = slices.DeleteFunc(out, func(v connectedAccount) bool { return v.Category != c })

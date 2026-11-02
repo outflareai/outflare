@@ -925,3 +925,50 @@ func TestMetaAdsAudiences(t *testing.T) {
 		t.Fatalf("a refused token: %v", err)
 	}
 }
+
+// Meta reports a purchase as purchase, omni_purchase and the pixel's own:
+// it counts once. Custom conversions are listed but not counted, and link
+// clicks, landing page views, video views and reach come with the day.
+func TestMetaResults(t *testing.T) {
+	acts := []metaAction{{"purchase", 3}, {"omni_purchase", 3}, {"offsite_conversion.fb_pixel_purchase", 3}, {"lead", 2},
+		{"offsite_conversion.custom.555", 4}, {"link_click", 40}, {"landing_page_view", 31}, {"video_view", 90}, {"post_engagement", 70}}
+	vals := []metaAction{{"purchase", 147}, {"omni_purchase", 147}}
+	reach := flexInt(500)
+	conv, value, x := metaResults(acts, vals, &reach)
+	if conv != 5 || value != 147 {
+		t.Fatalf("conv %v value %v", conv, value)
+	}
+	if *x.LinkClicks != 40 || *x.LandingPageViews != 31 || *x.VideoViews != 90 || *x.Reach != 500 {
+		t.Fatalf("extra %+v", x)
+	}
+	got := map[string]float64{}
+	for _, a := range x.Actions {
+		got[a.Name] = a.Conversions
+	}
+	if len(got) != 3 || got["purchase"] != 3 || got["lead"] != 2 || got["custom.555"] != 4 || *x.Actions[0].ValueMicros != 147_000_000 {
+		t.Fatalf("actions %+v", x.Actions)
+	}
+}
+
+// A Google ad inherits its final URL suffix from its ad group, campaign or
+// account, the most specific that is set; an ad without a link says
+// nothing.
+func TestGoogleAdTemplate(t *testing.T) {
+	cl, _, _ := fake(t, map[string]any{
+		"POST /v23/customers/111/googleAds:search": map[string]any{"results": []any{
+			map[string]any{"adGroup": map[string]any{"id": "71"}, "campaign": map[string]any{"finalUrlSuffix": "of_campaign={campaignid}"},
+				"customer": map[string]any{"finalUrlSuffix": "utm_source=google"}, "adGroupAd": map[string]any{"ad": map[string]any{"id": "81", "finalUrls": []string{"https://acme.example/"}}}},
+			map[string]any{"adGroup": map[string]any{"id": "71"}, "customer": map[string]any{"finalUrlSuffix": "utm_source=google"},
+				"adGroupAd": map[string]any{"ad": map[string]any{"id": "82", "finalUrls": []string{"https://acme.example/"}}}},
+			map[string]any{"adGroup": map[string]any{"id": "71"}, "adGroupAd": map[string]any{"ad": map[string]any{"id": "83"}}},
+		}},
+	})
+	ads, err := GoogleAds{}.AdItems(ctx, cl, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111"}, c.AdLevelAd)
+	if err != nil || len(ads) != 3 {
+		t.Fatalf("ads %+v %v", ads, err)
+	}
+	if ads[0].Details[c.AdDetailTemplated] != "true" || ads[0].Details[c.AdDetailURLTags] != "of_campaign={campaignid}" ||
+		ads[1].Details[c.AdDetailTemplated] != "false" || ads[2].Details[c.AdDetailTemplated] != "" {
+		t.Fatalf("templated: %v / %v / %v", ads[0].Details, ads[1].Details, ads[2].Details)
+	}
+}

@@ -438,9 +438,28 @@ func (s *Server) listLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	before, after := q.Get("before"), q.Get("after")
-	if before != "" && after != "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "pass before or after, not both")
+	// Newest first going back (a before cursor), or oldest first going
+	// forward when following (start=latest, then an after cursor).
+	kind, pos, ok := readCursor(r)
+	if !ok {
+		invalidCursor(w, r)
+		return
+	}
+	start := q.Get("start")
+	if start != "" && start != "latest" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "start must be latest")
+		return
+	}
+	before, after := "", ""
+	switch {
+	case kind == pageBefore:
+		before = pos
+	case kind == pageAfter:
+		after = pos
+	case kind == "" && start == "latest":
+		after = "latest"
+	case kind != "":
+		invalidCursor(w, r)
 		return
 	}
 	where, args, ok := s.logFilter(w, r)
@@ -454,24 +473,24 @@ func (s *Server) listLogs(w http.ResponseWriter, r *http.Request) {
 	case before != "":
 		id, ok := logID(before)
 		if !ok {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a log id (log_...) from next_before")
+			invalidCursor(w, r)
 			return
 		}
 		args = append(args, id)
 		where += " AND l.id < $" + strconv.Itoa(len(args))
 	case after == "latest":
-		// Start following from now: nothing yet, and next_after at the newest.
+		// Start following from now: nothing yet, and next_cursor after the newest.
 		var newest int64
 		if err := s.pool.QueryRow(r.Context(), `SELECT coalesce(max(id), 0) FROM request_logs WHERE workspace_id = $1`, args[0]).Scan(&newest); err != nil {
 			s.internal(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"data": []logView{}, "next_before": nil, "next_after": "log_" + strconv.FormatInt(newest, 10), "next_cursor": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"data": []logView{}, "next_cursor": encodeCursor(pageAfter, "log_"+strconv.FormatInt(newest, 10)), "has_more": false})
 		return
 	case after != "":
 		id, err := strconv.ParseInt(strings.TrimPrefix(after, "log_"), 10, 64)
 		if err != nil || !strings.HasPrefix(after, "log_") || id < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "after is a log id (log_...) from next_after, or latest")
+			invalidCursor(w, r)
 			return
 		}
 		args = append(args, id)
@@ -489,25 +508,21 @@ func (s *Server) listLogs(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	body := map[string]any{"data": list, "next_before": nil}
+	body := map[string]any{"data": list, "has_more": len(list) == limit}
 	if order == "ASC" {
-		// Following: next_after is always set, so polling never loses its place.
+		// Following: next_cursor is always set, so polling never loses its
+		// place; has_more says another page is ready now.
 		next := after
 		if len(list) > 0 {
 			next = list[len(list)-1].ID
 		}
-		body["next_after"] = next
-		body["next_cursor"] = nil
-		if len(list) == limit {
-			body["next_cursor"] = encodeCursor("after", next)
-		}
+		body["next_cursor"] = encodeCursor(pageAfter, next)
 	} else {
 		var next *string
 		if len(list) == limit {
 			next = &list[len(list)-1].ID
 		}
-		body["next_before"] = next
-		body["next_after"] = nil
+		body["next_cursor"] = nextCursor(pageBefore, next)
 	}
 	writeJSON(w, http.StatusOK, body)
 }

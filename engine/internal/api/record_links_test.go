@@ -32,8 +32,9 @@ func TestLeadActivityOnThePersonTimeline(t *testing.T) {
 	}
 
 	// Sam unsubscribes; the suppression and a withdrawn consent stop
-	// marketing email until he signs up and agrees to email.
-	owner.must(200, "POST", base+"/suppressions", map[string]any{"values": []string{"sam@acme.example"}, "reason": "unsubscribed"})
+	// marketing email until he signs up and agrees to email. It is his
+	// brand's opt-out: one an admin applies to every brand stays.
+	owner.must(200, "POST", "/v1/brands/"+lead["brand_id"].(string)+"/suppressions", map[string]any{"values": []string{"sam@acme.example"}, "reason": "unsubscribed"})
 	consents := owner.must(200, "GET", base+"/records/"+rec+"/consents", nil)["data"].([]any)
 	if len(consents) != 1 || consents[0].(map[string]any)["status"] != "withdrawn" {
 		t.Fatalf("consents after unsubscribe: %v", consents)

@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { KnowledgeAnswer, Mailbox, Member, SupportArticle, SupportConversation, SupportCounts, SupportMailbox, SupportMessage } from "@outflare/sdk";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Mailbox, Member, SupportArticle, SupportAssistantRun, SupportConversation, SupportCounts, SupportMailbox, SupportMessage } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, toast } from "../ui";
 import { Icon } from "../icons";
-import { ago, listTime, plural, stamp } from "../format";
+import { ago, listTime, stamp } from "../format";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
 import { SupportForwarding } from "@/components/support-forwarding";
 import { SupportSLA } from "@/components/support-sla";
+import { SupportChat } from "@/components/support-chat";
+import { AssistantDraft, SupportAssistantSettings } from "@/components/support-assistant";
 
 // The support inbox: customers who write to a support mailbox, as
 // conversations the team works through. Folders on the left, the list in
@@ -107,6 +109,18 @@ function duration(seconds: number | null | undefined) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+// chatLive says whether a chat visitor is likely still on the site: their
+// chat checks in every few seconds while it is open.
+function chatLive(c: SupportConversation) {
+  return c.channel === "chat" && !!c.visitor_seen_at && Date.now() - Date.parse(c.visitor_seen_at) < 60_000;
+}
+
+// who is how a conversation's customer is shown: a chat visitor who gave
+// no email is a website visitor.
+function who(c: SupportConversation) {
+  return c.contact.name || c.contact.email || "Website visitor";
+}
+
 // SlaChip says when the reply or the resolution is due, or how late it is.
 function SlaChip({ c, long = false }: { c: SupportConversation; long?: boolean }) {
   const { sla } = c;
@@ -156,6 +170,8 @@ export function Support({
   const [mailboxes, setMailboxes] = useState<SupportMailbox[] | null>(null);
   // Support addresses mail is forwarded to (Outflare Cloud).
   const [forwarding, setForwarding] = useState<string[] | null>(null);
+  // Answers and conflicts waiting in Knowledge, Review.
+  const [review, setReview] = useState(0);
   const [stats, setStats] = useState<{ median_first_reply_seconds: number | null; median_resolution_seconds: number | null; conversations: number; sla_missed?: number } | null>(null);
   const [error, setError] = useState("");
   const [settings, setSettings] = useState(false);
@@ -170,6 +186,7 @@ export function Support({
       setForwarding((data?.data ?? []).filter((a) => a.purpose === "support").map((a) => a.email)),
     );
     api.GET("/v1/workspaces/{ws}/support/stats", { params: { path: { ws }, query: brandQ } }).then(({ data }) => data && setStats(data));
+    api.GET("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: { ws }, query: brandQ } }).then(({ data }) => data && setReview(data.counts.answers + data.counts.conflicts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, tick, brand?.id]);
 
@@ -236,6 +253,12 @@ export function Support({
           {!!stats?.sla_missed && (
             <p className="flex justify-between" title="Conversations that missed a response time at least once"><span>Missed SLA</span><span className="tabular-nums text-red-700 dark:text-red-400">{stats.sla_missed}</span></p>
           )}
+          {review > 0 && (
+            <button type="button" onClick={() => go("knowledge")} className="mt-1 flex w-full items-center gap-1.5 rounded-md bg-violet-500/10 px-2 py-1.5 text-left text-violet-800 hover:bg-violet-500/15 dark:text-violet-300">
+              <Icon name="sparkles" className="size-3.5 shrink-0" />
+              <span className="flex-1">{review} to review in Knowledge</span>
+            </button>
+          )}
         </div>
       </nav>
 
@@ -271,7 +294,10 @@ export function Support({
                 <Avatar name={c.contact.name} email={c.contact.email} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline gap-2">
-                    <span className={cn("min-w-0 flex-1 truncate text-[13px]", c.unread ? "font-semibold" : "font-medium")}>{c.contact.name || c.contact.email}</span>
+                    <span className={cn("min-w-0 flex-1 truncate text-[13px]", c.unread ? "font-semibold" : "font-medium")}>
+                      {c.channel === "chat" && <Icon name="discuss" className={cn("mr-1 inline size-3 align-[-1px]", chatLive(c) ? "text-emerald-600" : "text-muted-foreground")} aria-label={chatLive(c) ? "Chat, on your site now" : "Chat"} />}
+                      {who(c)}
+                    </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{listTime(c.last_message_at)}</span>
                   </span>
                   <span className={cn("block truncate text-[13px]", c.unread ? "text-foreground" : "text-muted-foreground")}>{c.subject || "(no subject)"}</span>
@@ -319,7 +345,11 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
-  const [suggestion, setSuggestion] = useState<KnowledgeAnswer | null>(null);
+  // The assistant's latest run here, the draft the reply came from, and
+  // why it couldn't run (no AI connected).
+  const [run, setRun] = useState<SupportAssistantRun | null>(null);
+  const [runId, setRunId] = useState("");
+  const [aiProblem, setAiProblem] = useState<{ code: string; message: string } | null>(null);
   const [articles, setArticles] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -331,6 +361,8 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
     setConv(data.conversation);
     setMessages(data.messages);
     setOthers(data.other_conversations);
+    const a = await api.GET("/v1/workspaces/{ws}/support/conversations/{id}/assistant", { params: { path } });
+    if (a.data) setRun(a.data.run ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, id]);
 
@@ -366,11 +398,15 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
     const res =
       mode === "note"
         ? await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/notes", { params: { path }, body: { body } })
-        : await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/replies", { params: { path }, body: { body, ...(after ? { status: after } : {}) } });
+        : await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/replies", {
+            params: { path },
+            body: { body, ...(after ? { status: after } : {}), ...(runId ? { assistant_run_id: runId } : {}) },
+          });
     setBusy(false);
     if (res.error) return toast(errorMessage(res.error), "error");
     setBody("");
-    setSuggestion(null);
+    setRunId("");
+    setAiProblem(null);
     await load();
     onChanged();
     if (after) toast("Sent and closed");
@@ -378,7 +414,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
 
   // insertLink puts an article's title and page where the cursor is, on
   // a line of its own, so the customer can read the rest there.
-  function insertLink(title: string, url: string, from: "suggested" | "search" | "suggestion") {
+  function insertLink(title: string, url: string, from: "suggested" | "search") {
     const el = box.current;
     const at = el ? el.selectionEnd : body.length;
     const before = body.slice(0, at).replace(/\s+$/, "");
@@ -397,22 +433,31 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
 
   async function suggest() {
     setSuggesting(true);
-    setSuggestion(null);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/suggest-reply", { params: { path } });
+    setAiProblem(null);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/assistant", { params: { path } });
     setSuggesting(false);
-    if (error) return toast(errorMessage(error), "error");
-    setSuggestion(data);
-    if (data.answer && data.answered) {
-      setMode("reply");
-      setBody(data.answer);
+    if (error) {
+      const e = (error as { error?: { code?: string; message?: string } }).error;
+      if (e?.code && /^(connector_|ai_)/.test(e.code)) return setAiProblem({ code: e.code, message: e.message ?? "" });
+      return toast(errorMessage(error), "error");
     }
+    setRun(data as SupportAssistantRun);
+  }
+
+  function useDraft(r: SupportAssistantRun) {
+    setMode("reply");
+    setBody(r.reply);
+    setRunId(r.id);
+    setRun(null);
+    requestAnimationFrame(() => box.current?.focus());
   }
 
   if (error) return <div className="p-6"><ErrorText>{error}</ErrorText></div>;
   if (!conv) return <div className="flex-1"><Loading /></div>;
   const closed = conv.status === "closed";
   const forwarded = conv.via === "forwarding";
-  const canReply = !!conv.mailbox_id || (forwarded && !!conv.reply_from);
+  const chat = conv.channel === "chat";
+  const canReply = chat || !!conv.mailbox_id || (forwarded && !!conv.reply_from);
 
   return (
     <div className="flex h-full min-w-0 flex-1">
@@ -427,7 +472,8 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
               <span className={cn("size-1.5 shrink-0 rounded-full", { open: "bg-blue-600", pending: "bg-amber-500", closed: "bg-muted-foreground/50" }[conv.status])} />
               <span className="shrink-0 text-foreground/80">{statusLabel[conv.status]}</span>
               <SlaChip c={conv} long />
-              <span className="truncate">· {conv.contact.name ? `${conv.contact.name} · ` : ""}{conv.contact.email}</span>
+              <span className="truncate">· {conv.contact.name ? `${conv.contact.name} · ` : ""}{conv.contact.email || (chat ? "Website visitor" : "")}</span>
+              {chat && <span className={cn("shrink-0", chatLive(conv) ? "text-emerald-700 dark:text-emerald-400" : "")}>· {chatLive(conv) ? "On your site now" : "Chat"}</span>}
             </p>
           </div>
           {canManage && (
@@ -456,15 +502,17 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
 
         {canManage && (
           <div className="border-t bg-background p-3">
-            {suggestion && (
-              <SuggestionNote
-                s={suggestion}
-                onConnectAI={() => go("ai")}
-                onDismiss={() => setSuggestion(null)}
-                onUse={(t) => { setMode("reply"); setBody(t); }}
-                onLink={(c) => c.url && insertLink(c.title, c.url, "suggestion")}
-              />
+            {aiProblem && (
+              <p className="mb-2 flex items-start gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-xs">
+                <Icon name="ai" className="mt-0.5 size-3.5 shrink-0 text-violet-600" />
+                <span className="flex-1">
+                  {aiProblem.message}{" "}
+                  {aiProblem.code !== "connector_auth" && <button type="button" className="underline" onClick={() => go("ai")}>Connect an AI model</button>}
+                </span>
+                <button type="button" aria-label="Dismiss" onClick={() => setAiProblem(null)} className="text-muted-foreground hover:text-foreground"><Icon name="x" className="size-3.5" /></button>
+              </p>
             )}
+            {run && !closed && <AssistantDraft ws={ws} id={id} run={run} onUse={useDraft} onDiscarded={() => setRun(null)} />}
             {articles && mode === "reply" && (
               <ArticlePicker ws={ws} id={id} onPick={(a, from) => { if (a.url) insertLink(a.title, a.url, from); setArticles(false); }} onClose={() => setArticles(false)} go={go} />
             )}
@@ -485,7 +533,9 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                 <span className="ml-1 truncate text-[11px] text-muted-foreground">
                   {mode === "note"
                     ? "Only your team sees notes"
-                    : canReply
+                    : chat
+                      ? `In their chat${chatLive(conv) ? ": they're on your site now" : conv.contact.email ? "; they see it next time they open it" : ""}`
+                      : canReply
                       ? `To ${conv.contact.email}, from ${forwarded ? conv.reply_from : conv.mailbox_email}`
                       : forwarded
                         ? "Outflare doesn't know which of your addresses they wrote to"
@@ -509,7 +559,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                     disabled={suggesting}
                     className="inline-flex shrink-0 items-center gap-1 rounded px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-500/10 disabled:opacity-60 dark:text-violet-400"
                   >
-                    <Icon name="ai" className="size-3.5" />{suggesting ? "Drafting…" : "Suggest a reply"}
+                    <Icon name="ai" className="size-3.5" />{suggesting ? "Drafting…" : "Draft with AI"}
                   </button>
                 )}
               </div>
@@ -569,54 +619,6 @@ function MessageView({ m, contact }: { m: SupportMessage; contact: SupportConver
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-function SuggestionNote({ s, onUse, onDismiss, onConnectAI, onLink }: {
-  s: KnowledgeAnswer;
-  onUse: (text: string) => void;
-  onDismiss: () => void;
-  onConnectAI: () => void;
-  onLink: (c: KnowledgeAnswer["citations"][number]) => void;
-}) {
-  let text: ReactNode;
-  if (s.ai.problem) {
-    text = (
-      <>
-        {s.ai.problem.message}{" "}
-        {s.ai.problem.code !== "connector_auth" && <button type="button" className="underline" onClick={onConnectAI}>Connect an AI model</button>}
-      </>
-    );
-  } else if (!s.answered) {
-    text = "Your knowledge doesn't cover this yet, so there's no draft. Write the answer, then add it to Knowledge so next time it's there.";
-  } else {
-    text = <>Draft written from {plural(s.citations.length, "article")} customers may be told. Check it, edit it, then send.</>;
-  }
-  return (
-    <div className="mb-2 flex items-start gap-2 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-2 text-xs">
-      <Icon name="ai" className="mt-0.5 size-3.5 shrink-0 text-violet-600" />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p>{text}</p>
-        {s.answered && s.citations.length > 0 && (
-          <p className="text-muted-foreground">
-            Sources:{" "}
-            {s.citations.map((c, i) => (
-              <span key={c.chunk_id}>
-                {i > 0 && ", "}
-                {c.title}
-                {c.url && (
-                  <button type="button" className="ml-1 text-violet-700 underline dark:text-violet-400" onClick={() => onLink(c)} title={c.url}>add link</button>
-                )}
-              </span>
-            ))}
-          </p>
-        )}
-        {!s.answered && s.answer && !s.ai.problem && s.passages.length > 0 && (
-          <button type="button" className="underline" onClick={() => onUse(s.answer ?? "")}>Use what it found anyway</button>
-        )}
-      </div>
-      <button type="button" aria-label="Dismiss" onClick={onDismiss} className="text-muted-foreground hover:text-foreground"><Icon name="x" className="size-3.5" /></button>
     </div>
   );
 }
@@ -731,8 +733,11 @@ function Details({
         <div className="flex items-center gap-2">
           <Avatar name={conv.contact.name} email={conv.contact.email} />
           <div className="min-w-0">
-            <p className="truncate font-medium">{conv.contact.name || conv.contact.email}</p>
-            <p className="truncate text-xs text-muted-foreground">{conv.contact.email}</p>
+            <p className="truncate font-medium">{who(conv)}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {conv.contact.email || "No email given"}
+              {conv.identity_verified && <span className="ml-1 text-emerald-700 dark:text-emerald-400" title="Your site vouched for this email">· verified</span>}
+            </p>
           </div>
         </div>
         {conv.record_id && (
@@ -815,7 +820,7 @@ function Details({
             <p className="text-[11px] text-muted-foreground">Replies go out through your email provider.</p>
           </>
         ) : (
-          <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Via</span><span className="truncate">{conv.mailbox_email ?? "removed mailbox"}</span></p>
+          <p className="flex justify-between gap-2"><span className="shrink-0 text-muted-foreground">Via</span><span className="truncate">{conv.channel === "chat" ? "Chat on your website" : (conv.mailbox_email ?? "removed mailbox")}</span></p>
         )}
       </section>
 
@@ -970,6 +975,8 @@ function Settings({
         <p className="text-[13px] text-muted-foreground">Ask someone who manages mailboxes to choose the support mailbox.</p>
       )}
       <SupportForwarding ws={ws} canSetUp={canSetUp} go={go} onChanged={onChanged} />
+      <SupportChat ws={ws} canManage={canManage} />
+      <SupportAssistantSettings ws={ws} canManage={canManage} go={go} />
       {!first && <SupportSLA ws={ws} canManage={canManage} onChanged={onChanged} />}
     </div>
   );

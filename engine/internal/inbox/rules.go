@@ -402,6 +402,11 @@ func returnDate(d map[string]string, now time.Time) (time.Time, bool) {
 // ErrNoReferral is a reply that names nobody to add.
 var ErrNoReferral = errors.New("the reply doesn't name an email address to add")
 
+// ErrReferralOtherBrand is a referral who is another brand's lead
+// already: until the brands contract step an address is a lead in one
+// brand of a workspace at a time.
+var ErrReferralOtherBrand = errors.New("the person named is a lead of another brand in this workspace")
+
 // Referral is the person a reply named, added as a lead.
 type Referral struct {
 	LeadID   string `json:"lead_id"`
@@ -417,10 +422,10 @@ type Referral struct {
 // it. The caller records lead.referral_added with Referral.Data.
 func AddReferral(ctx context.Context, tx pgx.Tx, ws, inboundID, sequenceID string) (*Referral, error) {
 	var details []byte
-	var from string
+	var from, brand string
 	var referrer *string
-	err := tx.QueryRow(ctx, `SELECT COALESCE(details, '{}'), from_email, lead_id::text FROM inbound_messages WHERE id = $1 AND workspace_id = $2`,
-		inboundID, ws).Scan(&details, &from, &referrer)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(details, '{}'), from_email, lead_id::text, COALESCE(brand_id::text, '') FROM inbound_messages WHERE id = $1 AND workspace_id = $2`,
+		inboundID, ws).Scan(&details, &from, &referrer, &brand)
 	if err != nil {
 		return nil, err
 	}
@@ -443,12 +448,16 @@ func AddReferral(ctx context.Context, tx pgx.Tx, ws, inboundID, sequenceID strin
 		}
 		l.Company, l.Website = company, website
 	}
-	res, err := leads.Import(ctx, tx, ws, "referral", nil, []leads.Lead{l})
+	// The referral is a lead of the reply's brand.
+	res, err := leads.ImportIn(ctx, tx, ws, brand, "referral", nil, []leads.Lead{l})
 	if err != nil {
 		return nil, err
 	}
+	if res.OtherBrand > 0 {
+		return nil, ErrReferralOtherBrand
+	}
 	ref := &Referral{Email: email, Created: res.Created > 0}
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM leads WHERE workspace_id = $1 AND lower(email) = $2`, ws, email).Scan(&ref.LeadID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM leads WHERE workspace_id = $1 AND lower(email) = $2 AND brand_id = NULLIF($3, '')::uuid`, ws, email, brand).Scan(&ref.LeadID); err != nil {
 		return nil, err
 	}
 	if referrer != nil {

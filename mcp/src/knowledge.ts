@@ -146,6 +146,23 @@ export function registerKnowledgeTools(
   );
 
   server.registerTool(
+    "list_knowledge_suggestions",
+    {
+      title: "Knowledge waiting for review",
+      description:
+        "The knowledge review queue: answers found for questions the knowledge couldn't answer (from teammates' support replies, the website, Slack or agents), " +
+        "and items that contradict each other. People approve or reject them in Knowledge, Review; nothing is used until then.",
+      inputSchema: {
+        status: z.enum(["pending", "approved", "rejected", "all"]).optional(),
+        kind: z.enum(["answer", "conflict"]).optional(),
+        brand: z.string().optional().describe("A brand's handle or id."),
+      },
+      annotations: read,
+    },
+    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: path(), query: withBrand(q) } })),
+  );
+
+  server.registerTool(
     "get_knowledge_stats",
     {
       title: "Knowledge base at a glance",
@@ -182,6 +199,29 @@ export function registerKnowledgeTools(
   );
 
   if (readOnly) return;
+
+  server.registerTool(
+    "suggest_knowledge",
+    {
+      title: "Suggest an answer for review",
+      description:
+        "When you find the answer to an unanswered question (list_knowledge_gaps) on the business's website, in Slack or elsewhere, suggest it for a person " +
+        "to approve, with where you found it and the exact words. Don't add it with add_knowledge yourself: a person checks it first. " +
+        "Write it as the business would tell any customer, with nothing about one customer.",
+      inputSchema: {
+        question: z.string().min(1).max(1000),
+        body: z.string().min(1).max(20000).describe("The proposed answer."),
+        title: z.string().max(300).optional(),
+        source: z.enum(["website", "slack", "agent", "person"]),
+        source_ref: z.string().max(1000).optional().describe("The page address or the channel."),
+        source_quote: z.string().max(4000).optional().describe("The words you took it from."),
+        visibility: z.enum(["public", "customers_ai", "team"]).optional(),
+        brand_id: z.string().optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: path() }, body })),
+  );
 
   server.registerTool(
     "dismiss_knowledge_gap",

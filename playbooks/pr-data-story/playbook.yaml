@@ -46,7 +46,7 @@ steps:
   - say: Draft the release from the facts and approved quotes, check it, and fix what the check finds. A person approves it.
     tools: [draftStory, getStory, updateStory, checkStory]
   - say: Pick the journalists who wrote about the topic in the last two months, and a sequence of one email and at most one follow-up whose first step uses {{custom.opener}}.
-    tools: [listJournalists, listSequences, createSequence, previewSequence]
+    tools: [listJournalists, listBrandSequences, createBrandSequence, previewBrandSequence]
   - say: Start a pitch to each journalist. The AI writes an opener from the story and their latest article, and each pitch waits for a person.
     tools: [startStoryPitches, listStoryPitches]
   - say: Report replies and the coverage that followed.

@@ -28,17 +28,23 @@ func (s *Server) routesOutcomes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}/outcomes/syncs", s.inWorkspace(read, s.listOutcomeSyncs))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/outcomes/syncs/{id}/run", s.inWorkspace(manage, s.runOutcomeSync))
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/meetings", s.inWorkspace(read, s.listMeetings))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/meetings", s.inWorkspace(manage, s.createMeeting))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/meetings/{id}", s.inWorkspace(read, s.getMeeting))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/meetings/{id}", s.inWorkspace(manage, s.updateMeeting))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/meetings/{id}", s.inWorkspace(manage, s.deleteMeeting))
+	// A meeting and a deal belong to one brand (brand_outreach.go): served
+	// under the brand, and under the workspace until the contract step.
+	for _, b := range s.activationBases("meetings", s.inWorkspace) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listMeetings))
+		mux.HandleFunc("POST "+b.path, b.on(manage, s.createMeeting))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getMeeting))
+		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateMeeting))
+		mux.HandleFunc("DELETE "+b.path+"/{id}", b.on(manage, s.deleteMeeting))
+	}
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/deals", s.inWorkspace(read, s.listDeals))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/deals", s.inWorkspace(manage, s.createDeal))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/deals/{id}", s.inWorkspace(read, s.getDeal))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/deals/{id}", s.inWorkspace(manage, s.updateDeal))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/deals/{id}", s.inWorkspace(manage, s.deleteDeal))
+	for _, b := range s.activationBases("deals", s.inWorkspace) {
+		mux.HandleFunc("GET "+b.path, b.on(read, s.listDeals))
+		mux.HandleFunc("POST "+b.path, b.on(manage, s.createDeal))
+		mux.HandleFunc("GET "+b.path+"/{id}", b.on(read, s.getDeal))
+		mux.HandleFunc("PATCH "+b.path+"/{id}", b.on(manage, s.updateDeal))
+		mux.HandleFunc("DELETE "+b.path+"/{id}", b.on(manage, s.deleteDeal))
+	}
 
 	mux.HandleFunc("GET /v1/workspaces/{ws}/spend", s.inWorkspace(read, s.listSpend))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/spend", s.inWorkspace(manage, s.createSpend))
@@ -58,7 +64,7 @@ func (s *Server) outcomeError(w http.ResponseWriter, r *http.Request, err error,
 	switch {
 	case err == nil:
 		return false
-	case outcomes.IsInvalid(err):
+	case outcomes.IsInvalid(err), errors.As(err, new(errInvalid)):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, outcomes.ErrNotFound):
 		writeError(w, r, http.StatusNotFound, "not_found", what+" not found")
@@ -130,6 +136,10 @@ func (s *Server) badQuery(w http.ResponseWriter, r *http.Request, err error) boo
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, errCursor) {
+		invalidCursor(w, r)
+		return true
+	}
 	writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 	return true
 }
@@ -155,14 +165,18 @@ func limitParam(r *http.Request, def, max int) (int, error) {
 	return n, nil
 }
 
+// beforeParam reads ?cursor= for a list that pages newest first by time.
 func beforeParam(r *http.Request) (*time.Time, error) {
-	v := r.URL.Query().Get("before")
+	k, v, ok := readCursor(r)
+	if !ok || k != "" && k != pageBefore {
+		return nil, errCursor
+	}
 	if v == "" {
 		return nil, nil
 	}
 	t, err := time.Parse(time.RFC3339Nano, v)
 	if err != nil {
-		return nil, outcomesInvalid("before must be a time from next_before")
+		return nil, errCursor
 	}
 	return &t, nil
 }
@@ -225,7 +239,9 @@ func (s *Server) listMeetings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Status, f.Attributed = q.Get("status"), q.Get("attributed") == "true"
-	sel, ok := s.brandFilter(w, r)
+	// One brand's meetings: the route's, or on the workspace route the one
+	// ?brand= picks, else the first brand's.
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -239,7 +255,7 @@ func (s *Server) listMeetings(w http.ResponseWriter, r *http.Request) {
 		v := list[len(list)-1].StartsAt.Format(time.RFC3339Nano)
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getMeeting(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +265,9 @@ func (s *Server) getMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := outcomes.GetMeeting(r.Context(), s.pool, a.WorkspaceID, r.PathValue("id"))
+	if err == nil && !a.sees(m.BrandID) {
+		err = outcomes.ErrNotFound
+	}
 	if s.outcomeError(w, r, err, "meeting") {
 		return
 	}
@@ -268,6 +287,9 @@ func (s *Server) createMeeting(w http.ResponseWriter, r *http.Request) {
 	var m outcomes.Meeting
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
 		var err error
+		if req.BrandID, err = s.outcomeBrand(r); err != nil {
+			return err
+		}
 		if m, err = outcomes.CreateMeeting(r.Context(), tx, a.WorkspaceID, source, a.ActorID, req); err != nil {
 			return err
 		}
@@ -293,6 +315,9 @@ func (s *Server) updateMeeting(w http.ResponseWriter, r *http.Request) {
 	var m outcomes.Meeting
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
 		var err error
+		if _, err := outcomeInBrand(r.Context(), tx, a, "meetings", r.PathValue("id"), req.SequenceID); err != nil {
+			return err
+		}
 		if m, err = outcomes.UpdateMeeting(r.Context(), tx, a.WorkspaceID, r.PathValue("id"), req); err != nil {
 			return err
 		}
@@ -313,10 +338,14 @@ func (s *Server) deleteMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
+		brand, err := outcomeInBrand(r.Context(), tx, a, "meetings", id, nil)
+		if err != nil {
+			return err
+		}
 		if err := outcomes.DeleteMeeting(r.Context(), tx, a.WorkspaceID, id); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "meeting.deleted", "meeting", id, nil)
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "meeting.deleted", "meeting", id, map[string]any{"brand_id": brand})
 	})
 	if s.outcomeError(w, r, err, "meeting") {
 		return
@@ -350,7 +379,8 @@ func (s *Server) listDeals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.State, f.Attributed = q.Get("state"), q.Get("attributed") == "true"
-	sel, ok := s.brandFilter(w, r)
+	// One brand's deals, as for meetings.
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -364,7 +394,7 @@ func (s *Server) listDeals(w http.ResponseWriter, r *http.Request) {
 		v := list[len(list)-1].OpenedAt.Format(time.RFC3339Nano)
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getDeal(w http.ResponseWriter, r *http.Request) {
@@ -374,6 +404,9 @@ func (s *Server) getDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := outcomes.GetDeal(r.Context(), s.pool, a.WorkspaceID, r.PathValue("id"))
+	if err == nil && !a.sees(d.BrandID) {
+		err = outcomes.ErrNotFound
+	}
 	if s.outcomeError(w, r, err, "deal") {
 		return
 	}
@@ -393,6 +426,9 @@ func (s *Server) createDeal(w http.ResponseWriter, r *http.Request) {
 	var d outcomes.Deal
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
 		var err error
+		if req.BrandID, err = s.outcomeBrand(r); err != nil {
+			return err
+		}
 		if d, err = outcomes.CreateDeal(r.Context(), tx, a.WorkspaceID, source, a.ActorID, req); err != nil {
 			return err
 		}
@@ -418,6 +454,9 @@ func (s *Server) updateDeal(w http.ResponseWriter, r *http.Request) {
 	var d outcomes.Deal
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
 		var err error
+		if _, err := outcomeInBrand(r.Context(), tx, a, "deals", r.PathValue("id"), req.SequenceID); err != nil {
+			return err
+		}
 		if d, err = outcomes.UpdateDeal(r.Context(), tx, a.WorkspaceID, r.PathValue("id"), req); err != nil {
 			return err
 		}
@@ -438,10 +477,14 @@ func (s *Server) deleteDeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.inTx(r.Context(), func(tx pgx.Tx) error {
+		brand, err := outcomeInBrand(r.Context(), tx, a, "deals", id, nil)
+		if err != nil {
+			return err
+		}
 		if err := outcomes.DeleteDeal(r.Context(), tx, a.WorkspaceID, id); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "deal.deleted", "deal", id, nil)
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "deal.deleted", "deal", id, map[string]any{"brand_id": brand})
 	})
 	if s.outcomeError(w, r, err, "deal") {
 		return
@@ -492,7 +535,7 @@ func (s *Server) listSpend(w http.ResponseWriter, r *http.Request) {
 		v := list[len(list)-1].OccurredAt.Format(time.RFC3339Nano)
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getSpend(w http.ResponseWriter, r *http.Request) {
@@ -942,4 +985,40 @@ func csvSafe(v string) string {
 		}
 	}
 	return v
+}
+
+// outcomeBrand is the brand a new meeting or deal is logged in: the
+// route's, or on the workspace route the one ?brand= names, else the
+// workspace's first (brand_outreach.go).
+func (s *Server) outcomeBrand(r *http.Request) (string, error) {
+	var ref *string
+	if b := r.URL.Query().Get("brand"); b != "" {
+		ref = &b
+	}
+	return s.activationBrand(r.Context(), accessFrom(r.Context()), ref)
+}
+
+// outcomeInBrand locks a meeting or deal (table) the caller may change and
+// returns its brand, or outcomes.ErrNotFound: on a brand route only the
+// route's brand's. A sequence it is moved to must be of its brand.
+func outcomeInBrand(ctx context.Context, tx pgx.Tx, a *access, table, id string, sequenceID *string) (*string, error) {
+	var brand *string
+	err := tx.QueryRow(ctx, `SELECT brand_id::text FROM `+table+` WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&brand)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
+		return nil, outcomes.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sequenceID != nil && *sequenceID != "" {
+		var ok bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE id::text = $1 AND workspace_id = $2 AND brand_id IS NOT DISTINCT FROM $3::uuid)`,
+			*sequenceID, a.WorkspaceID, brand).Scan(&ok); err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errInvalid("sequence_id is not a sequence of this brand")
+		}
+	}
+	return brand, nil
 }

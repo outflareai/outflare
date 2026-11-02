@@ -3,12 +3,15 @@ import type { PlaybookAutomation, PlaybookAutomationInput, WorkspacePlaybook } f
 import { api, errorMessage } from "../api";
 import { Badge, Button, confirmAction, ErrorText, field, toast, type tones } from "../ui";
 import { ago, plural, when } from "../format";
+import { isAgentRun } from "../pages/AgentRuns";
+import { useBrand } from "@/lib/brand";
 import type { Tab } from "../App";
 
 // A playbook that runs by itself, on a schedule or when an event happens.
 // A person approves it once, with the mode and spend limits; each run is
-// then a mission started inside them. Anything a person must act on (a
-// limit, a missing connection, its approver gone) holds it with the reason.
+// then an agent run of Outflare's agent on the action layer inside them (or
+// a mission, when an outside agent runs it). Anything a person must act on
+// (a limit, a missing connection, its approver gone) holds it with the reason.
 
 const status: Record<PlaybookAutomation["status"], { label: string; tone: keyof typeof tones }> = {
   draft: { label: "Waits for approval", tone: "amber" },
@@ -65,7 +68,8 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
     if (error || !data) return setError(errorMessage(error));
     if (action === "run" && "id" in data) {
       toast("Started a run now.");
-      go("missions", data.id);
+      if (isAgentRun(data)) go("agents", data.id);
+      else go("missions", data.id);
       return;
     }
     toast(action === "approve" ? `${a.name} is on. ${automationWhen(a)}.` : `Paused ${a.name}.`);
@@ -73,7 +77,7 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
   }
 
   async function remove(a: PlaybookAutomation) {
-    if (!(await confirmAction(`Delete ${a.name}?`, "No more runs start. The runs it already started stay as missions.", "Delete"))) return;
+    if (!(await confirmAction(`Delete ${a.name}?`, "No more runs start. The runs it already started carry on until they end.", "Delete"))) return;
     const { error } = await api.DELETE("/v1/workspaces/{ws}/playbook-automations/{id}", { params: { path: { ws, id: a.id } } });
     if (error) return setError(errorMessage(error));
     load();
@@ -84,7 +88,7 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
     <section className="space-y-2">
       <h3 className="font-medium">Run it by itself</h3>
       <p className="text-muted-foreground">
-        On a schedule, or when something happens. You approve it once, with its mode and spend limits, and each run starts as a mission inside them. It stops and tells you why if a limit is reached or a connection goes missing.
+        On a schedule, or when something happens. You approve it once, with its mode and spend limits, and Outflare's agent starts each run inside them: its changes show on the Agents page. It stops and tells you why if a limit is reached or a connection goes missing.
       </p>
       <ErrorText>{error}</ErrorText>
       {list.length > 0 && (
@@ -105,7 +109,8 @@ export function PlaybookAutomations({ ws, playbook: p, inputs, canManage, go }: 
                 {a.status === "active" && a.next_run_at && <>Next {when(a.next_run_at)} · </>}
                 {plural(a.runs, "run")}
                 {a.last_run_at && <> · last {ago(a.last_run_at)}</>}
-                {a.last_mission_id && <> · <button type="button" className="underline underline-offset-4" onClick={() => go("missions", a.last_mission_id!)}>Last run</button></>}
+                {a.last_run_id ? <> · <button type="button" className="underline underline-offset-4" onClick={() => go("agents", a.last_run_id!)}>Last run</button></>
+                  : a.last_mission_id ? <> · <button type="button" className="underline underline-offset-4" onClick={() => go("missions", a.last_mission_id!)}>Last run</button></> : null}
               </div>
               {canManage && (
                 <div className="flex flex-wrap gap-2 pt-1">
@@ -141,6 +146,8 @@ function AutomationForm({ ws, playbook: p, inputs, onDone }: { ws: string; playb
   const [events, setEvents] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // The automation belongs to the brand in view, so its runs do too.
+  const brandID = useBrand(ws).brand?.id;
 
   useEffect(() => {
     api.GET("/v1/webhook-events").then(({ data }) => setEvents((data?.data ?? []).map((e) => e.type).filter((t) => t !== "webhook.test")));
@@ -155,6 +162,7 @@ function AutomationForm({ ws, playbook: p, inputs, onDone }: { ws: string; playb
     const body: PlaybookAutomationInput = {
       playbook_id: p.id, inputs, kind, mode, runner: "builtin", run_hour: runHour,
       max_spend_cents_per_run: run, max_spend_cents_per_month: month,
+      ...(brandID ? { brand_id: brandID } : {}),
       ...(kind === "schedule" ? { cadence } : { event_type: event, gather }),
     };
     setBusy(true);
@@ -215,7 +223,7 @@ function AutomationForm({ ws, playbook: p, inputs, onDone }: { ws: string; playb
           <input className={field} inputMode="decimal" placeholder="No limit" value={perMonth} onChange={(e) => setPerMonth(e.target.value)} />
         </label>
       </div>
-      <p className="text-[12px] text-muted-foreground">Outflare's agent runs each mission with your own AI model. Spend is on your own connected accounts. Link pitches still wait for your approval.</p>
+      <p className="text-[12px] text-muted-foreground">Outflare's agent runs each run with your own AI model, as an agent of its own on the action layer. Spend is on your own connected accounts. Some changes always wait for your approval.</p>
       <ErrorText>{error}</ErrorText>
       <div className="flex gap-2">
         <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Set it up"}</Button>

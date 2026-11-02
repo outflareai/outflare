@@ -76,8 +76,9 @@ func TestQuery(t *testing.T) {
 	if rows := queryRows(t, out); len(rows) != 1 || rows[0][0] != "Ada" {
 		t.Fatalf("brand token: %v", out)
 	}
-	if code, out := agent.do("POST", base+"/query", map[string]any{"sql": "select count(*) from leads"}); code != 403 || !strings.Contains(out["error"].(map[string]any)["message"].(string), "no brand") {
-		t.Fatalf("leads for a brand token: %d %v", code, out)
+	// Leads belong to a brand (step 5): the token reads its brand's only.
+	if rows := queryRows(t, agent.must(200, "POST", base+"/query", map[string]any{"sql": "select count(*) from leads"})); rows[0][0] != 0.0 {
+		t.Fatalf("leads for a brand token: %v", rows)
 	}
 	// Scopes: a table needs its own read scope.
 	if code, out := agent.do("POST", base+"/query", map[string]any{"sql": "select * from deals"}); code != 403 || !strings.Contains(out["error"].(map[string]any)["message"].(string), "outcomes.read") {
@@ -92,7 +93,7 @@ func TestQuery(t *testing.T) {
 			t.Fatalf("people has no columns: %v", m)
 		}
 	}
-	if !avail["people"] || avail["deals"] || avail["leads"] {
+	if !avail["people"] || avail["deals"] || !avail["leads"] {
 		t.Fatalf("tables: %v", avail)
 	}
 

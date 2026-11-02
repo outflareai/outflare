@@ -275,7 +275,7 @@ func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getPartner(w http.ResponseWriter, r *http.Request) {

@@ -82,18 +82,20 @@ type automationView struct {
 	NextRunAt           *time.Time `json:"next_run_at"`
 	LastRunAt           *time.Time `json:"last_run_at"`
 	LastMissionID       *string    `json:"last_mission_id"`
-	Runs                int        `json:"runs"`
-	ApprovedBy          *string    `json:"approved_by"`
-	ApprovedAt          *time.Time `json:"approved_at"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	// The last agent run it started (Outflare's agent on the action layer).
+	LastRunID  *string    `json:"last_run_id"`
+	Runs       int        `json:"runs"`
+	ApprovedBy *string    `json:"approved_by"`
+	ApprovedAt *time.Time `json:"approved_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 
 	lastEventID int64
 }
 
 const automationColumns = `id, playbook_id, name, brand_id::text, inputs, kind, cadence, run_hour, run_weekday, run_monthday,
 	event_type, gather, daily_cap, mode, runner, token_id::text, max_spend_cents_per_run, max_spend_cents_per_month,
-	status, held_reason, next_run_at, last_run_at, last_mission_id::text, runs, approved_by::text, approved_at,
+	status, held_reason, next_run_at, last_run_at, last_mission_id::text, last_run_id::text, runs, approved_by::text, approved_at,
 	created_at, updated_at, last_event_id`
 
 func scanAutomation(row pgx.Row) (automationView, error) {
@@ -101,7 +103,7 @@ func scanAutomation(row pgx.Row) (automationView, error) {
 	var inputs []byte
 	err := row.Scan(&v.ID, &v.PlaybookID, &v.Name, &v.BrandID, &inputs, &v.Kind, &v.Cadence, &v.RunHour, &v.RunWeekday, &v.RunMonthday,
 		&v.EventType, &v.Gather, &v.DailyCap, &v.Mode, &v.Runner, &v.TokenID, &v.MaxSpendCentsPerRun, &v.MaxSpendCentsPerMonth,
-		&v.Status, &v.HeldReason, &v.NextRunAt, &v.LastRunAt, &v.LastMissionID, &v.Runs, &v.ApprovedBy, &v.ApprovedAt,
+		&v.Status, &v.HeldReason, &v.NextRunAt, &v.LastRunAt, &v.LastMissionID, &v.LastRunID, &v.Runs, &v.ApprovedBy, &v.ApprovedAt,
 		&v.CreatedAt, &v.UpdatedAt, &v.lastEventID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, errNotFound
@@ -149,7 +151,13 @@ func automationSpend(ctx context.Context, q pgx.Tx, ws, id string, from time.Tim
 		}
 		total += p
 	}
-	return total, nil
+	// Agent runs: what their changes spent, through the action layer.
+	var runs int64
+	if err := q.QueryRow(ctx, `SELECT coalesce(sum(e.amount_cents), 0) FROM agent_runs r JOIN actions x ON x.token_id = r.token_id JOIN spend_entries e ON e.action_id = x.id
+		WHERE r.workspace_id = $1 AND r.automation_id = $2 AND e.occurred_at >= $3`, ws, id, from).Scan(&runs); err != nil {
+		return 0, err
+	}
+	return total + runs, nil
 }
 
 func (s *Server) automationOut(ctx context.Context, ws string, v automationView) (automationView, error) {
@@ -678,6 +686,10 @@ func (s *Server) runPlaybookAutomation(w http.ResponseWriter, r *http.Request) {
 	if s.automationError(w, r, err) {
 		return
 	}
+	if run, err := s.loadAgentRun(ctx, a, missionID); err == nil {
+		writeJSON(w, http.StatusCreated, run)
+		return
+	}
 	v, err := s.loadMission(ctx, a.WorkspaceID, missionID)
 	if s.missionError(w, r, err) {
 		return
@@ -711,7 +723,21 @@ func (s *Server) listPlaybookAutomationRuns(w http.ResponseWriter, r *http.Reque
 		}
 		out = append(out, m)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+	// Runs of Outflare's agent on the action layer.
+	rows, err = s.pool.Query(ctx, `SELECT `+agentRunColumns+` `+agentRunFrom+` WHERE r.workspace_id = $1 AND r.automation_id = $2 ORDER BY r.created_at DESC LIMIT 50`, a.WorkspaceID, v.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	agentRuns, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (agentRunView, error) { return scanAgentRun(row) })
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if agentRuns == nil {
+		agentRuns = []agentRunView{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "agent_runs": agentRuns})
 }
 
 // automationReady checks what a run needs before it starts: the
@@ -878,13 +904,40 @@ func (s *Server) fireAutomation(ctx context.Context, tx pgx.Tx, v automationView
 		}
 	}
 	p, _ := playbooks.Get(v.PlaybookID)
-	instructions, plan := playbookBrief(p, v.Inputs)
+	instructions, plan := playbookBrief(p, v.Inputs, v.Runner == runnerBuiltin)
 	instructions += "\n\n" + automationBrief(v, trigger, events, total)
 	name := v.Name + ", " + time.Now().UTC().Format("2 Jan 2006")
 	if len(name) > 200 {
 		name = name[:200]
 	}
 	goal := p.Summary
+	if v.Runner == runnerBuiltin {
+		// Outflare's agent runs it as an agent run on the action layer: the
+		// automation's mode becomes the run token's grants.
+		mode := map[string]string{missions.ModeDryRun: runModeDryRun, missions.ModeApproveWrites: runModeCopilot, missions.ModeAutonomous: runModeAutonomous}[v.Mode]
+		id, err := s.createAgentRun(ctx, tx, a, runSpec{Name: name, Goal: goal, Instructions: instructions, Plan: plan, Inputs: v.Inputs, BrandID: v.BrandID,
+			Mode: mode, MaxSpendCents: runLimit, PlaybookID: &p.ID, PlaybookVersion: &p.Version, AutomationID: &v.ID,
+			Note: "Started by the automation " + v.Name + ", with the approval " + actorLabel(ctx, tx, a) + " gave it."})
+		if err != nil {
+			var inv errInvalid
+			var denied errDenied
+			if errors.As(err, &inv) || errors.As(err, &denied) || errors.Is(err, ErrAgentSpec) {
+				return "", errHeld(err.Error())
+			}
+			return "", err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE playbook_automations SET last_run_at = now(), last_run_id = $2, runs = runs + 1, updated_at = now() WHERE id = $1`, v.ID, id); err != nil {
+			return "", err
+		}
+		props := automationProps(v)
+		props["trigger"], props["events"], props["run_id"] = trigger, total, id
+		data := map[string]any{"automation_id": v.ID, "playbook_id": p.ID, "playbook_version": p.Version, "run_id": id, "mode": mode, "trigger": trigger, "events": total}
+		if err := recordWithProps(ctx, tx, &a.principal, ws, "playbook.started", "agent_run", id, data, props); err != nil {
+			return "", err
+		}
+		return id, recordWithProps(ctx, tx, &a.principal, ws, "playbook_automation.ran", "playbook_automation", v.ID, data, props)
+	}
 	mi := missionInput{Name: &name, Goal: &goal, Instructions: &instructions, Plan: &plan, Mode: &v.Mode,
 		MaxSpendCents: optional[int64]{Set: runLimit != nil, Value: runLimit},
 		playbookID:    &p.ID, playbookVersion: &p.Version}

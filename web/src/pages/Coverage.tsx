@@ -580,7 +580,9 @@ function CoverageList({
 }) {
   const [rows, setRows] = useState<Row[]>([]),
     [total, setTotal] = useState(0),
-    [offset, setOffset] = useState(0),
+    // The cursor of each page shown so far, the current one last.
+    [pages, setPages] = useState<string[]>([""]),
+    [next, setNext] = useState<string | null>(null),
     [q, setQ] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>(
       initialView?.basic ?? {},
@@ -588,6 +590,7 @@ function CoverageList({
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const [pipeline, setPipeline] = useState(false);
+  const offset = (pages.length - 1) * 50;
   const [bulkError, setBulkError] = useState("");
   const [advanced, setAdvanced] = useState<FilterGroup>(
     initialView?.advanced ?? emptyFilters,
@@ -666,12 +669,13 @@ function CoverageList({
         q,
         filters: queryFilters,
         limit: 50,
-        offset,
+        ...(pages[pages.length - 1] ? { cursor: pages[pages.length - 1] } : {}),
       })
         .then((r) => {
           if (active) {
             setRows(r.data);
             setTotal(r.total);
+            setNext(r.next_cursor);
             setError("");
           }
         })
@@ -682,7 +686,7 @@ function CoverageList({
       active = false;
       clearTimeout(timer);
     };
-  }, [brand, def.name, q, filters, queryFilters, offset, reload, localReload]);
+  }, [brand, def.name, q, filters, queryFilters, pages, reload, localReload]);
   const columns =
     def.name === "placements"
       ? [
@@ -705,16 +709,17 @@ function CoverageList({
   const exportRows = async () => {
     try {
       const all: Row[] = [];
-      for (let page = 0; ; page += 200) {
+      for (let cursor = ""; ; ) {
         const r = await list(brand, def.name, {
           ...filters,
           filters: queryFilters,
           q,
           limit: 200,
-          offset: page,
+          ...(cursor ? { cursor } : {}),
         });
         all.push(...r.data);
-        if (all.length >= r.total || !r.data.length) break;
+        if (!r.next_cursor || !r.data.length) break;
+        cursor = r.next_cursor;
       }
       const blob = new Blob(
         [csv(all, ["id", ...def.fields.map((f) => f.name)])],
@@ -792,7 +797,7 @@ function CoverageList({
                 setAdvanced({ mode: "all", rules });
                 setQ("");
                 setFilters({});
-                setOffset(0);
+                setPages([""]);
                 track("ui.coverage_filters_changed", {
                   resource: def.name,
                   count: rules.length,
@@ -818,7 +823,7 @@ function CoverageList({
               setFilters(data.filters ?? {});
               setQ(data.q ?? "");
               setAdvanced(data.advanced ?? emptyFilters);
-              setOffset(0);
+              setPages([""]);
               setPipeline(!!data.pipeline);
             } catch {
               setError("This saved view could not be loaded.");
@@ -886,7 +891,7 @@ function CoverageList({
         value={advanced}
         onChange={(v) => {
           setAdvanced(v);
-          setOffset(0);
+          setPages([""]);
           track("ui.coverage_filters_changed", {
             resource: def.name,
             count: v.rules.length,
@@ -991,7 +996,7 @@ function CoverageList({
             value={q}
             onChange={(e) => {
               setQ(e.target.value);
-              setOffset(0);
+              setPages([""]);
             }}
           />
         </label>
@@ -1007,7 +1012,7 @@ function CoverageList({
               value={filters[f.name] ?? ""}
               onChange={(e) => {
                 setFilters({ ...filters, [f.name]: e.target.value });
-                setOffset(0);
+                setPages([""]);
               }}
             >
               <option value="">All {label(f.name).toLowerCase()}</option>
@@ -1171,21 +1176,21 @@ function CoverageList({
       )}
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {total ? offset + 1 : 0}–{Math.min(offset + 50, total)} of {total}
+          {total ? offset + 1 : 0}–{Math.min(offset + rows.length, total)} of {total}
           {pipeline && " · Pipeline shows this page of results"}
         </span>
         <div className="flex gap-2">
           <Button
             variant="ghost"
-            disabled={!offset}
-            onClick={() => setOffset(offset - 50)}
+            disabled={pages.length < 2}
+            onClick={() => setPages(pages.slice(0, -1))}
           >
             Previous
           </Button>
           <Button
             variant="ghost"
-            disabled={offset + 50 >= total}
-            onClick={() => setOffset(offset + 50)}
+            disabled={!next}
+            onClick={() => next && setPages([...pages, next])}
           >
             Next
           </Button>
@@ -2921,7 +2926,7 @@ function CoverageRelationshipContext({
           setItems(
             (r.data?.data ?? []) as unknown as Record<string, unknown>[],
           );
-          setNext(r.data?.next_before ?? null);
+          setNext(r.data?.next_cursor ?? null);
           setLoading(false);
         }
       } catch (e) {
@@ -2988,7 +2993,7 @@ function CoverageRelationshipContext({
                 {
                   params: {
                     path: { brand, record: company },
-                    query: { limit: 20, before: next, people: "true" },
+                    query: { limit: 20, cursor: next, people: "true" },
                   },
                 },
               );
@@ -3000,7 +3005,7 @@ function CoverageRelationshipContext({
                   unknown
                 >[]),
               ]);
-              setNext(r.data?.next_before ?? null);
+              setNext(r.data?.next_cursor ?? null);
             } catch (e) {
               setError(String(e));
             }

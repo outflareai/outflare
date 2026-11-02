@@ -54,18 +54,18 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 		return fmt.Sprint(s)
 	}
 	for q, want := range map[string]string{
-		"group=hot":                     "[hot@a.test ask@b.test]",
-		"group=later,closed":            "[later@c.test maybe@d.test]",
-		"category=question,auto_reply":  "[ask@b.test away@e.test]",
-		"source=emailbison":             "[ask@b.test maybe@d.test]",
-		"needs_review=true":             "[maybe@d.test]",
-		"min_confidence=0.9":            "[hot@a.test ask@b.test away@e.test]",
-		"tag=q4":                        "[later@c.test]",
-		"tag=vip,q4":                    "[hot@a.test later@c.test]",
-		"tag=vip&group=hot":             "[hot@a.test]",
-		"q=competitor":                  "[later@c.test]",
-		"group=automatic&kind=all":      "[away@e.test]",
-		"brand=none&needs_review=false": "[hot@a.test ask@b.test later@c.test away@e.test]",
+		"group=hot":                    "[hot@a.test ask@b.test]",
+		"group=later,closed":           "[later@c.test maybe@d.test]",
+		"category=question,auto_reply": "[ask@b.test away@e.test]",
+		"source=emailbison":            "[ask@b.test maybe@d.test]",
+		"needs_review=true":            "[maybe@d.test]",
+		"min_confidence=0.9":           "[hot@a.test ask@b.test away@e.test]",
+		"tag=q4":                       "[later@c.test]",
+		"tag=vip,q4":                   "[hot@a.test later@c.test]",
+		"tag=vip&group=hot":            "[hot@a.test]",
+		"q=competitor":                 "[later@c.test]",
+		"group=automatic&kind=all":     "[away@e.test]",
+		"brand=all&needs_review=false": "[hot@a.test ask@b.test later@c.test away@e.test]",
 	} {
 		if g := from(list(q)); g != want {
 			t.Errorf("%s: %s, want %s", q, g, want)
@@ -133,6 +133,12 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 	}
 	if len(named(got(), "inbox_tag.deleted")) != 1 {
 		t.Fatal("inbox_tag.deleted")
+	}
+	// The code writes only tags; the 0363 trigger keeps the old labels
+	// column equal for a version that still reads it.
+	var mismatched int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND labels <> tags`, ws).Scan(&mismatched); err != nil || mismatched != 0 {
+		t.Fatalf("labels differ from tags on %d replies: %v", mismatched, err)
 	}
 
 	// Saved views: personal by default, shared when asked; a token's are

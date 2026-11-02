@@ -27,19 +27,21 @@ func (e *Engine) Reply(ctx context.Context, workspaceID, inboundID, body string)
 	var rowID string
 	var via *viaPlatform
 	err := pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
-		var mailboxID, from, fromName, subject, msgID, refs string
+		var mailboxID, from, fromName, subject, msgID, refs, brand string
 		var leadID, integrationID, externalID *string
 		err := tx.QueryRow(ctx, `
-			SELECT mailbox_id, from_email, from_name, subject, message_id, references_ids, lead_id, integration_id::text, external_id
+			SELECT mailbox_id, from_email, from_name, subject, message_id, references_ids, lead_id, integration_id::text, external_id,
+				COALESCE(brand_id::text, '')
 			FROM inbound_messages WHERE id = $1 AND workspace_id = $2`, inboundID, workspaceID,
-		).Scan(&mailboxID, &from, &fromName, &subject, &msgID, &refs, &leadID, &integrationID, &externalID)
+		).Scan(&mailboxID, &from, &fromName, &subject, &msgID, &refs, &leadID, &integrationID, &externalID, &brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrInboundNotFound
 		}
 		if err != nil {
 			return err
 		}
-		d, err := policy.CheckRecipients(ctx, tx, workspaceID, []string{from})
+		// The reply's brand's opt-outs and those for every brand count.
+		d, err := policy.CheckRecipientsIn(ctx, tx, workspaceID, brand, []string{from})
 		if err != nil {
 			return err
 		}

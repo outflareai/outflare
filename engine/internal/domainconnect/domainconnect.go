@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ const (
 	ReasonNotOnboarded  = "not_onboarded"  // it does, but hasn't taken Outflare's template yet
 	ReasonNoTemplate    = "no_template"    // the records don't fit any template
 	ReasonLookupFailed  = "lookup_failed"  // the provider's API didn't answer
+	ReasonConflict      = "conflict"       // a record would land beside one already there
 )
 
 // Unavailable says why Domain Connect can't be used, with one of the
@@ -93,9 +95,10 @@ func (s Settings) Name() string {
 	return s.ProviderName
 }
 
-// Resolver looks up TXT records.
+// Resolver looks up TXT and MX records.
 type Resolver interface {
 	LookupTXT(ctx context.Context, name string) ([]string, error)
+	LookupMX(ctx context.Context, name string) ([]*net.MX, error)
 }
 
 // Client discovers DNS providers and builds signed apply links. Answers
@@ -256,12 +259,57 @@ func (c *Client) get(ctx context.Context, u string, into any) (int, error) {
 	return res.StatusCode, nil
 }
 
+// Conflicts reports a record in want that the provider would add beside
+// one already in DNS instead of replacing it. Cloudflare ignores the
+// templates' TXT conflict settings and replaces an apex MX, so a second
+// key at a DKIM selector, a second DMARC policy, or an MX in place of the
+// name's own would break mail. Those go through a DNS host connection or
+// by hand instead, where the person sees what is already there.
+func (c *Client) Conflicts(ctx context.Context, want []Rec) error {
+	for _, r := range want {
+		name := strings.TrimSuffix(strings.ToLower(r.Name), ".")
+		var found bool
+		var err error
+		switch {
+		case r.Type == "MX":
+			var mxs []*net.MX
+			mxs, err = c.Resolver.LookupMX(ctx, name)
+			found = len(mxs) > 0
+		case r.Type == "TXT" && strings.Contains(name, "._domainkey."):
+			var txts []string
+			txts, err = c.Resolver.LookupTXT(ctx, name)
+			found = len(txts) > 0
+		case r.Type == "TXT" && strings.HasPrefix(name, "_dmarc."):
+			var txts []string
+			txts, err = c.Resolver.LookupTXT(ctx, name)
+			found = slices.ContainsFunc(txts, func(t string) bool {
+				return strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=dmarc1")
+			})
+		default:
+			continue
+		}
+		var dnsErr *net.DNSError
+		if err != nil && !(errors.As(err, &dnsErr) && dnsErr.IsNotFound) {
+			return unavailable(ReasonLookupFailed, err)
+		}
+		if found {
+			return unavailable(ReasonConflict, nil)
+		}
+	}
+	return nil
+}
+
 // ApplyURL is the signed link to the provider's consent screen for a plan.
 // The provider sends the browser back to redirect with state, and error
 // when the person cancelled or it failed.
 func (c *Client) ApplyURL(z Zone, p Plan, redirect, state string) (string, error) {
 	if c.Key == nil {
 		return "", unavailable(ReasonNotConfigured, nil)
+	}
+	if p.Template.HostRequired && z.Host == "" {
+		// Cloudflare doesn't enforce hostRequired: without host= the CNAME
+		// goes on the apex, flattened over the site's own A records.
+		return "", unavailable(ReasonNoTemplate, nil)
 	}
 	q := url.Values{}
 	for k, v := range p.Vars {

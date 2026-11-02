@@ -60,14 +60,19 @@ func (c *runner) listen(ctx context.Context, args []string) int {
 	}
 
 	feed := s.URL + "/v1/workspaces/" + url.PathEscape(s.Workspace) + "/events"
-	after := "latest"
+	cursor := "" // empty: start from now
 	if forward != "" {
 		fmt.Fprintf(c.env.Stderr, "Forwarding events to %s, signed with %s\nPass that secret to verifyWebhook in your receiver. Ctrl-C to stop.\n", forward, secret)
 	} else {
 		fmt.Fprintln(c.env.Stderr, "Listening for events. Ctrl-C to stop.")
 	}
 	for {
-		q := url.Values{"after": {after}, "limit": {"100"}}
+		q := url.Values{"limit": {"100"}}
+		if cursor == "" {
+			q.Set("start", "latest")
+		} else {
+			q.Set("cursor", cursor)
+		}
 		if types != "" {
 			q.Set("types", types)
 		}
@@ -82,11 +87,11 @@ func (c *runner) listen(ctx context.Context, args []string) int {
 			return c.output(status, body, hdr, true)
 		}
 		var page struct {
-			Data      []json.RawMessage `json:"data"`
-			NextAfter string            `json:"next_after"`
-			HasMore   bool              `json:"has_more"`
+			Data       []json.RawMessage `json:"data"`
+			NextCursor string            `json:"next_cursor"`
+			HasMore    bool              `json:"has_more"`
 		}
-		if err := json.Unmarshal(body, &page); err != nil || page.NextAfter == "" {
+		if err := json.Unmarshal(body, &page); err != nil || page.NextCursor == "" {
 			return c.fail(1, errors.New("the server's events feed answered something unexpected"))
 		}
 		for _, ev := range page.Data {
@@ -96,7 +101,7 @@ func (c *runner) listen(ctx context.Context, args []string) int {
 			}
 			c.forward(ctx, forward, secret, ev)
 		}
-		after = page.NextAfter
+		cursor = page.NextCursor
 		if page.HasMore {
 			continue
 		}

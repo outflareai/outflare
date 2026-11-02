@@ -192,8 +192,13 @@ func fakeAttioCRM(t *testing.T) *httptest.Server {
 		case path == "/v2/workspace_members":
 			out = map[string]any{"data": []any{map[string]any{"id": map[string]string{"workspace_member_id": "m1"}, "email_address": "JACK@example.com"},
 				map[string]any{"id": map[string]string{"workspace_member_id": "m2"}, "email_address": "someone@elsewhere.example"}}}
-		case path == "/v2/lists", path == "/v2/notes", path == "/v2/tasks":
+		case path == "/v2/lists":
 			out = map[string]any{"data": []any{}}
+		case path == "/v2/notes":
+			out = map[string]any{"data": []any{map[string]any{"id": map[string]string{"note_id": "n1"}, "title": "Discovery notes", "content_plaintext": "Interested in an annual plan.", "parent_object": "people", "parent_record_id": "p1", "created_at": "2026-10-01T09:00:00Z"}}}
+		case path == "/v2/tasks":
+			out = map[string]any{"data": []any{map[string]any{"id": map[string]string{"task_id": "t1"}, "content_plaintext": "Follow up with Ann", "deadline_at": "2026-11-05T09:00:00Z", "assignees": []any{map[string]string{"referenced_actor_id": "m1"}}, "linked_records": []any{map[string]string{"target_object_id": "o-people", "target_record_id": "p1"}}}}}
+
 		case options[path] != nil:
 			list := []any{}
 			for _, title := range options[path] {
@@ -297,6 +302,10 @@ func TestCRMImportFromAttio(t *testing.T) {
 	v := waitCRMImport(t, owner, base, run["id"].(string))
 	if v["status"] != "done" {
 		t.Fatalf("import: %v", v)
+	}
+	var activityCount int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM crm_activities WHERE workspace_id=$1 AND source_id IS NOT NULL`, ws).Scan(&activityCount); err != nil || activityCount != 2 {
+		t.Fatalf("imported activities: %d, %v", activityCount, err)
 	}
 	sum := v["summary"].(map[string]any)
 	counts := map[string]map[string]any{}
@@ -412,4 +421,76 @@ func TestCRMImportFromAttio(t *testing.T) {
 func strPtr(v any) *string {
 	s, _ := v.(string)
 	return &s
+}
+
+func TestCRMImportListEntries(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	origin := fakeAttioCRM(t)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v2/lists":
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"api_slug": "sales", "name": "Sales", "parent_object": []string{"companies"}}}})
+			return
+		case "/v2/lists/sales/attributes":
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"api_slug": "stage", "title": "Stage", "type": "status"}}})
+			return
+		case "/v2/lists/sales/attributes/stage/statuses":
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"title": "Working"}}})
+			return
+		case "/v2/lists/sales/entries/query":
+			var body struct{ Offset int }
+			json.NewDecoder(r.Body).Decode(&body)
+			rows := []any{}
+			if body.Offset == 0 {
+				rows = append(rows, map[string]any{"id": map[string]string{"entry_id": "entry1"}, "parent_record_id": "c1", "entry_values": map[string]any{"stage": []any{map[string]any{"status": map[string]string{"title": "Working"}}}}})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"data": rows})
+			return
+		}
+		request, err := http.NewRequestWithContext(r.Context(), r.Method, origin.URL+r.URL.RequestURI(), r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(500)
+			return
+		}
+		request.Header = r.Header.Clone()
+		response, err := origin.Client().Do(request)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(500)
+			return
+		}
+		defer response.Body.Close()
+		w.WriteHeader(response.StatusCode)
+		io.Copy(w, response.Body)
+	}))
+	defer proxy.Close()
+	e.integrations.Client.BaseURLs["attio"] = proxy.URL
+	e.runCRMImports(t)
+	integration := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "attio", "credentials": map[string]string{"api_key": "at-key"}})["id"].(string)
+	path := base + "/integrations/" + integration + "/crm-imports"
+	run := owner.must(202, "POST", path, map[string]any{})
+	result := waitCRMImport(t, owner, base, run["id"].(string))
+	if result["status"] != "done" {
+		t.Fatalf("list import: %v", result)
+	}
+	entries := owner.must(200, "GET", base+"/records?type=list_sales", nil)["data"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("entries: %v", entries)
+	}
+	values := entries[0].(map[string]any)["attributes"].(map[string]any)
+	if values["stage"] != "working" || values["outflare_parent_record"] == nil {
+		t.Fatalf("list values: %v", values)
+	}
+	again := owner.must(202, "POST", path, map[string]any{})
+	waitCRMImport(t, owner, base, again["id"].(string))
+	if len(owner.must(200, "GET", base+"/records?type=list_sales", nil)["data"].([]any)) != 1 {
+		t.Fatal("rerun duplicated list entry")
+	}
+	var activities int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM crm_activities WHERE workspace_id=$1`, ws).Scan(&activities); err != nil || activities != 2 {
+		t.Fatalf("rerun duplicated notes or tasks: %d %v", activities, err)
+	}
 }

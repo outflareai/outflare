@@ -37,6 +37,7 @@ import { Separator } from "@/components/ui/separator";
 import { FeedbackButton, WhatsNewButton } from "@/components/build-with-us";
 
 export const tabNames: Record<Tab, string> = {
+ crm: "Sales workspace",
   overview: "Home",
   "get-started": "Get started",
   setup: "Brand setup",
@@ -76,6 +77,7 @@ export const tabNames: Record<Tab, string> = {
   visitors: "Visitors",
   inbox: "Inbox",
   missions: "Missions",
+  agents: "Agents",
   playbooks: "Playbooks",
   outcomes: "Outcomes",
   sequences: "Sequences",
@@ -124,6 +126,7 @@ export const tabNames: Record<Tab, string> = {
 // What each page is for, in a line: the All tools page and the command
 // palette show it.
 export const tabBlurbs: Record<Tab, string> = {
+ crm: "People, companies, deals, saved views, tasks and notes in one sales workspace.",
   overview: "How sending is going across every mailbox and sequence, and what to set up next.",
   "get-started": "Add your brand, invite your team and connect your AI model, analytics and tools. Every step can be skipped.",
   setup: "One brand's website script, site verification and tools, in order, each in one click where it can be. Leave any time and pick up where you left off.",
@@ -134,6 +137,7 @@ export const tabBlurbs: Record<Tab, string> = {
   inbox: "Replies from every mailbox in one place, with the ones that need an answer first.",
   playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or start one as a mission.",
   missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
+  agents: "What your agents changed, what waits for you, and what each may do on its own.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
   query: "Ask the brand's data anything in SQL: every table and record type, results as a table or a chart, CSV downloads, and saved queries with their versions.",
@@ -287,11 +291,11 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // tool joins its module; a new module is one more entry here, in this
 // order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Reviews, Paid ads,
 // Partners, Analytics, Playbooks. A module with no pages yet is left out.
-export const everyday: Tab[] = ["overview", "inbox", "missions"];
+export const everyday: Tab[] = ["overview", "inbox", "missions", "agents"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["crm", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
@@ -317,7 +321,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -916,6 +920,8 @@ type Call = { title: string; path: string; params: Record<string, string>; query
 function callFor(tab: Tab, ws: string, item?: string): Call {
   const base = { ws };
   switch (tab) {
+    case "crm":
+      return { title: "CRM records", path: "/v1/workspaces/{ws}/records", params: base, query: { type: item?.split(":")[0] ?? "person", limit: 50 }, mcp: "list_records", ask: "Show my sales relationships and the next follow-ups.", scope: "customers.read" };
     case "overview":
       return { title: "Workspace stats", path: "/v1/workspaces/{ws}/stats", params: base, mcp: "get_overview", ask: "How is sending going this week?", scope: "workspace.read" };
     case "get-started":
@@ -994,12 +1000,14 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Campaign links", path: "/v1/workspaces/{ws}/tracking-campaigns", params: base, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":
       return item
-        ? { title: "One conversation", path: "/v1/workspaces/{ws}/inbox/{id}", params: { ...base, id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
-        : { title: "Unread replies", path: "/v1/workspaces/{ws}/inbox", params: base, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
+        ? { title: "One conversation", path: "/v1/brands/{brand}/inbox/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_inbox_message", ask: "Summarise this reply and draft an answer.", scope: "inbox.read" }
+        : { title: "Unread replies", path: "/v1/brands/{brand}/inbox", params: { brand: "BRAND_ID" }, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
     case "playbooks":
       return item
         ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "missions.read" }
         : { title: "Playbooks", path: "/v1/workspaces/{ws}/playbooks", params: base, mcp: "list_playbooks", ask: "Which playbooks am I ready to run, and what should I connect for the rest?", scope: "missions.read" };
+    case "agents":
+      return { title: "Agent changes waiting for a person", path: "/v1/workspaces/{ws}/actions", params: base, query: { status: "held" }, mcp: "list_actions", ask: "What are my agents waiting on me to approve, and what did they change today?", scope: "actions.read" };
     case "missions":
       return item
         ? { title: "One mission", path: "/v1/workspaces/{ws}/missions/{id}", params: { ...base, id: item }, mcp: "get_mission", ask: "What has this mission done so far, and what is it waiting on?", scope: "missions.read" }
@@ -1008,13 +1016,15 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Cost per meeting", path: "/v1/workspaces/{ws}/outcomes/report", params: base, query: { group_by: "sequence" }, mcp: "get_outcomes_report", ask: "Which sequences have the lowest cost per meeting this month?", scope: "outcomes.read" };
     case "sequences":
       return item
-        ? { title: "One sequence", path: "/v1/workspaces/{ws}/sequences/{id}", params: { ...base, id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
-        : { title: "All sequences", path: "/v1/workspaces/{ws}/sequences", params: base, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
+        ? { title: "One sequence", path: "/v1/brands/{brand}/sequences/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_sequence", ask: "How is this sequence performing by step?", scope: "sequences.read" }
+        : { title: "All sequences", path: "/v1/brands/{brand}/sequences", params: { brand: "BRAND_ID" }, mcp: "list_sequences", ask: "List my active sequences and their reply rates.", scope: "sequences.read" };
     case "people":
       return item && /^[0-9a-f-]{36}$/.test(item)
         ? { title: "One record", path: "/v1/brands/{brand}/records/{record}", params: { brand: "BRAND_ID", record: item }, mcp: "get_record", ask: "Summarise this person's history with us and what to do next.", scope: "customers.read" }
         : item === "events"
           ? { title: "A brand's received product events", path: "/v1/brands/{brand}/events/summary", params: { brand: "BRAND_ID" }, mcp: "get_brand_events_summary", ask: "Which of our product events were rejected or held this week, and what should we fix?", scope: "customers.read" }
+          : item === "products"
+          ? { title: "A brand's products and lifecycle stages", path: "/v1/brands/{brand}/lifecycle", params: { brand: "BRAND_ID" }, mcp: "get_lifecycle", ask: "Which companies are partly churned, and which product did they leave?", scope: "customers.read" }
           : item === "duplicates"
           ? { title: "Possible duplicates", path: "/v1/brands/{brand}/records/duplicates", params: { brand: "BRAND_ID" }, mcp: "list_record_duplicates", ask: "Which possible duplicates are safe to merge, and which look like two different people?", scope: "customers.read" }
           : { title: item === "companies" ? "Companies" : "People", path: "/v1/brands/{brand}/records", params: { brand: "BRAND_ID" }, query: { type: item === "companies" ? "account" : "person", limit: 50 }, mcp: "list_records", ask: "Which customers at fintech companies haven't heard from us this month?", scope: "customers.read" };
@@ -1023,11 +1033,11 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One saved query", path: "/v1/brands/{brand}/queries/{saved_query}", params: { brand: "BRAND_ID", saved_query: item }, mcp: "get_saved_query", ask: "Run this saved query and tell me what changed since last month.", scope: "customers.read" }
         : { title: "Saved queries", path: "/v1/brands/{brand}/queries", params: { brand: "BRAND_ID" }, mcp: "list_saved_queries", ask: "How many people signed up each week this quarter, by plan? Save the query for the team.", scope: "customers.read" };
     case "leads":
-      return { title: "Leads", path: "/v1/workspaces/{ws}/leads", params: base, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
+      return { title: "Leads", path: "/v1/brands/{brand}/leads", params: { brand: "BRAND_ID" }, query: { limit: 50 }, mcp: "list_leads", ask: "Find leads at companies in fintech.", scope: "leads.read" };
     case "lists":
       return item
-        ? { title: "One lead list", path: "/v1/workspaces/{ws}/lead-lists/{id}", params: { ...base, id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
-        : { title: "Lead lists", path: "/v1/workspaces/{ws}/lead-lists", params: base, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
+        ? { title: "One lead list", path: "/v1/brands/{brand}/lead-lists/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
+        : { title: "Lead lists", path: "/v1/brands/{brand}/lead-lists", params: { brand: "BRAND_ID" }, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
     case "link-autopilot":
       return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "missions.read" };
     case "lead-finder":
@@ -1035,7 +1045,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "email-finder":
       return { title: "Find a work email", path: "/v1/workspaces/{ws}/email-finder/find", params: base, mcp: "find_emails", ask: "Find the work email for Alice Nguyen at acme.example.", scope: "leads.read" };
     case "suppression":
-      return { title: "Suppression list", path: "/v1/workspaces/{ws}/suppressions", params: base, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
+      return { title: "Suppression list", path: "/v1/brands/{brand}/suppressions", params: { brand: "BRAND_ID" }, mcp: "list_suppressions", ask: "Is anyone at acme-com.example suppressed?", scope: "leads.read" };
     case "mailboxes":
       return { title: "Mailboxes", path: "/v1/workspaces/{ws}/mailboxes", params: base, mcp: "list_mailboxes", ask: "Which mailboxes are failing to sign in?", scope: "mailboxes.read" };
     case "domains":

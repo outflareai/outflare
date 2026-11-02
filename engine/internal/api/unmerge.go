@@ -236,8 +236,8 @@ func (s *Server) listMerges(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	where := []string{"m.brand_id = $1", "m.workspace_id = $2", "(m.merged_at, m.id::text) < ($3, $4)"}
@@ -274,7 +274,7 @@ func (s *Server) listMerges(w http.ResponseWriter, r *http.Request) {
 		v := last.MergedAt.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // ---- Undoing ----

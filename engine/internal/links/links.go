@@ -83,10 +83,12 @@ func Upsert(ctx context.Context, q Querier, workspaceID string, l Link) (id, seq
 		if name == "" {
 			name = "Campaign " + l.ExternalID
 		}
+		// The campaign is the connection's brand's, else the workspace's
+		// first (plans/brands/README.md: nothing is for every brand).
 		if err := q.QueryRow(ctx, `
-			INSERT INTO sequences (workspace_id, name, status)
-			VALUES ($1, $2, $3)
-			RETURNING id::text`, workspaceID, name, SequenceStatus(l.Status)).Scan(&sequenceID); err != nil {
+			INSERT INTO sequences (workspace_id, name, status, brand_id)
+			VALUES ($1, $2, $3, COALESCE((SELECT brand_id FROM integrations WHERE id = NULLIF($4, '')::uuid), outflare_first_brand($1)))
+			RETURNING id::text`, workspaceID, name, SequenceStatus(l.Status), l.IntegrationID).Scan(&sequenceID); err != nil {
 			return "", "", err
 		}
 	}

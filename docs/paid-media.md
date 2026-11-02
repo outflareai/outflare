@@ -68,15 +68,29 @@ numbers. Each run stores:
 - **Ad sets and ads** (Meta Ads and Google Ads, where Google calls ad sets ad
   groups): each one under its campaign, with its status, a Meta ad set's own
   budget, and for each ad what the platform says about it: its headline, text,
-  landing page, URL parameters or tracking template, its type (Google) and a
-  preview image (Meta, a link that expires and is refreshed by each sync).
+  landing page, URL parameters (Meta) or final URL suffix and tracking template
+  (Google, the ad's own or the ones it inherits from its ad group, campaign or
+  account), its type (Google) and a preview image (Meta, a link that expires
+  and is refreshed by each sync), and whether those links carry Outflare's
+  tracking template.
   Removed ad groups and ads aren't listed, but their numbers still sync while a
   report has them.
 - **Daily metrics** for each campaign, ad set and ad: spend, impressions,
   clicks, and the platform's own conversions and conversion value where it
   reports them. Days are the account's own days, in its time zone. An ad set's
   and an ad's numbers are already in their campaign's, so totals count
-  campaigns only.
+  campaigns only. From Meta also link clicks, landing page views, 3-second
+  video views and reach. Reach is each day's people: added over days, someone
+  reached on two days counts twice, so frequency is the average day's.
+- **Conversions by type** for each campaign, ad set and ad per day. Meta's
+  standard kinds (purchase, lead, complete_registration, start_trial,
+  subscribe) each count once, though Meta reports a purchase as `purchase`,
+  `omni_purchase` and the pixel's own; custom conversions are listed as
+  `custom.<id>` and aren't in the conversions total. Google's are its
+  conversion actions, by name.
+- **Google search keywords and search terms**: each keyword that showed an
+  ad, with its match type and numbers per day, and what people searched, with
+  the keyword it matched. Google leaves out searches too few people made.
 - **Spend in the costs ledger**: one entry per campaign (never per ad set or ad) per day, channel
   `paid_ads`, in the account's currency and brand, so paid ads sit beside every
   other cost and outcome. An entry is updated when the platform revises the day.
@@ -87,19 +101,23 @@ are not added up across platforms as if they were.
 
 ## Reading it
 
-In the app, open **Paid ads** in the sidebar: spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by day, platform and campaign, with each account's brand and sync switch. Open a campaign for its numbers by day, its ad sets and its ads; open an ad set to see only its ads. A connection that still needs a developer token asks for it at the top.
+In the app, open **Paid ads** in the sidebar: spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by day, platform and campaign, with each account's brand and sync switch. Open a campaign for its numbers by day, its conversions by type, its ad sets and its ads, each beside the visits, conversions and revenue Outflare's own attribution credits to it, and for Google its keywords and search terms; open an ad set to see only its ads. An ad whose links lack the tracking template is marked. A connection that still needs a developer token asks for it at the top.
 
 | Call | What it answers |
 | --- | --- |
 | `GET /v1/workspaces/{ws}/ads/accounts` | Every account, its brand and sync status |
 | `GET /v1/workspaces/{ws}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS |
 | `GET /v1/workspaces/{ws}/ads/items` | Ad sets and ad groups (`level=ad_group`) or ads (`level=ad`), ranked by spend, with their campaign; `campaign_id` or `parent_id` narrows them |
+| `GET /v1/workspaces/{ws}/ads/conversion-actions` | Platform conversions by action, per connector and currency; `entity_id` gives one campaign's, ad set's or ad's |
+| `GET /v1/workspaces/{ws}/ads/keywords` | Google search keywords ranked by spend; `campaign_id` or `ad_group_id` narrows them |
+| `GET /v1/workspaces/{ws}/ads/search-terms` | What people searched that showed a Google ad, with the keyword it matched, ranked by spend |
 | `GET /v1/workspaces/{ws}/ads/summary` | Totals grouped by `connector`, `brand`, `account` or `day`, per currency; `entity_id` gives one campaign's, ad set's or ad's numbers alone |
 | `POST /v1/workspaces/{ws}/ads/sync` | Sync now instead of within six hours |
 
 All of them take `brand`. Money is in micros of the account's currency
 (1,000,000 = one unit); totals are given per currency, never converted. The MCP
 server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`, `list_ad_items`,
+`list_ad_conversion_actions`, `list_ad_keywords`, `list_ad_search_terms`,
 `get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`).
 
 To credit sales to each ad by its id, paste the network's tracking template

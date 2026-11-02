@@ -214,7 +214,7 @@ var (
 	// "apply these records?" screen.
 	domainConnectLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "domain_connect", Name: "lookups_total",
-		Help: "Domain Connect lookups, by outcome: available, or why not (not_configured, no_provider, not_onboarded, no_template, nothing_to_add, lookup_failed).",
+		Help: "Domain Connect lookups, by outcome: available, or why not (not_configured, no_provider, not_onboarded, no_template, nothing_to_add, lookup_failed, conflict).",
 	}, []string{"outcome"})
 	domainConnectDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "domain_connect", Name: "lookup_seconds",
@@ -222,10 +222,44 @@ var (
 		Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10},
 	})
 	// Query: read-only SQL run for people and agents.
+	// Calls Outflare makes to MCP servers (engine/internal/mcpclient).
+	mcpClientCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mcp_client", Name: "calls_total",
+		Help: "Calls Outflare made to MCP servers, by operation (connect, list_tools, call_tool) and outcome (success, error).",
+	}, []string{"op", "outcome"})
+	mcpClientDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "mcp_client", Name: "call_duration_seconds",
+		Help:    "How long calls to MCP servers took, by operation.",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120},
+	}, []string{"op"})
+
+	// The action layer (ADR 13): what the gate decided for agent tokens'
+	// changes, and how decided changes ended.
+	actionsDecided = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "actions", Name: "decided_total",
+		Help: "Changes agent tokens made through the action layer, by what the gate did (running, held, refused) and why (grant, no_grant, daily_limit, always_person).",
+	}, []string{"decision", "rule"})
+	agentRunTurns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "agent_runs", Name: "turns_total",
+		Help: "Turns Outflare's agent took in agent runs (playbooks on the action layer), by how they ended: done, failed (the model or the API broke) or paused (the run paused with a reason a person acts on).",
+	}, []string{"outcome"})
+	actionsFinished = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "actions", Name: "finished_total",
+		Help: "Agent changes that ended, by outcome: executed, failed (it ran and the API answered an error) or rejected (a person said no).",
+	}, []string{"outcome"})
 	ruleEvaluations = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "rules", Name: "evaluations_total",
 		Help: "Rules evaluated for a record, by trigger kind and outcome (fired; or why not: no_match, duplicate, cooldown, late, before_live, too_deep, manual; absence clocks started and stopped).",
 	}, []string{"trigger", "outcome"})
+	// Lifecycle stages per product (engine/internal/lifecycle).
+	lifecycleEvaluations = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "lifecycle", Name: "evaluations_total",
+		Help: "Lifecycle checks of a record at a level (company, person; any before a level is known), by outcome: moved, or why not (no_move, duplicate, late, stale, before_live, not_approved, off).",
+	}, []string{"level", "outcome"})
+	lifecycleSweepDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "lifecycle", Name: "sweep_seconds",
+		Help: "How long one inactivity sweep took.", Buckets: jobBuckets,
+	})
 	// Marketing email guardrails: sends the frequency cap stopped and
 	// quiet hours held.
 	emailsGuarded = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -249,6 +283,10 @@ var (
 		Namespace: namespace, Subsystem: "sequencers", Name: "leads_pushed_total",
 		Help: "People journeys added to sequencer campaigns, by connector (smartlead, instantly, emailbison) and outcome (added, already_in, refused by the sequencer, error).",
 	}, []string{"connector", "outcome"})
+	mailSignInsMoved = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "mailboxes", Name: "sign_ins_moved_total",
+		Help: "Mailbox sign-ins from before they were connections, moved into Gmail and Outlook connections at start-up, by kind (admin: an admin connection; sign_in: a mailbox's own sign-in) and outcome (moved, linked to a connection that already existed, skipped with nothing to move, failed).",
+	}, []string{"kind", "outcome"})
 	journeyCallDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "journeys", Name: "call_duration_seconds",
 		Help: "Time one try of a journey step's call took, by step kind.", Buckets: requestBuckets,
@@ -307,6 +345,10 @@ var (
 		Namespace: namespace, Subsystem: "knowledge", Name: "asks_total",
 		Help: "Questions asked of the knowledge base, by outcome (answered, unanswered, no_ai, error).",
 	}, []string{"outcome"})
+	knowledgeSuggestions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "suggestions_total",
+		Help: "Knowledge review queue: suggestions by source (support_reply, website, slack, agent, person, answer) and outcome (created, not_reusable, no_ai, error, approved, rejected).",
+	}, []string{"source", "outcome"})
 	supportMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "messages_total",
 		Help: "Support inbox messages, by kind (in: from a customer, out: a reply queued, note) and outcome.",
@@ -319,6 +361,26 @@ var (
 		Namespace: namespace, Subsystem: "support", Name: "reply_seconds",
 		Help: "Time to send one support reply through its mailbox.", Buckets: []float64{.1, .25, .5, 1, 2.5, 5, 10, 20, 30, 60},
 	})
+	supportAssistantRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "assistant_runs_total",
+		Help: "Runs of the support assistant, by channel (email, chat) and action (answer, clarify, handoff, skipped, failed).",
+	}, []string{"channel", "action"})
+	supportAssistantDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "support", Name: "assistant_seconds",
+		Help: "Time for the support assistant to decide on one customer message, model calls included.", Buckets: []float64{.1, .5, 1, 2.5, 5, 10, 20, 30, 60, 120},
+	})
+	knowledgeAnswerSearches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "answer_searches_total",
+		Help: "Searches for an answer the knowledge didn't have, by source (website, slack, none) and outcome (found, none, nothing_to_read, error, no_ai, off).",
+	}, []string{"source", "outcome"})
+	knowledgeAnswerSearchDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "answer_search_seconds",
+		Help: "Time to search the website and Slack for one missing answer.", Buckets: []float64{.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180},
+	})
+	supportChatRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "chat_requests_total",
+		Help: "Requests from website chat widgets, by route (loader, frame, session, poll, send, articles) and outcome (ok, not_found, limited, bad_token, invalid, error).",
+	}, []string{"route", "outcome"})
 	supportSLABreaches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "sla_breaches_total",
 		Help: "Support SLA targets missed, by target (reply: the team's next reply, resolve: resolving the conversation).",
@@ -422,7 +484,7 @@ var (
 	// Ad groups' and ads' days stored by the ad sync (Meta and Google).
 	adItemRows = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "item_days_synced_total",
-		Help: "Days of numbers stored for ad groups (Meta ad sets, Google ad groups) and ads by the ad sync, by level (ad_group, ad).",
+		Help: "Days of numbers stored below campaigns by the ad sync, by level: ad_group (Meta ad sets, Google ad groups), ad, keyword and search_term (Google).",
 	}, []string{"level"})
 	// Social accounts: reading followers of connected accounts and of the
 	// public profiles in brand links.
@@ -509,6 +571,19 @@ var (
 		Namespace: namespace, Subsystem: "news", Name: "story_ai_runs_total",
 		Help: "Runs of the workspace's own AI on stories, by kind (ideas, draft, pitch: a pitch opener, reply: reading a journalist's reply) and outcome (success, connector_needed, ai_model_needed, ai_budget_reached, connector_auth, ai_failed, check_failed).",
 	}, []string{"kind", "outcome"})
+
+	quoteApprovalEmails = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stories", Name: "quote_approval_emails_total",
+		Help: "Emails asking an expert to approve a quote, as their outreach sequence finished them, by outcome (sent, blocked, failed, bounced).",
+	}, []string{"outcome"})
+	quoteApprovalPages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stories", Name: "quote_approval_pages_total",
+		Help: "Requests to the public quote approval page, by action (view, decide) and outcome (ok, gone, invalid, limited, error).",
+	}, []string{"action", "outcome"})
+	quoteApprovalDecisions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "stories", Name: "quote_approval_decisions_total",
+		Help: "Experts' decisions on quotes through an approval link, by decision (approved, changes_suggested, declined).",
+	}, []string{"decision"})
 
 	linkPageChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "seo", Name: "link_page_checks_total",
@@ -705,11 +780,13 @@ var own = []prometheus.Collector{
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
-	ruleEvaluations, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs,
+	mcpClientCalls, mcpClientDuration, ruleEvaluations, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, mailSignInsMoved,
+	actionsDecided, actionsFinished, agentRunTurns,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
-	supportMessages, supportReplies, supportReplyDuration, supportSLABreaches, supportOverdue, supportSLAChecks, supportSLACheckDuration,
+	knowledgeSuggestions,
+	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
@@ -718,6 +795,7 @@ var own = []prometheus.Collector{
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
 	coverageChecks, coverageReviews, newsRuns, newsFound, newsReads, storyAIRuns,
+	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
 	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
@@ -880,6 +958,31 @@ func FlagCache(hit bool) {
 // and outcome.
 func RuleEvaluated(trigger, outcome string) { ruleEvaluations.WithLabelValues(trigger, outcome).Inc() }
 
+// LifecycleEvaluated counts one lifecycle check of a record at a level
+// (company, person, or any), by outcome.
+func LifecycleEvaluated(level, outcome string) {
+	lifecycleEvaluations.WithLabelValues(level, outcome).Inc()
+}
+
+// LifecycleSweepDuration observes one inactivity sweep.
+func LifecycleSweepDuration(d time.Duration) { lifecycleSweepDuration.Observe(d.Seconds()) }
+
+// MCPClientCalled counts a call Outflare made to an MCP server.
+func MCPClientCalled(op, outcome string, d time.Duration) {
+	mcpClientCalls.WithLabelValues(op, outcome).Inc()
+	mcpClientDuration.WithLabelValues(op).Observe(d.Seconds())
+}
+
+// AgentRunTurn counts a turn of Outflare's agent in an agent run, by how
+// it ended: done, failed, or paused (the run paused with a reason).
+func AgentRunTurn(outcome string) { agentRunTurns.WithLabelValues(outcome).Inc() }
+
+// ActionDecided counts what the action layer's gate did with a change.
+func ActionDecided(decision, rule string) { actionsDecided.WithLabelValues(decision, rule).Inc() }
+
+// ActionFinished counts how a decided change ended.
+func ActionFinished(outcome string) { actionsFinished.WithLabelValues(outcome).Inc() }
+
 // EmailGuarded records a marketing email a guardrail stopped or held: what
 // sent it (journey, broadcast) and the outcome (frequency_cap,
 // quiet_hours).
@@ -920,6 +1023,11 @@ func AdAudienceSynced(connector, outcome string) {
 func SequencerPushed(connector, outcome string) {
 	sequencerPushes.WithLabelValues(connector, outcome).Inc()
 }
+
+// MailSignInMoved records one older mailbox sign-in moved into a
+// connection: kind (admin, sign_in) and outcome (moved, linked, skipped,
+// failed).
+func MailSignInMoved(kind, outcome string) { mailSignInsMoved.WithLabelValues(kind, outcome).Inc() }
 
 // Excluded records people an exclusion left out of a journey, a
 // broadcast or a sequence.
@@ -985,9 +1093,20 @@ func HelpCentreRender(d time.Duration) {
 	helpRender.Observe(d.Seconds())
 }
 
+// KnowledgeSuggestion records what happened to one review queue
+// suggestion, by where it came from.
+func KnowledgeSuggestion(source, outcome string) {
+	knowledgeSuggestions.WithLabelValues(source, outcome).Inc()
+}
+
 // SupportMessage records one support inbox message: kind in, out or note,
 // and its outcome.
 func SupportMessage(kind, outcome string) { supportMessages.WithLabelValues(kind, outcome).Inc() }
+
+// SupportChatRequest records one request from a website chat widget.
+func SupportChatRequest(route, outcome string) {
+	supportChatRequests.WithLabelValues(route, outcome).Inc()
+}
 
 // SupportSLABreached records one SLA target missed: reply or resolve.
 func SupportSLABreached(target string) { supportSLABreaches.WithLabelValues(target).Inc() }
@@ -1003,6 +1122,21 @@ func SupportSLACheck(ok bool, d time.Duration) {
 	}
 	supportSLAChecks.WithLabelValues(outcome).Inc()
 	supportSLACheckDuration.Observe(d.Seconds())
+}
+
+// SupportAssistant records one run of the support assistant.
+func SupportAssistant(channel, action string, d time.Duration) {
+	supportAssistantRuns.WithLabelValues(channel, action).Inc()
+	supportAssistantDuration.Observe(d.Seconds())
+}
+
+// KnowledgeAnswerSearch records one search of a source for a missing
+// answer; d is zero when nothing was searched.
+func KnowledgeAnswerSearch(source, outcome string, d time.Duration) {
+	knowledgeAnswerSearches.WithLabelValues(source, outcome).Inc()
+	if d > 0 {
+		knowledgeAnswerSearchDuration.Observe(d.Seconds())
+	}
 }
 
 // SupportSent records one run of the support reply job.
@@ -1161,6 +1295,19 @@ func NewsArticleRead(status string, journalist bool) {
 // StoryAIRun records one run of the AI on stories: ideas or a draft, and
 // its outcome.
 func StoryAIRun(kind, outcome string) { storyAIRuns.WithLabelValues(kind, outcome).Inc() }
+
+// QuoteApprovalEmail records what became of one quote approval email in
+// its outreach sequence: sent, blocked, failed or bounced.
+func QuoteApprovalEmail(outcome string) { quoteApprovalEmails.WithLabelValues(outcome).Inc() }
+
+// QuoteApprovalPage records one request to the public quote approval page.
+func QuoteApprovalPage(action, outcome string) {
+	quoteApprovalPages.WithLabelValues(action, outcome).Inc()
+}
+
+// QuoteApprovalDecided records an expert's decision through an approval
+// link.
+func QuoteApprovalDecided(decision string) { quoteApprovalDecisions.WithLabelValues(decision).Inc() }
 
 // SocialPublished records one try of the publish job.
 func SocialPublished(channel, outcome string) {

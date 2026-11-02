@@ -60,11 +60,11 @@ func TestLeadImportMergeAndLists(t *testing.T) {
 
 	// Pagination.
 	p1 := owner.must(200, "GET", base+"/leads?limit=2", nil)
-	if len(p1["data"].([]any)) != 2 || p1["next_after"] == nil {
+	if len(p1["data"].([]any)) != 2 || p1["next_cursor"] == nil {
 		t.Fatalf("page 1: %v", p1)
 	}
-	p2 := owner.must(200, "GET", base+"/leads?limit=2&after="+p1["next_after"].(string), nil)
-	if d := p2["data"].([]any); len(d) != 1 || d[0].(map[string]any)["email"] != "cy@gamma-io.example" || p2["next_after"] != nil {
+	p2 := owner.must(200, "GET", base+"/leads?limit=2&cursor="+p1["next_cursor"].(string), nil)
+	if d := p2["data"].([]any); len(d) != 1 || d[0].(map[string]any)["email"] != "cy@gamma-io.example" || p2["next_cursor"] != nil {
 		t.Fatalf("page 2: %v", p2)
 	}
 

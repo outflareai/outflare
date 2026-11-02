@@ -1,14 +1,16 @@
-// Inside a campaign: its numbers by day, its ad sets (Google: ad groups)
-// and its ads, each with what it spent and what the platform says it
-// brought. Meta Ads and Google Ads read below campaigns; other platforms
-// show the campaign's trend only.
+// Inside a campaign: its numbers by day and its conversions by type, its
+// ad sets (Google: ad groups) and its ads, each with what it spent, what the
+// platform says it brought and what Outflare's own attribution credits to
+// it, and for Google its keywords and the searches they matched. Meta Ads
+// and Google Ads read below campaigns; other platforms show the campaign's
+// trend only.
 
 import { useEffect, useRef, useState } from "react";
-import type { AdCampaign, AdItem, AdSummaryRow } from "@outflare/sdk";
+import type { AdCampaign, AdConversionAction, AdItem, AdKeyword, AdSearchTerm, AdSummaryRow, AttributionAdRow } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, ErrorText } from "../ui";
-import { metricColumns, money, n, platformName } from "./Ads";
+import { deliveryColumns, metricColumns, money, n, platformName } from "./Ads";
 
 const metrics = [
   { id: "spend", label: "Spend", value: (r: AdSummaryRow) => r.totals.spend_micros, format: (v: number, c: string) => money(v, c) },
@@ -82,6 +84,56 @@ export function AdTrend({ rows, from, to }: { rows: AdSummaryRow[]; from: string
   );
 }
 
+// cents formats Outflare's own money, which is in cents, one entry per
+// currency.
+const cents = (list: { amount_cents: number; currency: string }[] | undefined) =>
+  list && list.length > 0 ? list.map((m) => money(m.amount_cents * 10_000, m.currency)).join(" · ") : "—";
+
+// outflareColumns are what Outflare's own attribution credits to each row,
+// found by the platform's id in the visits its tracking template marked.
+function outflareColumns<T extends { external_id: string }>(by: Record<string, AttributionAdRow>) {
+  const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
+  return [
+    { id: "of_visits", header: "Visits", accessorFn: (r: T) => by[r.external_id]?.visits ?? 0, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(by[r.external_id]?.visits ?? 0)) },
+    { id: "of_conversions", header: "Outflare conv.", accessorFn: (r: T) => by[r.external_id]?.conversions ?? 0, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(by[r.external_id]?.conversions ?? 0)) },
+    { id: "of_revenue", header: "Outflare revenue", accessorFn: (r: T) => by[r.external_id]?.revenue[0]?.amount_cents ?? 0, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(cents(by[r.external_id]?.revenue)) },
+  ];
+}
+
+// ConversionActions lists the conversions the platforms counted, by their
+// own action: all campaigns, or the one campaign, ad set or ad entity.
+// With card, it is a card of its own, shown only when there is something.
+export function ConversionActions({ ws, from, to, brand, entity, card }: { ws: string; from: string; to: string; brand?: string; entity?: string; card?: boolean }) {
+  const [rows, setRows] = useState<AdConversionAction[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/ads/conversion-actions", { params: { path: { ws }, query: { from, to, ...(brand ? { brand } : {}), ...(entity ? { entity_id: entity } : {}) } } })
+      .then(({ data, error }) => {
+        setError(error ? errorMessage(error) : "");
+        setRows(data?.data ?? []);
+      });
+  }, [ws, from, to, brand, entity]);
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!rows || rows.length === 0) return null;
+  const label = (a: string) => (a.startsWith("custom.") ? `Custom conversion ${a.slice(7)}` : a.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()));
+  const list = (
+    <div className="divide-y rounded-md border text-[13px]">
+      {rows.map((r) => (
+        <div key={`${r.connector}|${r.action}|${r.currency}`} className="flex flex-wrap items-baseline justify-between gap-x-3 px-3 py-1.5">
+          <span className="min-w-0 truncate">{label(r.action)} <span className="text-muted-foreground">· {platformName(r.connector)}</span></span>
+          <span className="font-mono tabular-nums">{n(r.conversions)}{r.value_micros !== null && r.value_micros > 0 && <span className="text-muted-foreground"> · {money(r.value_micros, r.currency)}</span>}</span>
+        </div>
+      ))}
+    </div>
+  );
+  if (!card) return list;
+  return (
+    <Card title="Conversions by type" description="What each platform counted, by its own action: purchases, leads, sign-ups and the rest. Meta reports a purchase several ways; each kind counts once here.">
+      {list}
+    </Card>
+  );
+}
+
 function status(s: AdItem["status"], word: string) {
   if (s === "active") return null;
   return <Badge tone={s === "removed" ? "red" : "grey"} title={word}>{s === "paused" ? "Paused" : s === "removed" ? "Removed" : word || "Other"}</Badge>;
@@ -100,28 +152,49 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
   const [groups, setGroups] = useState<AdItem[]>([]);
   const [ads, setAds] = useState<AdItem[]>([]);
   const [group, setGroup] = useState<AdItem | null>(null);
+  const [setsBy, setSetsBy] = useState<Record<string, AttributionAdRow>>({});
+  const [adsBy, setAdsBy] = useState<Record<string, AttributionAdRow>>({});
+  const [keywords, setKeywords] = useState<AdKeyword[]>([]);
+  const [terms, setTerms] = useState<AdSearchTerm[]>([]);
+  const [search, setSearch] = useState<"keywords" | "terms">("keywords");
   const [error, setError] = useState("");
+  const google = campaign.connector === "google_ads";
+  // Meta's delivery numbers show where Meta has them.
+  const hidden = campaign.connector === "meta_ads" ? [] : deliveryColumns;
   const below = campaign.connector === "meta_ads" || campaign.connector === "google_ads";
   const groupWord = campaign.connector === "meta_ads" ? "Ad sets" : "Ad groups";
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), [campaign.id]);
+  // Braces: newer browsers return a promise from scrollIntoView, which
+  // React would take for a cleanup function.
+  useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [campaign.id]);
 
   useEffect(() => {
     const path = { ws };
     const range = { from, to };
     setGroup(null);
+    const byId = (rows: AttributionAdRow[] | undefined) => Object.fromEntries((rows ?? []).map((r) => [r.id, r]));
     Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...range, group: "day", entity_id: campaign.id } } }),
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad_group", campaign_id: campaign.id, limit: 500 } } }) : null,
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad", campaign_id: campaign.id, limit: 1000 } } }) : null,
-    ]).then(([s, g, a]) => {
-      const err = s.error ?? g?.error ?? a?.error;
+      below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "adset" } } }) : null,
+      below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "ad" } } }) : null,
+      google ? api.GET("/v1/workspaces/{ws}/ads/keywords", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 500 } } }) : null,
+      google ? api.GET("/v1/workspaces/{ws}/ads/search-terms", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 1000 } } }) : null,
+    ]).then(([s, g, a, os, oa, k, t]) => {
+      const err = s.error ?? g?.error ?? a?.error ?? os?.error ?? oa?.error ?? k?.error ?? t?.error;
       setError(err ? errorMessage(err) : "");
       setTrend(s.data?.data ?? []);
       setGroups(g?.data?.data ?? []);
       setAds(a?.data?.data ?? []);
+      setSetsBy(byId(os?.data?.data));
+      setAdsBy(byId(oa?.data?.data));
+      setKeywords(k?.data?.data ?? []);
+      setTerms(t?.data?.data ?? []);
     });
-  }, [ws, campaign.id, from, to, below]);
+  }, [ws, campaign.id, from, to, below, google]);
 
   const shown = group ? ads.filter((a) => a.parent_id === group.id) : ads;
   return (
@@ -133,6 +206,9 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
       >
         <ErrorText>{error}</ErrorText>
         {trend && <AdTrend rows={trend} from={from} to={to} />}
+        <div className="mt-4">
+          <ConversionActions ws={ws} from={from} to={to} entity={campaign.id} />
+        </div>
         {below && (
           <div className="mt-6 space-y-6">
             <div>
@@ -141,7 +217,7 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                 data={groups}
                 rowId={(g) => g.id}
                 onRowClick={(g) => setGroup(group?.id === g.id ? null : g)}
-                columnsMenu={false}
+                hidden={hidden}
                 searchPlaceholder={`Search ${groupWord.toLowerCase()}`}
                 empty={`No ${groupWord.toLowerCase()} spent or ran in this range.`}
                 initialSort={[{ id: "spend", desc: true }]}
@@ -160,6 +236,7 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                     ),
                   },
                   ...metricColumns<AdItem>((g) => g.totals, (g) => g.currency),
+                  ...outflareColumns<AdItem>(setsBy),
                 ]}
               />
             </div>
@@ -172,6 +249,7 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                 data={shown}
                 rowId={(a) => a.id}
                 searchPlaceholder="Search ads"
+                hidden={hidden}
                 empty="No ads spent or ran in this range."
                 initialSort={[{ id: "spend", desc: true }]}
                 columns={[
@@ -189,11 +267,13 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                             {!group && <>{a.parent_name} · </>}
                             {a.details.url ? <a href={a.details.url} target="_blank" rel="noreferrer" className="underline">{host(a.details.url)}</a> : `id ${a.external_id}`} {status(a.status, a.provider_status)}
                           </div>
+                          {a.details.templated === "false" && <Badge tone="amber" title="Its links don't carry Outflare's tracking template, so its clicks can't be tied to it. Add the template under Tracking templates.">No tracking template</Badge>}
                         </div>
                       </div>
                     ),
                   },
                   ...metricColumns<AdItem>((a) => a.totals, (a) => a.currency),
+                  ...outflareColumns<AdItem>(adsBy),
                 ]}
                 mobile={(a) => (
                   <span className="block min-w-0">
@@ -203,6 +283,64 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                 )}
               />
             </div>
+            {google && (
+              <div>
+                <div className="mb-2 flex rounded-md border w-fit" role="group" aria-label="Search">
+                  {(["keywords", "terms"] as const).map((k) => (
+                    <button key={k} type="button" className={`px-2.5 py-1 text-[12px] ${k === search ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setSearch(k)}>
+                      {k === "keywords" ? "Keywords" : "Search terms"}
+                    </button>
+                  ))}
+                </div>
+                {search === "keywords" ? (
+                  <DataTable
+                    data={group ? keywords.filter((k) => k.ad_group_id === group.id) : keywords}
+                    rowId={(k) => k.id}
+                    searchPlaceholder="Search keywords"
+                    hidden={deliveryColumns}
+                    empty="No keyword showed an ad in this range."
+                    initialSort={[{ id: "spend", desc: true }]}
+                    columns={[
+                      {
+                        id: "keyword",
+                        header: "Keyword",
+                        accessorFn: (k) => k.text,
+                        cell: ({ row: { original: k } }) => (
+                          <div className="space-y-0.5">
+                            <div className="font-medium">{k.match_type === "exact" ? `[${k.text}]` : k.match_type === "phrase" ? `"${k.text}"` : k.text}</div>
+                            <div className="text-[12px] text-muted-foreground">{k.match_type} · {k.ad_group_name} {status(k.status, "")}</div>
+                          </div>
+                        ),
+                      },
+                      ...metricColumns<AdKeyword>((k) => k.totals, (k) => k.currency),
+                    ]}
+                  />
+                ) : (
+                  <DataTable
+                    data={group ? terms.filter((t) => t.ad_group_id === group.id) : terms}
+                    rowId={(t) => `${t.ad_group_id}|${t.term}|${t.keyword_text}|${t.keyword_match_type}`}
+                    searchPlaceholder="Search what people searched"
+                    hidden={deliveryColumns}
+                    empty="No searches in this range. Google leaves out searches too few people made."
+                    initialSort={[{ id: "spend", desc: true }]}
+                    columns={[
+                      {
+                        id: "term",
+                        header: "Search",
+                        accessorFn: (t) => `${t.term} ${t.keyword_text}`,
+                        cell: ({ row: { original: t } }) => (
+                          <div className="space-y-0.5">
+                            <div className="font-medium">{t.term}</div>
+                            <div className="text-[12px] text-muted-foreground">{t.keyword_text ? `matched ${t.keyword_text} (${t.keyword_match_type})` : "keyword not reported"} · {t.ad_group_name}</div>
+                          </div>
+                        ),
+                      },
+                      ...metricColumns<AdSearchTerm>((t) => t.totals, (t) => t.currency),
+                    ]}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>

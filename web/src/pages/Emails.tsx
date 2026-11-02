@@ -90,10 +90,10 @@ function EmailsPage({ ws, canSend, admin, open, onOpen, go }: { ws: string; canS
   const [next, setNext] = useState<string | null>(null);
   const [more, setMore] = useState(false);
 
-  const fetchPage = useCallback(async (before?: string) => {
+  const fetchPage = useCallback(async (cursor?: string) => {
     const query = {
       limit: 50,
-      ...(before ? { before } : {}),
+      ...(cursor ? { cursor } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.purpose ? { purpose: filters.purpose } : {}),
       ...(filters.to ? { to: filters.to } : {}),
@@ -103,7 +103,7 @@ function EmailsPage({ ws, canSend, admin, open, onOpen, go }: { ws: string; canS
       ...(filters.broadcast ? { broadcast: filters.broadcast } : {}),
     };
     const { data } = await api.GET("/v1/brands/{brand}/emails", { params: { path: { brand: brandId }, query } });
-    return data ?? { data: [], next_before: null };
+    return data ?? { data: [], next_cursor: null };
   }, [ws, filters, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -112,7 +112,7 @@ function EmailsPage({ ws, canSend, admin, open, onOpen, go }: { ws: string; canS
     fetchPage().then((p) => {
       if (!live) return;
       setEmails(p.data);
-      setNext(p.next_before ?? null);
+      setNext(p.next_cursor ?? null);
     });
     return () => {
       live = false;
@@ -125,7 +125,7 @@ function EmailsPage({ ws, canSend, admin, open, onOpen, go }: { ws: string; canS
     const p = await fetchPage(next);
     setMore(false);
     setEmails((e) => [...(e ?? []), ...p.data]);
-    setNext(p.next_before ?? null);
+    setNext(p.next_cursor ?? null);
   }
 
   if (listed) return <Loading />;
@@ -391,9 +391,9 @@ function Recipient({ ws, address, back, openEmail, go }: { ws: string; address: 
     api.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address } } }).then(({ data, error }) => (data ? setR(data) : setError(errorMessage(error))));
   }, [ws, address]);
   async function loadMore() {
-    if (!r?.next_before) return;
+    if (!r?.next_cursor) return;
     setMore(true);
-    const { data } = await api.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address }, query: { before: r.next_before } } });
+    const { data } = await api.GET("/v1/workspaces/{ws}/email-recipients/{address}", { params: { path: { ws, address }, query: { cursor: r.next_cursor } } });
     setMore(false);
     if (data) setR({ ...data, events: [...r.events, ...data.events] });
   }
@@ -439,7 +439,7 @@ function Recipient({ ws, address, back, openEmail, go }: { ws: string; address: 
             ))}
           </ol>
         )}
-        {r.next_before && <Button variant="ghost" className="mt-3" onClick={loadMore} disabled={more}>{more ? "Loading…" : "Show older"}</Button>}
+        {r.next_cursor && <Button variant="ghost" className="mt-3" onClick={loadMore} disabled={more}>{more ? "Loading…" : "Show older"}</Button>}
       </Card>
     </div>
   );

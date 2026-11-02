@@ -460,6 +460,7 @@ Rules:
 - Answer only from the passages. If they don't contain the answer, set answered to false and say in one sentence what is missing. Never guess, never use outside knowledge, never invent prices, dates, policies or numbers.
 - Be short and direct: one to five sentences, or a short list when the answer is steps. Plain words, no preamble.
 - Cite the passages you used by their numbers in cited, most important first. Cite only passages that support the answer.
+- If two or more passages contradict each other on something the question depends on (a different price, time limit, policy or step), list their numbers in conflicting and say in conflict_note, in one short sentence, what they disagree about. Otherwise leave both empty. Never resolve a contradiction yourself: answer only from what they agree on, or set answered to false.
 - Write for the audience given. For customers, speak to the customer and don't mention internal notes, passages or the knowledge base.`
 
 func knowledgeAskSchema() map[string]any {
@@ -469,8 +470,11 @@ func knowledgeAskSchema() map[string]any {
 			"answered": map[string]any{"type": "boolean", "description": "Whether the passages answer the question."},
 			"answer":   map[string]any{"type": "string", "description": "The answer, or what is missing when answered is false."},
 			"cited":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "Numbers of the passages the answer uses."},
+			"conflicting": map[string]any{"type": "array", "items": map[string]any{"type": "integer"},
+				"description": "Numbers of passages that contradict each other on something the question depends on; empty when none do."},
+			"conflict_note": map[string]any{"type": "string", "description": "What the conflicting passages disagree about, in one sentence; empty when none do."},
 		},
-		"required":             []string{"answered", "answer", "cited"},
+		"required":             []string{"answered", "answer", "cited", "conflicting", "conflict_note"},
 		"additionalProperties": false,
 	}
 }
@@ -551,6 +555,9 @@ func (s *Server) answerKnowledge(ctx context.Context, a *access, kq knowledgeQue
 	}
 	out.Passages, out.Meaning = passages, meaning
 	cited := []int{}
+	// Items the model saw contradict each other: one conflict to review.
+	var conflictItems []string
+	var conflictNote string
 	ai, err := s.aiModel(ctx, a.WorkspaceID, taskKnowledge)
 	if err == nil {
 		err = s.checkAIBudget(ctx, a.WorkspaceID, ai, knowledgeAskCents)
@@ -588,9 +595,11 @@ func (s *Server) answerKnowledge(ctx context.Context, a *access, kq knowledgeQue
 		model := resp.Usage.Model
 		out.AI.Model = &model
 		var got struct {
-			Answered bool   `json:"answered"`
-			Answer   string `json:"answer"`
-			Cited    []int  `json:"cited"`
+			Answered     bool   `json:"answered"`
+			Answer       string `json:"answer"`
+			Cited        []int  `json:"cited"`
+			Conflicting  []int  `json:"conflicting"`
+			ConflictNote string `json:"conflict_note"`
 		}
 		if err == nil && resp.Stop == llm.StopRefusal {
 			err = errors.New("the model declined to answer")
@@ -623,6 +632,12 @@ func (s *Server) answerKnowledge(ctx context.Context, a *access, kq knowledgeQue
 			}
 		}
 		out.Answered = got.Answered && answer != "" && len(cited) > 0
+		for _, n := range got.Conflicting {
+			if n >= 1 && n <= len(passages) && !slices.Contains(conflictItems, passages[n-1].ItemID) {
+				conflictItems = append(conflictItems, passages[n-1].ItemID)
+			}
+		}
+		conflictNote = strings.TrimSpace(got.ConflictNote)
 	}
 	for _, n := range cited {
 		out.Citations = append(out.Citations, passages[n-1])
@@ -644,8 +659,18 @@ func (s *Server) answerKnowledge(ctx context.Context, a *access, kq knowledgeQue
 				items = append(items, p.ItemID)
 			}
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO knowledge_uses (workspace_id, item_id, question_id)
-			SELECT $1, unnest($2::uuid[]), $3 ON CONFLICT DO NOTHING`, a.WorkspaceID, items, out.ID)
+		if _, err := tx.Exec(ctx, `INSERT INTO knowledge_uses (workspace_id, item_id, question_id)
+			SELECT $1, unnest($2::uuid[]), $3 ON CONFLICT DO NOTHING`, a.WorkspaceID, items, out.ID); err != nil {
+			return err
+		}
+		if len(conflictItems) < 2 {
+			return nil
+		}
+		if conflictNote == "" {
+			conflictNote = "These items disagree."
+		}
+		_, _, err := fileKnowledgeSuggestion(ctx, tx, knowledgeSuggestion{WorkspaceID: a.WorkspaceID, BrandID: kq.brand, Kind: "conflict",
+			Question: conflictNote, Source: "answer", SourceRef: surface, SourceQuote: kq.q, ItemIDs: conflictItems})
 		return err
 	})
 	return out, err

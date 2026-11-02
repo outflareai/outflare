@@ -1,5 +1,5 @@
 import { SearchDashboard } from "./pages/SearchDashboard";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@outflare/sdk";
 import { api } from "./api";
@@ -63,6 +63,7 @@ import { EmailFinder } from "./pages/EmailFinder";
 import { CloudPage } from "./pages/CloudLocked";
 import { cloudFeature } from "./lib/cloud";
 import { Missions } from "./pages/Missions";
+import { Agents } from "./pages/Agents";
 import { Playbooks } from "./pages/Playbooks";
 import { Infrastructure } from "./pages/Infrastructure";
 import { Instance } from "./pages/Instance";
@@ -101,6 +102,8 @@ import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
 import { ConnectComputer } from "./pages/ConnectComputer";
 import { setBrand, useBrand } from "@/lib/brand";
+
+const CRMWorkspace = lazy(() => import("./pages/crm/Workspace").then((m) => ({ default: m.CRMWorkspace })));
 
 type Me = { user: { id?: string; name?: string; email?: string; email_verified?: boolean; has_password?: boolean; email_resend_after?: number }; workspaces: Workspace[]; menu_links?: MenuLink[]; support_view?: { expires_at: string } | null };
 type State =
@@ -220,17 +223,7 @@ export function App() {
   }
 }
 
-// The OAuth consent screen returns here with the outcome in the query.
-function takeOAuthOutcome() {
-  const q = new URLSearchParams(location.search);
-  const connected = q.get("connected"), failed = q.get("oauth_error"), ws = q.get("ws");
-  if (connected || failed) history.replaceState(null, "", location.pathname);
-  return { ws, notice: connected ? `Connected ${connected}. Checking its sign-in now.` : failed ? `Could not connect the mailbox: ${failed}` : "", failed: !!failed };
-}
-
 function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onReload: () => void }) {
-  const [outcome] = useState(takeOAuthOutcome);
-  const [notice, setNotice] = useState(outcome.notice);
   // Something a link named that could not be opened, such as a workspace
   // this person is not in.
   const [lost, setLost] = useState("");
@@ -238,7 +231,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   startNav(me.user.id ?? "");
   // A workspace from the URL: its slug, or its ID in older links.
   const known = (ref?: string | null) => (ref ? me.workspaces.find((w) => w.id === ref || w.slug === ref.toLowerCase())?.id : undefined);
-  const [start] = useState(() => (outcome.ws ? { ws: outcome.ws, tab: "mailboxes" as Tab } : fromPath()));
+  const [start] = useState(fromPath);
   const [wsId, setWsId] = useState(known(start.ws) ?? me.workspaces[0]?.id ?? "");
   const [tab, setTabState] = useState<Tab>(start.tab ?? "overview");
   // item is what pages get: an item's ID, a domain name and so on.
@@ -547,12 +540,6 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <button aria-label="Dismiss" className="-m-2 p-2" onClick={() => setLost("")}><Icon name="x" className="size-3.5" /></button>
           </div>
         )}
-        {notice && (
-          <div className={`mb-6 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-[13px] ${outcome.failed ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300" : "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300"}`}>
-            <span>{notice}</span>
-            <button aria-label="Dismiss" onClick={() => setNotice("")}><Icon name="x" className="size-3.5" /></button>
-          </div>
-        )}
         {!ready && <Loading />}
         {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -595,10 +582,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} />}
+        {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("missions.run")} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "sequences" && <Sequences key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
-        {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} openOAuth={!!outcome.ws} go={setTab} />}
+        {ready && ws && tab === "mailboxes" && <Mailboxes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "domains" && <Domains key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(d) => setItem(d || undefined)} go={setTab} />}
         {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} waiting={pitchesWaiting} onWaiting={setPitchesWaiting} />}
         {ready && ws && tab === "link-autopilot" && (
@@ -617,6 +605,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
+        {ready && ws && tab === "crm" && <Suspense fallback={<Loading />}><CRMWorkspace canManageMailPolicy={can("members.manage")} ws={ws.id} canManage={can("customers.manage")} canConfigure={can("catalog.manage")} myId={me.user.id} open={item} setOpen={setItem} go={setTab} /></Suspense>}
         {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
         {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}

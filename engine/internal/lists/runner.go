@@ -26,6 +26,8 @@ type runner struct {
 	s   *Service
 	ws  string
 	run Run
+	// brand is the list's brand: its leads are that brand's.
+	brand string
 
 	searcher    c.PeopleSearcher
 	search      *c.Opened
@@ -264,8 +266,8 @@ func (r *runner) triage(ctx context.Context, provider string, people []c.Person)
 		rows, err := r.s.Pool.Query(ctx, `
 			SELECT s.external_id, s.lead_id,
 			       EXISTS (SELECT 1 FROM lead_list_members m WHERE m.lead_id = s.lead_id AND m.list_id = $4)
-			FROM lead_sources s WHERE s.workspace_id = $1 AND s.provider = $2 AND s.external_id = ANY($3)`,
-			r.ws, provider, ids, *r.run.ListID)
+			FROM lead_sources s WHERE s.workspace_id = $1 AND s.provider = $2 AND s.external_id = ANY($3) AND s.brand_id = NULLIF($5, '')::uuid`,
+			r.ws, provider, ids, *r.run.ListID, r.brand)
 		if err != nil {
 			return nil, err
 		}
@@ -447,7 +449,7 @@ func (r *runner) add(ctx context.Context, provider string, cands []*candidate) e
 		}
 	}
 	if len(emails) > 0 {
-		sup, err := r.matching(ctx, `SELECT lower(e) FROM unnest($2::text[]) e WHERE EXISTS (`+leads.SuppressedSQL("$1", "e")+`)`, emails)
+		sup, err := r.matching(ctx, `SELECT lower(e) FROM unnest($2::text[]) e WHERE EXISTS (`+leads.SuppressedInSQL("$1", "NULLIF($3, '')::uuid", "e")+`)`, emails, r.brand)
 		if err != nil {
 			return err
 		}
@@ -588,7 +590,7 @@ func (r *runner) save(ctx context.Context, tx pgx.Tx, provider string, cands []*
 	}
 	if len(rows) > 0 {
 		unique, _ := leads.Dedupe(rows)
-		if _, err := leads.Import(ctx, tx, r.ws, provider, nil, unique); err != nil {
+		if _, err := leads.ImportIn(ctx, tx, r.ws, r.brand, provider, nil, unique); err != nil {
 			return 0, err
 		}
 	}
@@ -601,8 +603,11 @@ func (r *runner) save(ctx context.Context, tx pgx.Tx, provider string, cands []*
 		var leadID string
 		if cd.leadID != "" {
 			leadID = cd.leadID
-		} else if err := tx.QueryRow(ctx, `SELECT id FROM leads WHERE workspace_id = $1 AND lower(email) = $2`,
-			r.ws, strings.ToLower(cd.person.Email)).Scan(&leadID); err != nil {
+		} else if err := tx.QueryRow(ctx, `SELECT id FROM leads WHERE workspace_id = $1 AND lower(email) = $2 AND brand_id = NULLIF($3, '')::uuid`,
+			r.ws, strings.ToLower(cd.person.Email), r.brand).Scan(&leadID); errors.Is(err, pgx.ErrNoRows) {
+			r.skip(SkipOtherBrand, 1)
+			continue
+		} else if err != nil {
 			return 0, err
 		}
 		tag, err := tx.Exec(ctx, `

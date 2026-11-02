@@ -58,6 +58,17 @@ try {
  await page.waitForFunction(()=>window.firstFrame?.['workspace-a']!==undefined);
  const returning=await page.evaluate(()=>window.firstFrame['workspace-a']);
  assert(!returning.includes('Other brand'),'previous workspace brand appeared when returning');
+ await page.goto(`${origin}/tests/fixtures/ai-account-brands.html?readonly=1`);
+ const download = page.getByRole('link',{name:'Download for Mac · update test',exact:true});
+ await download.waitFor();
+ assert.equal(await download.getAttribute('href'),'https://github.com/outflareai/outflare/releases/download/desktop-update-test/Outflare-desktop-update-test-macos.dmg');
+ assert.equal(await download.getAttribute('target'),'_blank');
+ assert.equal(await download.getAttribute('rel'),'noopener noreferrer');
+ await page.getByText('Tests one automatic upgrade. Stable release coming soon.',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Add account',exact:true}).count(),0,'read-only member unexpectedly gained account management');
+ await page.getByRole('tab',{name:'Computers',exact:true}).click();
+ await page.getByText('Download the Mac update test below.',{exact:false}).waitFor();
+ assert.equal(await page.getByRole('link',{name:'Download for Mac · update test',exact:true}).count(),2,'member cannot download from Computers setup');
  await page.route('**/acme/ai-accounts',route=>route.fulfill({status:200,contentType:'text/html',body:'<h1>Subscription assignment</h1>'}));
  await page.goto(`${origin}/tests/fixtures/ai-account-brands.html?connect=1&code=TEST-CODE`);
  await page.getByRole('button',{name:'Link computer',exact:true}).click();
@@ -65,5 +76,5 @@ try {
  assert.equal(approvedPath,'/v1/workspaces/workspace-a/ai-devices');
  assert.equal(new URL(page.url()).searchParams.has('brand'),false);
  assert.deepEqual(errors,[]);
- console.log('PASS: explicit brand choice, brand-only saves, workspace reporting, deferred prompts, workspace switching and onboarding redirect.');
+ console.log('PASS: explicit brand choice, brand-only saves, workspace reporting, deferred prompts, workspace switching, member-visible downloads and onboarding redirect.');
 } finally {await browser?.close();server.kill();}

@@ -61,10 +61,13 @@ const (
 	SkipUnverified    = "unverified"
 	SkipLowScore      = "low_score"
 	SkipAlreadyInList = "already_in_list"
+	// The address is another brand's lead already; until the brands
+	// contract step an address is a lead in one brand at a time.
+	SkipOtherBrand = "other_brand"
 )
 
 // SkipReasons lists every reason, in display order.
-var SkipReasons = []string{SkipAlreadyInList, SkipLowScore, SkipNoEmail, SkipUnverified, SkipSuppressed, SkipContacted, SkipInSequence, SkipUndeliverable}
+var SkipReasons = []string{SkipAlreadyInList, SkipLowScore, SkipNoEmail, SkipUnverified, SkipSuppressed, SkipContacted, SkipInSequence, SkipUndeliverable, SkipOtherBrand}
 
 const (
 	pageSize        = 100
@@ -413,6 +416,11 @@ func (s *Service) handle(ctx context.Context, job jobs.Job) error {
 		return err
 	}
 	r := &runner{s: s, ws: ws, run: run}
+	// A run fills its list's brand's leads (plans/brands/README.md).
+	if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(brand_id::text, outflare_first_brand(workspace_id)::text, '') FROM list_runs WHERE id = $1`,
+		run.ID).Scan(&r.brand); err != nil {
+		return err
+	}
 	err = r.execute(ctx)
 	if err != nil && job.Attempt < job.MaxAttempts && c.KindOf(err) == c.ErrUnavailable && !errors.Is(err, errStop) {
 		return err // a provider blip: retry; cached answers keep it cheap

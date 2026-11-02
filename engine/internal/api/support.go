@@ -32,6 +32,15 @@ func (s *Server) routesSupport(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+base+"/conversations/{id}/notes", s.inBrand(manage, s.noteSupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/suggest-reply", s.inBrand(manage, s.suggestSupportReply))
 	mux.HandleFunc("GET "+base+"/conversations/{id}/articles", s.inBrand(read, s.listSupportArticles))
+	mux.HandleFunc("GET "+base+"/conversations/{id}/assistant", s.inBrand(read, s.getConversationAssistant))
+	mux.HandleFunc("POST "+base+"/conversations/{id}/assistant", s.inBrand(manage, s.runConversationAssistant))
+	mux.HandleFunc("POST "+base+"/assistant-runs/{id}/discard", s.inBrand(manage, s.discardAssistantRun))
+	mux.HandleFunc("GET "+base+"/assistant-settings", s.inBrand(read, s.listAssistantSettings))
+	mux.HandleFunc("PUT "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.putAssistantSetting))
+	mux.HandleFunc("DELETE "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.deleteAssistantSetting))
+	mux.HandleFunc("GET "+base+"/assistant/stats", s.inBrand(read, s.assistantStats))
+	mux.HandleFunc("POST "+base+"/assistant/test", s.inBrand(manage, s.testAssistant))
+	mux.HandleFunc("GET "+base+"/assistant/slack-channels", s.inWorkspace(manage, s.listAssistantSlackChannels))
 	mux.HandleFunc("GET "+base+"/stats", s.inBrand(read, s.supportStats))
 	mux.HandleFunc("GET "+base+"/sla-policies", s.inBrand(read, s.listSupportSLAPolicies))
 	mux.HandleFunc("PUT "+base+"/sla-policies/{scope}", s.inWorkspace(manage, s.putSupportSLAPolicy))
@@ -60,19 +69,23 @@ type supportConversationView struct {
 	// How it came in: mailbox (a connected support mailbox) or forwarding
 	// (the brand's support address); for forwarding, the address and the
 	// business's own address replies go out from.
-	Via            string         `json:"via"`
-	InboundAddress *string        `json:"inbound_address"`
-	ReplyFrom      *string        `json:"reply_from"`
-	Channel        string         `json:"channel"`
-	Subject        string         `json:"subject"`
-	Status         string         `json:"status"`
-	Assignee       *supportPerson `json:"assignee"`
-	Team           *supportPerson `json:"team"`
-	Tags           []string       `json:"tags"`
-	Unread         bool           `json:"unread"`
-	LastFrom       string         `json:"last_from"`
-	Preview        string         `json:"preview"`
-	Messages       int            `json:"messages"`
+	Via            string  `json:"via"`
+	InboundAddress *string `json:"inbound_address"`
+	ReplyFrom      *string `json:"reply_from"`
+	Channel        string  `json:"channel"`
+	// Chat: whether the website vouched for the visitor's email, and when
+	// the chat last checked in (they're likely still there when recent).
+	IdentityVerified bool           `json:"identity_verified"`
+	VisitorSeenAt    *time.Time     `json:"visitor_seen_at"`
+	Subject          string         `json:"subject"`
+	Status           string         `json:"status"`
+	Assignee         *supportPerson `json:"assignee"`
+	Team             *supportPerson `json:"team"`
+	Tags             []string       `json:"tags"`
+	Unread           bool           `json:"unread"`
+	LastFrom         string         `json:"last_from"`
+	Preview          string         `json:"preview"`
+	Messages         int            `json:"messages"`
 	// When the team's next reply and the resolution are due under the
 	// SLA, and whether each was missed; all null without an SLA.
 	SLA            supportSLAView `json:"sla"`
@@ -85,7 +98,7 @@ type supportConversationView struct {
 
 const supportConversationSelect = `
 	SELECT c.id::text, c.brand_id::text, c.record_id::text, COALESCE(NULLIF(r.name, ''), ''), c.contact_email,
-		c.mailbox_id::text, m.email, CASE WHEN c.inbound_address_id IS NOT NULL AND c.mailbox_id IS NULL THEN 'forwarding' ELSE 'mailbox' END,
+		c.mailbox_id::text, m.email, CASE WHEN c.channel = 'chat' THEN 'chat' WHEN c.inbound_address_id IS NOT NULL AND c.mailbox_id IS NULL THEN 'forwarding' ELSE 'mailbox' END,
 		ia.local_part, c.reply_from, c.channel, c.subject, c.status,
 		c.assignee_id::text, COALESCE(NULLIF(u.name, ''), u.email), c.team_id::text, t.name,
 		c.tags, c.unread, c.last_from,
@@ -93,7 +106,7 @@ const supportConversationSelect = `
 			WHERE sm.conversation_id = c.id AND sm.kind <> 'note' ORDER BY sm.created_at DESC LIMIT 1), ''),
 		(SELECT count(*) FROM support_messages sm WHERE sm.conversation_id = c.id AND sm.kind <> 'note')::int,
 		c.first_message_at, c.first_reply_at, c.closed_at, c.last_message_at, c.created_at,
-		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at
+		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at, c.identity_verified, c.visitor_seen_at
 	FROM support_conversations c
 	LEFT JOIN records r ON r.id = c.record_id
 	LEFT JOIN mailboxes m ON m.id = c.mailbox_id
@@ -107,7 +120,7 @@ func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConvers
 	err := row.Scan(&v.ID, &v.BrandID, &v.RecordID, &v.Contact.Name, &v.Contact.Email, &v.MailboxID, &v.MailboxEmail,
 		&v.Via, &v.InboundAddress, &v.ReplyFrom, &v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
 		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt,
-		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt)
+		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt, &v.IdentityVerified, &v.VisitorSeenAt)
 	if assigneeID != nil {
 		v.Assignee = &supportPerson{ID: *assigneeID, Name: deref(assigneeName)}
 	}
@@ -141,7 +154,7 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -250,7 +263,7 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		n := offset + len(list)
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": next, "counts": counts})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next), "counts": counts})
 }
 
 // supportBrandSQL keeps a list to the picked brand: its conversations and
@@ -549,6 +562,8 @@ func (s *Server) replySupportConversation(w http.ResponseWriter, r *http.Request
 	var req struct {
 		Body   string `json:"body"`
 		Status string `json:"status"`
+		// The assistant's draft this reply came from, if any.
+		AssistantRunID string `json:"assistant_run_id"`
 	}
 	if !decode(w, r, &req) || !supportBody(w, r, req.Body) {
 		return
@@ -565,9 +580,18 @@ func (s *Server) replySupportConversation(w http.ResponseWriter, r *http.Request
 	if !s.supportWrites(w, r, a, c) {
 		return
 	}
+	if req.AssistantRunID != "" && !validUUID(req.AssistantRunID) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "assistant_run_id is not a draft waiting on this conversation")
+		return
+	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
+		if req.AssistantRunID != "" {
+			if err := useAssistantRun(ctx, tx, a.WorkspaceID, c.ID, req.AssistantRunID, a.ActorID, req.Body); err != nil {
+				return err
+			}
+		}
 		reply := support.Reply{WorkspaceID: a.WorkspaceID, ConversationID: c.ID, AuthorID: a.UserID, Body: req.Body, Status: req.Status,
 			Who: s.emailWho(ctx, a)}
 		if s.emails != nil {
@@ -577,9 +601,13 @@ func (s *Server) replySupportConversation(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
-		data := map[string]any{"message_id": id}
+		data := map[string]any{"message_id": id, "from_assistant": req.AssistantRunID != ""}
 		if req.Status != "" {
 			data["status"] = req.Status
+		}
+		// The knowledge had no answer here: offer the team's reply as one.
+		if err := captureKnowledgeReply(ctx, tx, a.WorkspaceID, c.ID, id); err != nil {
+			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "support.replied", "support_conversation", c.ID, data)
 	})
@@ -683,6 +711,18 @@ func (s *Server) suggestSupportReply(w http.ResponseWriter, r *http.Request) {
 		outcome = "unanswered"
 	}
 	ev.Props["answered"], ev.Props["cited"] = out.Answered, len(out.Citations)
+	// A question the knowledge couldn't answer: the team's reply to it can
+	// become the answer (captureKnowledgeReply).
+	if out.AI.Problem == nil {
+		var gap *string
+		if !out.Answered {
+			gap = &question
+		}
+		if _, err := s.pool.Exec(ctx, `UPDATE support_conversations SET knowledge_gap = $2 WHERE id = $1`, c.ID, gap); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
 	if err := s.linkHelpArticles(ctx, a.WorkspaceID, kq.brand, out.Citations); err != nil {
 		s.internal(w, r, err)
 		return

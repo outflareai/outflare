@@ -206,11 +206,11 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   // Only partners who haven't given payout details (imported ones re-enter them on the portal).
   const [missingOnly, setMissingOnly] = useState(false);
   useEffect(() => setRules(program.rules), [program.rules]);
-  const get = useCallback(async (before?: string): Promise<Page<Partner>> => {
+  const get = useCallback(async (cursor?: string): Promise<Page<Partner>> => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", {
-      params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
+      params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
     });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, missingOnly]);
   const { list, next, error, reload, more } = usePages(get);
   // The tiles count every partner, not just the loaded page.
@@ -348,6 +348,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       cell: ({ row: { original: p } }) => (
         <span className="block min-w-0">
           <span className="block truncate font-medium">{p.name || p.email || p.code}</span>
+          {p.name && p.email && <span className="block truncate text-[12px] text-muted-foreground">{p.email}</span>}
           <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{ownRate(rules, p.id) && ` · own rate ${ruleText(ownRate(rules, p.id)!, c)}`}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}{!p.payout_method && " · no payout details"}</span>
         </span>
       ),
@@ -493,9 +494,9 @@ function AddPartner({ ws, program, onClose, onSaved }: { ws: string; program: Pa
 }
 
 function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
-  const get = useCallback(async (before?: string): Promise<Page<PartnerConversion>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  const get = useCallback(async (cursor?: string): Promise<Page<PartnerConversion>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
   const { list, next, error, reload, more } = usePages(get);
   useEffect(() => {
@@ -542,11 +543,11 @@ function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram })
   const [q, setQ] = useState("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<PartnerConversionLogEntry | null>(null);
-  const get = useCallback(async (before?: string): Promise<Page<PartnerConversionLogEntry>> => {
+  const get = useCallback(async (cursor?: string): Promise<Page<PartnerConversionLogEntry>> => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversion-log", {
-      params: { path: { ws }, query: { limit: pageSize, ...(all ? {} : { program: program.id }), ...(outcome ? { outcome } : {}), ...(search ? { q: search } : {}), ...(before ? { before } : {}) } },
+      params: { path: { ws }, query: { limit: pageSize, ...(all ? {} : { program: program.id }), ...(outcome ? { outcome } : {}), ...(search ? { q: search } : {}), ...(cursor ? { cursor } : {}) } },
     });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, outcome, all, search]);
   const { list, next, error, reload, more } = usePages(get);
   useEffect(() => {
@@ -614,9 +615,9 @@ function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram })
 // Leads are people partners submitted on the portal as referred.
 function Leads({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [status, setStatus] = useState<PartnerLead["status"] | "">("pending");
-  const get = useCallback(async (before?: string): Promise<Page<PartnerLead>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(before ? { before } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  const get = useCallback(async (cursor?: string): Promise<Page<PartnerLead>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, status]);
   const { list, next, error, reload, more } = usePages(get);
   useEffect(() => {
@@ -671,9 +672,9 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
   const [status, setStatus] = useState<PartnerReward["status"] | "">("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const get = useCallback(async (before?: string): Promise<Page<PartnerReward>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(before ? { before } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  const get = useCallback(async (cursor?: string): Promise<Page<PartnerReward>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, status]);
   const { list, next, error: listError, reload, more } = usePages(get);
   const load = useCallback(async () => {
@@ -818,9 +819,9 @@ function SwitchOver({ ws, program, canManage, onDone }: { ws: string; program: P
 }
 
 function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const get = useCallback(async (before?: string): Promise<Page<PartnerPayout>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(before ? { before } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_before ?? null, error: error ? errorMessage(error) : "" };
+  const get = useCallback(async (cursor?: string): Promise<Page<PartnerPayout>> => {
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
+    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
   const { list, next, error: listError, reload: load, more } = usePages(get);
   useEffect(() => {

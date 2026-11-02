@@ -59,7 +59,7 @@ steps:
   - say: Draft a short, personal invite for each, from a real person at the brand, that says why them and what they'd get. Hold every send until a person approves it.
     tools: [previewBrandEmailTemplate, sendBrandEmail]
   - say: Move partnerships to Pitched when the invite goes out, and to Negotiating or Declined as replies come in.
-    tools: [listInbox, updateRecord]
+    tools: [listBrandInbox, updateRecord]
 guardrails:
   - Never send an invite or agree terms without a person's approval.
   - Only write to people who allow marketing email from the brand; the opt-out list always wins.

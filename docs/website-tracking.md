@@ -73,12 +73,14 @@ Each workspace sees its own under **Paid ads → Tracking health** (and `GET /v1
 
 - **Paid visits per network:** the share with the click id, with only the ad ids, or untracked.
 - **Synced campaigns that spent with no tracked visit:** these usually lack the template.
+- **Ads without the template:** live or spending Meta and Google ads whose links, as the platform reports them, don't carry it (Meta's URL parameters; Google's final URL suffix or tracking template, the ad's own or inherited from its ad group, campaign or account). Ads whose link the platform keeps elsewhere (dynamic creative, Performance Max) aren't judged.
 - **Conversions sent back per platform:** with the commonest reason one was refused.
 
 A list of issues comes first, worst first, each with what to do. An issue is raised when:
 
 - a network has at least 20 paid visits and a fifth or more of them are untracked;
 - any campaign spent without a tracked visit;
+- any live or spending ad's links lack the template;
 - a platform refused a tenth or more of the conversions sent to it.
 
 ## Serve it from your own domain

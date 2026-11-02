@@ -588,6 +588,8 @@ Logs keep only what describes a call, never request or response bodies, query va
 
 Apps connected this way make changes only inside a **mission** a person approved: outside one they read, and a write gets `403 mission_required` telling them to start a mission (MCP `create_mission`), which a person approves before anything runs. Turn **Only inside missions** off for an app on its page to let it change things directly. Apps Outflare doesn't recognise by where they send you back (Claude, ChatGPT, Cursor, VS Code, or an app on your own computer) may only read until the server's operator checks them: their page shows the app's id, and `outflare verify-app <client_id>` (or `unverify-app`) on the server lets people give it more.
 
+**Agent actions** are the other way to keep an agent safe, for any API token: turn on **Send changes through the action layer** for the token, and each change it makes either runs, waits for a person, or is refused, by the grants you set for it (run, hold or refuse, per kind of change, with a daily limit). Nothing matches a new agent's changes, so it starts out asking for everything; you approve held changes one at a time or in batches, and every change it made is kept. Some changes always wait for a person: mailboxes, sending, sign-ins, tokens, webhooks, connections, suppressions and company context. See [docs/actions.md](docs/actions.md).
+
 ```sh
 claude mcp add --transport http outflare https://outflare.example.com/mcp
 ```

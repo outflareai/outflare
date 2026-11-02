@@ -501,6 +501,10 @@ func writeAttributes(ctx context.Context, tx pgx.Tx, c *catalog, t *recordTypeVi
 			next = v
 		}
 		prev, had := rec.Attributes[key]
+		if key == "outflare_parent_record" && strings.HasPrefix(rec.Type, "list_") && had && prev != nil && !sameJSON(prev, next) {
+			return false, errInvalid("a list entry's linked record cannot change; add a new entry for the other record")
+		}
+
 		if cur := rec.AttributeSources[key]; had && cur != "" && sourceRank(f, cur) < sourceRank(f, source) {
 			rec.Skipped = append(rec.Skipped, skippedField{Field: key, KeptSource: cur})
 			continue
@@ -833,7 +837,7 @@ func agentWrite(r *http.Request) bool {
 		return false
 	}
 	switch surface(r, info) {
-	case "mcp", "mission":
+	case "mcp", "mission", "agent":
 		return true
 	}
 	return false
@@ -1198,8 +1202,9 @@ func (s *Server) deleteRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		suppressed := 0
 		if suppress {
+			// The record's brand stops contacting them (decision 5).
 			if suppressed, err = leads.Suppress(ctx, tx, a.WorkspaceID, leads.Added{Reason: "do_not_contact", Source: "record_deleted",
-				Method: leads.MethodManual, ActorID: a.ActorID, ActorType: a.ActorType}, block); err != nil {
+				Method: leads.MethodManual, ActorID: a.ActorID, ActorType: a.ActorType, BrandID: deref(rec.BrandID)}, block); err != nil {
 				return err
 			}
 		}
@@ -1237,6 +1242,20 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	if t := q.Get("type"); t != "" {
 		args = append(args, t)
 		where += fmt.Sprintf(` AND r.record_type = $%d`, len(args))
+	}
+	if ids := q["ids"]; len(ids) > 0 {
+		if len(ids) > 200 {
+			writeError(w, r, 400, "invalid_request", "at most 200 ids")
+			return
+		}
+		for _, id := range ids {
+			if !validUUID(id) {
+				writeError(w, r, 400, "invalid_request", "ids must be record ids")
+				return
+			}
+		}
+		args = append(args, ids)
+		where += fmt.Sprintf(` AND r.id=ANY($%d::uuid[])`, len(args))
 	}
 	if o := q.Get("origin"); o != "" {
 		if !slices.Contains(recordOrigins, o) {
@@ -1299,6 +1318,14 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 				WHERE jsonb_typeof(r.attributes->$%d) = 'array' AND r.attributes->$%d @> jsonb_build_array(v)))`, kn, vn, vn, kn, kn)
 		}
 	}
+	if key := q.Get("empty_attribute"); key != "" {
+		if !fieldKeyShape.MatchString(key) {
+			writeError(w, r, 400, "invalid_request", "empty_attribute must be a field key")
+			return
+		}
+		args = append(args, key)
+		where += fmt.Sprintf(` AND (NOT r.attributes ? $%d OR r.attributes->$%d = 'null'::jsonb OR r.attributes->$%d = '""'::jsonb OR r.attributes->$%d = '[]'::jsonb)`, len(args), len(args), len(args), len(args))
+	}
 	if text := strings.ToLower(strings.TrimSpace(q.Get("q"))); text != "" {
 		args = append(args, escapeLike(text))
 		n := len(args)
@@ -1306,19 +1333,49 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 			WHERE i.record_id = r.id AND i.valid_to IS NULL AND lower(i.value) LIKE '%%' || $%d || '%%'))`, n, n)
 	}
 	where += sel.sql("r.brand_id", &args)
-	if b := q.Get("before"); b != "" {
+	sortKey := q.Get("sort")
+	order := "r.created_at DESC, r.id DESC"
+	offset := 0
+	if sortKey != "" {
+		column := map[string]string{"name": "lower(r.name)", "created_at": "r.created_at", "updated_at": "r.updated_at"}[sortKey]
+		if column == "" {
+			writeError(w, r, 400, "invalid_request", "sort must be name, created_at or updated_at")
+			return
+		}
+		direction := q.Get("direction")
+		if direction == "" {
+			direction = "asc"
+		}
+		if direction != "asc" && direction != "desc" {
+			writeError(w, r, 400, "invalid_request", "direction must be asc or desc")
+			return
+		}
+		var ok bool
+		offset, ok = pageOffsetParam(w, r)
+		if !ok {
+			return
+		}
+		order = column + " " + strings.ToUpper(direction) + ", r.id " + strings.ToUpper(direction)
+	} else if b, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if b != "" {
 		if !validUUID(b) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be a record id from next_before")
+			invalidCursor(w, r)
 			return
 		}
 		args = append(args, b)
-		where += fmt.Sprintf(` AND (r.created_at, r.id) < (SELECT created_at, id FROM records WHERE id = $%d AND workspace_id = $1)`, len(args))
+		where += fmt.Sprintf(` AND (r.created_at,r.id) < (SELECT created_at,id FROM records WHERE id=$%d AND workspace_id=$1)`, len(args))
 	}
-	args = append(args, limit)
+	var total int
+	countArgs := append([]any(nil), args...)
+	args = append(args, limit, offset)
 	var list []recordView
 	err = s.readTx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM records r WHERE "+where, countArgs...).Scan(&total); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT `+recordColumns+` FROM records r WHERE `+where+
-			fmt.Sprintf(` ORDER BY r.created_at DESC, r.id DESC LIMIT $%d`, len(args)), args...)
+			fmt.Sprintf(` ORDER BY %s LIMIT $%d OFFSET $%d`, order, len(args)-1, len(args)), args...)
 		if err != nil {
 			return err
 		}
@@ -1335,7 +1392,16 @@ func (s *Server) listRecords(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	out := map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next), "total": total}
+	if sortKey != "" {
+		var nextOffset *int
+		if offset+len(list) < total {
+			n := offset + len(list)
+			nextOffset = &n
+		}
+		out["next_cursor"] = nextCursor(pageOffset, nextOffset)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // lookupRecords finds the records an identity points at: the one record
@@ -1410,9 +1476,11 @@ func (s *Server) recordHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var before int64 = math.MaxInt64
-	if v := r.URL.Query().Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		if before, err = strconv.ParseInt(v, 10, 64); err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be a change id from next_before")
+			invalidCursor(w, r)
 			return
 		}
 	}
@@ -1438,7 +1506,7 @@ func (s *Server) recordHistory(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) listIdentities(w http.ResponseWriter, r *http.Request) {

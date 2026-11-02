@@ -181,7 +181,10 @@ func TestPartnerToltImport(t *testing.T) {
 		map[string]any{"id": "l5", "partner_id": "p2", "param": "aff", "value": "BEN2"})
 	tolt.set("/promotion-codes",
 		map[string]any{"id": "pc1", "partner_id": "p1", "code": "ANA10"},
-		map[string]any{"id": "pc2", "partner_id": "p9", "code": "GHOST"})
+		map[string]any{"id": "pc2", "partner_id": "p9", "code": "GHOST"},
+		// A program-wide promotion, with no code and no partner: skipped
+		// without an issue.
+		map[string]any{"id": "pc3", "entity_type": "program", "type": "percentage", "code": nil, "partner_id": nil})
 	tolt.set("/customers",
 		map[string]any{"id": "cus_c1", "partner": map[string]any{"id": "p1"}, "email": "cara@example.com", "customer_id": "u-1", "created_at": day(2)},
 		map[string]any{"id": "c2", "partner_id": "p2", "customer_id": "u-2", "created_at": day(3)})
@@ -373,11 +376,11 @@ func TestPartnerToltImport(t *testing.T) {
 				sum[k] += v.(float64)
 			}
 		}
-		next, _ := page["next_before"].(string)
+		next, _ := page["next_cursor"].(string)
 		if next == "" {
 			break
 		}
-		page = owner.must(200, "GET", base+"/partners?program=affiliates&limit=1&before="+url.QueryEscape(next), nil)
+		page = owner.must(200, "GET", base+"/partners?program=affiliates&limit=1&cursor="+url.QueryEscape(next), nil)
 	}
 	for _, k := range []string{"customers", "sales_cents", "pending_cents", "paid_cents", "balance_cents"} {
 		if totals[k] != sum[k] {
@@ -747,5 +750,94 @@ func TestPartnerImportHeldUntilSwitchOver(t *testing.T) {
 	}
 	if got := statuses(); got != "approved:true,approved:true" {
 		t.Fatalf("after switch-over: %s", got)
+	}
+}
+
+// TestPartnerImportUnpaidPayouts: a Tolt commission is paid only when Tolt
+// says so. One in a payout Tolt hasn't paid (pending or not eligible) keeps
+// its own status, and a re-run takes back what an earlier import paid
+// wrongly, removing the payout it made when nothing is left in it.
+func TestPartnerImportUnpaidPayouts(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	tolt := &fakeTolt{data: map[string][]map[string]any{}}
+	tolt.set("/programs", map[string]any{"id": "prg_1", "name": "Northpeak partners", "currency": "usd", "status": "active"})
+	tolt.set("/links", map[string]any{"id": "l1", "partner_id": "p1", "param": "ref", "value": "ANA"})
+	tolt.set("/partners", map[string]any{"id": "p1", "first_name": "Ana", "email": "ana@acme.example", "status": "active"})
+	tolt.set("/promotion-codes")
+	tolt.set("/customers", map[string]any{"id": "cus_1", "partner_id": "p1", "customer_id": "u-1"})
+	tolt.set("/transactions")
+	tolt.set("/commissions",
+		map[string]any{"id": "m1", "partner_id": "p1", "customer_id": "cus_1", "amount": "1000", "status": "paid", "payout_id": "po_1", "paid_at": "2026-03-20T12:00:00Z"},
+		map[string]any{"id": "m2", "partner_id": "p1", "customer_id": "cus_1", "amount": "2000", "status": "approved", "payout_id": "po_2"},
+		map[string]any{"id": "m3", "partner_id": "p1", "customer_id": "cus_1", "amount": "3000", "status": "pending", "payout_id": "po_2"})
+	srv := httptest.NewServer(tolt)
+	defer srv.Close()
+	e.integrations.Client.BaseURLs["tolt"] = srv.URL
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate"})
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "tolt", "credentials": map[string]string{"api_key": "tlt_test_not_a_real_key"}})
+	imports := base + "/partner-programs/affiliates/imports"
+	run := func() {
+		t.Helper()
+		imp := owner.must(201, "POST", imports, map[string]any{})
+		e.runCRMImports(t)
+		for range 500 {
+			v := owner.must(200, "GET", imports+"/"+imp["id"].(string), nil)
+			if v["status"] == "done" {
+				return
+			}
+			if v["status"] == "failed" {
+				t.Fatalf("import = %v", v)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("import didn't finish")
+	}
+	statuses := func() string {
+		var s string
+		e.pool.QueryRow(ctx, `SELECT string_agg(status || ':' || (payout_id IS NOT NULL)::text, ',' ORDER BY amount_cents) FROM partner_rewards WHERE workspace_id = $1`, ws).Scan(&s) //nolint:errcheck
+		return s
+	}
+	payouts := func() string {
+		var s string
+		e.pool.QueryRow(ctx, `SELECT COALESCE(string_agg(status || ':' || amount_cents, ',' ORDER BY amount_cents), '') FROM partner_payouts WHERE workspace_id = $1`, ws).Scan(&s) //nolint:errcheck
+		return s
+	}
+
+	run()
+	if got := statuses(); got != "paid:true,approved:false,pending:false" {
+		t.Fatalf("first run: %s", got)
+	}
+	if got := payouts(); got != "paid:1000" {
+		t.Fatalf("payouts: %s", got)
+	}
+
+	// What an earlier import did: m2 and m3 paid in a payout for po_2.
+	var prog, member, po string
+	if err := e.pool.QueryRow(ctx, `SELECT program_id::text, membership_id::text FROM partner_rewards WHERE workspace_id = $1 LIMIT 1`, ws).Scan(&prog, &member); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `INSERT INTO partner_payouts (workspace_id, membership_id, amount_cents, currency, status, note, reference, paid_at)
+		VALUES ($1, $2, 5000, 'USD', 'paid', 'Paid in Tolt', 'po_2', now()) RETURNING id::text`, ws, member).Scan(&po); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO partner_import_refs (workspace_id, program_id, connector, kind, external_id, local_id) VALUES ($1, $2, 'tolt', 'payout', 'po_2', $3)`, ws, prog, po); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE partner_rewards SET status = 'paid', approved_at = now(), payout_id = $2 WHERE workspace_id = $1 AND amount_cents IN (2000, 3000)`, ws, po); err != nil {
+		t.Fatal(err)
+	}
+	if got := statuses(); got != "paid:true,paid:true,paid:true" {
+		t.Fatalf("set up: %s", got)
+	}
+
+	run()
+	if got := statuses(); got != "paid:true,approved:false,pending:false" {
+		t.Fatalf("after the re-run: %s", got)
+	}
+	if got := payouts(); got != "paid:1000" {
+		t.Fatalf("payouts after the re-run: %s", got)
 	}
 }

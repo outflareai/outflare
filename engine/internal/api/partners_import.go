@@ -841,6 +841,13 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		}
 	case connectors.PartnerKindPromoCodes:
 		for _, c := range page.PromoCodes {
+			if c.PartnerID == "" && c.Code == "" {
+				// A promotion with neither a code nor a partner, such as a
+				// program-wide discount: no partner's code, nothing to move.
+				r.sum.count(kind).Skipped++
+				metrics.PartnerImportObjects(kind, "skipped", 1)
+				continue
+			}
 			if c.PartnerID == "" && c.ID != "" {
 				// Its partner is under a field the import doesn't read yet:
 				// the message names the fields there are.
@@ -1303,6 +1310,10 @@ func (r *partnerImportRun) commissionStatus(ctx context.Context, tx pgx.Tx, c co
 	}
 	want := c.Status
 	switch {
+	case status == "paid" && payout != nil && (want == "approved" || want == "pending"):
+		// An earlier import paid it in a payout the platform hasn't paid
+		// yet: it goes back to the platform's status.
+		return r.unpay(ctx, tx, id, *payout, cents, want)
 	case status == want || status == "paid" || status == "fulfilled":
 		return "unchanged", nil
 	case want == "pending":
@@ -1334,6 +1345,42 @@ func (r *partnerImportRun) commissionStatus(ctx context.Context, tx pgx.Tx, c co
 		}
 	}
 	return "updated", nil
+}
+
+// unpay takes a reward back out of a payout an import made for it, when the
+// platform says the commission isn't paid after all: it returns to want
+// (approved, or pending with its spend taken back), and a payout left
+// empty is removed. A payout made here, by the team, is never touched.
+func (r *partnerImportRun) unpay(ctx context.Context, tx pgx.Tx, id, payout string, cents int64, want string) (string, error) {
+	var imported bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_import_refs WHERE program_id = $1 AND connector = $2 AND kind = 'payout' AND local_id = $3)`,
+		r.prog.ID, r.connector, payout).Scan(&imported); err != nil || !imported {
+		return "unchanged", err
+	}
+	if want == "pending" {
+		if _, err := tx.Exec(ctx, `UPDATE partner_rewards SET status = 'pending', approved_at = NULL, payout_id = NULL, updated_at = now() WHERE id = $1`, id); err != nil {
+			return "", err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM spend_entries WHERE workspace_id = $1 AND source = 'auto' AND ref = $2`, r.ws, "partner_reward:"+id); err != nil {
+			return "", err
+		}
+	} else if _, err := tx.Exec(ctx, `UPDATE partner_rewards SET status = 'approved', payout_id = NULL, updated_at = now() WHERE id = $1`, id); err != nil {
+		return "", err
+	}
+	var left int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM partner_rewards WHERE payout_id = $1`, payout).Scan(&left); err != nil {
+		return "", err
+	}
+	if left == 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM partner_import_refs WHERE program_id = $1 AND connector = $2 AND kind = 'payout' AND local_id = $3`,
+			r.prog.ID, r.connector, payout); err != nil {
+			return "", err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM partner_payouts WHERE workspace_id = $1 AND id = $2`, r.ws, payout)
+		return "updated", err
+	}
+	_, err := tx.Exec(ctx, `UPDATE partner_payouts SET amount_cents = amount_cents - $2, updated_at = now() WHERE id = $1`, payout, cents)
+	return "updated", err
 }
 
 // payInPayout puts a paid commission in the paid payout it was part of on

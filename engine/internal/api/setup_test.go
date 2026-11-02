@@ -377,7 +377,7 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 	t.Cleanup(api.DeprecateOperation("getOldThing", "GET /v1/workspaces/{ws}/new-thing"))
 	if _, err := e.pool.Exec(ctx, `
 		INSERT INTO request_logs (workspace_id, request_id, method, route, operation, path, status, duration_ms, surface, client)
-		VALUES ($1, 'r1', 'GET', 'x', 'listLeads', '/x', 200, 1, 'mcp', 'mcp/0.0.9'),
+		VALUES ($1, 'r1', 'GET', 'x', 'listMailboxes', '/x', 200, 1, 'mcp', 'mcp/0.0.9'),
 		       ($1, 'r2', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', '')`, ws); err != nil {
 		t.Fatal(err)
 	}

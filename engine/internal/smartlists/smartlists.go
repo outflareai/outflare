@@ -51,14 +51,19 @@ const (
 //   - news_search: whether they wrote an article this news search found
 //     (exists) or not (not_exists), ever or in the last within_days days:
 //     a media list of the journalists who cover a topic.
+//   - company_attribute: a field on a company they are on (the companies
+//     field), compared like attribute: such as a journalist's outlet tier,
+//     outlet_tier. neq and not_exists hold when none of their companies
+//     matches.
 type Rule struct {
-	Attribute  string `json:"attribute,omitempty"`
-	Event      string `json:"event,omitempty"`
-	WithinDays int    `json:"within_days,omitempty"`
-	InList     string `json:"in_list,omitempty"`
-	NewsSearch string `json:"news_search,omitempty"`
-	Op         string `json:"op"`
-	Value      any    `json:"value,omitempty"`
+	Attribute        string `json:"attribute,omitempty"`
+	CompanyAttribute string `json:"company_attribute,omitempty"`
+	Event            string `json:"event,omitempty"`
+	WithinDays       int    `json:"within_days,omitempty"`
+	InList           string `json:"in_list,omitempty"`
+	NewsSearch       string `json:"news_search,omitempty"`
+	Op               string `json:"op"`
+	Value            any    `json:"value,omitempty"`
 }
 
 var (
@@ -87,13 +92,13 @@ func Check(rules []Rule, match string) string {
 
 func checkRule(r Rule) string {
 	set := 0
-	for _, v := range []string{r.Attribute, r.Event, r.InList, r.NewsSearch} {
+	for _, v := range []string{r.Attribute, r.CompanyAttribute, r.Event, r.InList, r.NewsSearch} {
 		if v != "" {
 			set++
 		}
 	}
 	if set != 1 {
-		return "each rule tests one of attribute, event, in_list or news_search"
+		return "each rule tests one of attribute, company_attribute, event, in_list or news_search"
 	}
 	if !ops[r.Op] {
 		return "op is eq, neq, gt, lt, contains, exists or not_exists"
@@ -101,6 +106,8 @@ func checkRule(r Rule) string {
 	switch {
 	case r.Attribute != "" && (!fieldRE.MatchString(r.Attribute) || len(r.Attribute) > 200):
 		return "attribute is a field name such as plan or address.country"
+	case r.CompanyAttribute != "" && (!fieldRE.MatchString(r.CompanyAttribute) || len(r.CompanyAttribute) > 200):
+		return "company_attribute is a company field's name such as outlet_tier or industry"
 	case r.Event != "" && (!eventRE.MatchString(r.Event) || len(r.Event) > 100):
 		return "event is an event name such as order_completed"
 	case r.InList != "" && !uuidRE.MatchString(r.InList):
@@ -116,7 +123,7 @@ func checkRule(r Rule) string {
 	case r.Op != "exists" && r.Op != "not_exists" && r.Value == nil:
 		return "op " + r.Op + " needs a value"
 	case r.Op == "exists" || r.Op == "not_exists":
-		if r.Value != nil && r.Attribute != "" {
+		if r.Value != nil && (r.Attribute != "" || r.CompanyAttribute != "") {
 			return "op " + r.Op + " takes no value"
 		}
 	}
@@ -272,9 +279,33 @@ func (b *builder) rule(r Rule, eventBrand string) string {
 		}
 		return sql
 	}
-	path := b.arg(strings.Split(r.Attribute, "."))
-	j := `(r.attributes #> ` + path + `::text[])`
-	t := `(r.attributes #>> ` + path + `::text[])`
+	if r.CompanyAttribute != "" {
+		// Any of their companies passing; neq and not_exists ask that
+		// none of them has the value.
+		op, not := r.Op, false
+		switch op {
+		case "neq":
+			op, not = "eq", true
+		case "not_exists":
+			op, not = "exists", true
+		}
+		sql := `EXISTS (SELECT 1 FROM record_relationships rr JOIN records c ON c.id = rr.to_id AND c.record_type = 'account' AND c.merged_into IS NULL
+			WHERE rr.workspace_id = $1 AND rr.from_id = r.id AND rr.kind = 'companies' AND rr.valid_to IS NULL
+			AND COALESCE(` + b.test("c", r.CompanyAttribute, op, r.Value) + `, false))`
+		if not {
+			return `NOT ` + sql
+		}
+		return sql
+	}
+	return b.test("r", r.Attribute, r.Op, r.Value)
+}
+
+// test compares a field on records aliased alias with op and value.
+func (b *builder) test(alias, field, op string, value any) string {
+	path := b.arg(strings.Split(field, "."))
+	j := `(` + alias + `.attributes #> ` + path + `::text[])`
+	t := `(` + alias + `.attributes #>> ` + path + `::text[])`
+	r := Rule{Op: op, Value: value}
 	switch r.Op {
 	case "exists":
 		return `COALESCE(` + t + `, '') <> ''`

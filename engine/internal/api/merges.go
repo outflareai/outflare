@@ -518,8 +518,8 @@ func (s *Server) listDuplicates(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	statuses := []string{"open", "blocked"}
@@ -609,7 +609,7 @@ func (s *Server) listDuplicates(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []duplicateView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // decideDuplicate answers "same human?" without merging: dismiss (not the

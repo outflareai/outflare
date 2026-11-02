@@ -594,7 +594,7 @@ func (c *runner) write(body []byte, raw bool) {
 	}
 }
 
-// paginate follows next_cursor (or next_before, next_after or next_offset) and prints one
+// paginate follows next_cursor and prints one
 // {"data": [...]} with every page.
 func (c *runner) paginate(ctx context.Context, s settings, target, mission string, raw bool) int {
 	var all []json.RawMessage
@@ -613,19 +613,16 @@ func (c *runner) paginate(ctx context.Context, s settings, target, mission strin
 		var data []json.RawMessage
 		json.Unmarshal(page["data"], &data) //nolint:errcheck
 		all = append(all, data...)
-		// next_cursor is the one rule every list follows; the older
-		// next_ fields are a fallback for servers that predate it.
+		// next_cursor is the one rule every list follows: null on the last
+		// page.
 		next := ""
-		for _, k := range []string{"cursor", "before", "after", "offset"} {
-			if v, ok := page["next_"+k]; ok && string(v) != "null" {
-				u, _ := url.Parse(target)
-				q := u.Query()
-				q.Del("cursor")
-				q.Set(k, strings.Trim(string(v), `"`))
-				u.RawQuery = q.Encode()
-				next = u.String()
-				break
-			}
+		var cursor string
+		if json.Unmarshal(page["next_cursor"], &cursor) == nil && cursor != "" {
+			u, _ := url.Parse(target)
+			q := u.Query()
+			q.Set("cursor", cursor)
+			u.RawQuery = q.Encode()
+			next = u.String()
 		}
 		if string(page["has_more"]) == "false" {
 			break

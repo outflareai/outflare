@@ -40,6 +40,9 @@ var simPages = map[string]struct {
 		`<script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","headline":"Northpeak raises a seed round",` +
 		`"author":[{"@type":"Person","name":"Sam Okafor"}],"datePublished":"2026-10-27T09:00:00Z"}</script></head>` +
 		`<body><h1>Northpeak raises a seed round</h1><p>The proxy firm said...</p></body></html>`, "text/html"},
+	// For the support assistant: a help page that answers a question.
+	"/faq": {200, `<html lang="en"><head><title>FAQ</title></head><body><h1>Questions</h1><h2>Can I pay by bank transfer?</h2>` +
+		`<p>Yes. Annual plans can be paid by bank transfer. Ask for an invoice from the billing page and pay within 30 days.</p></body></html>`, "text/html"},
 	"/contact": {200, `<html><head><title>Contact</title></head><body><a href="mailto:editor@{host}">Editor</a> <a href="mailto:someone@elsewhere.example">Elsewhere</a></body></html>`, "text/html"},
 }
 

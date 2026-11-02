@@ -415,7 +415,7 @@ func (s *Server) loadDelivery(ctx context.Context, endpointID string, id int64) 
 }
 
 // listWebhookDeliveries returns an endpoint's deliveries newest first, for
-// the last 30 days. Page with ?before=<id>&limit=<n>; filter with
+// the last 30 days. Page with ?cursor=&limit=; filter with
 // ?status= and ?event_type=.
 func (s *Server) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 	cur, ok := s.oneWebhook(w, r)
@@ -433,10 +433,12 @@ func (s *Server) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	var before int64 = 1<<63 - 1
-	if v := q.Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be a delivery id")
+			invalidCursor(w, r)
 			return
 		}
 		before = n
@@ -465,7 +467,7 @@ func (s *Server) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // testWebhook sends a webhook.test event now and answers with the delivery,
@@ -535,7 +537,7 @@ func (s *Server) PruneInboundWebhookIDs(ctx context.Context) (int64, error) {
 
 // listEvents is the events feed: the same events webhooks send, for callers
 // that cannot receive them (agents, scripts behind a firewall). Oldest
-// first; poll with ?after=next_after. Events are kept as long as the audit
+// first; poll with ?cursor=next_cursor, or start with ?start=latest. Events are kept as long as the audit
 // log.
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -549,21 +551,28 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
+	cur, ok := pageCursor(w, r, pageAfter)
+	if !ok {
+		return
+	}
 	var after int64
-	if q.Get("after") == "latest" {
-		// Start from now: no events, and next_after is the newest one, so
+	if v := q.Get("start"); v != "" && v != "latest" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "start must be latest")
+		return
+	} else if v == "latest" && cur == "" {
+		// Start from now: no events, and next_cursor is after the newest, so
 		// a listener only sees what happens from here on.
 		var latest int64
 		if err := s.pool.QueryRow(r.Context(), `SELECT coalesce(max(id), 0) FROM audit_events WHERE workspace_id = $1`, a.WorkspaceID).Scan(&latest); err != nil {
 			s.internal(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"data": []webhooks.Envelope{}, "next_after": "evt_" + strconv.FormatInt(latest, 10), "has_more": false})
+		writeJSON(w, http.StatusOK, map[string]any{"data": []webhooks.Envelope{}, "next_cursor": nextCursor(pageAfter, "evt_"+strconv.FormatInt(latest, 10)), "has_more": false})
 		return
-	} else if v := strings.TrimPrefix(q.Get("after"), "evt_"); v != "" {
+	} else if v := strings.TrimPrefix(cur, "evt_"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil || n < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "after must be an event id (evt_...)")
+			invalidCursor(w, r)
 			return
 		}
 		after = n
@@ -617,10 +626,10 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	// next_after is always set, so a caller can keep polling from it; with
+	// next_cursor is always set, so a caller can keep polling from it; with
 	// nothing new it is the cursor it sent.
 	next := "evt_" + strconv.FormatInt(max(last, after), 10)
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_after": next, "has_more": len(list) == limit})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageAfter, next), "has_more": len(list) == limit})
 }
 
 type webhookAttemptView struct {

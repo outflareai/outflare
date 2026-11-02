@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Chat</title>
+<style nonce="{{NONCE}}">
+  :root { --accent: #111827; --bg: #fff; --fg: #111827; --muted: #6b7280; --line: #e5e7eb; --soft: #f3f4f6; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); display: flex; flex-direction: column; }
+  header { background: var(--accent); color: #fff; padding: 16px 16px 14px; display: flex; align-items: flex-start; gap: 12px; }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+  header .grow { flex: 1; min-width: 0; }
+  button { font: inherit; }
+  .icon { background: transparent; border: 0; color: inherit; cursor: pointer; padding: 4px; border-radius: 6px; line-height: 0; }
+  .icon:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  header .icon:focus-visible { outline-color: #fff; }
+  main { flex: 1; overflow-y: auto; padding: 14px 14px 6px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 82%; padding: 9px 12px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .team { align-self: flex-start; background: var(--soft); border-top-left-radius: 4px; }
+  .visitor { align-self: flex-end; background: var(--accent); color: #fff; border-top-right-radius: 4px; }
+  .who { font-size: 11px; color: var(--muted); margin: 4px 4px -4px; }
+  .who.right { align-self: flex-end; }
+  .note { align-self: center; font-size: 12px; color: var(--muted); text-align: center; padding: 4px 8px; }
+  .search { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .search label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .search input, form input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; color: inherit; background: #fff; }
+  .results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .results a { display: block; padding: 7px 4px; text-decoration: none; color: inherit; border-radius: 6px; }
+  .results a:hover { background: var(--soft); }
+  .results strong { display: block; font-size: 13px; font-weight: 600; }
+  .results span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  form { border-top: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  textarea { resize: none; min-height: 40px; max-height: 120px; }
+  .send { background: var(--accent); color: #fff; border: 0; border-radius: 8px; height: 40px; padding: 0 14px; cursor: pointer; font-weight: 600; }
+  .send:disabled { opacity: .5; cursor: default; }
+  .error { color: #b91c1c; font-size: 12px; }
+  .foot { text-align: center; font-size: 11px; color: var(--muted); padding: 0 0 8px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="grow">
+    <h1 id="title"></h1>
+    <p id="greeting"></p>
+  </div>
+  <button class="icon" id="close" type="button" aria-label="Close chat">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  </button>
+</header>
+<main id="log" aria-live="polite">
+  <div class="search" id="search" hidden>
+    <label for="q">Find an answer</label>
+    <input id="q" type="search" placeholder="Search our help centre" autocomplete="off">
+    <ul class="results" id="results"></ul>
+  </div>
+</main>
+<form id="form" novalidate>
+  <input id="email" type="email" placeholder="Your email, so we can reply" autocomplete="email" hidden aria-label="Your email">
+  <div class="row">
+    <textarea id="body" rows="1" placeholder="Write a message…" aria-label="Message" maxlength="5000"></textarea>
+    <button class="send" id="send" type="submit">Send</button>
+  </div>
+  <p class="error" id="error" role="alert" hidden></p>
+</form>
+<p class="foot">Messages go to our team's inbox.</p>
+<script nonce="{{NONCE}}">
+(function () {
+  var cfg = /*CONFIG*/{};
+  var st = cfg.settings;
+  var base = "/chat/" + cfg.key;
+  var store = "outflare-chat:" + cfg.key;
+  var token = null, identity = null, last = "", known = false, seen = {};
+  var $ = function (id) { return document.getElementById(id); };
+  document.documentElement.style.setProperty("--accent", st.color);
+  $("title").textContent = st.title;
+  $("greeting").textContent = st.greeting;
+  $("close").addEventListener("click", function () { parent.postMessage({ type: "outflare-chat:close" }, "*"); });
+
+  try { token = localStorage.getItem(store); } catch (e) {}
+
+  function call(method, path, body) {
+    var h = { "Content-Type": "application/json" };
+    if (token) h["X-Chat-Token"] = token;
+    return fetch(base + path, { method: method, headers: h, body: body ? JSON.stringify(body) : undefined, credentials: "omit" })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw j.error || { message: "Something went wrong" }; return j; }); });
+  }
+
+  function show(m) {
+    if (seen[m.id]) return;
+    seen[m.id] = true;
+    var log = $("log");
+    if (m.from === "team" && m.name) {
+      var who = document.createElement("div");
+      who.className = "who";
+      who.textContent = m.name;
+      log.appendChild(who);
+    }
+    var el = document.createElement("div");
+    el.className = "msg " + m.from;
+    el.textContent = m.body;
+    log.appendChild(el);
+    if (m.created_at > last) last = m.created_at;
+    log.scrollTop = log.scrollHeight;
+    $("search").hidden = true;
+  }
+
+  function note(text) {
+    var el = document.createElement("div");
+    el.className = "note";
+    el.textContent = text;
+    $("log").appendChild(el);
+  }
+
+  function err(text) { $("error").textContent = text || ""; $("error").hidden = !text; }
+
+  function render(res) {
+    (res.messages || []).forEach(show);
+    var started = Object.keys(seen).length > 0;
+    known = known || started || !!identity;
+    $("email").hidden = !(st.require_email && !known);
+    $("search").hidden = started || !st.show_articles;
+  }
+
+  function startSession() {
+    return call("POST", "/session", { identity: identity }).then(function (res) {
+      token = res.token;
+      try { localStorage.setItem(store, token); } catch (e) {}
+      render(res);
+    });
+  }
+
+  var timer;
+  function poll() {
+    clearTimeout(timer);
+    if (!token) return;
+    call("GET", "/messages" + (last ? "?after=" + encodeURIComponent(last) : "")).then(function (res) {
+      res.messages.forEach(show);
+    }).catch(function () {}).then(function () {
+      timer = setTimeout(poll, document.hidden ? 20000 : 4000);
+    });
+  }
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+
+  window.addEventListener("message", function (e) {
+    if (e.source !== parent || !e.data || e.data.type !== "outflare-chat:identity") return;
+    var id = e.data.identity;
+    if (!id || typeof id.email !== "string" || typeof id.signature !== "string") return;
+    identity = { email: id.email, name: typeof id.name === "string" ? id.name : "", signature: id.signature };
+    startSession().catch(function () {});
+  });
+
+  $("body").addEventListener("input", function () {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+  });
+  $("body").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("form").requestSubmit(); }
+  });
+
+  $("form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var body = $("body").value.trim();
+    var email = $("email").hidden ? "" : $("email").value.trim();
+    if (!body) return;
+    if (!$("email").hidden && !email) { err("Leave your email so we can get back to you."); $("email").focus(); return; }
+    err("");
+    $("send").disabled = true;
+    var go = token ? Promise.resolve() : startSession();
+    go.then(function () {
+      return call("POST", "/messages", { body: body, email: email, identity: identity });
+    }).then(function (res) {
+      $("body").value = "";
+      $("body").style.height = "";
+      known = true;
+      $("email").hidden = true;
+      // Shown now; the server's copy has the same id, so it isn't shown twice.
+      show({ id: res.id, from: "visitor", name: "", body: body, created_at: "" });
+      if (res.started) note("Thanks! Someone from the team will reply here.");
+      poll();
+    }).catch(function (x) {
+      err(x && x.message ? x.message : "Couldn't send. Try again.");
+    }).then(function () { $("send").disabled = false; });
+  });
+
+  var qt;
+  $("q").addEventListener("input", function () {
+    var q = this.value.trim();
+    clearTimeout(qt);
+    qt = setTimeout(function () {
+      var list = $("results");
+      if (!q) { list.textContent = ""; return; }
+      call("GET", "/articles?q=" + encodeURIComponent(q)).then(function (res) {
+        list.textContent = "";
+        res.data.forEach(function (a) {
+          if (!a.url) return;
+          var li = document.createElement("li"), link = document.createElement("a"), t = document.createElement("strong"), x = document.createElement("span");
+          link.href = a.url;
+          link.target = "_blank";
+          link.rel = "noopener";
+          t.textContent = a.title;
+          x.textContent = a.excerpt;
+          link.appendChild(t);
+          link.appendChild(x);
+          li.appendChild(link);
+          list.appendChild(li);
+        });
+        if (!list.children.length) {
+          var li = document.createElement("li");
+          li.className = "note";
+          li.textContent = "Nothing found. Write to us below.";
+          list.appendChild(li);
+        }
+      }).catch(function () {});
+    }, 250);
+  });
+
+  $("search").hidden = !st.show_articles;
+  $("email").hidden = !st.require_email;
+  if (token) startSession().then(poll).catch(function () { token = null; });
+})();
+</script>
+</body>
+</html>

@@ -271,8 +271,9 @@ func TestBrandQuery(t *testing.T) {
 	if code, _ := owner.do("POST", q, map[string]any{"sql": "create temporary view x as select 1"}); code != 400 {
 		t.Fatalf("a query made a view: %d", code)
 	}
-	if code, out := owner.do("POST", q, map[string]any{"sql": "select count(*) from leads"}); code != 403 {
-		t.Fatalf("leads on a brand query: %d %v", code, out)
+	// Leads belong to a brand (step 5): a brand's query reads its own.
+	if r := rows(owner, q, "select count(*) from leads"); len(r) != 1 || r[0][0] != 0.0 {
+		t.Fatalf("leads on a brand query: %v", r)
 	}
 
 	// Record types are tables, with a column per field.

@@ -129,7 +129,7 @@ func TestReviewRequests(t *testing.T) {
 	if report["sent"] != 1.0 || report["clicked"] != 1.0 || len(report["platforms"].([]any)) != 1 {
 		t.Fatalf("report=%v", report)
 	}
-	owner.must(400, "GET", route+"?after=bad", nil)
+	owner.must(400, "GET", route+"?cursor=bad", nil)
 	// Once-ever applies across workflows. Multiple workers cannot both reserve
 	// the remaining customer's invitation, even across distinct source events.
 	settings.Frequency = "once"

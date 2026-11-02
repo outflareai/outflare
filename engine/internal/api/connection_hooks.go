@@ -167,7 +167,7 @@ var hookEventStatuses = []string{inbound.EventQueued, inbound.EventHandled, inbo
 func (s *Server) listHookEvents(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	if s.inbound == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}, "next_before": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}, "next_cursor": nil})
 		return
 	}
 	q := r.URL.Query()
@@ -197,7 +197,7 @@ func (s *Server) listHookEvents(w http.ResponseWriter, r *http.Request) {
 		t := list[len(list)-1].ReceivedAt.Format("2006-01-02T15:04:05.999999999Z07:00")
 		next = &t
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) replayHookEvent(w http.ResponseWriter, r *http.Request) {

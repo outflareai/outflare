@@ -29,6 +29,9 @@ func (s *Server) routesAds(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/accounts/{id}", s.inWorkspace(auth.ScopeIntegrationsManage, s.updateAdAccount))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/campaigns", s.inBrand(read, s.listAdCampaigns))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/items", s.inBrand(read, s.listAdItems))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-actions", s.inBrand(read, s.listAdConversionActions))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/keywords", s.inBrand(read, s.listAdKeywords))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/search-terms", s.inBrand(read, s.listAdSearchTerms))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/summary", s.inBrand(read, s.adsSummary))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/sync", s.inWorkspace(read, s.syncAds))
 }
@@ -364,6 +367,22 @@ type adTotals struct {
 	CTR               *float64 `json:"ctr"`
 	CostPerConvMicros *int64   `json:"cost_per_conversion_micros"`
 	PlatformROAS      *float64 `json:"platform_roas"`
+	// What Meta reports beside clicks; null where no day had it. Reach
+	// adds up each day's people, so someone reached on two days counts
+	// twice; frequency is impressions over that, the average day's.
+	DailyReach       *int64   `json:"daily_reach"`
+	Frequency        *float64 `json:"frequency"`
+	LinkClicks       *int64   `json:"link_clicks"`
+	LandingPageViews *int64   `json:"landing_page_views"`
+	VideoViews       *int64   `json:"video_views"`
+	// reachImpressions are the impressions on days with a reach.
+	reachImpressions *int64
+}
+
+// dest is where a row of adSums scans to.
+func (t *adTotals) dest() []any {
+	return []any{&t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros,
+		&t.DailyReach, &t.reachImpressions, &t.LinkClicks, &t.LandingPageViews, &t.VideoViews}
 }
 
 func (t *adTotals) derive() {
@@ -383,10 +402,16 @@ func (t *adTotals) derive() {
 		v := float64(*t.ConversionValueMicros) / float64(t.SpendMicros)
 		t.PlatformROAS = &v
 	}
+	if t.DailyReach != nil && *t.DailyReach > 0 && t.reachImpressions != nil {
+		v := float64(*t.reachImpressions) / float64(*t.DailyReach)
+		t.Frequency = &v
+	}
 }
 
 const adSums = `COALESCE(sum(m.spend_micros), 0)::bigint, COALESCE(sum(m.impressions), 0)::bigint, COALESCE(sum(m.clicks), 0)::bigint,
-	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint`
+	sum(m.conversions)::float8, sum(m.conversion_value_micros)::bigint,
+	sum(m.reach)::bigint, sum(m.impressions) FILTER (WHERE m.reach IS NOT NULL)::bigint,
+	sum(m.link_clicks)::bigint, sum(m.landing_page_views)::bigint, sum(m.video_views)::bigint`
 
 type adFilter struct {
 	from, to string
@@ -502,8 +527,8 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c adCampaignOut
 		t := &c.Totals
-		if err := rows.Scan(&c.ID, &c.AdAccountID, &c.Connector, &c.AccountName, &c.ExternalID, &c.Name, &c.Status, &c.ProviderStatus, &c.Objective,
-			&c.DailyBudgetMicros, &c.BrandID, &c.Currency, &t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros); err != nil {
+		if err := rows.Scan(append([]any{&c.ID, &c.AdAccountID, &c.Connector, &c.AccountName, &c.ExternalID, &c.Name, &c.Status, &c.ProviderStatus, &c.Objective,
+			&c.DailyBudgetMicros, &c.BrandID, &c.Currency}, t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -570,7 +595,7 @@ func (s *Server) adsSummary(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var x adSummaryRow
 			t := &x.Totals
-			if err := rows.Scan(&x.Key, &x.Currency, &t.SpendMicros, &t.Impressions, &t.Clicks, &t.Conversions, &t.ConversionValueMicros); err != nil {
+			if err := rows.Scan(append([]any{&x.Key, &x.Currency}, t.dest()...)...); err != nil {
 				return nil, err
 			}
 			t.derive()

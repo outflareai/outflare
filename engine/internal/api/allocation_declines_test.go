@@ -35,7 +35,7 @@ func TestAllocationDeclinesListAndClear(t *testing.T) {
 	owner.must(200, "POST", base+"/allocation/changes/"+changes[0].(map[string]any)["id"].(string)+"/undo", nil)
 	list := owner.must(200, "GET", base+"/allocation/declines?sequence_id="+aID, nil)
 	data := list["data"].([]any)
-	if len(data) != 1 || list["next_offset"] != nil {
+	if len(data) != 1 || list["next_cursor"] != nil {
 		t.Fatalf("declines: %v", list)
 	}
 	d := data[0].(map[string]any)

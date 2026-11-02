@@ -602,7 +602,8 @@ func (r *paymentRun) subscription(ctx context.Context, tx pgx.Tx, rec string, s 
 	}
 	ev := func(name, msg string, at time.Time, p map[string]any) error {
 		_, err := customers.Record(ctx, tx, r.ws, customers.Event{RecordID: rec, Name: name, Source: r.provider, OccurredAt: at,
-			MessageID: r.provider + ":subscription:" + s.ID + ":" + msg, RequestID: RequestID(ctx), Properties: p})
+			MessageID: r.provider + ":subscription:" + s.ID + ":" + msg, RequestID: RequestID(ctx), Properties: p,
+			Product: s.ProductID, ProductSource: customers.ProductFromBilling})
 		return err
 	}
 	if err := ev(evSubscriptionStarted, "started", s.Created, props()); err != nil {

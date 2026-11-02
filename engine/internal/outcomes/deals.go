@@ -39,11 +39,13 @@ type Deal struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 	LeadEmail         *string    `json:"lead_email"`
 	SequenceName      *string    `json:"sequence_name"`
+	// The brand it belongs to.
+	BrandID *string `json:"brand_id"`
 }
 
 const dealCols = `d.id, d.sequence_id, d.mission_id, d.lead_id, d.meeting_id, d.source, d.integration_id, d.external_id,
 	d.name, d.stage, d.state, d.amount_cents, d.currency, d.opened_at, d.closed_at, d.attribution, d.attribution_pinned,
-	d.created_at, d.updated_at, l.email, s.name`
+	d.created_at, d.updated_at, l.email, s.name, d.brand_id`
 
 const dealFrom = ` FROM deals d
 	LEFT JOIN leads l ON l.id = d.lead_id
@@ -53,7 +55,7 @@ func scanDeal(row pgx.Row) (Deal, error) {
 	var d Deal
 	err := row.Scan(&d.ID, &d.SequenceID, &d.MissionID, &d.LeadID, &d.MeetingID, &d.Source, &d.IntegrationID,
 		&d.ExternalID, &d.Name, &d.Stage, &d.State, &d.AmountCents, &d.Currency, &d.OpenedAt, &d.ClosedAt, &d.Attribution,
-		&d.AttributionPinned, &d.CreatedAt, &d.UpdatedAt, &d.LeadEmail, &d.SequenceName)
+		&d.AttributionPinned, &d.CreatedAt, &d.UpdatedAt, &d.LeadEmail, &d.SequenceName, &d.BrandID)
 	return d, err
 }
 
@@ -65,7 +67,7 @@ type DealFilter struct {
 	State      string
 	Attributed bool
 	// Brand is a brand's id, "none" for rows no brand owns, or "" for
-	// all; a row's brand is its sequence's.
+	// all; each row carries its brand.
 	Brand  string
 	Limit  int
 	Before *time.Time
@@ -85,7 +87,7 @@ func ListDeals(ctx context.Context, q Querier, ws string, f DealFilter) ([]Deal,
 		  AND ($6 = '' OR d.state = $6)
 		  AND (NOT $7 OR d.attribution <> 'none')
 		  AND ($8::timestamptz IS NULL OR d.opened_at < $8)
-		  AND ($10 = '' OR (SELECT q.brand_id FROM sequences q WHERE q.id = d.sequence_id)::text IS NOT DISTINCT FROM NULLIF($10, 'none'))
+		  AND ($10 = '' OR d.brand_id::text IS NOT DISTINCT FROM NULLIF($10, 'none'))
 		ORDER BY d.opened_at DESC, d.id LIMIT $9`,
 		ws, f.From, f.To, f.SequenceID, f.MissionID, f.State, f.Attributed, f.Before, f.Limit, f.Brand)
 	if err != nil {
@@ -127,6 +129,9 @@ type NewDeal struct {
 	OpenedAt     *time.Time `json:"opened_at"`
 	ClosedAt     *time.Time `json:"closed_at"`
 	ExternalID   *string    `json:"external_id"`
+	// BrandID is the brand the deal is logged in (set by the API, not read
+	// from the body); empty takes the brand of what it is matched to.
+	BrandID string `json:"-"`
 }
 
 func checkDeal(state string, amount *int64, currency *string) error {
@@ -171,8 +176,8 @@ func CreateDeal(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n Ne
 	switch {
 	case n.MeetingID != nil:
 		mt, err := GetMeeting(ctx, tx, ws, *n.MeetingID)
-		if errors.Is(err, ErrNotFound) {
-			return Deal{}, invalid("meeting_id is not a meeting in this workspace")
+		if errors.Is(err, ErrNotFound) || (err == nil && n.BrandID != "" && (mt.BrandID == nil || *mt.BrandID != n.BrandID)) {
+			return Deal{}, invalid("meeting_id is not a meeting in this brand")
 		}
 		if err != nil {
 			return Deal{}, err
@@ -180,11 +185,12 @@ func CreateDeal(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n Ne
 		m = Match{Attribution: mt.Attribution, LeadID: mt.LeadID, SequenceID: mt.SequenceID}
 	case n.LeadID != nil:
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM leads WHERE workspace_id = $1 AND id = $2)`, ws, *n.LeadID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM leads WHERE workspace_id = $1 AND id = $2 AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid))`,
+			ws, *n.LeadID, n.BrandID).Scan(&ok); err != nil {
 			return Deal{}, err
 		}
 		if !ok {
-			return Deal{}, invalid("lead_id is not a lead in this workspace")
+			return Deal{}, invalid("lead_id is not a lead in this brand")
 		}
 		m, err = AttributeLead(ctx, tx, ws, *n.LeadID, opened)
 	case n.ContactEmail != "":
@@ -193,14 +199,18 @@ func CreateDeal(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n Ne
 	if err != nil {
 		return Deal{}, err
 	}
+	if err := inBrand(ctx, tx, n.BrandID, &m); err != nil {
+		return Deal{}, err
+	}
 	pinned := false
 	if n.SequenceID != nil {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2)`, ws, *n.SequenceID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid))`,
+			ws, *n.SequenceID, n.BrandID).Scan(&ok); err != nil {
 			return Deal{}, err
 		}
 		if !ok {
-			return Deal{}, invalid("sequence_id is not a sequence in this workspace")
+			return Deal{}, invalid("sequence_id is not a sequence in this brand")
 		}
 		m.SequenceID, m.Attribution, pinned = n.SequenceID, AttrManual, true
 	}
@@ -211,10 +221,10 @@ func CreateDeal(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n Ne
 	var id string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO deals (workspace_id, sequence_id, mission_id, lead_id, meeting_id, source, external_id, name, stage,
-			state, amount_cents, currency, opened_at, closed_at, attribution, attribution_pinned, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id`,
+			state, amount_cents, currency, opened_at, closed_at, attribution, attribution_pinned, created_by, brand_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NULLIF($18, '')::uuid) RETURNING id`,
 		ws, m.SequenceID, n.MissionID, m.LeadID, n.MeetingID, source, n.ExternalID, n.Name, strings.TrimSpace(n.Stage),
-		n.State, n.AmountCents, n.Currency, opened, n.ClosedAt, m.Attribution, pinned, actor).Scan(&id)
+		n.State, n.AmountCents, n.Currency, opened, n.ClosedAt, m.Attribution, pinned, actor, n.BrandID).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return Deal{}, invalid("a deal with this external_id already exists")

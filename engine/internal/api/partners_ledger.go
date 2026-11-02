@@ -245,7 +245,7 @@ func (s *Server) listPartnerRewards(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerRewardView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // rewardChange runs change on one reward in a transaction and answers it.
@@ -471,7 +471,7 @@ func (s *Server) listPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerPayoutView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // partnerPayoutTermDue holds for a reward (w) whose program's (p) payout

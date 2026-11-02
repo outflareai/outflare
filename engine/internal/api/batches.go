@@ -190,8 +190,8 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	where := []string{"b.brand_id = $1", "b.workspace_id = $2", "(b.created_at, b.id::text) < ($3, $4)"}
@@ -227,7 +227,7 @@ func (s *Server) listBatches(w http.ResponseWriter, r *http.Request) {
 		v := last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getBatch(w http.ResponseWriter, r *http.Request) {

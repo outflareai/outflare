@@ -140,7 +140,7 @@ export function Backlinks({ ws, go }: Props) {
   const [reload, setReload] = useState(0);
   const [links, setLinks] = useState<Backlink[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [next, setNext] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [events, setEvents] = useState<BacklinkEvent[] | null>(null);
   const [error, setError] = useState("");
@@ -181,18 +181,18 @@ export function Backlinks({ ws, go }: Props) {
       setError("");
       setLinks(data.data);
       setTotal(data.total);
-      setNext(data.next_offset);
+      setNext(data.next_cursor);
     });
   }, [ws, query, reload]);
 
   const loadMore = async () => {
     if (!query || next === null) return;
     setMore(true);
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/backlinks", { params: { path: { ws }, query: { ...query, offset: next } } });
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/backlinks", { params: { path: { ws }, query: { ...query, cursor: next } } });
     setMore(false);
     if (error || !data) return setError(errorMessage(error));
     setLinks((l) => [...(l ?? []), ...data.data]);
-    setNext(data.next_offset);
+    setNext(data.next_cursor);
   };
 
   const review = async (l: Backlink, review: Review, domain = false) => {

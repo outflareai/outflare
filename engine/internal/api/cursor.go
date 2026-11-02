@@ -3,78 +3,103 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-// One way to page every list: pass next_cursor back as cursor.
+// One way to page every list: a page answers next_cursor, null on the
+// last page, and passing it back as cursor gives the next page. There is
+// no other paging parameter, so callers, the SDK and the CLI's --all only
+// ever need to know this one rule.
 //
-// Lists page in one of three ways underneath (before an id or time, newest
-// first; after an id, oldest first; or an offset), and each keeps its own
-// parameter and next_ field. On top of that, every list takes an opaque
-// cursor and answers next_cursor, so callers, the SDK and the CLI's --all
-// only ever need to know one rule. A cursor is the underlying parameter
-// and value, base64url encoded; callers must not build or read them.
+// Underneath, a list pages in one of three ways: before an id or time
+// (newest first), after an id (oldest first), or by offset. A cursor is
+// that kind and the position, base64url encoded, so a list refuses a
+// cursor another kind of list gave out. Callers must not build or read
+// them; the encoding may change.
 
-// pageKeys are the underlying paging parameters, each with its next_ field.
-var pageKeys = []string{"before", "after", "offset"}
+// pageKind is how a list pages underneath.
+type pageKind string
 
-func encodeCursor(key, value string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(key + ":" + value))
+const (
+	pageBefore pageKind = "before"
+	pageAfter  pageKind = "after"
+	pageOffset pageKind = "offset"
+)
+
+const badCursor = "cursor is not one this API gave out: pass next_cursor from the previous page unchanged"
+
+// errCursor is a cursor the list cannot read, for helpers that return an
+// error: badQuery answers it with 400 invalid_cursor.
+var errCursor = errors.New(badCursor)
+
+func encodeCursor(kind pageKind, value string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(string(kind) + ":" + value))
 }
 
-// withCursorParam turns ?cursor= back into the list's own parameter, so
-// handlers only read before, after or offset.
-func withCursorParam(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		c := q.Get("cursor")
-		if c == "" || r.Method != http.MethodGet {
-			next.ServeHTTP(w, r)
-			return
-		}
-		raw, err := base64.RawURLEncoding.DecodeString(c)
-		key, value, ok := strings.Cut(string(raw), ":")
-		known := false
-		for _, k := range pageKeys {
-			known = known || k == key
-		}
-		if err != nil || !ok || !known {
-			writeError(w, r, http.StatusBadRequest, "invalid_cursor", "cursor is not one this API gave out: pass next_cursor from the previous page unchanged")
-			return
-		}
-		q.Del("cursor")
-		q.Set(key, value)
-		r2 := r.Clone(r.Context())
-		r2.URL.RawQuery = q.Encode()
-		next.ServeHTTP(w, r2)
-	})
-}
-
-// addNextCursor sets next_cursor beside a list's next_before, next_after
-// or next_offset: null when that is null, so null always means the end.
-func addNextCursor(body map[string]any) {
-	if _, done := body["next_cursor"]; done {
-		return
+// readCursor decodes ?cursor=: its kind and position, or "" and "" when
+// there is none (the first page).
+func readCursor(r *http.Request) (pageKind, string, bool) {
+	c := r.URL.Query().Get("cursor")
+	if c == "" {
+		return "", "", true
 	}
-	for _, k := range pageKeys {
-		v, ok := body["next_"+k]
-		if !ok {
-			continue
-		}
-		body["next_cursor"] = cursorFor(k, v)
-		return
+	raw, err := base64.RawURLEncoding.DecodeString(c)
+	key, value, ok := strings.Cut(string(raw), ":")
+	switch k := pageKind(key); {
+	case err != nil || !ok || value == "":
+		return "", "", false
+	case k == pageBefore || k == pageAfter || k == pageOffset:
+		return k, value, true
 	}
+	return "", "", false
 }
 
-func cursorFor(key string, v any) any {
+// pageCursor reads ?cursor= for a list that pages by kind: the position,
+// or "" for the first page. A cursor this kind of list did not give out
+// is answered with 400 invalid_cursor, and ok is false.
+func pageCursor(w http.ResponseWriter, r *http.Request, kind pageKind) (string, bool) {
+	k, v, ok := readCursor(r)
+	if !ok || (k != "" && k != kind) {
+		writeError(w, r, http.StatusBadRequest, "invalid_cursor", badCursor)
+		return "", false
+	}
+	return v, true
+}
+
+// pageOffsetParam reads ?cursor= for a list that pages by offset: 0 for
+// the first page.
+func pageOffsetParam(w http.ResponseWriter, r *http.Request) (int, bool) {
+	v, ok := pageCursor(w, r, pageOffset)
+	if !ok || v == "" {
+		return 0, ok
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		writeError(w, r, http.StatusBadRequest, "invalid_cursor", badCursor)
+		return 0, false
+	}
+	return n, true
+}
+
+// invalidCursor answers a cursor whose position the list cannot read.
+func invalidCursor(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusBadRequest, "invalid_cursor", badCursor)
+}
+
+// nextCursor is a page's next_cursor: the next page's position for a list
+// that pages by kind, or nil (the last page) when v is nil, a nil pointer
+// or "".
+func nextCursor(kind pageKind, v any) any {
 	b, err := json.Marshal(v)
-	if err != nil || string(b) == "null" {
+	if err != nil || string(b) == "null" || string(b) == `""` {
 		return nil
 	}
 	s := string(b)
 	if strings.HasPrefix(s, `"`) {
 		_ = json.Unmarshal(b, &s)
 	}
-	return encodeCursor(key, s)
+	return encodeCursor(kind, s)
 }

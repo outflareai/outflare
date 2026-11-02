@@ -9,6 +9,7 @@ import { Badge, Button, Card, confirmAction, Empty, ErrorText, Loading, toast } 
 import { Switch } from "@/components/ui/switch";
 import { DataTable } from "@/components/data-table";
 import { readAgo } from "@/lib/aiAccounts";
+import { DesktopDownloadLink } from "@/components/desktop-download";
 import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
 import { track } from "@/lib/analytics";
 
@@ -65,8 +66,9 @@ export function ComputersView({ ws, me, seeAll, manageAll }: { ws: string; me: s
         <ul className="space-y-1.5 text-[13px] text-muted-foreground">
           <li>Install it, open it and click <span className="font-medium text-foreground">Link this computer</span>. Outflare opens; check the code and approve it.</li>
           <li>It starts when you sign in to your computer and reports every 10 minutes. Only usage numbers, plans and resets reach Outflare: never your prompts, files or the tools' sign-ins.</li>
-          <li>While it is being tested, your admin shares the installer.</li>
+          <li>Download the Mac update test below. Existing account sign-ins are detected automatically.</li>
         </ul>
+        <div className="mt-4"><DesktopDownloadLink location="computers" /></div>
       </Card>
       <ErrorText>{error}</ErrorText>
       {seeAll && (

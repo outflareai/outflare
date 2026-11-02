@@ -41,9 +41,9 @@ func TestStoryPitches(t *testing.T) {
 	j1, j2 := journalist("Kim Lee", "kim@news.example"), journalist("Sam Cole", "")
 
 	// The sequence: stops on reply, at most one follow-up, uses the opener.
-	seq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Pitches", "steps": []map[string]any{
+	seq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Pitches", "brand_id": "northpeak", "steps": []map[string]any{
 		{"subject": "A story for you", "body": "Hi {{first_name|there}},\n\n{{custom.opener}}\n\nThanks"}}})["id"].(string)
-	long := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Too long", "steps": []map[string]any{
+	long := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Too long", "brand_id": "northpeak", "steps": []map[string]any{
 		{"subject": "a", "body": "{{custom.opener}}"}, {"body": "b", "delay_days": 3}, {"body": "c", "delay_days": 3}}})["id"].(string)
 
 	// Only an approved story is pitched.

@@ -173,7 +173,7 @@ func (s *Server) listLinkReads(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -198,7 +198,7 @@ func (s *Server) listLinkReads(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []linkReadView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getLinkRead(w http.ResponseWriter, r *http.Request) {
@@ -426,7 +426,7 @@ func (s *Server) deadPagesReport(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -464,7 +464,7 @@ func (s *Server) deadPagesReport(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []deadPageView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 type topPageView struct {
@@ -488,7 +488,7 @@ func (s *Server) topPagesReport(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -527,5 +527,5 @@ func (s *Server) topPagesReport(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"target": target, "read_id": readID, "read_at": readAt, "data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"target": target, "read_id": readID, "read_at": readAt, "data": list, "next_cursor": nextCursor(pageOffset, next)})
 }

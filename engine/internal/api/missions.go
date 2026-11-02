@@ -154,7 +154,7 @@ func scanMission(row pgx.Row) (missionView, error) {
 // email providers, mailboxes, sending servers,
 // senders, sign-ins, webhooks, the suppression list and the company context.
 var builtinHeld = regexp.MustCompile(`^/v1/workspaces/[^/]+/(inbox/[^/]+/reply|mailboxes/[^/]+/test-send|mailboxes|mailboxes/import|` +
-	`sending-servers(/.*)?|senders(/.*)?|oauth-connections(/.*)?|webhooks(/.*)?|suppressions/[^/]+|context|api-tokens(/.*)?|integrations(/.*)?|emails|email-providers(/.*)?)/?$`)
+	`sending-servers(/.*)?|senders(/.*)?|webhooks(/.*)?|suppressions/[^/]+|context|api-tokens(/.*)?|integrations(/.*)?|emails|email-providers(/.*)?)/?$`)
 
 // A mailbox by id: changing or removing one also waits for a person.
 var builtinHeldMailbox = regexp.MustCompile(`^/v1/workspaces/[^/]+/mailboxes/[0-9a-fA-F-]{36}/?$`)
@@ -967,8 +967,19 @@ func (s *Server) missionUpdates(ctx context.Context, missionID string, before in
 	})
 }
 
-func pageArgs(r *http.Request) (before int64, limit int) {
-	before, _ = strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+// pageArgs reads ?cursor= (a position before an id) and ?limit=; ok is
+// false once it has answered a bad cursor.
+func pageArgs(w http.ResponseWriter, r *http.Request) (before int64, limit int, ok bool) {
+	v, ok := pageCursor(w, r, pageBefore)
+	if !ok {
+		return 0, 0, false
+	}
+	if v != "" {
+		if before, _ = strconv.ParseInt(v, 10, 64); before <= 0 {
+			invalidCursor(w, r)
+			return 0, 0, false
+		}
+	}
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 || limit > 200 {
 		limit = 50
@@ -982,7 +993,10 @@ func (s *Server) listMissionUpdates(w http.ResponseWriter, r *http.Request) {
 	if s.missionError(w, r, err) {
 		return
 	}
-	before, limit := pageArgs(r)
+	before, limit, ok := pageArgs(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.missionUpdates(r.Context(), v.ID, before, limit, r.URL.Query().Get("open_requests") == "true")
 	if err != nil {
 		s.internal(w, r, err)
@@ -992,7 +1006,7 @@ func (s *Server) listMissionUpdates(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) postMissionUpdate(w http.ResponseWriter, r *http.Request) {
@@ -1094,7 +1108,10 @@ func (s *Server) listMissionCalls(w http.ResponseWriter, r *http.Request) {
 	if s.missionError(w, r, err) {
 		return
 	}
-	before, limit := pageArgs(r)
+	before, limit, ok := pageArgs(w, r)
+	if !ok {
+		return
+	}
 	writesOnly := r.URL.Query().Get("writes") == "true"
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT c.id, c.actor_id::text, ac.display_name, c.method, c.path, c.query, c.outcome, c.status_code, c.duration_ms,
@@ -1120,7 +1137,7 @@ func (s *Server) listMissionCalls(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // ---- Actions ----
@@ -1462,9 +1479,7 @@ func (s *Server) missionGate(w http.ResponseWriter, r *http.Request, a *access, 
 	start := time.Now()
 	ctx := r.Context()
 	reason := strings.TrimSpace(r.Header.Get(missions.ReasonHeader))
-	if len(reason) > 1000 {
-		reason = reason[:1000]
-	}
+	reason = cutRunes(reason, 1000)
 	m, err := s.loadMission(ctx, a.WorkspaceID, missionID)
 	if errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "mission_not_found", "mission not found; check the "+missions.Header+" header")

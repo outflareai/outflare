@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -107,6 +108,19 @@ func TestNewsWatchFindsJournalists(t *testing.T) {
 		j["latest_article"].(map[string]any)["title"] != "Northpeak raises a seed round" ||
 		len(j["topics"].([]any)) != 1 || j["topics"].([]any)[0].(map[string]any)["name"] != "Proxy news" {
 		t.Fatalf("journalist: %v", j)
+	}
+	// They are marked as a journalist on their record, with the topic
+	// search's name as a suggested beat; a person's edit then wins.
+	if j["journalist"] != true || fmt.Sprint(j["beats"]) != "[Proxy news]" || len(j["suggested_beats"].([]any)) != 0 || j["latest_article"] == nil {
+		t.Fatalf("beats: %v", j)
+	}
+	rec := owner.must(200, "GET", base+"/records/"+j["record_id"].(string), nil)
+	if rec["attributes"].(map[string]any)["journalist"] != true || rec["attribute_sources"].(map[string]any)["beats"] != "enrichment" {
+		t.Fatalf("record: %v", rec)
+	}
+	edited := owner.must(200, "PATCH", base+"/journalists/"+j["record_id"].(string), map[string]any{"beats": []string{"Proxies"}})
+	if fmt.Sprint(edited["beats"]) != "[Proxies]" || fmt.Sprint(edited["suggested_beats"]) != "[Proxy news]" {
+		t.Fatalf("edited: %v", edited)
 	}
 	var onOutlet bool
 	if err := e.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM record_relationships rr JOIN records c ON c.id = rr.to_id

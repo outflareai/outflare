@@ -45,17 +45,13 @@ type Service struct {
 type TokenRequest struct {
 	MailboxID, WorkspaceID, Email, Provider string
 	// IntegrationID is the connection the mailbox signs in through (the
-	// google_mail or outlook_mail connector). ConnectionID and
-	// RefreshToken are the older ways, for mailboxes connected before.
+	// google_mail or outlook_mail connector).
 	IntegrationID *string
-	ConnectionID  *string
-	RefreshToken  string
 }
 
-// TokenSource returns an OAuth access token for a mailbox, and a new
-// refresh token when the provider rotated it.
+// TokenSource returns an OAuth access token for a mailbox.
 type TokenSource interface {
-	Token(ctx context.Context, req TokenRequest) (access, rotated string, err error)
+	Token(ctx context.Context, req TokenRequest) (string, error)
 }
 
 // Register adds the mailbox job handlers to a queue.
@@ -69,7 +65,6 @@ func (s *Service) Register(q *jobs.Queue) {
 type stored struct {
 	SMTPPassword string `json:"smtp_password,omitempty"`
 	IMAPPassword string `json:"imap_password,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 // ImportResult summarises an import.
@@ -235,7 +230,7 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 	case err != nil:
 		return false, "", err
 	}
-	creds, err := json.Marshal(stored{SMTPPassword: r.SMTPPassword, IMAPPassword: r.IMAPPassword, RefreshToken: r.RefreshToken})
+	creds, err := json.Marshal(stored{SMTPPassword: r.SMTPPassword, IMAPPassword: r.IMAPPassword})
 	if err != nil {
 		return false, "", err
 	}
@@ -249,11 +244,11 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 		_, err = tx.Exec(ctx, `
 			INSERT INTO mailboxes (id, workspace_id, pool_id, email, display_name, provider,
 				smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username,
-				credentials, daily_limit, source, auth_method, oauth_connection_id, integration_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+				credentials, daily_limit, source, auth_method, integration_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 			id, ws, poolID, r.Email, r.DisplayName, r.Provider,
 			r.SMTPHost, r.SMTPPort, r.SMTPUsername, r.IMAPHost, r.IMAPPort, r.IMAPUsername,
-			sealed, limit, source, authMethod(r), r.ConnectionID, r.IntegrationID)
+			sealed, limit, source, authMethod(r), r.IntegrationID)
 	} else {
 		// Re-importing a mailbox replaces its connection details and
 		// re-verifies it. Pool, name and limit change only when given.
@@ -266,11 +261,11 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 				daily_limit = CASE WHEN $13 = 0 THEN daily_limit ELSE $13 END,
 				status = CASE WHEN status = 'paused' THEN status ELSE 'verifying' END,
 				status_reason = NULL, smtp_ok = NULL, imap_ok = NULL, updated_at = now(),
-				auth_method = $14, oauth_connection_id = $15, integration_id = $16
+				auth_method = $14, integration_id = $15
 			WHERE id = $1 AND workspace_id = $2`,
 			id, ws, r.Provider, r.SMTPHost, r.SMTPPort, r.SMTPUsername,
 			r.IMAPHost, r.IMAPPort, r.IMAPUsername, sealed, poolID, r.DisplayName, r.DailyLimit,
-			authMethod(r), r.ConnectionID, r.IntegrationID)
+			authMethod(r), r.IntegrationID)
 	}
 	if err != nil {
 		return false, "", err
@@ -353,13 +348,13 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 	var smtpHost, imapHost, provider, method string
 	var smtpPort, imapPort int
 	var sealed []byte
-	var connID, integrationID *string
+	var integrationID *string
 	err := q.QueryRow(ctx, `
 		SELECT email, display_name, status, purpose, brand_id::text, smtp_host, smtp_port, smtp_username,
-		       imap_host, imap_port, imap_username, credentials, provider, auth_method, oauth_connection_id, integration_id
+		       imap_host, imap_port, imap_username, credentials, provider, auth_method, integration_id
 		FROM mailboxes WHERE id = $1 AND workspace_id = $2`, id, workspaceID,
 	).Scan(&a.Email, &a.DisplayName, &a.Status, &a.Purpose, &a.BrandID, &smtpHost, &smtpPort, &a.SMTPCred.Username,
-		&imapHost, &imapPort, &a.IMAPCred.Username, &sealed, &provider, &method, &connID, &integrationID)
+		&imapHost, &imapPort, &a.IMAPCred.Username, &sealed, &provider, &method, &integrationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -382,9 +377,8 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 	if s.Tokens == nil {
 		return nil, &ConnError{"OAuth", StageAuth, errors.New("OAuth is not configured on this instance")}
 	}
-	tok, rotated, err := s.Tokens.Token(ctx, TokenRequest{
-		MailboxID: id, WorkspaceID: workspaceID, Email: a.Email, Provider: provider,
-		IntegrationID: integrationID, ConnectionID: connID, RefreshToken: c.RefreshToken,
+	tok, err := s.Tokens.Token(ctx, TokenRequest{
+		MailboxID: id, WorkspaceID: workspaceID, Email: a.Email, Provider: provider, IntegrationID: integrationID,
 	})
 	if err != nil {
 		var ce *ConnError
@@ -392,13 +386,6 @@ func (s *Service) Load(ctx context.Context, q jobs.Querier, workspaceID, id stri
 			return nil, err
 		}
 		return nil, &ConnError{"OAuth", StageAuth, err}
-	}
-	if rotated != "" {
-		c.RefreshToken = rotated
-		b, _ := json.Marshal(c)
-		if _, err := s.Pool.Exec(ctx, `UPDATE mailboxes SET credentials = $2 WHERE id = $1`, id, s.Box.Seal(b, []byte(id))); err != nil {
-			return nil, err
-		}
 	}
 	a.SMTPCred = Credentials{Username: a.Email, Token: tok}
 	a.IMAPCred = Credentials{Username: a.Email, Token: tok}

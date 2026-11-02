@@ -138,10 +138,12 @@ func (s *Server) listVerifications(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(q.Get("limit")); err == nil && v > 0 && v <= 1000 {
 		limit = v
 	}
-	if v := q.Get("offset"); v != "" {
+	if v, ok := pageCursor(w, r, pageOffset); !ok {
+		return
+	} else if v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "offset must be 0 or more")
+			invalidCursor(w, r)
 			return
 		}
 		offset = n
@@ -166,7 +168,7 @@ func (s *Server) listVerifications(w http.ResponseWriter, r *http.Request) {
 		n := offset + limit
 		next = &n
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_offset": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 // startVerification queues verification of addresses, a lead list, or

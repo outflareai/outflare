@@ -79,15 +79,15 @@ function details(e: AuditEvent): string {
 
 export function Audit({ ws }: { ws: string }) {
   const [events, setEvents] = useState<AuditEvent[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
+  const [next, setNext] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   const { query: brandQuery } = useBrand(ws);
   const load = useCallback(
-    async (before?: number) => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/audit-events", { params: { path: { ws }, query: { before, ...brandQuery } } });
-      setEvents((prev) => (before ? [...(prev ?? []), ...(data?.data ?? [])] : data?.data ?? []));
-      setNext(data?.next_before ?? null);
+    async (cursor?: string) => {
+      const { data } = await api.GET("/v1/workspaces/{ws}/audit-events", { params: { path: { ws }, query: { cursor, ...brandQuery } } });
+      setEvents((prev) => (cursor ? [...(prev ?? []), ...(data?.data ?? [])] : data?.data ?? []));
+      setNext(data?.next_cursor ?? null);
     },
     [ws, brandQuery.brand], // eslint-disable-line react-hooks/exhaustive-deps
   );

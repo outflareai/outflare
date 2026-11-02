@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { KitPlan, PlaybookAutomation, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
+import type { AgentRun, KitPlan, PlaybookAutomation, PlaybookConnectionNeed, WorkspacePlaybook } from "@outflare/sdk";
 import { track } from "@/lib/analytics";
 import { PlaybookAutomations } from "@/components/playbook-automations";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { KitFileSheet, KitPlanList } from "@/components/kit-export";
+import { budgetCents, RunModePicker } from "./AgentRuns";
+import { useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, PageHeader, toast, type tones } from "../ui";
 import { plural } from "../format";
@@ -11,8 +13,9 @@ import type { Tab } from "../App";
 
 // Playbooks: ready-made recipes from the repository's playbooks/ folder.
 // Anyone can add one with a pull request. A playbook keeps nothing of its
-// own: starting one creates a mission draft, so everything it does goes
-// through the mission's approvals and limits, and lands in the modules it
+// own: starting one here starts an agent run (Outflare's agent on the
+// action layer, AgentRuns.tsx), so everything it does goes through the
+// mode the person chose and the team's grants, and lands in the modules it
 // uses (journeys, the inbox, campaign links, fixes).
 
 type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
@@ -58,7 +61,7 @@ export function Playbooks({ ws, canManage, go }: Props) {
     <div className="space-y-6">
       <PageHeader
         title="Playbooks"
-        description="Ready-made recipes for growth. Each one says what it needs, runs as a mission on your own accounts, and waits for your approval before it changes anything. Copy the prompt into your own AI app, or start it here."
+        description="Ready-made recipes for growth. Each one says what it needs and runs on your own accounts and AI model, changing only what you let it. Copy the prompt into your own AI app, or start it here and Outflare's agent runs it."
         action={
           <div className="flex flex-wrap items-center gap-3">
             <a className="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={contributeURL} target="_blank" rel="noreferrer">Write your own playbook</a>
@@ -115,6 +118,10 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
   const [error, setError] = useState("");
   const [kit, setKit] = useState<KitPlan | null>(null);
   const [applyKit, setApplyKit] = useState(false);
+  const [mode, setMode] = useState<AgentRun["mode"]>("copilot");
+  const [budget, setBudget] = useState("");
+  // The run works for the brand in view.
+  const brand = useBrand(ws).brand?.handle;
   const missing = new Set(p.readiness.missing_connections.map(needKey));
   const missingOptional = new Set(p.readiness.missing_optional.map(needKey));
   const missingData = new Set(p.readiness.missing_data.map((d) => d.check));
@@ -131,12 +138,16 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
 
   async function start(e: FormEvent) {
     e.preventDefault();
+    const cents = mode === "autonomous" ? budgetCents(budget) : null;
+    if (mode === "autonomous" && (cents == null || !(cents > 0))) return setError("Give an autonomous run a budget in dollars, or choose copilot.");
+    setError("");
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/playbooks/{id}/runs", { params: { path: { ws, id: p.id } }, body: { inputs: values, apply_kit: applyKit } });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/playbooks/{id}/agent-runs", { params: { path: { ws, id: p.id } }, body: { inputs: values, mode, max_spend_cents: cents, apply_kit: applyKit, ...(brand ? { brand } : {}) } });
     setBusy(false);
     if (error || !data || !("id" in data)) return setError(errorMessage(error));
-    toast(`Started ${p.title} as a mission draft. Approve it to let it run.`);
-    go("missions", data.id);
+    track("ui.agent_run_started", { playbook_id: p.id, mode, has_budget: cents != null });
+    toast(mode === "copilot" ? `Started ${p.title}. Its changes wait for you on the Agents page.` : mode === "dry_run" ? `Started ${p.title} as a dry run. Nothing changes; see what it would do on the Agents page.` : `Started ${p.title}. It runs on its own within its budget.`);
+    go("agents", data.id);
   }
 
   return (
@@ -227,8 +238,9 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
               </span>
             </div>
             <p className="text-[12px] text-muted-foreground">
-              Paste the prompt into Claude, ChatGPT or Cursor with Outflare connected (<button type="button" className="underline underline-offset-4" onClick={() => go("ai")}>AI apps</button>), or start it here as a mission draft.
+              Paste the prompt into Claude, ChatGPT or Cursor with Outflare connected (<button type="button" className="underline underline-offset-4" onClick={() => go("ai")}>AI apps</button>), or start it here: Outflare's agent runs it in turns on your AI model, as an agent of its own.
             </p>
+            {canManage && <RunModePicker mode={mode} setMode={setMode} budget={budget} setBudget={setBudget} />}
             {kit && kit.changes > 0 && kit.conflicts === 0 && canManage && (
               <label className="flex items-center gap-2">
                 <input type="checkbox" className="size-4" checked={applyKit} onChange={(e) => setApplyKit(e.target.checked)} />
@@ -238,7 +250,7 @@ function PlaybookSheet({ ws, playbook: p, names, canManage, go, onClose }: { ws:
             <ErrorText>{error}</ErrorText>
             {canManage && (
               <Button type="submit" disabled={busy || p.readiness.missing_connections.length > 0}>
-                {p.readiness.missing_connections.length > 0 ? "Connect what it needs first" : busy ? "Starting…" : "Start as a mission"}
+                {p.readiness.missing_connections.length > 0 ? "Connect what it needs first" : busy ? "Starting…" : mode === "dry_run" ? "Start a dry run" : "Start"}
               </Button>
             )}
           </form>

@@ -313,6 +313,9 @@ func (a Attio) CRMPreview(ctx context.Context, cl *c.Client, creds c.Creds, limi
 			out.Lists[i] = c.CRMList{Slug: l.Slug, Name: l.Name, Entries: n, Fields: fs}
 			if len(l.Parent) > 0 {
 				out.Lists[i].Object = l.Parent[0]
+				if slug, ok := slugs[l.Parent[0]]; ok {
+					out.Lists[i].Object = slug
+				}
 			}
 			return err
 		})
@@ -474,6 +477,106 @@ func (Attio) CRMRecords(ctx context.Context, cl *c.Client, creds c.Creds, object
 			}
 		}
 		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// CRMActivities reads notes and tasks without changing the source workspace.
+func (Attio) CRMActivities(ctx context.Context, cl *c.Client, creds c.Creds, kind string, offset, limit int) ([]c.CRMActivityRecord, error) {
+	if kind != "note" && kind != "task" {
+		return nil, fmt.Errorf("unsupported activity kind %q", kind)
+	}
+	resource := "tasks"
+	if kind == "note" {
+		resource = "notes"
+		limit = min(limit, notePageSize)
+	}
+	var response struct {
+		Data []struct {
+			ID struct {
+				NoteID string `json:"note_id"`
+				TaskID string `json:"task_id"`
+			} `json:"id"`
+			Title            string `json:"title"`
+			ContentPlaintext string `json:"content_plaintext"`
+			ContentMarkdown  string `json:"content_markdown"`
+			ParentObject     string `json:"parent_object"`
+			ParentRecordID   string `json:"parent_record_id"`
+			LinkedRecords    []struct {
+				Object string `json:"target_object_id"`
+				ID     string `json:"target_record_id"`
+			} `json:"linked_records"`
+			Assignees []struct {
+				ID string `json:"referenced_actor_id"`
+			} `json:"assignees"`
+			DeadlineAt *time.Time `json:"deadline_at"`
+			Completed  bool       `json:"is_completed"`
+			CreatedAt  *time.Time `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := get(ctx, cl, creds, http.MethodGet, fmt.Sprintf("/v2/%s?limit=%d&offset=%d", resource, limit, offset), nil, &response); err != nil {
+		return nil, err
+	}
+	out := make([]c.CRMActivityRecord, 0, len(response.Data))
+	for _, v := range response.Data {
+		record := c.CRMActivityRecord{ID: v.ID.TaskID, Kind: kind, Title: v.Title, Body: v.ContentMarkdown, DueAt: v.DeadlineAt, Completed: v.Completed, CreatedAt: v.CreatedAt}
+		if record.Body == "" {
+			record.Body = v.ContentPlaintext
+		}
+		if kind == "note" {
+			record.ID = v.ID.NoteID
+		}
+		if record.Title == "" {
+			record.Title = v.ContentPlaintext
+			if len(record.Title) > 300 {
+				record.Title = record.Title[:300]
+			}
+		}
+		if record.Title == "" {
+			record.Title = "Imported " + kind
+		}
+		if v.ParentRecordID != "" {
+			record.Records = append(record.Records, c.CRMRef{Object: v.ParentObject, ID: v.ParentRecordID})
+		}
+		for _, ref := range v.LinkedRecords {
+			record.Records = append(record.Records, c.CRMRef{Object: ref.Object, ID: ref.ID})
+		}
+		if len(v.Assignees) > 0 {
+			record.AssignedTo = v.Assignees[0].ID
+		}
+		out = append(out, record)
+	}
+	return out, nil
+}
+
+func (Attio) CRMListEntries(ctx context.Context, cl *c.Client, creds c.Creds, list string, offset, limit int) ([]c.CRMRecord, error) {
+	var response struct {
+		Data []struct {
+			ID struct {
+				EntryID string `json:"entry_id"`
+			} `json:"id"`
+			ParentRecordID string             `json:"parent_record_id"`
+			Values         map[string][]value `json:"entry_values"`
+		} `json:"data"`
+	}
+	if err := get(ctx, cl, creds, http.MethodPost, "/v2/lists/"+url.PathEscape(list)+"/entries/query", map[string]any{"limit": limit, "offset": offset}, &response); err != nil {
+		return nil, err
+	}
+	out := make([]c.CRMRecord, 0, len(response.Data))
+	for _, row := range response.Data {
+		entry := c.CRMRecord{ID: "list:" + list + ":" + row.ID.EntryID, Values: map[string][]any{}}
+		for slug, values := range row.Values {
+			for _, v := range values {
+				if converted := v.convert(); converted != nil {
+					entry.Values[slug] = append(entry.Values[slug], converted)
+				}
+			}
+		}
+		if row.ParentRecordID != "" {
+			entry.Values["outflare_parent_record"] = []any{c.CRMRef{ID: row.ParentRecordID}}
+		}
+		entry.Values["name"] = []any{list + " entry"}
+		out = append(out, entry)
 	}
 	return out, nil
 }

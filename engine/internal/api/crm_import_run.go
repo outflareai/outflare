@@ -72,6 +72,7 @@ type crmImportSummary struct {
 	Placeholders int               `json:"placeholders"`
 	Warnings     []string          `json:"warnings"`
 	MoreWarnings int               `json:"more_warnings"`
+	Activities   int               `json:"activities"`
 }
 
 type crmObjectResult struct {
@@ -124,9 +125,11 @@ func (sum *crmImportSummary) normalize() {
 // crmProgress is where an import got to: its plan, then the object and
 // offset the next step starts at.
 type crmProgress struct {
-	Plan   *crmPlan `json:"plan,omitempty"`
-	Object int      `json:"object"`
-	Offset int      `json:"offset"`
+	Plan           *crmPlan `json:"plan,omitempty"`
+	Object         int      `json:"object"`
+	ActivityKind   int      `json:"activity_kind"`
+	ActivityOffset int      `json:"activity_offset"`
+	Offset         int      `json:"offset"`
 	// Steps queued so far, which keeps each step's job distinct.
 	Steps int `json:"steps"`
 }
@@ -259,6 +262,7 @@ func startCRMImport(ctx context.Context, tx pgx.Tx, a *access, integrationID, co
 
 // RegisterJobs adds the server's own background work to the queue.
 func (s *Server) RegisterJobs(q *jobs.Queue) {
+	q.Handle(jobCRMGoogleSync, s.crmGoogleSyncJob)
 	q.Handle(jobCRMImport, s.crmImportJob)
 	q.Handle(jobBatchUndo, s.batchUndoJob)
 	q.Handle(jobEventsProcess, s.eventsProcessJob)
@@ -288,6 +292,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobPartnerTaskCheck, s.partnerTaskCheckJob)
 	s.registerSocialJobs(q)
 	s.registerSemanticJobs(q)
+	s.registerKnowledgeJobs(q)
 }
 
 func (s *Server) crmImportJob(ctx context.Context, job jobs.Job) error {
@@ -441,7 +446,17 @@ func (r *crmRun) step(ctx context.Context, integrationID string) (bool, error) {
 	deadline := time.Now().Add(crmImportStep)
 	for r.progress.Object < len(r.progress.Plan.Objects) {
 		op := &r.progress.Plan.Objects[r.progress.Object]
-		page, err := r.imp.CRMRecords(ctx, o.Client, o.Creds, op.Slug, r.progress.Offset, crmImportPage)
+		var page []connectors.CRMRecord
+		var err error
+		if list, ok := strings.CutPrefix(op.Slug, "list:"); ok {
+			importer, ok := r.imp.(connectors.CRMListImporter)
+			if !ok {
+				return false, errInvalid("this connector cannot import list entries")
+			}
+			page, err = importer.CRMListEntries(ctx, o.Client, o.Creds, list, r.progress.Offset, crmImportPage)
+		} else {
+			page, err = r.imp.CRMRecords(ctx, o.Client, o.Creds, op.Slug, r.progress.Offset, crmImportPage)
+		}
 		if err != nil {
 			return false, err
 		}
@@ -457,7 +472,7 @@ func (r *crmRun) step(ctx context.Context, integrationID string) (bool, error) {
 			r.progress.Offset += len(page)
 		}
 		if r.progress.Object == len(r.progress.Plan.Objects) {
-			return true, nil
+			return r.activityStep(ctx)
 		}
 		if err := r.save(ctx, false); err != nil {
 			return false, err
@@ -466,7 +481,7 @@ func (r *crmRun) step(ctx context.Context, integrationID string) (bool, error) {
 			return false, nil
 		}
 	}
-	return true, nil
+	return r.activityStep(ctx)
 }
 
 func (r *crmRun) result(op *crmObjectPlan) *crmObjectResult {
@@ -500,6 +515,23 @@ func (r *crmRun) plan(ctx context.Context) error {
 	}
 	// Companies before people, so a person's companies are already here.
 	objects := slices.Clone(preview.Objects)
+	if _, ok := r.imp.(connectors.CRMListImporter); ok {
+		for _, list := range preview.Lists {
+			if len(want) > 0 && !want[list.Object] {
+				continue
+			}
+			if list.Object == "" {
+				r.sum.warn("list %s: its parent object could not be determined", list.Slug)
+				continue
+			}
+			fields := slices.Clone(list.Fields)
+			fields = append(fields, connectors.CRMField{Slug: "outflare_parent_record", Title: "Linked record", Kind: connectors.CRMReference, Target: []string{list.Object}}, connectors.CRMField{Slug: "name", Title: "Name", Kind: connectors.CRMText, System: true})
+			objects = append(objects, connectors.CRMObject{Slug: "list:" + list.Slug, Name: "List " + list.Name, Plural: list.Name + " entries", Fields: fields})
+			if len(want) > 0 {
+				want["list:"+list.Slug] = true
+			}
+		}
+	}
 	order := map[string]int{"companies": 0, "people": 1}
 	slices.SortStableFunc(objects, func(x, y connectors.CRMObject) int {
 		rank := func(o connectors.CRMObject) int {
@@ -1216,4 +1248,97 @@ func (r *crmRun) identity(ctx context.Context, tx pgx.Tx, sum *crmImportSummary,
 		ON CONFLICT (record_id, namespace, value) WHERE valid_to IS NULL DO NOTHING`,
 		r.a.WorkspaceID, recordID, namespace, value, verified, r.o.Connector.Definition().ID, nullIfEmpty(r.a.ActorID))
 	return err
+}
+
+// Bring linked history over after its records and members exist. Pages use the
+// same resumable job and connector metrics as the rest of the import.
+func (r *crmRun) activityStep(ctx context.Context) (bool, error) {
+	imp, ok := r.imp.(connectors.CRMActivityImporter)
+	if !ok {
+		return true, nil
+	}
+	kinds := []string{"note", "task"}
+	if r.progress.ActivityKind >= len(kinds) {
+		return true, nil
+	}
+	kind := kinds[r.progress.ActivityKind]
+	limit := 50
+	page, err := imp.CRMActivities(ctx, r.o.Client, r.o.Creds, kind, r.progress.ActivityOffset, limit)
+	if err != nil {
+		return false, err
+	}
+	err = pgx.BeginFunc(ctx, r.s.pool, func(tx pgx.Tx) error {
+		sum := r.sum
+		for _, item := range page {
+			if item.ID == "" {
+				sum.warn("%s without a source id was left out", kind)
+				continue
+			}
+			linked := 0
+			for _, ref := range item.Records {
+				id, err := r.find(ctx, tx, r.identityNamespace(), ref.ID, "")
+				if err != nil {
+					return err
+				}
+				if id == "" {
+					continue
+				}
+				rec, err := loadRecord(ctx, tx, r.a, id)
+				if err != nil {
+					return err
+				}
+				if rec.BrandID == nil {
+					continue
+				}
+				var assignee *string
+				if user := r.progress.Plan.Members[item.AssignedTo]; user != "" {
+					assignee = &user
+				}
+				status := "open"
+				if item.Completed {
+					status = "done"
+				}
+				title := item.Title
+				if len(title) > 300 {
+					sum.warn("%s %s: title truncated to 300 characters", kind, item.ID)
+					title = title[:300]
+				}
+				body := item.Body
+				if len(body) > 20000 {
+					sum.warn("%s %s: body truncated to 20000 characters", kind, item.ID)
+					body = body[:20000]
+				}
+				// Existing imported notes stay editable here; a rerun never overwrites them.
+				tag, err := tx.Exec(ctx, `INSERT INTO crm_activities(workspace_id,brand_id,record_id,kind,title,body,status,assigned_to,due_at,created_at,integration_id,source_id)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10,now()),$11,$12)
+      ON CONFLICT(workspace_id,integration_id,source_id,record_id) WHERE source_id IS NOT NULL DO NOTHING`, r.a.WorkspaceID, rec.BrandID, id, kind, title, body, status, assignee, item.DueAt, item.CreatedAt, r.o.ID, kind+":"+item.ID)
+				if err != nil {
+					return err
+				}
+				linked++
+				sum.Activities += int(tag.RowsAffected())
+			}
+			if linked == 0 {
+				sum.warn("%s %s: no linked record was imported; it remains in the source CRM", kind, item.ID)
+			}
+			if item.AssignedTo != "" && r.progress.Plan.Members[item.AssignedTo] == "" {
+				sum.warn("%s %s: assignee was not matched to a workspace member", kind, item.ID)
+			}
+		}
+		if err := record(ctx, tx, &r.a.principal, r.a.WorkspaceID, "crm_import.activities_imported", "crm_import", r.id, map[string]any{"kind": kind, "count": sum.Activities - r.sum.Activities}); err != nil {
+			return err
+		}
+		r.sum = sum
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(page) < limit {
+		r.progress.ActivityKind++
+		r.progress.ActivityOffset = 0
+	} else {
+		r.progress.ActivityOffset += len(page)
+	}
+	return r.progress.ActivityKind >= len(kinds), nil
 }

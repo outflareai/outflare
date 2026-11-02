@@ -1,4 +1,6 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useBrand } from "@/lib/brand";
 import type { Suppression as Entry, SuppressionReason } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, PageHeader, toast } from "../ui";
@@ -19,19 +21,28 @@ function fromLabel(e: Entry): string {
   return e.method === "ai_suggested" ? `${from} (suggested by AI)` : from;
 }
 
-export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boolean; canRemove: boolean }) {
+// Opt-outs belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Suppression(props: { ws: string; canAdd: boolean; canRemove: boolean }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Opt-outs" brands={active.length} />;
+  return <SuppressionPage key={brand.id} {...props} />;
+}
+
+function SuppressionPage({ ws, canAdd, canRemove }: { ws: string; canAdd: boolean; canRemove: boolean }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [total, setTotal] = useState(0);
   const [next, setNext] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
   const load = useCallback(
-    async (after?: string) => {
-      const { data } = await api.GET("/v1/workspaces/{ws}/suppressions", { params: { path: { ws }, query: { ...(q ? { q } : {}), ...(after ? { after } : {}) } } });
+    async (cursor?: string) => {
+      const { data } = await api.GET("/v1/brands/{brand}/suppressions", { params: { path: { brand: brandId }, query: { ...(q ? { q } : {}), ...(cursor ? { cursor } : {}) } } });
       if (!data) return;
-      setEntries((prev) => (after ? [...(prev ?? []), ...data.data] : data.data));
+      setEntries((prev) => (cursor ? [...(prev ?? []), ...data.data] : data.data));
       setTotal(data.total);
-      setNext(data.next_after ?? null);
+      setNext(data.next_cursor ?? null);
     },
     [ws, q],
   );
@@ -44,14 +55,14 @@ export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boo
   async function remove(e: Entry) {
     const shown = e.kind === "domain" ? `everyone at ${e.value}` : e.value;
     if (!(await confirmAction(`Remove ${e.kind === "domain" ? e.value : e.value} from the suppression list?`, <p>Sequences could email {shown} again. {e.reason === "unsubscribed" || e.reason === "complained" ? <b>They asked not to be emailed: removing them may break anti-spam law.</b> : null}</p>, "Remove"))) return;
-    await api.DELETE("/v1/workspaces/{ws}/suppressions/{id}", { params: { path: { ws, id: e.id } } });
+    await api.DELETE("/v1/brands/{brand}/suppressions/{id}", { params: { path: { brand: brandId, id: e.id } } });
     toast(`Removed ${e.value}. It can be emailed again.`);
     load();
   }
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Do not contact" description="People and companies that are never emailed. Every email is checked against this list right before it's sent. Unsubscribes, bounces and removal requests are added automatically." />
+      <PageHeader title="Do not contact" description="People and companies that are never emailed. Every email is checked against this list right before it's sent. Unsubscribes, bounces and removal requests are added automatically. An opt-out applies to this brand; bounces, spam complaints and entries added for every brand apply everywhere." />
       {canAdd && <Add ws={ws} onDone={() => load()} />}
       {entries === null ? (
         <Loading />
@@ -112,9 +123,12 @@ export function Suppression({ ws, canAdd, canRemove }: { ws: string; canAdd: boo
 }
 
 function Add({ ws, onDone }: { ws: string; onDone: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [text, setText] = useState("");
   const [reason, setReason] = useState<SuppressionReason>("manual");
   const [note, setNote] = useState("");
+  // An entry is this brand's; an admin can apply it to every brand.
+  const [allBrands, setAllBrands] = useState(false);
   const [error, setError] = useState("");
 
   async function loadFile(f: File | undefined) {
@@ -128,7 +142,7 @@ function Add({ ws, onDone }: { ws: string; onDone: () => void }) {
   async function submit(e: FormEvent) {
     e.preventDefault();
     const values = text.split(/[\s,;]+/).filter(Boolean);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/suppressions", { params: { path: { ws } }, body: { values, reason, ...(note ? { note } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/suppressions", { params: { path: { brand: brandId } }, body: { values, reason, ...(note ? { note } : {}), ...(allBrands ? { all_brands: true } : {}) } });
     if (error) return setError(errorMessage(error));
     setText("");
     setNote("");
@@ -155,6 +169,10 @@ function Add({ ws, onDone }: { ws: string; onDone: () => void }) {
           <label className="block flex-1 basis-48">
             <span className="mb-1 block font-medium">Note <span className="font-normal text-muted-foreground">(optional)</span></span>
             <input className={`${field} w-full`} placeholder="e.g. Existing customer" maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+          <label className="flex items-center gap-2 pb-2">
+            <input type="checkbox" checked={allBrands} onChange={(e) => setAllBrands(e.target.checked)} />
+            <span title="Bounces and spam complaints always apply to every brand.">Every brand</span>
           </label>
           <Button disabled={!text.trim()}>Add to list</Button>
         </div>

@@ -95,6 +95,9 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         review: z.enum(["approved", "needs_review", "all"]).optional(),
         acquired_via: z.string().optional().describe("Only records from these tools, comma-separated, such as rb2b,vector."),
         limit: z.number().int().min(1).max(200).optional(),
+        sort: z.enum(["name", "created_at", "updated_at"]).optional(),
+        direction: z.enum(["asc", "desc"]).optional(), offset: z.number().int().min(0).max(100000).optional(),
+        empty_attribute: z.string().optional(),
         cursor: z.string().optional().describe("next_cursor from the previous page."),
       },
       annotations: read,
@@ -406,7 +409,48 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/batches/{batch}/undo-preview", { params: { path: { brand: b, batch } } }))),
   );
 
+  server.registerTool("get_crm_summary",{title:"CRM sales overview",description:"Actual relationship counts, outstanding tasks, per-currency pipeline values and stale open deals.",inputSchema:{brand_id:id},annotations:read},({brand_id})=>call(()=>gtm.GET("/v1/brands/{brand}/crm/summary",{params:{path:{brand:brand_id}}})));
+  server.registerTool("list_crm_activities", {
+    title: "List CRM tasks and notes", description: "Record-linked tasks and notes for one brand. Page with next_cursor.",
+    inputSchema: { brand_id: id, record_id: id.optional(), kind: z.enum(["task", "note"]).optional(), status: z.enum(["open", "done"]).optional(), assigned_to: id.optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(500).optional() }, annotations: read,
+  }, ({ brand_id, ...query }) => call(() => gtm.GET("/v1/brands/{brand}/crm/activities", { params: { path: { brand: brand_id }, query } })));
+  server.registerTool("list_crm_views", {
+    title: "List CRM saved views", description: "The caller's personal views and the team's shared views in one brand.",
+    inputSchema: { brand_id: id, record_type: typeKey.optional(), limit: z.number().int().min(1).max(500).optional() }, annotations: read,
+  }, ({ brand_id, ...query }) => call(() => gtm.GET("/v1/brands/{brand}/crm/views", { params: { path: { brand: brand_id }, query } })));
+
   if (readOnly) return;
+
+  const activity = {
+    title: z.string().min(1).max(300), body: z.string().max(20000).optional(),
+    priority: z.enum(["low", "normal", "high"]).optional(), status: z.enum(["open", "done"]).optional(),
+    assigned_to: id.nullable().optional(), due_at: z.string().datetime().nullable().optional(),
+  };
+  server.registerTool("create_crm_activity", {
+    title: "Create a CRM task or note", description: "Attach a task or note to a person, company, deal or custom record in this brand.",
+    inputSchema: { brand_id: id, record_id: id, kind: z.enum(["task", "note"]), ...activity }, annotations: write,
+  }, ({ brand_id, ...body }) => call(() => gtm.POST("/v1/brands/{brand}/crm/activities", { params: { path: { brand: brand_id } }, body })));
+  server.registerTool("update_crm_activity", {
+    title: "Update a CRM task or note", description: "Edit an activity or complete a task. Send the version read from list_crm_activities; stale writes are refused.",
+    inputSchema: { brand_id: id, id, version: z.number().int().min(1), ...z.object(activity).partial().shape }, annotations: write,
+  }, ({ brand_id, id: activity_id, ...body }) => call(() => gtm.PATCH("/v1/brands/{brand}/crm/activities/{id}", { params: { path: { brand: brand_id, id: activity_id } }, body })));
+  server.registerTool("delete_crm_activity", {
+    title: "Delete a CRM task or note", description: "Permanently remove a task or note from a brand's CRM.",
+    inputSchema: { brand_id: id, id }, annotations: { ...write, destructiveHint: true },
+  }, ({ brand_id, id: activity_id }) => call(() => gtm.DELETE("/v1/brands/{brand}/crm/activities/{id}", { params: { path: { brand: brand_id, id: activity_id } } })));
+  server.registerTool("create_crm_view", {
+    title: "Save a CRM view", description: "Save filters, sorting, columns and layout as a personal or shared view.",
+    inputSchema: { brand_id: id, name: z.string().min(1).max(100), record_type: typeKey, shared: z.boolean().optional(), config: z.record(z.string(), z.unknown()).optional() }, annotations: write,
+  }, ({ brand_id, ...body }) => call(() => gtm.POST("/v1/brands/{brand}/crm/views", { params: { path: { brand: brand_id } }, body })));
+  server.registerTool("update_crm_view", {
+    title: "Update your saved CRM view", description: "Only the view's creator can change it. Send its latest version.",
+    inputSchema: { brand_id: id, id, version: z.number().int().min(1), name: z.string().min(1).max(100).optional(), shared: z.boolean().optional(), config: z.record(z.string(), z.unknown()).optional() }, annotations: write,
+  }, ({ brand_id, id: view_id, ...body }) => call(() => gtm.PATCH("/v1/brands/{brand}/crm/views/{id}", { params: { path: { brand: brand_id, id: view_id } }, body })));
+  server.registerTool("delete_crm_view", {
+    title: "Delete your saved CRM view", description: "Remove a saved view. The underlying records stay.",
+    inputSchema: { brand_id: id, id }, annotations: { ...write, destructiveHint: true },
+  }, ({ brand_id, id: view_id }) => call(() => gtm.DELETE("/v1/brands/{brand}/crm/views/{id}", { params: { path: { brand: brand_id, id: view_id } } })));
+
 
   server.registerTool(
     "review_record",

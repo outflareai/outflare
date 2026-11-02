@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/holdout"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
@@ -124,6 +125,8 @@ type broadcast struct {
 	topicKey, topicName                    string
 	topicDefault                           bool
 	exclude                                customers.Exclusion
+	// The share of the audience held out on purpose, in percent.
+	holdout int
 }
 
 // broadcastStep makes the emails for the next batch of the audience, and
@@ -135,10 +138,10 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 		var data, exclude []byte
 		err := tx.QueryRow(ctx, `SELECT b.workspace_id, b.status, b.template_id, b.from_address, b.audience_kind, b.brand_id, b.topic_id,
 			b.provider_id, b.template_version, b.record_ids::text[], b.data, b.track_opens, b.track_clicks, b.cursor_record::text, b.sent_by,
-			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true), b.exclude
+			COALESCE(tp.key, ''), COALESCE(tp.name, ''), COALESCE(tp.subscribed_by_default, true), b.exclude, b.holdout_percent
 			FROM email_broadcasts b LEFT JOIN email_topics tp ON tp.id = b.topic_id WHERE b.id = $1 FOR UPDATE OF b`, id).
 			Scan(&b.ws, &b.status, &b.templateID, &b.from, &b.audience, &b.brandID, &b.topicID, &b.providerID, &b.version, &b.recordIDs,
-				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault, &exclude)
+				&data, &b.trackOpens, &b.trackClicks, &b.cursor, &b.sentBy, &b.topicKey, &b.topicName, &b.topicDefault, &exclude, &b.holdout)
 		if errors.Is(err, pgx.ErrNoRows) {
 			done = true
 			return nil
@@ -170,7 +173,7 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 		if err != nil {
 			return err
 		}
-		made, skipped := 0, 0
+		made, skipped, held := 0, 0, 0
 		for _, p := range people {
 			tag, err := tx.Exec(ctx, `INSERT INTO email_broadcast_recipients (broadcast_id, workspace_id, record_id, address)
 				VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, id, b.ws, p.id, p.address)
@@ -184,6 +187,15 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 			why, err := broadcastSkip(ctx, tx, b, p)
 			if err != nil {
 				return err
+			}
+			// Held out on purpose: among the people who could get it, so
+			// the two sides are alike.
+			if why == "" && holdout.In(id, p.id, b.holdout) {
+				held++
+				if _, err := tx.Exec(ctx, `UPDATE email_broadcast_recipients SET skipped = 'holdout' WHERE broadcast_id = $1 AND record_id = $2`, id, p.id); err != nil {
+					return err
+				}
+				continue
 			}
 			var emailID string
 			if why == "" {
@@ -211,19 +223,20 @@ func (s *Service) broadcastStep(ctx context.Context, id string) (bool, error) {
 		}
 		finished := len(people) < broadcastBatch
 		if _, err := tx.Exec(ctx, `UPDATE email_broadcasts SET cursor_record = $2, recipients = recipients + $3, skipped = skipped + $4,
+			held_out = held_out + $6,
 			status = CASE WHEN $5 THEN 'sent' ELSE status END, finished_at = CASE WHEN $5 THEN now() END, updated_at = now() WHERE id = $1`,
-			id, b.cursor, made, skipped, finished); err != nil {
+			id, b.cursor, made, skipped, finished, held); err != nil {
 			return err
 		}
 		if !finished {
 			return nil
 		}
 		done = true
-		var total, none int
-		if err := tx.QueryRow(ctx, `SELECT recipients, skipped FROM email_broadcasts WHERE id = $1`, id).Scan(&total, &none); err != nil {
+		var total, none, out int
+		if err := tx.QueryRow(ctx, `SELECT recipients, skipped, held_out FROM email_broadcasts WHERE id = $1`, id).Scan(&total, &none, &out); err != nil {
 			return err
 		}
-		return s.record(ctx, tx, System, b.ws, "email_broadcast.sent", "email_broadcast", id, map[string]any{"recipients": total, "skipped": none})
+		return s.record(ctx, tx, System, b.ws, "email_broadcast.sent", "email_broadcast", id, map[string]any{"recipients": total, "skipped": none, "held_out": out})
 	})
 	return done, err
 }

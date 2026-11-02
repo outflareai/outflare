@@ -32,7 +32,7 @@ export function registerSupplierTools(server: McpServer, gtm: MissionClient, wor
         status: z.enum(["provisioning", "active", "cancelling", "cancelled", "failed"]).optional(),
         q: z.string().optional().describe("Part of the email address."),
         limit: z.number().int().min(1).max(1000).optional(),
-        offset: z.number().int().min(0).optional(),
+        cursor: z.string().optional().describe("next_cursor from the previous page."),
       },
       annotations: read,
     },

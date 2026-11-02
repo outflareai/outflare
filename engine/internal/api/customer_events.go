@@ -191,11 +191,13 @@ func (m eventMessage) time(keys ...string) (time.Time, bool, error) {
 }
 
 type eventResult struct {
-	Index         int      `json:"index"`
-	Status        string   `json:"status"`
-	EventID       *string  `json:"event_id"`
-	RecordID      *string  `json:"record_id"`
-	Name          string   `json:"name,omitempty"`
+	Index    int     `json:"index"`
+	Status   string  `json:"status"`
+	EventID  *string `json:"event_id"`
+	RecordID *string `json:"record_id"`
+	Name     string  `json:"name,omitempty"`
+	// The product the event is about, when it named one the brand knows.
+	ProductID     *string  `json:"product_id,omitempty"`
 	IgnoredTraits []string `json:"ignored_traits,omitempty"`
 	Warnings      []string `json:"warnings,omitempty"`
 	// Records merged into this person because they proved they own an email
@@ -561,12 +563,27 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		}
 	}
 
-	var id string
+	// The product it is about (anyone can send a browser event, so one
+	// never names a product).
+	var product *string
+	if ref := customers.ProductRef(props); ref != "" && source != siteSource {
+		var pb string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE($2::uuid, (SELECT r.brand_id FROM records r WHERE r.id = $3), outflare_first_brand($1))::text`,
+			a.WorkspaceID, brand, rec).Scan(&pb); err != nil {
+			return err
+		}
+		if product, err = customers.ResolveProduct(ctx, tx, a.WorkspaceID, pb, ref, customers.ProductFromEvent, at); err != nil {
+			return err
+		}
+	}
+
+	var id, eventBrand string
 	err = tx.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, account_id, brand_id, kind, name, raw_name, user_id, anonymous_id,
-			properties, traits, context, source, message_id, occurred_at, request_id)
-		VALUES ($1, $2, $3, COALESCE($4, (SELECT r.brand_id FROM records r WHERE r.id = $2), outflare_first_brand($1)), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING id::text`,
+			properties, traits, context, source, message_id, occurred_at, request_id, product_id)
+		VALUES ($1, $2, $3, COALESCE($4, (SELECT r.brand_id FROM records r WHERE r.id = $2), outflare_first_brand($1)), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		RETURNING id::text, brand_id::text`,
 		a.WorkspaceID, rec, account, brand, kind, name, rawName, nullIfEmpty(userID), nullIfEmpty(anonID),
-		props, traits, ctxObj, source, nullIfEmpty(messageID), at, RequestID(ctx)).Scan(&id)
+		props, traits, ctxObj, source, nullIfEmpty(messageID), at, RequestID(ctx), product).Scan(&id, &eventBrand)
 	if isUnique(err) {
 		res.Status = "duplicate"
 		return nil
@@ -574,11 +591,16 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	if err != nil {
 		return err
 	}
-	res.EventID, res.RecordID = &id, rec
+	res.EventID, res.RecordID, res.ProductID = &id, rec, product
 	// Anyone can send a browser event, so one never starts a journey.
 	if rec != nil && source != siteSource {
 		if err := customers.EventAdded(ctx, tx, a.WorkspaceID, id, name); err != nil {
 			return err
+		}
+		if product != nil {
+			if err := customers.ProductEventAdded(ctx, tx, a.WorkspaceID, eventBrand, id, true); err != nil {
+				return err
+			}
 		}
 	}
 	n := totals.names[name]
@@ -1099,17 +1121,23 @@ type customerEventView struct {
 const customerEventColumns = `e.id::text, e.record_id::text, e.account_id::text, e.brand_id::text, e.kind, e.name, e.raw_name, e.user_id, e.anonymous_id,
 	e.properties, e.traits, e.context, e.source, e.message_id, e.occurred_at, e.received_at`
 
-// timeCursor pages newest first by time, then id: "<RFC 3339>|<id>".
-func timeCursor(v string) (time.Time, string, error) {
+// timeCursor reads ?cursor= for a list that pages newest first by time,
+// then id ("<RFC 3339>|<id>" underneath).
+func timeCursor(w http.ResponseWriter, r *http.Request) (time.Time, string, bool) {
+	v, ok := pageCursor(w, r, pageBefore)
+	if !ok {
+		return time.Time{}, "", false
+	}
 	if v == "" {
-		return time.Now().Add(100 * 365 * 24 * time.Hour), "", nil
+		return time.Now().Add(100 * 365 * 24 * time.Hour), "", true
 	}
 	ts, id, _ := strings.Cut(v, "|")
 	t, err := time.Parse(time.RFC3339Nano, ts)
 	if err != nil {
-		return t, "", errInvalid("before must be next_before from the previous page")
+		invalidCursor(w, r)
+		return t, "", false
 	}
-	return t, id, nil
+	return t, id, true
 }
 
 func (s *Server) listCustomerEvents(w http.ResponseWriter, r *http.Request) {
@@ -1120,8 +1148,8 @@ func (s *Server) listCustomerEvents(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	where := []string{"e.workspace_id = $1", "(e.occurred_at, e.id::text) < ($2, $3)"}
@@ -1189,7 +1217,7 @@ func (s *Server) listCustomerEvents(w http.ResponseWriter, r *http.Request) {
 		v := last.OccurredAt.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // timelineItem is one thing that happened to a record.
@@ -1310,8 +1338,8 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	kinds := timelineKinds
@@ -1400,7 +1428,7 @@ func (s *Server) recordTimeline(w http.ResponseWriter, r *http.Request) {
 		v := last.At.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // ---- Consent ----

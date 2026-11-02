@@ -190,8 +190,8 @@ func (s *Server) listPrivacyExports(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	beforeAt, beforeID, err := timeCursor(q.Get("before"))
-	if s.allocError(w, r, err) {
+	beforeAt, beforeID, ok := timeCursor(w, r)
+	if !ok {
 		return
 	}
 	where := []string{"x.brand_id = $1", "x.workspace_id = $2", "(x.created_at, x.id::text) < ($3, $4)"}
@@ -236,7 +236,7 @@ func (s *Server) listPrivacyExports(w http.ResponseWriter, r *http.Request) {
 		v := last.CreatedAt.Format(time.RFC3339Nano) + "|" + last.ID
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // privacyExport reads one of the brand's exports.
@@ -489,11 +489,13 @@ type exportSource struct {
 // privacyExportSources are the tables an export reads: every column that
 // points at a record (customers.Follows and customers.Owned, which a test
 // keeps complete), a table's columns together so a row is in the file once.
-// The exports themselves are left out.
+// Exports themselves and personal mail are left out. Personal correspondence
+// requires its owner’s explicit sharing; a general record export must not
+// bypass that boundary.
 func privacyExportSources() []exportSource {
 	var out []exportSource
 	for _, ref := range slices.Concat(customers.Follows, customers.Owned) {
-		if ref.Table == "privacy_exports" {
+		if ref.Table == "privacy_exports" || ref.Table == "crm_mail_messages" || ref.Table == "crm_mail_sharing" || ref.Table == "crm_mail_capture_targets" {
 			continue
 		}
 		i := slices.IndexFunc(out, func(s exportSource) bool { return s.table == ref.Table })

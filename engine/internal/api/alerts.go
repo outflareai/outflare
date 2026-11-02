@@ -75,10 +75,12 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	var before *time.Time
-	if v := r.URL.Query().Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		t, err := time.Parse(time.RFC3339Nano, v)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be a time such as 2026-01-31T09:00:00Z")
+			invalidCursor(w, r)
 			return
 		}
 		before = &t
@@ -119,7 +121,7 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		v := out[len(out)-1].CreatedAt.Format(time.RFC3339Nano)
 		next = &v
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 type alertSetting struct {

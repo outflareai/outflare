@@ -245,7 +245,7 @@ func (s *Server) listPartnerLeads(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerLeadView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // onePartnerLead finds a pending or decided lead the caller may see.

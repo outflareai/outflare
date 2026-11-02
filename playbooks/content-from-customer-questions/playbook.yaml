@@ -27,7 +27,7 @@ inputs:
     example: "90"
 steps:
   - say: Read replies from the period and pull out every question.
-    tools: [listInbox, getInboundMessage]
+    tools: [listBrandInbox, getBrandInboundMessage]
   - say: Group questions that mean the same thing and count them.
     tools: []
   - say: Check which ones the site already answers and which pages target them.

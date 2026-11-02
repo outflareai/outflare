@@ -1164,6 +1164,9 @@ type tokenView struct {
 	// Set when the token only sees one brand's records and the shared ones,
 	// and changes only that brand's.
 	BrandID *string `json:"brand_id"`
+	// Its changes go through the action layer: run, held for a person or
+	// refused by the grants a person set for it.
+	ActionGate bool `json:"action_gate"`
 	tokenLimitsView
 }
 
@@ -1177,12 +1180,12 @@ type tokenLimitsView struct {
 }
 
 const tokenColumns = `id, name, prefix, scopes, created_at, expires_at, last_used_at, brand_id::text,
-	daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text`
+	daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text, action_gate`
 
 func scanToken(row pgx.Row) (tokenView, error) {
 	var v tokenView
 	err := row.Scan(&v.ID, &v.Name, &v.Prefix, &v.Scopes, &v.CreatedAt, &v.ExpiresAt, &v.LastUsedAt, &v.BrandID,
-		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID)
+		&v.DailySendBudget, &v.MaxPriority, &v.MayTakeMailboxes, &v.DefaultTeamID, &v.ActionGate)
 	return v, err
 }
 
@@ -1266,6 +1269,8 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		// Binds the token to one brand, by id or handle. Fixed for the
 		// token's life.
 		Brand *string `json:"brand"`
+		// Send its changes through the action layer (ADR 13).
+		ActionGate bool `json:"action_gate"`
 		tokenLimits
 	}
 	if !decode(w, r, &req) {
@@ -1337,15 +1342,15 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		}
 		v, err = scanToken(tx.QueryRow(ctx, `
 			INSERT INTO api_tokens (workspace_id, actor_id, name, prefix, token_hash, scopes, created_by, expires_at,
-			                        daily_send_budget, max_priority, may_take_mailboxes, default_team_id, brand_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, $13)
+			                        daily_send_budget, max_priority, may_take_mailboxes, default_team_id, brand_id, action_gate)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12, $13, $14)
 			RETURNING `+tokenColumns,
 			a.WorkspaceID, actorID, name, prefix, hash, req.Scopes, createdBy, expiresAt,
-			req.DailySendBudget.Value, prio, req.MayTakeMailboxes, req.DefaultTeamID.Value, brand))
+			req.DailySendBudget.Value, prio, req.MayTakeMailboxes, req.DefaultTeamID.Value, brand, req.ActionGate))
 		if err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "token.created", "api_token", v.ID, map[string]any{"name": name, "scopes": req.Scopes, "brand_id": brand})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "token.created", "api_token", v.ID, map[string]any{"name": name, "scopes": req.Scopes, "brand_id": brand, "action_gate": req.ActionGate})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -1370,6 +1375,9 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name   *string  `json:"name"`
 		Scopes []string `json:"scopes"`
+		// Turn the action layer on or off for the token. Turning it off
+		// gives an agent more room, so only a signed-in person does it.
+		ActionGate *bool `json:"action_gate"`
 		tokenLimits
 	}
 	if !decode(w, r, &req) {
@@ -1400,11 +1408,11 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 		var cur tokenLimitsView
 		var name, actorID string
 		var scopes []string
-		var app bool
+		var app, gate bool
 		err := tx.QueryRow(ctx, `SELECT name, actor_id, scopes, EXISTS (SELECT 1 FROM oauth_grants g WHERE g.api_token_id = api_tokens.id),
-			daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text
+			daily_send_budget, CASE max_priority WHEN 0 THEN 'low' WHEN 1 THEN 'normal' WHEN 2 THEN 'high' END, may_take_mailboxes, default_team_id::text, action_gate
 			FROM api_tokens WHERE id = $1 AND workspace_id = $2 AND revoked_at IS NULL FOR UPDATE`, id, a.WorkspaceID).
-			Scan(&name, &actorID, &scopes, &app, &cur.DailySendBudget, &cur.MaxPriority, &cur.MayTakeMailboxes, &cur.DefaultTeamID)
+			Scan(&name, &actorID, &scopes, &app, &cur.DailySendBudget, &cur.MaxPriority, &cur.MayTakeMailboxes, &cur.DefaultTeamID, &gate)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -1413,6 +1421,13 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 		}
 		if app && (req.Scopes != nil || req.Name != nil) {
 			return errInvalid("this token belongs to a connected app: change what it may do under Connect your AI")
+		}
+		newGate := gate
+		if req.ActionGate != nil {
+			newGate = *req.ActionGate
+			if gate && !newGate && a.TokenID != "" {
+				return errDenied("only a signed-in person turns the action layer off for a token")
+			}
 		}
 		// Taking a permission away is always allowed; adding one needs the
 		// person or token making the change to have it.
@@ -1452,11 +1467,16 @@ func (s *Server) updateTokenLimits(w http.ResponseWriter, r *http.Request) {
 			newScopes = slices.Compact(slices.Sorted(slices.Values(req.Scopes)))
 		}
 		v, err = scanToken(tx.QueryRow(ctx, `
-			UPDATE api_tokens SET name = $3, scopes = $4, daily_send_budget = $5, max_priority = $6, may_take_mailboxes = $7, default_team_id = $8
+			UPDATE api_tokens SET name = $3, scopes = $4, daily_send_budget = $5, max_priority = $6, may_take_mailboxes = $7, default_team_id = $8, action_gate = $9
 			WHERE id = $1 AND workspace_id = $2 RETURNING `+tokenColumns,
-			id, a.WorkspaceID, newName, newScopes, next.DailySendBudget.Value, prio, *next.MayTakeMailboxes, next.DefaultTeamID.Value))
+			id, a.WorkspaceID, newName, newScopes, next.DailySendBudget.Value, prio, *next.MayTakeMailboxes, next.DefaultTeamID.Value, newGate))
 		if err != nil {
 			return err
+		}
+		if newGate != gate {
+			if err := record(ctx, tx, &a.principal, a.WorkspaceID, "token.action_gate_changed", "api_token", id, map[string]any{"action_gate": newGate}); err != nil {
+				return err
+			}
 		}
 		if newName != name {
 			// The audit log shows the token's actor by name.
@@ -1533,7 +1553,7 @@ type auditView struct {
 	BrandID *string `json:"brand_id"`
 }
 
-// listAudit returns events newest first. Page with ?before=<id>&limit=<n>,
+// listAudit returns events newest first. Page with ?cursor=&limit=,
 // and narrow to a brand with ?brand=.
 func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -1547,10 +1567,12 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	var before int64 = 1<<63 - 1
-	if v := r.URL.Query().Get("before"); v != "" {
+	if v, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "before must be an event id")
+			invalidCursor(w, r)
 			return
 		}
 		before = n
@@ -1579,7 +1601,7 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // ---- Shared helpers ----

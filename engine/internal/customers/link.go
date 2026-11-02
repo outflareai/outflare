@@ -177,7 +177,7 @@ func withBrand(data map[string]any, brand string) map[string]any {
 // workspace's first brand. The same email in two brands is two people.
 func LinkLeads(ctx context.Context, tx pgx.Tx, workspaceID string, ids []string, limit int) (int, error) {
 	rows, err := tx.Query(ctx, `SELECT l.id::text, l.email, l.first_name, l.last_name, l.title, l.linkedin_url, l.source, COALESCE(l.batch_id::text, ''),
-			COALESCE((SELECT ll.brand_id FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
+			COALESCE(l.brand_id, (SELECT ll.brand_id FROM lead_list_members m JOIN lead_lists ll ON ll.id = m.list_id
 				WHERE m.lead_id = l.id AND ll.brand_id IS NOT NULL ORDER BY m.added_at, ll.id LIMIT 1), outflare_first_brand(l.workspace_id))::text
 		FROM leads l
 		WHERE l.workspace_id = $1 AND l.record_id IS NULL AND ($2::uuid[] IS NULL OR l.id = ANY($2))
@@ -358,6 +358,8 @@ type Ref struct{ Table, Column string }
 // new link is never left behind on a merged record.
 var Follows = []Ref{
 	{"partner_proposals", "record_id"},
+	{"crm_activities", "record_id"},
+	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"}, {"coverage_placements", "contact_record_id"},
 	{"partner_audiences", "record_id"}, {"partner_task_submissions", "record_id"},
@@ -384,6 +386,8 @@ var Follows = []Ref{
 // (a partner per program, a referral per program): a row moves only when
 // the record kept has none of its own there.
 var followOnce = map[string]string{
+	"crm_mail_capture_targets":   "owner_id",
+	"crm_mail_sharing":           "owner_id",
 	"email_broadcast_recipients": "broadcast_id",
 	"partner_memberships":        "program_id",
 	"partner_referrals":          "program_id",
@@ -406,6 +410,10 @@ var Owned = []Ref{
 	// record kept has its own state, so it neither fires again nor misses
 	// its own timers.
 	{"rule_states", "record_id"},
+	// Lifecycle stages per product, their history and a company's overall
+	// status stay the merged record's for the same reason: the record kept
+	// has its own, and moving them would clash or move it twice.
+	{"lifecycle_states", "record_id"}, {"lifecycle_transitions", "record_id"}, {"lifecycle_overall", "record_id"},
 	// What was deleted from the record and can be restored for 7 days
 	// (the recovery window): it stays the record's. Erasing the record
 	// deletes it (ON DELETE CASCADE); a privacy export includes it.
@@ -492,6 +500,26 @@ func follow(ctx context.Context, tx pgx.Tx, workspaceID, fromID, intoID string, 
 		WHERE f.workspace_id = $3 AND f.record_id = $1 AND f.status = 'active'
 		  AND EXISTS (SELECT 1 FROM journey_runs k WHERE k.journey_id = f.journey_id AND k.record_id = $2 AND k.status = 'active')`, fromID, intoID, workspaceID); err != nil {
 		return nil, nil, err
+	}
+	// A combined record is a new sharing context. Never let a destination's
+	// full-sharing rule declassify correspondence that was private on the source.
+	var mailSharingExists bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('crm_mail_sharing') IS NOT NULL`).Scan(&mailSharingExists); err != nil {
+		return nil, nil, err
+	}
+	if mailSharingExists {
+		var capturesExist bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass('crm_mail_capture_targets') IS NOT NULL`).Scan(&capturesExist); err != nil {
+			return nil, nil, err
+		}
+		if capturesExist {
+			if _, err := tx.Exec(ctx, `UPDATE crm_mail_capture_targets SET enabled=false,version=version+1,updated_at=now() WHERE workspace_id=$1 AND record_id IN($2,$3)`, workspaceID, fromID, intoID); err != nil {
+				return nil, nil, err
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE crm_mail_sharing SET config='{"visibility":"private","audience":"selected","viewer_ids":[]}'::jsonb, version=version+1, updated_at=now() WHERE workspace_id=$1 AND record_id IN ($2,$3)`, workspaceID, fromID, intoID); err != nil {
+			return nil, nil, err
+		}
 	}
 	for _, r := range Follows {
 		// A table a newer migration adds may not exist yet: its column is

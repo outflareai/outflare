@@ -38,6 +38,7 @@ type reqInfo struct {
 	p           *principal
 	workspaceID string
 	injected    bool   // an approved mission action, run inside the server
+	agent       bool   // an action-layer change: a loop's call, or a held change replaying
 	path        string // the URL path, which says how someone signed in or up
 	brandID     string // the brand the request was about, for its log row
 }
@@ -140,6 +141,9 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 		observe := metrics.RequestStarted()
 		info := &reqInfo{path: r.URL.Path}
 		_, info.injected = r.Context().Value(ctxInjectedKey{}).(*principal)
+		_, replaying := r.Context().Value(ctxActionReplayKey{}).(string)
+		_, calling := r.Context().Value(ctxAgentCallKey{}).(bool)
+		info.agent = replaying || calling
 		ctx, release := track.Hold(context.WithValue(r.Context(), ctxReqInfoKey{}, info))
 		rec := &trackRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r.WithContext(ctx))
@@ -267,6 +271,9 @@ func tracked(r *http.Request, status int, route string) bool {
 // surface is where a request came from: the client's own name for itself,
 // else what its credentials and user agent say.
 func surface(r *http.Request, info *reqInfo) string {
+	if info.agent {
+		return "agent"
+	}
 	if info.injected {
 		return "mission"
 	}

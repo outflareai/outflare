@@ -83,7 +83,11 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
-	before, _ := strconv.ParseInt(strings.TrimPrefix(q.Get("before"), "job_"), 10, 64)
+	cur, ok := pageCursor(w, r, pageBefore)
+	if !ok {
+		return
+	}
+	before, _ := strconv.ParseInt(strings.TrimPrefix(cur, "job_"), 10, 64)
 	rows, err := s.pool.Query(r.Context(), `SELECT `+jobCols+` FROM jobs
 		WHERE workspace_id = $1 AND ($2 = '' OR status = $2) AND ($3 = '' OR kind = $3) AND ($4 = 0 OR id < $4)
 		ORDER BY id DESC LIMIT $5`, a.WorkspaceID, status, q.Get("kind"), before, limit)
@@ -100,7 +104,7 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	if len(list) == limit {
 		next = &list[len(list)-1].ID
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // PruneJobs deletes finished jobs after 14 days. Jobs with an idempotency

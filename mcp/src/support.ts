@@ -79,6 +79,55 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "get_support_assistant",
+    {
+      title: "Support assistant settings and report",
+      description:
+        "Whether the support assistant drafts replies for chat and email (per brand or the whole workspace), and in the last days how often " +
+        "it answered, asked back or handed off, and how many drafts the team sent as they were.",
+      inputSchema: { days: z.number().int().min(1).max(365).optional() },
+      annotations: read,
+    },
+    async ({ days }) => {
+      const settings = await gtm.GET("/v1/workspaces/{ws}/support/assistant-settings", { params: { path: path() } });
+      if (settings.error) return call(async () => settings);
+      return call(() =>
+        gtm.GET("/v1/workspaces/{ws}/support/assistant/stats", { params: { path: path(), query: days ? { days } : {} } }).then((stats) =>
+          stats.error ? stats : { ...stats, data: { settings: settings.data, report: stats.data } },
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    "try_support_assistant",
+    {
+      title: "Try the support assistant",
+      description:
+        "Asks the support assistant a made-up customer question: what it would answer (from approved knowledge), ask back, or hand off and why. " +
+        "Nothing is stored or sent. Use it to check the knowledge covers a question before switching the assistant on.",
+      inputSchema: {
+        question: z.string().min(1).max(2000),
+        channel: z.enum(["email", "chat"]).optional(),
+        brand: z.string().optional().describe("A brand's id or handle; the whole workspace when left out."),
+      },
+      annotations: read,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/support/assistant/test", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
+    "list_chat_widgets",
+    {
+      title: "Website chat widgets",
+      description: "The chats on the business's websites: the sites each shows on, its look and words, and the embed code to paste into the site.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/support/chat-widgets", { params: { path: path() } })),
+  );
+
+  server.registerTool(
     "get_support_stats",
     {
       title: "Support at a glance",
@@ -90,6 +139,20 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
   );
 
   if (readOnly) return;
+
+  server.registerTool(
+    "draft_support_reply",
+    {
+      title: "Draft a reply with the support assistant",
+      description:
+        "Asks the support assistant about the customer's latest message: a short answer from approved knowledge, one question back, " +
+        "or a hand-off to a person with the reason. Nothing is sent; reply_support_conversation with assistant_run_id sends it after the person agrees.",
+      inputSchema: { conversation_id: id },
+      annotations: write,
+    },
+    ({ conversation_id }) =>
+      call(() => gtm.POST("/v1/workspaces/{ws}/support/conversations/{id}/assistant", { params: { path: conv(conversation_id) } })),
+  );
 
   server.registerTool(
     "suggest_support_reply",
@@ -129,6 +192,31 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "create_chat_widget",
+    {
+      title: "Add a chat to a website",
+      description:
+        "Makes a chat widget for the business's site; give the person its embed_code to paste into the site. It shows only on allowed_origins " +
+        "(example.com covers subdomains). Visitors' messages land in the support inbox as chat conversations.",
+      inputSchema: {
+        allowed_origins: z.array(z.string()).min(1).max(20).describe("The sites it may show on, such as example.com."),
+        brand_id: z.string().optional().describe("The brand its conversations belong to."),
+        settings: z
+          .object({
+            color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+            title: z.string().min(1).max(60),
+            greeting: z.string().max(300),
+            require_email: z.boolean(),
+            show_articles: z.boolean(),
+          })
+          .optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/support/chat-widgets", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
     "reply_support_conversation",
     {
       title: "Reply to a customer",
@@ -139,6 +227,7 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
         conversation_id: id,
         body: z.string().min(1).max(20000).describe("Plain text."),
         status: z.enum(["pending", "closed", "open"]).optional(),
+        assistant_run_id: z.string().uuid().optional().describe("The assistant's draft this reply came from (draft_support_reply), so its report counts it."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },

@@ -131,6 +131,18 @@ archived.
   channel. People whose first conversion fell in the period, grouped by its
   first-touch credit, with how many have paid and everything they have paid
   since, in total and per person. Always first touch, whatever `model`.
+- `GET /v1/workspaces/{ws}/attribution/accounts`: credit rolled up from
+  people to their company (a person's first company on their record). For
+  every company: how many of its people converted, the conversions and
+  revenue credited to them, the channel with the most credit, and the deals
+  it won in the period. People with no company are left out.
+- `GET /v1/workspaces/{ws}/attribution/deals`: won deal value per channel.
+  Each deal won in the period is spread across channels in proportion to
+  the credit, under the model, of the conversions its people had before it
+  closed. A deal's people are its people, its contact and everyone at its
+  company. A deal none of them had a credited conversion for is counted
+  under `unattributed`. `brand` filters by the deal's brand and by its
+  people's conversions' brand.
 - `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
 - `GET` and `PATCH /v1/workspaces/{ws}/attribution/settings`: the default
@@ -164,6 +176,20 @@ counts ([partners.md](partners.md)). Money in other currencies is left out,
 never converted. Mission progress shows them as `revenue_attributed_cents`,
 `revenue_deals_cents` and `revenue_referred_cents`.
 
+Broadcasts, sequences and journeys can hold people out on purpose, to
+measure what they add beyond what would have happened anyway: a
+broadcast's or sequence's `holdout_percent`, or a journey's random split
+with a holdout path. A sequence's held-out enrollments stop before their
+first email (status `stopped`, `status_reason` `holdout`). The lift
+reports, `GET /v1/brands/{brand}/email-broadcasts/{id}/lift`,
+`.../sequences/{id}/lift` and `.../journeys/{id}/lift?step=` (scope
+`analytics.read`; MCP `get_email_broadcast_lift`, `get_sequence_lift` and
+`get_journey_lift`), compare who converted within `days` (30 by default)
+and what they paid on each side, with the lift, a p-value and a verdict
+([lifecycle-email.md](lifecycle-email.md#what-a-holdout-shows)). A
+sequence's report starts from each enrollment and leaves out leads with
+no customer record.
+
 The [digest](digests.md) has a Channels section: visits, conversions,
 revenue and cost per currency for the period against the one before, under
 the default model, and the three channels with the most conversions.
@@ -192,6 +218,7 @@ audit actions `attribution.settings_updated`, `attribution.model_created`,
 
 ## Not built yet
 
-- Credit goes to people, not to companies or deals.
+- Deal credit is read when asked for, not stored, so it follows the
+  model and the deal's people as they are now.
 - Identified visits don't say how the person was identified (a sign-in, a
   form, an email link), only that they were.

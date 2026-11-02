@@ -101,7 +101,8 @@ func TestJourneyActions(t *testing.T) {
 		{"id": "enroll", "kind": "enroll_in_sequence", "sequence_id": seq, "next": "topic"},
 		{"id": "topic", "kind": "unsubscribe_topic", "topic": "news", "next": "alert"},
 		{"id": "alert", "kind": "alert", "title": "Went quiet", "text": "Check in", "next": "again"},
-		{"id": "again", "kind": "enter_journey", "journey_id": welcome},
+		{"id": "again", "kind": "enter_journey", "journey_id": welcome, "next": "follow_up"},
+		{"id": "follow_up", "kind": "create_task", "title": "Follow up with customer", "due_after_seconds": 86400},
 	}
 	// Bad action steps are refused.
 	owner.must(400, "POST", base+"/journeys", map[string]any{"name": "Bad", "steps": []map[string]any{{"id": "a", "kind": "add_tag"}}})
@@ -121,6 +122,12 @@ func TestJourneyActions(t *testing.T) {
 	owner.must(200, "PATCH", base+"/journeys/"+jid, map[string]any{"steps": append(slices.Clone(steps[:3]), map[string]any{"id": "list", "kind": "add_to_list", "list_id": smart})})
 	owner.must(400, "POST", base+"/journeys/"+jid+"/activate", nil)
 	owner.must(200, "PATCH", base+"/journeys/"+jid, map[string]any{"steps": steps})
+	// The workspace route assigns its brand automatically; CRM tasks must
+	// use that same brand instead of asking the salesperson to set it again.
+	brand := owner.must(200, "GET", base+"/records/"+ana, nil)["brand_id"].(string)
+	if j["brand_id"] != brand {
+		t.Fatalf("journey/task brand = %v, want %s", j["brand_id"], brand)
+	}
 	owner.must(200, "POST", base+"/journeys/"+jid+"/activate", nil)
 
 	q := jobs.New(e.pool, log)
@@ -164,6 +171,10 @@ func TestJourneyActions(t *testing.T) {
 	r := finished(jid, ana)
 	if r["status"] != "completed" {
 		t.Fatalf("ana's run = %v", r)
+	}
+	var taskCount int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM crm_activities WHERE workspace_id=$1 AND record_id=$2 AND kind='task' AND assigned_to=$3 AND due_at>now()`, ws, ana, me).Scan(&taskCount); err != nil || taskCount != 1 {
+		t.Fatalf("automated follow-up: %d %v", taskCount, err)
 	}
 	attrs := owner.must(200, "GET", base+"/records/"+ana, nil)["attributes"].(map[string]any)
 	if tags := attrs["tags"].([]any); !slices.Contains(tags, "churn-risk") || !slices.Contains(tags, "vip") {

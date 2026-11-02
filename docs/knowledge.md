@@ -19,7 +19,10 @@ The rest of the Library:
 
 - **Content** (all, articles, quick answers, or a folder) is a table: status (Live, Draft, Check due), whether customers and the help centre get it, its folder, how many answers used it in the last 30 days and when it changed. Search and filter by status and by who uses it.
 - Clicking a row opens the item beside the list: read it, switch **AI talking to customers** and **Help centre** on or off, make it Live or a draft, and change its folder, brand, owner and check-by date. Each change saves at once. **Edit** opens the editor; **History** shows its versions.
-- **Unanswered questions** lists what people, agents and help centre readers asked that nothing answered, the most asked first. **Write the answer** starts a quick answer with the question filled in, and saving it takes the question off the list; **Dismiss** sets one aside.
+- **Review** holds what needs a person:
+  - **Suggested answers**: answers Outflare found for questions the knowledge couldn't answer, each with where it came from and the words it was taken from. **Approve** (after editing, if needed) adds it as a quick answer that every AI uses from then on; **Reject** (with a reason) stops it being suggested again. Ones about prices, refunds, contracts, legal terms, security or personal data are marked **Check carefully** and come first.
+  - **Conflicts**: articles that disagree, noticed while answering a question (one gives 30 days to ask for a refund, another 14). Pick the one that's right; the others go back to drafts so nothing uses them. Until then, answers avoid the point they disagree on.
+  - **Unanswered questions**: what people, agents and help centre readers asked that nothing answered, the most asked first. **Write the answer** starts a quick answer with the question filled in, and saving it takes the question off the list; **Dismiss** sets one aside.
 - **Test an answer** asks a question the way an agent would, for your team or for a customer.
 - The editor works like a document: a toolbar, `/` at the start of a line for headings, lists, checklists, quotes, tables, code and dividers, Ctrl or Cmd with B, I, K and S, and pasting from Google Docs, Word or a web page keeps headings, lists, links and tables. It saves Markdown, which every AI reads as it is.
 
@@ -60,6 +63,17 @@ Every AI in Outflare reads the knowledge base the same way, so what you write is
 ### Ask your knowledge
 
 The **Ask** box on the Knowledge page asks a question the way an agent would. Pick who the answer is for (your team, or a customer), and it shows the answer with the articles it used, each one click from its editor. A question the knowledge doesn't cover offers **Write the answer**, which starts a quick answer with the question filled in. Without an AI model it still shows the passages it found.
+
+## How it fills its own gaps
+
+Nothing found is used until a person approves it. Suggestions come from:
+
+- **Support.** When **Suggest a reply** finds no answer in a conversation and a teammate then answers it, the workspace's own AI turns the reply into a general answer, leaving out the customer's name, order and anything done just for them, and suggests it. A reply that only acted for that customer ("I've refunded you") suggests nothing. The Support inbox shows how many answers are waiting.
+- **The website and Slack.** When the [support assistant](support-inbox.md#the-support-assistant) hands a customer's question to the team because the knowledge has no answer, it reads the business's website (the brand's, else the workspace's: its sitemap's best matches and its FAQ, help, support, pricing and docs pages, politely, as OutflareBot) and then the Slack channels picked for it (a Slack (knowledge) connection), and suggests the first answer it finds with the page or message and the exact words. The words must really be in the page or message, or nothing is suggested. Each source can be switched off in Support settings.
+- **Agents.** An AI agent that finds an answer on the business's website, in Slack or elsewhere suggests it (`suggest_knowledge`, `POST .../knowledge/suggestions`) with the page or channel and the exact words. Agents can't approve.
+- **Answering.** When passages contradict each other on something a question depends on, the answer says so instead of picking one, and the conflict is filed for review.
+
+The same suggestion waits at most once, and one a person rejected isn't made again. The website, Slack and customers' messages are read as data, never as instructions.
 
 ## The API and MCP
 

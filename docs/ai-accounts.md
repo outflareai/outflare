@@ -34,6 +34,8 @@ API: `GET .../ai-accounts/receipts`, `POST .../ai-accounts/receipts/{id}/assign`
 
 ## Outflare for desktop
 
+Every workspace member can download the Mac update test from the AI accounts header or the Computers tab, without a GitHub account. This test installer exercises one automatic upgrade; its label distinguishes it from a future stable release. Install into Applications, open it, then close its window while leaving the menu-bar app running to allow the automatic upgrade.
+
 A small app each person installs once, for Mac, Windows and Linux. It sits in the menu bar or system tray, starts when they sign in, and every 10 minutes reads how much of each limit (the 5-hour and weekly windows, monthly requests, credits) their AI tools have used and when each resets: Claude, ChatGPT and Codex, Cursor and GitHub Copilot. It sends only those numbers, the plan and banked resets. Prompts, files and the tools' sign-ins never leave the computer.
 
 It reads each tool two ways, which the app labels: **official** (the tool's own documented way) and **extended** (the endpoints the tool's own app calls, with the sign-in already on the computer). It only reads: it never sends a prompt, uses a reset or buys anything, and backs off when a tool asks it to. The one sign-in it renews is Claude Code's default login, which Claude Code itself renews only while it runs: when it has expired, the app renews it the same way and saves it back, so Claude Code stays signed in.

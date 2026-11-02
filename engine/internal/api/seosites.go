@@ -760,9 +760,12 @@ func (s *Server) listCrawls(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "site is a site's id")
 		return
 	}
-	before := q.Get("before")
+	before, ok := pageCursor(w, r, pageBefore)
+	if !ok {
+		return
+	}
 	if before != "" && !validUUID(before) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "before is a crawl id from next_before")
+		invalidCursor(w, r)
 		return
 	}
 	sel, ok := s.brandFilter(w, r)
@@ -794,7 +797,7 @@ func (s *Server) listCrawls(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []crawlRunView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 func (s *Server) getCrawl(w http.ResponseWriter, r *http.Request) {
@@ -916,10 +919,12 @@ func (s *Server) listCrawlPages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var after int64
-	if v := q.Get("after"); v != "" {
+	if v, ok := pageCursor(w, r, pageAfter); !ok {
+		return
+	} else if v != "" {
 		after, err = strconv.ParseInt(v, 10, 64)
 		if err != nil || after < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "after is a page id from next_after")
+			invalidCursor(w, r)
 			return
 		}
 	}
@@ -951,7 +956,7 @@ func (s *Server) listCrawlPages(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []crawlPageView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 type crawlLinkView struct {

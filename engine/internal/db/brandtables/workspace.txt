@@ -5,7 +5,17 @@
 actors
 alert_mutes
 brands
+# Facts about an address or a mail domain (deliverable, risky, its address
+# shape), the same for every brand, like a hard bounce: a verifier's answer
+# is known once for the workspace, and holds nothing about a brand's people.
+email_checks
+email_patterns
+email_verifications
 idempotency_keys
+# The team's inbox labels and saved inbox filters; which reply carries a
+# label is on the reply, which belongs to a brand.
+inbox_tags
+inbox_views
 invites
 jobs
 memberships

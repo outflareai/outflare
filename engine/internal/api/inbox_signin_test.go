@@ -2,11 +2,12 @@ package api_test
 
 import (
 	"context"
-	"net/url"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/inbox"
+	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -15,16 +16,15 @@ import (
 // outage is only noted, and the mailbox keeps its turn.
 func TestInboxSyncRevokedSignIn(t *testing.T) {
 	e := freshEnv(t)
-	f := e.useFakeProvider(t)
+	f := e.useMailFake(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 
-	state := follow(t, owner, base+"/oauth/google/authorize").Query().Get("state")
-	follow(t, owner, "/v1/oauth/callback?code=good-code&state="+url.QueryEscape(state))
-	id := owner.must(200, "GET", base+"/mailboxes", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
-	// As if its sign-in check had passed.
-	if _, err := e.pool.Exec(ctx, `UPDATE mailboxes SET status = 'active' WHERE id = $1`, id); err != nil {
+	// A Gmail sign-in whose connection has no access token yet, so every
+	// sign-in asks Google for one.
+	id := legacyMailbox(t, e, ws, "li@gw.test", "google", "rt-li", nil)
+	if _, err := oauth.MoveLegacy(ctx, e.integrations, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -35,7 +35,7 @@ func TestInboxSyncRevokedSignIn(t *testing.T) {
 		t.Fatalf("outage returned %v", err)
 	}
 	m := owner.must(200, "GET", base+"/mailboxes/"+id, nil)
-	if m["status"] != "active" || m["last_synced_at"] == nil || !strings.Contains(m["sync_error"].(string), "temporarily_unavailable") {
+	if m["status"] != "active" || m["last_synced_at"] == nil || !strings.Contains(m["sync_error"].(string), "HTTP 503") {
 		t.Fatalf("after outage: %v", m)
 	}
 	if ev := named(got(), inbox.EventSyncFailed); len(ev) != 1 || ev[0].ErrorCode != "mailbox_auth" || ev[0].Props["sign_in_lost"] != false {
@@ -49,8 +49,8 @@ func TestInboxSyncRevokedSignIn(t *testing.T) {
 		t.Fatalf("revoked returned %v", err)
 	}
 	m = owner.must(200, "GET", base+"/mailboxes/"+id, nil)
-	if m["status"] != "error" || m["imap_ok"] != false || !strings.Contains(m["status_reason"].(string), "invalid_grant") ||
-		!strings.Contains(m["sync_error"].(string), "invalid_grant") {
+	if m["status"] != "error" || m["imap_ok"] != false || !strings.Contains(m["status_reason"].(string), "no longer accepts") ||
+		!strings.Contains(m["sync_error"].(string), "no longer accepts") {
 		t.Fatalf("after revoke: %v", m)
 	}
 	ev := got()

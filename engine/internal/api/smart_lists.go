@@ -492,11 +492,13 @@ func (s *Server) listSmartListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	var after *time.Time
 	var afterID string
-	if b := r.URL.Query().Get("before"); b != "" {
+	if b, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if b != "" {
 		at, id, found := strings.Cut(b, "|")
 		t, err := time.Parse(time.RFC3339Nano, at)
 		if !found || err != nil || !validUUID(id) {
-			writeError(w, r, http.StatusBadRequest, "invalid_cursor", "before is not one this API gave out: pass next_cursor from the previous page unchanged")
+			invalidCursor(w, r)
 			return
 		}
 		after, afterID = &t, id
@@ -512,7 +514,7 @@ func (s *Server) listSmartListMembers(w http.ResponseWriter, r *http.Request) {
 		c := last.EnteredAt.UTC().Format(time.RFC3339Nano) + "|" + last.ID
 		next = &c
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_before": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
 // addStaticMembers puts people in a static list, and removeStaticMembers

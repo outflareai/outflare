@@ -177,6 +177,26 @@ func normal(s string) string {
 	}), " ")
 }
 
+// SameWords reports whether two quotes say the same words, as the check
+// compares them: case, punctuation and spacing aside.
+func SameWords(a, b string) bool { return normal(a) == normal(b) }
+
+// InContext is the release's paragraph that carries the quote, so the
+// expert reads their words where they will appear, or "" when the release
+// doesn't quote it yet.
+func InContext(release, quote string) string {
+	q := normal(quote)
+	if q == "" {
+		return ""
+	}
+	for _, p := range strings.Split(strings.ReplaceAll(release, "\r\n", "\n"), "\n\n") {
+		if p = strings.TrimSpace(p); p != "" && strings.Contains(normal(p), q) {
+			return p
+		}
+	}
+	return ""
+}
+
 // containsWord reports whether lower (padded with spaces) has phrase as
 // whole words.
 func containsWord(lower, phrase string) bool {

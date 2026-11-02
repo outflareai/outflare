@@ -43,6 +43,9 @@ func (s *Server) routesNews(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/news-searches/{search}/run", s.inBrand(manage, s.runNewsSearch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/news-articles", s.inBrand(read, s.listNewsArticles))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journalists", s.inBrand(read, s.listJournalists))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/journalists", s.inBrand(manage, s.addJournalist))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/journalists/import", s.inBrand(manage, s.importJournalists))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journalists/{record}", s.inBrand(manage, s.updateJournalist))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/coverage", s.inBrand(read, s.listCoverage))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/coverage", s.inBrand(manage, s.addCoverage))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/coverage/{coverage}", s.inBrand(manage, s.updateCoverage))
@@ -439,7 +442,7 @@ func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -472,7 +475,7 @@ func (s *Server) listNewsArticles(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []newsArticleView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": nextOffset(offset, len(list), total)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, nextOffset(offset, len(list), total))})
 }
 
 func nextOffset(offset, n, total int) *int {
@@ -563,7 +566,7 @@ func (s *Server) listCoverage(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	offset, ok := offsetParam(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -587,7 +590,7 @@ func (s *Server) listCoverage(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []coverageView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_offset": nextOffset(offset, len(list), total)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, nextOffset(offset, len(list), total))})
 }
 
 // newCoverage is an article to keep as a brand's coverage.

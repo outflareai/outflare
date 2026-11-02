@@ -38,7 +38,7 @@ steps:
   - say: Once the expert has approved the quote, draft the release, check it and fix what the check finds. A person approves it.
     tools: [draftStory, updateStory, checkStory]
   - say: Pitch the journalists who wrote about the story, through a short sequence whose first step uses {{custom.opener}}, each pitch waiting for a person.
-    tools: [listJournalists, listSequences, createSequence, startStoryPitches, listStoryPitches]
+    tools: [listJournalists, listBrandSequences, createBrandSequence, startStoryPitches, listStoryPitches]
   - say: Report replies and coverage.
     tools: [getStoryResults]
 guardrails:

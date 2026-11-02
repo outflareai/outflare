@@ -55,6 +55,8 @@ type Meeting struct {
 	// Joined for display.
 	LeadEmail    *string `json:"lead_email"`
 	SequenceName *string `json:"sequence_name"`
+	// The brand it belongs to.
+	BrandID *string `json:"brand_id"`
 }
 
 // ErrNotFound means no such row in the workspace.
@@ -63,7 +65,7 @@ var ErrNotFound = errors.New("not found")
 const meetingCols = `m.id, m.sequence_id, m.mission_id, m.lead_id, m.inbound_id, m.source, m.integration_id, m.external_id,
 	m.title, m.starts_at, m.ends_at, m.booked_at, m.status, m.attendee_email, m.attendee_name, m.organizer_email,
 	m.attribution, m.attribution_pinned, m.qualified, m.notes, m.created_by, m.created_at, m.updated_at,
-	l.email, s.name`
+	l.email, s.name, m.brand_id`
 
 const meetingFrom = ` FROM meetings m
 	LEFT JOIN leads l ON l.id = m.lead_id
@@ -74,7 +76,7 @@ func scanMeeting(row pgx.Row) (Meeting, error) {
 	err := row.Scan(&m.ID, &m.SequenceID, &m.MissionID, &m.LeadID, &m.InboundID, &m.Source, &m.IntegrationID,
 		&m.ExternalID, &m.Title, &m.StartsAt, &m.EndsAt, &m.BookedAt, &m.Status, &m.AttendeeEmail, &m.AttendeeName,
 		&m.OrganizerEmail, &m.Attribution, &m.AttributionPinned, &m.Qualified, &m.Notes, &m.CreatedBy, &m.CreatedAt,
-		&m.UpdatedAt, &m.LeadEmail, &m.SequenceName)
+		&m.UpdatedAt, &m.LeadEmail, &m.SequenceName, &m.BrandID)
 	return m, err
 }
 
@@ -93,7 +95,7 @@ type MeetingFilter struct {
 	// Attributed: only meetings tied to outreach.
 	Attributed bool
 	// Brand is a brand's id, "none" for rows no brand owns, or "" for
-	// all; a row's brand is its sequence's.
+	// all; each row carries its brand.
 	Brand  string
 	Limit  int
 	Before *time.Time // cursor: starts_at of the last row seen
@@ -113,7 +115,7 @@ func ListMeetings(ctx context.Context, q Querier, ws string, f MeetingFilter) ([
 		  AND ($6 = '' OR m.status = $6)
 		  AND (NOT $7 OR m.attribution <> 'none')
 		  AND ($8::timestamptz IS NULL OR m.starts_at < $8)
-		  AND ($10 = '' OR (SELECT q.brand_id FROM sequences q WHERE q.id = m.sequence_id)::text IS NOT DISTINCT FROM NULLIF($10, 'none'))
+		  AND ($10 = '' OR m.brand_id::text IS NOT DISTINCT FROM NULLIF($10, 'none'))
 		ORDER BY m.starts_at DESC, m.id LIMIT $9`,
 		ws, f.From, f.To, f.SequenceID, f.MissionID, f.Status, f.Attributed, f.Before, f.Limit, f.Brand)
 	if err != nil {
@@ -159,6 +161,9 @@ type NewMeeting struct {
 	Qualified     *bool      `json:"qualified"`
 	Notes         string     `json:"notes"`
 	ExternalID    *string    `json:"external_id"`
+	// BrandID is the brand the meeting is logged in (set by the API, not
+	// read from the body); empty takes the brand of what it is matched to.
+	BrandID string `json:"-"`
 }
 
 // CreateMeeting logs a meeting. Give a lead, or an attendee email that is
@@ -193,9 +198,10 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 	switch {
 	case n.LeadID != nil:
 		var email string
-		if err := tx.QueryRow(ctx, `SELECT email FROM leads WHERE workspace_id = $1 AND id = $2`, ws, *n.LeadID).Scan(&email); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT email FROM leads WHERE workspace_id = $1 AND id = $2 AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid)`,
+			ws, *n.LeadID, n.BrandID).Scan(&email); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return Meeting{}, invalid("lead_id is not a lead in this workspace")
+				return Meeting{}, invalid("lead_id is not a lead in this brand")
 			}
 			return Meeting{}, err
 		}
@@ -211,14 +217,18 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 	if err != nil {
 		return Meeting{}, err
 	}
+	if err := inBrand(ctx, tx, n.BrandID, &m); err != nil {
+		return Meeting{}, err
+	}
 	pinned := false
 	if n.SequenceID != nil {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2)`, ws, *n.SequenceID).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid))`,
+			ws, *n.SequenceID, n.BrandID).Scan(&ok); err != nil {
 			return Meeting{}, err
 		}
 		if !ok {
-			return Meeting{}, invalid("sequence_id is not a sequence in this workspace")
+			return Meeting{}, invalid("sequence_id is not a sequence in this brand")
 		}
 		m.SequenceID, m.Attribution, pinned = n.SequenceID, AttrManual, true
 	}
@@ -229,11 +239,11 @@ func CreateMeeting(ctx context.Context, tx pgx.Tx, ws, source, actorID string, n
 	var id string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO meetings (workspace_id, sequence_id, mission_id, lead_id, inbound_id, source, external_id, title,
-			starts_at, ends_at, booked_at, status, attendee_email, attendee_name, attribution, attribution_pinned, qualified, notes, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			starts_at, ends_at, booked_at, status, attendee_email, attendee_name, attribution, attribution_pinned, qualified, notes, created_by, brand_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NULLIF($20, '')::uuid)
 		RETURNING id`,
 		ws, m.SequenceID, n.MissionID, m.LeadID, m.InboundID, source, n.ExternalID, n.Title,
-		n.StartsAt, n.EndsAt, booked, n.Status, n.AttendeeEmail, n.AttendeeName, m.Attribution, pinned, n.Qualified, n.Notes, actor).Scan(&id)
+		n.StartsAt, n.EndsAt, booked, n.Status, n.AttendeeEmail, n.AttendeeName, m.Attribution, pinned, n.Qualified, n.Notes, actor, n.BrandID).Scan(&id)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return Meeting{}, invalid("a meeting with this external_id already exists")

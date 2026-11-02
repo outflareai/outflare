@@ -183,19 +183,28 @@ var workFields = []fieldView{
 	builtinField("owner", "Owner", "actor_reference", "", "", false, true, "The workspace member who owns the record. Alerts about it go to them."),
 }
 
+// prFields are digital PR's facts: a person who writes for an outlet (a
+// journalist, found by the news watch or added by hand) and the topics they
+// cover, and an outlet's tier on its company.
+var prFields = []fieldView{
+	builtinField("journalist", "Journalist", "checkbox", "", "", false, true, "Writes for an outlet: shows on Digital PR's Journalists tab. The news watch sets it for the authors it finds."),
+	builtinField("beats", "Beats", "text", "", "", true, true, "The topics a journalist covers. The news watch suggests them from the searches their articles came up in."),
+	builtinField("outlet_tier", "Outlet tier", "select", "outlet_tier", "", false, true, "What kind of outlet this is, for media lists: national, trade, regional, local, or a newsletter or blog."),
+}
+
 // lateBuiltins are built-in field keys added after workspaces could make
 // their own fields, so a workspace may already have a field of that key.
 // Where it does, its own field wins and the built-in is left out.
 var lateBuiltins = func() []string {
-	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields))
-	for _, f := range slices.Concat(billingFields, touchFields, workFields) {
+	keys := make([]string, 0, len(billingFields)+len(touchFields)+len(workFields)+len(prFields))
+	for _, f := range slices.Concat(billingFields, touchFields, workFields, prFields) {
 		keys = append(keys, f.Key)
 	}
 	return keys
 }()
 
 // lateOptionSets are built-in option sets added the same way.
-var lateOptionSets = []string{"billing_status"}
+var lateOptionSets = []string{"billing_status", "outlet_tier"}
 
 // builtinTypes are the record types every workspace has. A person's emails,
 // phones and ids are identities, not fields, so one email is never stored
@@ -215,7 +224,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
-		}, touchFields, workFields)},
+		}, touchFields, workFields, prFields[:2])},
 	{Key: "account", Name: "Company", Plural: "Companies", Builtin: true,
 		Description: "A company or other organization: a customer account, a prospect company, a partner. Its domains are identities.",
 		Fields: []fieldView{
@@ -226,7 +235,7 @@ var builtinTypes = []recordTypeView{
 			builtinField("linkedin_url", "LinkedIn", "url", "", "", false, false, ""),
 			builtinField("lifecycle_stage", "Lifecycle stage", "status", "lifecycle_stage", "", false, true, ""),
 			billingFields[0], billingFields[1], billingFields[2], billingFields[3], billingFields[4],
-			workFields[0], workFields[1],
+			workFields[0], workFields[1], prFields[2],
 		}},
 }
 
@@ -266,6 +275,8 @@ var builtinOptionSets = func() []optionSetView {
 			"churned", "Churned", "other", "Other")},
 		{Key: "billing_status", Name: "Billing status", Builtin: true, Options: opts(
 			"trialing", "Trialing", "active", "Active", "past_due", "Past due", "canceled", "Canceled")},
+		{Key: "outlet_tier", Name: "Outlet tier", Builtin: true, Options: opts(
+			"national", "National", "trade", "Trade", "regional", "Regional", "local", "Local", "newsletter", "Newsletter or blog")},
 	}
 }()
 

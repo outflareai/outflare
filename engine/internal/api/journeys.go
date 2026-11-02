@@ -589,6 +589,12 @@ func (s *Server) activateJourney(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "add a step before activating the journey")
 		return
 	}
+	for _, step := range cur.Steps {
+		if step.Kind == "create_task" && cur.BrandID == nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "choose a brand before activating a journey that creates CRM tasks")
+			return
+		}
+	}
 	if !s.journeyApplied(w, r, s.checkJourneyTemplates(r, a.WorkspaceID, cur.BrandID, cur.Steps, true)) {
 		return
 	}
@@ -729,13 +735,17 @@ func (s *Server) listJourneyRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	status, after, record, step := q.Get("status"), q.Get("after"), q.Get("record"), q.Get("step")
+	status, record, step := q.Get("status"), q.Get("record"), q.Get("step")
+	after, ok := pageCursor(w, r, pageAfter)
+	if !ok {
+		return
+	}
 	switch {
 	case status != "" && !slices.Contains(journeyRunStatuses, status):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is one of "+strings.Join(journeyRunStatuses, ", "))
 		return
 	case after != "" && !validUUID(after):
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "after must be a run id")
+		invalidCursor(w, r)
 		return
 	case record != "" && !validUUID(record):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "record must be a record id")
@@ -771,7 +781,7 @@ func (s *Server) listJourneyRuns(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []journeyRunView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 func (s *Server) findJourneyRun(w http.ResponseWriter, r *http.Request, ws, journeyID, id string) (*journeyRunView, bool) {

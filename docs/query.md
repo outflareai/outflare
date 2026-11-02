@@ -31,9 +31,10 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `record_identities`, `record_relationships` | `customers.read` | Emails, phones, ids and domains; links between records |
 | `customer_events`, `consents`, `subscriptions` | `customers.read` | Product events, the consent log, payment subscriptions (`monthly_minor` is MRR in minor units) |
 | `rules`, `rule_firings` | `customers.read` | The brand's [rules](rules.md), and each time one fired for a record |
+| `products`, `lifecycle_states`, `lifecycle_moves`, `lifecycle_overall` | `customers.read` | The brand's [products](product-lifecycle.md), where each company and person stands with each, every move between stages, and each company's overall status |
 | `journeys`, `journey_runs` | `customers.read` | The brand's journeys (`steps` counts the live version's steps), and each person's way through one |
 | `brands` | `workspace.read` | The brand itself |
-| `leads` | `leads.read` | Leads for outreach; they have no brand yet, so a brand's query can't read them |
+| `leads` | `leads.read` | The brand's leads for outreach |
 | `sequences`, `enrollments`, `messages` | `sequences.read` | Sequences, who is in them, and the emails they sent (without bodies) |
 | `replies` | `inbox.read` | Mail received, with its AI label, without bodies |
 | `deals`, `meetings`, `spend` | `outcomes.read` | Outcomes and money spent |
@@ -52,7 +53,8 @@ Each of the brand's own record types is a table too, named by its key: a `subscr
 
 - **This workspace only.** Every table shows only the workspace's own rows.
 - **One brand.** Every customer table (`records`, `people`, `companies`, the type tables, `record_identities`, `record_relationships`, `customer_events`, `consents`, `subscriptions`) and `brands` hold only rows whose own `brand_id` is the query's brand; a row with no brand is not the brand's and is left out too. No SQL text changes that: a `brand_id` filter, a subquery, a CTE or a join only ever sees the brand's rows, and the tables underneath can't be read at all. Another brand's token or a member kept to other brands gets `404` for the brand's query routes.
-- **Areas not yet moved to brands.** The outreach, outcomes, email, website and social tables keep the rule they had for a caller kept to some brands: the brand's rows and the ones no brand owns, where a row's brand comes from the same place as on a record's timeline (a message's, meeting's or deal's sequence, a reply's mailbox). `leads` has no brand, so a brand's query can't read it. Each area becomes strict as it moves (`plans/brands/README.md`, "Order").
+- **Outreach and activation.** `leads`, `sequences`, `enrollments`, `messages`, `replies`, `meetings` and `deals` (outreach, brands step 5), and the rule, journey and email tables (step 4), hold only rows whose own `brand_id` is the query's brand.
+- **Areas not yet moved to brands.** The website, social and spend tables keep the rule they had for a caller kept to some brands: the brand's rows and the ones no brand owns. Each area becomes strict as it moves (`plans/brands/README.md`, "Order").
 - **Your scopes.** Each table needs its read scope. A query naming a table you can't read is refused with `forbidden`, naming the scope.
 
 ## What a query can do

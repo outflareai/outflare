@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -14,10 +15,25 @@ import (
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
-// fakeMailSignIn is Google's and Microsoft's token endpoints as the
+// mailFake is Google's and Microsoft's token endpoints as the
 // google_mail and outlook_mail connectors call them.
-func fakeMailSignIn(t *testing.T) *httptest.Server {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+type mailFake struct {
+	*httptest.Server
+	mu sync.Mutex
+	// refresh is how refresh grants are answered: "" works, "revoked"
+	// refuses the grant, "down" is a provider outage.
+	refresh string
+}
+
+func (f *mailFake) setRefresh(mode string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refresh = mode
+}
+
+func fakeMailSignIn(t *testing.T) *mailFake {
+	fake := &mailFake{}
+	fake.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm() //nolint:errcheck
 		f := r.PostForm
 		reply := func(status int, v map[string]any) {
@@ -32,6 +48,18 @@ func fakeMailSignIn(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/token" && f.Get("grant_type") == "authorization_code" && f.Get("code") == "unverified":
 			reply(200, map[string]any{"access_token": "x", "refresh_token": "y", "expires_in": 3600,
 				"id_token": idToken(map[string]any{"email": "eve@gw.test", "email_verified": false})})
+		case r.URL.Path == "/token" && f.Get("grant_type") == "refresh_token":
+			fake.mu.Lock()
+			mode := fake.refresh
+			fake.mu.Unlock()
+			switch {
+			case mode == "down":
+				reply(503, map[string]any{"error": "temporarily_unavailable"})
+			case mode == "revoked" || f.Get("client_id") != "gid" || !strings.HasPrefix(f.Get("refresh_token"), "rt-"):
+				reply(400, map[string]any{"error": "invalid_grant", "error_description": "Token has been expired or revoked."})
+			default:
+				reply(200, map[string]any{"access_token": "access-" + f.Get("refresh_token"), "expires_in": 3600})
+			}
 		case r.URL.Path == "/sa" && f.Get("grant_type") == "urn:ietf:params:oauth:grant-type:jwt-bearer":
 			parts := strings.Split(f.Get("assertion"), ".")
 			raw, _ := base64.RawURLEncoding.DecodeString(parts[1])
@@ -53,8 +81,8 @@ func fakeMailSignIn(t *testing.T) *httptest.Server {
 			reply(400, map[string]any{"error": "unsupported_grant_type"})
 		}
 	}))
-	t.Cleanup(srv.Close)
-	return srv
+	t.Cleanup(fake.Close)
+	return fake
 }
 
 // Mailbox sign-ins are connections: signing in through the connector OAuth

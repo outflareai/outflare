@@ -26,13 +26,13 @@ inputs:
     example: https://cal.example.com/northpeak/intro
 steps:
   - say: List replies from the last day that nobody has answered yet.
-    tools: [listInbox]
+    tools: [listBrandInbox]
   - say: Read each conversation and keep the ones that are interested or ask a question.
-    tools: [getInboundMessage]
+    tools: [getBrandInboundMessage]
   - say: Tag them so the team sees them.
-    tools: [listInboxTags, updateInboundMessage]
+    tools: [listInboxTags, updateBrandInboundMessage]
   - say: Draft a short reply in the same thread that answers the question and offers the booking link.
-    tools: [replyToInboundMessage]
+    tools: [replyBrandToInboundMessage]
 guardrails:
   - Every reply waits for a person to approve it before it is sent.
   - Out-of-office, unsubscribe and not-interested replies are left alone.

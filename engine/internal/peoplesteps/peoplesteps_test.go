@@ -113,7 +113,7 @@ func TestPeopleSteps(t *testing.T) {
 	spent := map[string]int{}
 	r := pipeline.NewRunner(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r.PollInterval = 20 * time.Millisecond
-	for _, s := range Stages(pool, fakeFinder{}, Config{
+	for _, s := range Stages(pool, fakeFinder{}, nil, Config{
 		Pipeline: "people_test",
 		Via:      "lead_finder",
 		Contact: func(_ context.Context, it pipeline.Item) (Contact, error) {
@@ -280,7 +280,7 @@ func TestEnrollStep(t *testing.T) {
 	stops := map[string]string{}
 	r := pipeline.NewRunner(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r.PollInterval = 20 * time.Millisecond
-	for _, s := range Stages(pool, fakeFinder{}, Config{
+	for _, s := range Stages(pool, fakeFinder{}, nil, Config{
 		Pipeline: "enroll_test",
 		Via:      "lead_finder",
 		Contact: func(_ context.Context, it pipeline.Item) (Contact, error) {

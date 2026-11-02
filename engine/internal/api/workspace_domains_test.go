@@ -54,16 +54,11 @@ func TestOneListOfDomainsAndConnections(t *testing.T) {
 	}
 
 	hub := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "meta_ads", "credentials": map[string]string{"api_key": "mt"}})["id"].(string)
-	var google string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO oauth_connections (workspace_id, provider, name, secret) VALUES ($1, 'google', 'Acme Google', '\x00') RETURNING id::text`, ws).Scan(&google); err != nil {
-		t.Fatal(err)
-	}
 	conns := owner.must(200, "GET", base+"/connections", nil)["data"].([]any)
-	if len(conns) != 2 || conns[0].(map[string]any)["id"] != hub || conns[0].(map[string]any)["kind"] != "integration" ||
-		conns[1].(map[string]any)["id"] != google || conns[1].(map[string]any)["kind"] != "mailbox_oauth" {
+	if len(conns) != 1 || conns[0].(map[string]any)["id"] != hub || conns[0].(map[string]any)["kind"] != "integration" {
 		t.Fatalf("connections: %v", conns)
 	}
-	if n := len(owner.must(200, "GET", base+"/connections?category=mailbox_provider", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/connections?category=mailbox_provider", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("mailbox connections: %d", n)
 	}
 }

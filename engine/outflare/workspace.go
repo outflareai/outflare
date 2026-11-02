@@ -307,6 +307,42 @@ func (c *Connection) SearchPeople(ctx context.Context, f PeopleFilter, size int,
 	return page, err
 }
 
+// Company search: the workspace's own data provider (Apollo, PDL) finds
+// companies, not people, matching a profile.
+const CapSearchCompanies = connectors.CapSearchCompanies
+
+type (
+	CompanyFilter = connectors.CompanyFilter
+	FoundCompany  = connectors.Company
+	CompanyPage   = connectors.CompanyPage
+)
+
+// SearchCompanies returns one page (up to size companies; cursor empty for
+// the first) of a company search on the connection, and books the credits
+// it cost against ref.
+func (c *Connection) SearchCompanies(ctx context.Context, f CompanyFilter, cursor string, size int, ref string) (CompanyPage, error) {
+	s, ok := c.o.Connector.(connectors.CompanySearcher)
+	if !ok {
+		return CompanyPage{}, ErrNotConnected
+	}
+	if err := usagelimits.Check(ctx, c.h.Pool, c.WorkspaceID, c.ID, "credit", 0); err != nil {
+		return CompanyPage{}, err
+	}
+	page, err := s.SearchCompanies(ctx, c.o.Client, c.o.Creds, f, cursor, size)
+	if page.Credits > 0 {
+		id, credits := c.ID, page.Credits
+		e := outcomes.Entry{WorkspaceID: c.WorkspaceID, Category: outcomes.CategoryData, Provider: c.Connector,
+			IntegrationID: &id, OccurredAt: time.Now(), Source: outcomes.SourceAuto, Note: "Company search", Units: &credits, UnitName: "credit"}
+		if ref != "" {
+			e.Ref = &ref
+		}
+		if _, _, serr := outcomes.Record(ctx, c.h.Pool, e); serr != nil && err == nil {
+			err = serr
+		}
+	}
+	return page, err
+}
+
 // RoleAddress reports whether an address is a role or shared inbox, such
 // as info@, contact@ or sales@, rather than one person's.
 func RoleAddress(email string) bool {
@@ -352,7 +388,26 @@ type (
 	AIMessage  = llm.Message
 	AIUsage    = llm.Usage
 	AIResponse = llm.Response
+	// AIImage is a picture in a message or a tool result; AIToolResult
+	// answers a tool call the model made.
+	AIImage      = llm.Image
+	AIToolResult = llm.ToolResult
 )
+
+// AISupportsImages reports whether a provider reads images.
+func AISupportsImages(provider string) bool { return llm.SupportsImages(provider) }
+
+// AICheckImage reports why an image can't be sent to a model, or nil.
+func AICheckImage(img AIImage) error { return llm.CheckImage(img) }
+
+// AICapabilities is what a provider's chat API does through Outflare.
+type AICapabilities = llm.Capabilities
+
+// AICapabilitiesOf reports what provider's API does with model, so a
+// feature offers only what will work (tools, images, streaming, search).
+func AICapabilitiesOf(provider, model string) AICapabilities {
+	return llm.CapabilitiesOf(provider, model)
+}
 
 // ErrNoAIKey means the workspace has not connected an AI provider.
 var ErrNoAIKey = llm.ErrNoKey
@@ -375,6 +430,62 @@ func (h *Host) AI() *AI { return &AI{h} }
 // cents.
 func (a *AI) ChatFor(ctx context.Context, c *Caller, task string, req AIRequest, maxCents int64, ref string) (AIResponse, int64, error) {
 	return a.Chat(ctx, c.WorkspaceID, task, req, maxCents, ref)
+}
+
+// AIConnection is one of the workspace's connected AI model connections.
+// DefaultModel is the provider's own default; Searches says whether that
+// model can search the web before it answers (AISearchesWeb).
+type AIConnection struct {
+	ID, Provider, ProviderName, Name, DefaultModel string
+	Searches                                       bool
+}
+
+// AISearchesWeb reports whether a provider's model can search the web
+// before it answers, returning the pages it used as AIResponse.Citations:
+// Claude's web search, OpenRouter's web plugin (any model) or OpenAI's
+// search models.
+func AISearchesWeb(provider, model string) bool { return llm.SupportsWebSearch(provider, model) }
+
+// Connections lists the workspace's connected AI model connections, for a
+// feature that calls several of them rather than the one the workspace
+// chose. workspaceID must come from a row the caller holds for that
+// workspace.
+func (a *AI) Connections(ctx context.Context, workspaceID string) ([]AIConnection, error) {
+	if a.h.server == nil {
+		return nil, errors.New("the engine has not started")
+	}
+	conns, err := a.h.server.AIConnectionsOf(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AIConnection, len(conns))
+	for i, c := range conns {
+		out[i] = AIConnection{ID: c.ID, Provider: c.Provider.ID, ProviderName: c.Provider.Name, Name: c.Name,
+			DefaultModel: c.Provider.DefaultModel, Searches: llm.SupportsWebSearch(c.Provider.ID, c.Provider.DefaultModel)}
+	}
+	return out, nil
+}
+
+// ChatOn is Chat on one of the workspace's AI connections and a model of
+// the caller's choosing (empty: the workspace's model on that connection,
+// else the provider's default), under task's and the workspace's monthly
+// AI limits. A model whose price Outflare doesn't know is refused, except
+// on a router that reports what each call cost. The cents include any web
+// searches the model ran.
+func (a *AI) ChatOn(ctx context.Context, workspaceID, task, integrationID, model string, req AIRequest, maxCents int64, ref string) (AIResponse, int64, error) {
+	if a.h.server == nil {
+		return AIResponse{}, 0, errors.New("the engine has not started")
+	}
+	c, err := a.h.server.AIModelOn(ctx, workspaceID, task, integrationID, model, maxCents)
+	if err != nil {
+		return AIResponse{}, 0, err
+	}
+	resp, err := c.Model.Chat(ctx, req)
+	cents := c.Price.Cents(resp.Usage)
+	if serr := a.h.server.AIModels().Spent(ctx, workspaceID, c, resp.Usage, ref, task); serr != nil && err == nil {
+		err = serr
+	}
+	return resp, cents, err
 }
 
 // Chat is ChatFor for background jobs, which have no caller. workspaceID

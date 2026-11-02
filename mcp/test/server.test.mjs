@@ -9,6 +9,7 @@ import { createServer } from "../dist/server.js";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const SEQ = "22222222-2222-4222-8222-222222222222";
+const BRAND = "33333333-3333-4333-8333-333333333333";
 
 async function connect(api, opts = {}) {
   const calls = [];
@@ -43,22 +44,22 @@ test("lists read and write tools, and only read tools when read-only", async () 
 test("calls the API with the workspace, token and arguments", async () => {
   const { client, calls } = await connect(() => [200, { enrolled: 2, already_enrolled: 0, suppressed: 1, active_elsewhere: 0 }]);
   const lead = "33333333-3333-4333-8333-333333333333";
-  const res = await client.callTool({ name: "enroll_leads", arguments: { sequence_id: SEQ, lead_ids: [lead] } });
+  const res = await client.callTool({ name: "enroll_leads", arguments: { brand: BRAND, sequence_id: SEQ, lead_ids: [lead] } });
   assert.equal(res.isError, undefined);
   assert.equal(JSON.parse(res.content[0].text).enrolled, 2);
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/sequences/${SEQ}/enrollments`);
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/sequences/${SEQ}/enrollments`);
   assert.equal(calls[0].headers.get("authorization"), "Bearer oft_x");
   assert.deepEqual(JSON.parse(calls[0].body), { lead_ids: [lead] });
 
-  await client.callTool({ name: "list_inbox", arguments: { unread: true, limit: 5 } });
+  await client.callTool({ name: "list_inbox", arguments: { brand: BRAND, unread: true, limit: 5 } });
   assert.equal(calls[1].url.search, "?unread=true&limit=5");
 });
 
 test("imports CSV as text/csv with the list name", async () => {
   const { client, calls } = await connect(() => [200, { created: 1, updated: 0, duplicates: 0, suppressed: 0, errors: [], list_id: null }]);
   const csv = "email,first_name\nana@acme-com.example,Ana\n";
-  const res = await client.callTool({ name: "import_leads_csv", arguments: { csv, list: "Q4 founders" } });
+  const res = await client.callTool({ name: "import_leads_csv", arguments: { brand: BRAND, csv, list: "Q4 founders" } });
   assert.equal(res.isError, undefined);
   assert.equal(calls[0].headers.get("content-type"), "text/csv");
   assert.equal(calls[0].url.searchParams.get("list"), "Q4 founders");
@@ -67,7 +68,7 @@ test("imports CSV as text/csv with the list name", async () => {
 
 test("returns API errors as tool errors the model can read", async () => {
   const { client } = await connect(() => [409, { error: { code: "conflict", message: "the recipient is suppressed", request_id: "req_9" } }]);
-  const res = await client.callTool({ name: "reply_to_inbox_message", arguments: { message_id: SEQ, body: "Thanks!" } });
+  const res = await client.callTool({ name: "reply_to_inbox_message", arguments: { brand: BRAND, message_id: SEQ, body: "Thanks!" } });
   assert.equal(res.isError, true);
   assert.equal(res.content[0].text, "409 conflict: the recipient is suppressed (request req_9)\nNext step: Read the item again and retry with its current state.");
   assert.deepEqual(res.structuredContent.error, {
@@ -76,12 +77,12 @@ test("returns API errors as tool errors the model can read", async () => {
   });
 
   const denied = await connect(() => [403, { error: { code: "forbidden", message: "this needs the sequences.manage scope", request_id: "req_2" } }]);
-  const res2 = await denied.client.callTool({ name: "enroll_leads", arguments: { sequence_id: SEQ, lead_ids: [SEQ] } });
+  const res2 = await denied.client.callTool({ name: "enroll_leads", arguments: { brand: BRAND, sequence_id: SEQ, lead_ids: [SEQ] } });
   assert.match(res2.content[0].text, /Next step: This app or token isn.t allowed to do this/);
   assert.equal(res2.structuredContent.error.retry, false);
 
   const busy = await connect(() => [429, { error: { code: "rate_limited", message: "slow down", request_id: "req_3" } }]);
-  const res3 = await busy.client.callTool({ name: "list_inbox", arguments: {} });
+  const res3 = await busy.client.callTool({ name: "list_inbox", arguments: { brand: BRAND } });
   assert.equal(res3.structuredContent.error.retry, true);
 });
 
@@ -175,7 +176,7 @@ test("sending server tools put the server id in the path", async () => {
 
 test("a 204 answer reads as ok", async () => {
   const { client } = await connect(() => [204, undefined]);
-  const res = await client.callTool({ name: "stop_enrollment", arguments: { sequence_id: SEQ, enrollment_id: SEQ } });
+  const res = await client.callTool({ name: "stop_enrollment", arguments: { brand: BRAND, sequence_id: SEQ, enrollment_id: SEQ } });
   assert.equal(res.isError, undefined);
   assert.equal(res.content[0].text, '{"ok":true}');
 });
@@ -200,18 +201,18 @@ test("lead and mailbox tools: read, change, delete, list membership", async () =
   const { client, calls } = await connect(() => [200, {}]);
   const LEAD = "44444444-4444-4444-8444-444444444444";
   const LIST = "55555555-5555-4555-8555-555555555555";
-  await client.callTool({ name: "get_lead", arguments: { lead_id: LEAD } });
-  assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/leads/${LEAD}`);
-  await client.callTool({ name: "update_lead", arguments: { lead_id: LEAD, title: "CFO", custom: { tier: null } } });
+  await client.callTool({ name: "get_lead", arguments: { brand: BRAND, lead_id: LEAD } });
+  assert.equal(calls.at(-1).url.pathname, `/v1/brands/${BRAND}/leads/${LEAD}`);
+  await client.callTool({ name: "update_lead", arguments: { brand: BRAND, lead_id: LEAD, title: "CFO", custom: { tier: null } } });
   assert.equal(calls.at(-1).method, "PATCH");
   assert.deepEqual(JSON.parse(calls.at(-1).body), { title: "CFO", custom: { tier: null } });
-  await client.callTool({ name: "delete_lead", arguments: { lead_id: LEAD, suppress: true } });
+  await client.callTool({ name: "delete_lead", arguments: { brand: BRAND, lead_id: LEAD, suppress: true } });
   assert.equal(calls.at(-1).method, "DELETE");
   assert.equal(calls.at(-1).url.search, "?suppress=true");
-  await client.callTool({ name: "add_leads_to_list", arguments: { list_id: LIST, lead_ids: [LEAD] } });
-  assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/lead-lists/${LIST}/leads`);
-  await client.callTool({ name: "remove_lead_from_list", arguments: { list_id: LIST, lead_id: LEAD } });
-  assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/lead-lists/${LIST}/leads/${LEAD}`);
+  await client.callTool({ name: "add_leads_to_list", arguments: { brand: BRAND, list_id: LIST, lead_ids: [LEAD] } });
+  assert.equal(calls.at(-1).url.pathname, `/v1/brands/${BRAND}/lead-lists/${LIST}/leads`);
+  await client.callTool({ name: "remove_lead_from_list", arguments: { brand: BRAND, list_id: LIST, lead_id: LEAD } });
+  assert.equal(calls.at(-1).url.pathname, `/v1/brands/${BRAND}/lead-lists/${LIST}/leads/${LEAD}`);
   await client.callTool({ name: "get_mailbox", arguments: { mailbox_id: LEAD } });
   assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/mailboxes/${LEAD}`);
   await client.callTool({ name: "update_mailbox", arguments: { mailbox_id: LEAD, status: "paused" } });
@@ -270,7 +271,7 @@ test("acts inside a mission once use_mission is called", async () => {
   assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/missions/${MISSION}`);
 
   // A held write comes back as a normal result with the action to poll.
-  const res = await client.callTool({ name: "create_sequence", arguments: { name: "In mission" } });
+  const res = await client.callTool({ name: "create_sequence", arguments: { brand: BRAND, name: "In mission" } });
   assert.equal(res.isError, undefined);
   assert.equal(JSON.parse(res.content[0].text).approval_required, true);
   assert.equal(calls.at(-1).headers.get("outflare-mission"), MISSION);
@@ -324,7 +325,7 @@ test("analytics for agents: changes, catalog resource, prompts and compact answe
 
 test("webhook tools: create, test and redeliver call the brand's webhook endpoints", async () => {
   const HOOK = "44444444-4444-4444-8444-444444444444";
-  const BRAND = "33333333-3333-4333-8333-333333333333";
+
   const { client, calls } = await connect(() => [200, { id: HOOK, status: "delivered" }]);
   await client.callTool({ name: "create_webhook", arguments: { brand: BRAND, url: "https://example.com/h", events: ["lead.replied"] } });
   assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/webhooks`);
@@ -342,17 +343,18 @@ test("webhook tools: create, test and redeliver call the brand's webhook endpoin
 });
 
 test("answers are compact JSON with structuredContent, and list_events joins types", async () => {
-  const { client, calls } = await connect(() => [200, { data: [{ id: "evt_2", type: "lead.replied" }], next_after: "evt_2", has_more: false }]);
-  const res = await client.callTool({ name: "list_events", arguments: { after: "evt_1", types: ["lead.replied", "mailbox.*"] } });
-  assert.equal(res.content[0].text, JSON.stringify({ data: [{ id: "evt_2", type: "lead.replied" }], next_after: "evt_2", has_more: false }));
-  assert.equal(res.structuredContent.next_after, "evt_2");
+  const { client, calls } = await connect(() => [200, { data: [{ id: "evt_2", type: "lead.replied" }], next_cursor: "c2", has_more: false }]);
+  const res = await client.callTool({ name: "list_events", arguments: { cursor: "c1", types: ["lead.replied", "mailbox.*"] } });
+  assert.equal(res.content[0].text, JSON.stringify({ data: [{ id: "evt_2", type: "lead.replied" }], next_cursor: "c2", has_more: false }));
+  assert.equal(res.structuredContent.next_cursor, "c2");
   assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/events`);
   assert.equal(calls[0].url.searchParams.get("types"), "lead.replied,mailbox.*");
+  assert.equal(calls[0].url.searchParams.get("cursor"), "c1");
 });
 
 test("names the tool, the agent's app and the client on every call", async () => {
   const { client, calls } = await connect(() => [200, { data: [] }]);
-  await client.callTool({ name: "list_inbox", arguments: {} });
+  await client.callTool({ name: "list_inbox", arguments: { brand: BRAND } });
   const h = calls.at(-1).headers;
   assert.equal(h.get("outflare-tool"), "list_inbox");
   assert.equal(h.get("outflare-agent"), "test");
@@ -413,9 +415,9 @@ test("memory tools save, correct and forget, and stay out of read-only mode", as
 
 test("brand tools reach the brand routes, and OUTFLARE_BRAND is the list default", async () => {
   const { client, calls } = await connect(() => [200, { data: [] }], { brand: "repocket" });
-  await client.callTool({ name: "list_sequences", arguments: {} });
+  await client.callTool({ name: "list_mailboxes", arguments: {} });
   assert.equal(calls[0].url.search, "?brand=repocket");
-  await client.callTool({ name: "list_sequences", arguments: { brand: "all" } });
+  await client.callTool({ name: "list_mailboxes", arguments: { brand: "all" } });
   assert.equal(calls[1].url.search, "?brand=all");
   await client.callTool({ name: "update_brand_context", arguments: { brand: "geonode", voice: "Plain." } });
   assert.equal(calls[2].method, "PATCH");
@@ -426,7 +428,7 @@ test("brand tools reach the brand routes, and OUTFLARE_BRAND is the list default
 });
 
 test("customer tools and run_query use the brand routes, looking a handle up first", async () => {
-  const BRAND = "33333333-3333-4333-8333-333333333333";
+
   const { client, calls } = await connect((req) => {
     const u = new URL(req.url);
     if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
@@ -449,7 +451,7 @@ test("customer tools and run_query use the brand routes, looking a handle up fir
 });
 
 test("activation tools use the brand routes: rules, journeys, lifecycle email and alerts", async () => {
-  const BRAND = "33333333-3333-4333-8333-333333333333";
+
   const { client, calls } = await connect((req) => {
     const u = new URL(req.url);
     if (u.pathname.endsWith("/brands/repocket")) return [200, { id: BRAND, handle: "repocket" }];
@@ -502,7 +504,7 @@ test("reddit tools: guide, campaign prompt, actions and the report; read-only le
 });
 
 test("saved query tools use the brand routes; save_query makes or changes one; read-only leaves it out", async () => {
-  const BRAND = "33333333-3333-4333-8333-333333333333";
+
   const { client, calls } = await connect(() => [200, { data: [], columns: [], rows: [] }]);
   await client.callTool({ name: "list_saved_queries", arguments: { brand: BRAND, q: "plan" } });
   assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/queries`);

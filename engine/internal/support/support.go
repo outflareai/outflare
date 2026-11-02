@@ -201,6 +201,11 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 	if err := Clock(ctx, tx, conv); err != nil {
 		return out, err
 	}
+	if !e.AutoReply {
+		if err := queueAssistant(ctx, tx, ws, conv, out.MessageID); err != nil {
+			return out, err
+		}
+	}
 	action := "support.message_received"
 	if out.Started {
 		action = "support.conversation_started"
@@ -262,19 +267,22 @@ const (
 // answers the new message's id.
 func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 	var mailboxID, inboundID, replyFrom, brandID *string
-	var contact, subject string
+	var contact, subject, channel string
 	var mbStatus, mbPurpose, mbEmail, mbName *string
 	err := tx.QueryRow(ctx, `
-		SELECT c.mailbox_id::text, c.inbound_address_id::text, c.reply_from, c.brand_id::text, c.contact_email, c.subject,
+		SELECT c.mailbox_id::text, c.inbound_address_id::text, c.reply_from, c.brand_id::text, c.contact_email, c.subject, c.channel,
 			m.status, m.purpose, m.email, m.display_name
 		FROM support_conversations c LEFT JOIN mailboxes m ON m.id = c.mailbox_id
 		WHERE c.id = $1 AND c.workspace_id = $2 FOR UPDATE OF c`, r.ConversationID, r.WorkspaceID,
-	).Scan(&mailboxID, &inboundID, &replyFrom, &brandID, &contact, &subject, &mbStatus, &mbPurpose, &mbEmail, &mbName)
+	).Scan(&mailboxID, &inboundID, &replyFrom, &brandID, &contact, &subject, &channel, &mbStatus, &mbPurpose, &mbEmail, &mbName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", err
+	}
+	if channel == ChannelChat {
+		return queueChatReply(ctx, tx, r)
 	}
 	forwarded := mailboxID == nil && inboundID != nil
 	switch {
@@ -379,6 +387,32 @@ func QueueReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
 	_, err = jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: JobSend, WorkspaceID: &r.WorkspaceID,
 		Payload: map[string]string{"message_id": id}, IdempotencyKey: "support-send:" + id, MaxAttempts: 5})
 	return id, err
+}
+
+// queueChatReply stores a reply to a chat as sent: the widget shows it the
+// next time it asks.
+func queueChatReply(ctx context.Context, tx pgx.Tx, r Reply) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx, `
+		INSERT INTO support_messages (workspace_id, conversation_id, kind, record_id, author_id, from_name, body, status, sent_at)
+		SELECT $1, $2, 'out', c.record_id, $3, COALESCE((SELECT NULLIF(u.name, '') FROM users u WHERE u.id = $3), ''), $4, 'sent', now()
+		FROM support_conversations c WHERE c.id = $2 RETURNING id::text`,
+		r.WorkspaceID, r.ConversationID, nilIfEmpty(r.AuthorID), r.Body).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	next := r.Status
+	if next == "" {
+		next = StatusPending
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE support_conversations SET last_message_at = now(), last_from = 'team', unread = false, status = $2,
+			first_reply_at = COALESCE(first_reply_at, now()),
+			closed_at = CASE WHEN $2 = 'closed' THEN now() ELSE closed_at END, updated_at = now()
+		WHERE id = $1`, r.ConversationID, next); err != nil {
+		return "", err
+	}
+	return id, Clock(ctx, tx, r.ConversationID)
 }
 
 // mailAddress is "Name <address>", quoting the name when it needs it.

@@ -3,6 +3,7 @@ import type { components, Connector } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Status, toast } from "../ui";
 import { cn } from "@/lib/utils";
+import { Button as UIButton } from "@/components/ui/button";
 import { Icon } from "../icons";
 import { plural } from "../format";
 import { ConnectorLogo } from "@/components/connector-logo";
@@ -113,6 +114,12 @@ export function takeDNSFocus(): string | null {
   }
 }
 
+// Why the one-off approval isn't offered, where the person can act on it.
+const approvalWhyNot: Partial<Record<string, string>> = {
+  no_provider: "This domain's DNS host doesn't offer one-click approval, so connect it below or use one of the other ways.",
+  conflict: "One-click approval isn't offered here: a record already there (a DKIM key, DMARC policy or MX record) would end up doubled. Add these another way, where you can see what's there first.",
+};
+
 export function DNSOneClick({ ws, page, item, approval, connections, records, run, canManage, intro, after, onAdd, reload, used }: {
   ws: string;
   // Where the records go, for approving them once at the DNS provider.
@@ -182,8 +189,16 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
       </Panel>
     );
   }
+  const signIn = (def: Connector) => {
+    remember(item);
+    used("sign_in");
+    void startConnectorOAuth(ws, def, page);
+  };
+  const integration = connections[0];
+  const connectDialog = connecting && def && <ConnectDialog ws={ws} def={def} onSignIn={() => signIn(def)} onClose={() => setConnecting(false)} onDone={() => { setConnecting(false); used("connected"); reload(); }} />;
   if (appr?.available && appr.url && pending) {
-    const url = appr.url;
+    // A real link, so it can be seen, copied or opened like any other; the
+    // page notes where it went before the browser leaves.
     const go = () => {
       remember(item);
       try {
@@ -192,7 +207,6 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
         // Only for the record.
       }
       used("approval");
-      location.assign(url);
     };
     return (
       <Panel>
@@ -200,21 +214,26 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
         {list(records)}
         <p className="text-[12px] text-muted-foreground">{appr.provider} shows you the same records and asks you to approve them once. Outflare gets no access to your account. {after}</p>
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={go}><Icon name="check" className="size-3.5" /> Approve in {appr.provider}</Button>
+          <UIButton asChild size="sm" className="text-[13px]">
+            <a href={appr.url} onClick={go}><Icon name="check" className="size-3.5" /> Approve in {appr.provider}</a>
+          </UIButton>
         </div>
+        {!integration && def && (
+          <p className="text-[12px] text-muted-foreground">
+            Or{" "}
+            <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => setConnecting(true)}>connect the Cloudflare API for auto-provisioning</button>
+            : Outflare then adds records like these from this page, without a trip to Cloudflare. It only adds records and never changes or deletes one.
+          </p>
+        )}
+        {connectDialog}
       </Panel>
     );
   }
-  const signIn = (def: Connector) => {
-    remember(item);
-    used("sign_in");
-    void startConnectorOAuth(ws, def, page);
-  };
-  const integration = connections[0];
   if (!integration) {
     const oauth = !!def && !!authOption(def, "oauth2")?.available;
     return (
       <Panel>
+        {appr?.reason && approvalWhyNot[appr.reason] && <p className="text-[12px] text-muted-foreground">{approvalWhyNot[appr.reason]}</p>}
         <p className="text-[13px] text-muted-foreground">{intro} You see every record before anything is added. Outflare only adds records, each marked "Added by Outflare", and never changes or deletes one.</p>
         <div className="flex flex-wrap items-center gap-2">
           {oauth ? (
@@ -223,10 +242,10 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
               <Button variant="ghost" onClick={() => setConnecting(true)}>Use an API token instead</Button>
             </>
           ) : (
-            <Button disabled={!def} onClick={() => setConnecting(true)}><ConnectorLogo id="cloudflare" size="sm" /> Connect Cloudflare</Button>
+            <Button disabled={!def} onClick={() => setConnecting(true)}><ConnectorLogo id="cloudflare" size="sm" /> Connect Cloudflare API</Button>
           )}
         </div>
-        {connecting && def && <ConnectDialog ws={ws} def={def} onSignIn={() => signIn(def)} onClose={() => setConnecting(false)} onDone={() => { setConnecting(false); used("connected"); reload(); }} />}
+        {connectDialog}
       </Panel>
     );
   }

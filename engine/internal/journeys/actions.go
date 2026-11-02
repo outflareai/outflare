@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -190,6 +191,18 @@ var Actions = []actionDef{
 			svc := reviewrequests.Service{Pool: x.s.Pool, Mail: x.s.Emails}
 			return svc.FromWorkflow(ctx, x.tx, x.ws, *x.j.brandID, x.st.ReviewCampaignID, x.r.recordID, x.r.id+":"+x.st.ID)
 		}},
+	{StepKind: StepKind{Kind: "create_task", Group: "data", Label: "Create a CRM follow-up", Description: "Create a task on this person's CRM record and assign it to their owner. The task is committed with the journey step, so a retry cannot create it twice.", Settings: schema(map[string]any{"title": str("What needs to happen, up to 300 characters."), "text": str("Details for the team, up to 20000 characters."), "due_after_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 31536000, "description": "Due this many seconds after creation; 0 means no due date."}}, "title")}, check: func(st Step) string {
+		if strings.TrimSpace(st.Title) == "" || len(st.Title) > 300 {
+			return "title must be 1 to 300 characters"
+		}
+		if len(st.Text) > 20000 {
+			return "text must be at most 20000 characters"
+		}
+		if st.DueAfterSeconds < 0 || st.DueAfterSeconds > 31536000 {
+			return "due_after_seconds must be 0 to 31536000"
+		}
+		return ""
+	}, run: createCRMTask},
 	{StepKind: StepKind{Kind: "set_field", Group: "data", Label: "Update a field",
 		Description: "Set, clear or add to a field on the person. It never overwrites a value a person set by hand unless overwrite_manual is on.",
 		Settings: schema(map[string]any{"field": str("The field's key, such as lifecycle_stage."), "change": enum("set (the default), clear or increment", "set", "clear", "increment"),
@@ -698,7 +711,9 @@ func suppress(ctx context.Context, x *act) (string, string, error) {
 	if len(entries) == 0 {
 		return "skipped", "no email address or work domain", nil
 	}
-	n, err := leads.Suppress(ctx, x.tx, x.ws, leads.Added{Reason: "do_not_contact", Source: "journey", Evidence: map[string]any{"journey_id": x.j.id, "run_id": x.r.id}}, entries)
+	// The journey's brand stops contacting them (decision 5).
+	n, err := leads.Suppress(ctx, x.tx, x.ws, leads.Added{Reason: "do_not_contact", Source: "journey", Evidence: map[string]any{"journey_id": x.j.id, "run_id": x.r.id},
+		BrandID: brandOf(x.j.brandID)}, entries)
 	if err != nil {
 		return "", "", err
 	}
@@ -768,4 +783,48 @@ func describeAlert(ctx context.Context, q jobs.Querier, a alerts.Row) (alerts.Vi
 		}
 	}
 	return v, nil
+}
+
+// brandOf is a brand id, or "" for none.
+func brandOf(id *string) string {
+	if id == nil {
+		return ""
+	}
+	return *id
+}
+
+func createCRMTask(ctx context.Context, x *act) (string, string, error) {
+	if x.j.brandID == nil {
+		return "failed", "choose a brand for this journey", nil
+	}
+	var brand *string
+	var owner *string
+	if err := x.tx.QueryRow(ctx, `SELECT brand_id::text,attributes->>'owner' FROM records WHERE workspace_id=$1 AND id=$2 AND deleted_at IS NULL AND merged_into IS NULL`, x.ws, x.r.recordID).Scan(&brand, &owner); err != nil {
+		return "", "", err
+	}
+	if brand == nil || *brand != *x.j.brandID {
+		return "skipped", "record belongs to another brand", nil
+	}
+	if owner != nil {
+		var member bool
+		if err := x.tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM memberships WHERE workspace_id=$1 AND user_id=$2 AND (brand_ids IS NULL OR cardinality(brand_ids)=0 OR $3::uuid=ANY(brand_ids)))`, x.ws, *owner, *brand).Scan(&member); err != nil {
+			return "", "", err
+		}
+		if !member {
+			owner = nil
+		}
+	}
+	var due *time.Time
+	if x.st.DueAfterSeconds > 0 {
+		at := time.Now().Add(time.Duration(x.st.DueAfterSeconds) * time.Second)
+		due = &at
+	}
+	var id string
+	if err := x.tx.QueryRow(ctx, `INSERT INTO crm_activities(workspace_id,brand_id,record_id,kind,title,body,assigned_to,due_at) VALUES($1,$2,$3,'task',$4,$5,$6,$7) RETURNING id::text`, x.ws, *brand, x.r.recordID, strings.TrimSpace(x.st.Title), x.st.Text, owner, due).Scan(&id); err != nil {
+		return "", "", err
+	}
+	if err := x.record("activities.created", "crm_activities", id, map[string]any{"kind": "task", "brand_id": brand}); err != nil {
+		return "", "", err
+	}
+	return "done", "", nil
 }

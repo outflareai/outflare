@@ -9,6 +9,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 )
@@ -41,6 +42,9 @@ func Settled(ctx context.Context, q jobs.Querier, ws, inboundID, category, actor
 	if err := outcomes.QueueReplyPush(ctx, q, ws, inboundID, category, expandLabels); err != nil {
 		return err
 	}
+	if err := labeledEvent(ctx, q, ws, inboundID, category, requestID); err != nil {
+		return err
+	}
 	if GroupOf(category) != "hot" {
 		return nil
 	}
@@ -61,6 +65,43 @@ func Settled(ctx context.Context, q jobs.Querier, ws, inboundID, category, actor
 	_, err = alerts.Raise(ctx, q, alerts.Alert{WorkspaceID: ws, BrandID: brand, Kind: AlertHotReply, DedupeKey: inboundID,
 		TargetType: "inbound_message", TargetID: inboundID, RecordID: record, OwnerID: owner, SkipActorID: actorID, RequestID: requestID,
 		Data: map[string]any{"inbound_id": inboundID, "category": category, "sequence_id": sequence}})
+	return err
+}
+
+// EventReplyLabeled is the customer event a settled reply label records
+// on the sender's timeline, so journeys can start on it and rules and the
+// automation map see replies like any other event.
+const EventReplyLabeled = "reply.labeled"
+
+// labeledEvent records reply.labeled on the person who sent the reply:
+// the reply's record, else its lead's, else the person with the sender's
+// address. A reply from nobody Outflare knows records nothing. Each label
+// a reply settles on is recorded once; relabelling it records the new one.
+// The properties are ids and enums only, never the reply's text.
+func labeledEvent(ctx context.Context, q jobs.Querier, ws, inboundID, category, requestID string) error {
+	var record, sequence *string
+	var mailbox, source string
+	err := q.QueryRow(ctx, `
+		SELECT COALESCE(i.record_id, l.record_id, outflare_person_with_email(i.workspace_id, i.from_email))::text,
+			i.sequence_id::text, i.mailbox_id::text, i.source
+		FROM inbound_messages i LEFT JOIN leads l ON l.id = i.lead_id AND l.workspace_id = i.workspace_id
+		WHERE i.id = $1 AND i.workspace_id = $2 AND i.kind IN ('reply', 'auto_reply')`, inboundID, ws).
+		Scan(&record, &sequence, &mailbox, &source)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && record == nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	props := map[string]any{"inbound_id": inboundID, "category": category, "mailbox_id": mailbox, "source": source}
+	if g := GroupOf(category); g != "" {
+		props["group"] = g
+	}
+	if sequence != nil {
+		props["sequence_id"] = *sequence
+	}
+	_, err = customers.Record(ctx, q, ws, customers.Event{RecordID: *record, Name: EventReplyLabeled, Properties: props,
+		Source: "replies", MessageID: "reply:" + inboundID + ":" + category, RequestID: requestID})
 	return err
 }
 

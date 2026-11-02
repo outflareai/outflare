@@ -72,11 +72,11 @@ func TestRecordTimelineEveryModule(t *testing.T) {
 	}
 	// Pages carry on where the last one ended.
 	page := owner.must(200, "GET", base+"/records/"+ana+"/timeline?limit=2&kinds="+kinds, nil)
-	next, _ := page["next_before"].(string)
+	next, _ := page["next_cursor"].(string)
 	if len(page["data"].([]any)) != 2 || next == "" {
 		t.Fatalf("page = %v", page)
 	}
-	rest := owner.must(200, "GET", base+"/records/"+ana+"/timeline?limit=10&kinds="+kinds+"&before="+next, nil)["data"].([]any)
+	rest := owner.must(200, "GET", base+"/records/"+ana+"/timeline?limit=10&kinds="+kinds+"&cursor="+next, nil)["data"].([]any)
 	if len(rest) != 3 {
 		t.Fatalf("rest = %v", rest)
 	}

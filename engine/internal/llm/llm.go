@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
@@ -144,8 +145,11 @@ var outflareSecret = regexp.MustCompile(`^of[a-z]_`)
 
 // Message is one turn of a conversation.
 type Message struct {
-	Role        string // "user" or "assistant"
-	Text        string
+	Role string // "user" or "assistant"
+	Text string
+	// Images the person sent (user messages): screenshots, brand assets,
+	// uploaded files. Check SupportsImages before sending them.
+	Images      []Image
 	ToolCalls   []ToolCall   // assistant
 	ToolResults []ToolResult // user
 	// The provider's own form of an assistant message, sent back as it
@@ -165,6 +169,42 @@ type ToolResult struct {
 	CallID  string
 	Content string
 	IsError bool
+	// Images the tool returned, such as a page's screenshot.
+	Images []Image
+}
+
+// Image is a picture sent to a model: PNG, JPEG, GIF or WebP bytes.
+type Image struct {
+	MediaType string // image/png, image/jpeg, image/gif or image/webp
+	Data      []byte
+}
+
+// ImageTypes are the media types every provider that reads images takes.
+var ImageTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+// MaxImageBytes is the largest image sent, so one screenshot can't use up
+// a request's size limit.
+const MaxImageBytes = 5 << 20
+
+// CheckImage reports why an image can't be sent, or nil.
+func CheckImage(img Image) error {
+	if !slices.Contains(ImageTypes, img.MediaType) {
+		return fmt.Errorf("an image must be PNG, JPEG, GIF or WebP, not %q", img.MediaType)
+	}
+	if len(img.Data) == 0 || len(img.Data) > MaxImageBytes {
+		return fmt.Errorf("an image must be 1 byte to %d MB", MaxImageBytes>>20)
+	}
+	return nil
+}
+
+// SupportsImages reports whether a provider's chat API reads images. A
+// model on it may still not: the provider answers with an error then.
+func SupportsImages(provider string) bool {
+	switch provider {
+	case DeepSeek.ID:
+		return false
+	}
+	return true
 }
 
 // Tool is a function the model may call. Schema is a JSON Schema object.
@@ -190,6 +230,11 @@ type Request struct {
 	// provider offers it (SupportsWebSearch); the pages it used come back
 	// as Response.Citations.
 	WebSearch bool
+	// OnText, when set, streams the answer: it is called with each piece
+	// of text as the model writes it, so a chat can show the reply as it
+	// comes. Chat still returns the whole Response at the end, exactly as
+	// without it. It runs on the calling goroutine and must not block.
+	OnText func(delta string)
 }
 
 // Citation is a web page a model's answer is based on.

@@ -85,13 +85,13 @@ type Config struct {
 	// connection budget.
 	QueryConnections int
 
-	// OAuth apps for the "Connect with Google/Microsoft" consent screen.
-	// Optional: admin-level connections (service account, Entra app) and
+	// Google's OAuth app for "Continue with Google". The Gmail connector
+	// and the other Google connectors use it too, and the Microsoft ones
+	// read MICROSOFT_OAUTH_CLIENT_ID themselves (connectors.OAuthAppsFromEnv).
+	// Optional: admin connections (service account, Entra app) and
 	// password mailboxes work without them.
-	GoogleClientID        string // GOOGLE_OAUTH_CLIENT_ID
-	GoogleClientSecret    string // GOOGLE_OAUTH_CLIENT_SECRET
-	MicrosoftClientID     string // MICROSOFT_OAUTH_CLIENT_ID
-	MicrosoftClientSecret string // MICROSOFT_OAUTH_CLIENT_SECRET
+	GoogleClientID     string // GOOGLE_OAUTH_CLIENT_ID
+	GoogleClientSecret string // GOOGLE_OAUTH_CLIENT_SECRET
 
 	// Product analytics for the web app, off unless a key is set. This is
 	// the operator's own PostHog project, separate from the anonymous
@@ -180,10 +180,8 @@ func Load() (Config, error) {
 		CrawlAllowPrivate:      os.Getenv("OUTFLARE_CRAWL_ALLOW_PRIVATE") == "true",
 		ConnectorsAllowPrivate: os.Getenv("OUTFLARE_CONNECTORS_ALLOW_PRIVATE") == "true",
 
-		GoogleClientID:        os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
-		GoogleClientSecret:    os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
-		MicrosoftClientID:     os.Getenv("MICROSOFT_OAUTH_CLIENT_ID"),
-		MicrosoftClientSecret: os.Getenv("MICROSOFT_OAUTH_CLIENT_SECRET"),
+		GoogleClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
 
 		PostHogKey:  strings.TrimSpace(os.Getenv("OUTFLARE_POSTHOG_KEY")),
 		PostHogHost: strings.TrimRight(getenv("OUTFLARE_POSTHOG_HOST", "https://us.i.posthog.com"), "/"),

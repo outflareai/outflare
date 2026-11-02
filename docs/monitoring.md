@@ -83,9 +83,12 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_query_export_rows_total` | | Rows written to CSV downloads. |
 | `outflare_smart_lists_lists`, `outflare_smart_lists_oldest_refresh_seconds`, `outflare_smart_lists_failing` | | [Smart lists](lists.md#smart-lists): how many there are, how long since the least recently refreshed one was brought up to date (normal is under 20 minutes), and how many failed their last refresh. |
 | `outflare_rules_evaluations_total` | `trigger`, `outcome` | [Rules](rules.md) evaluated for a record: `fired`, or why not (`no_match`, `duplicate`, `cooldown`, `late`, `before_live`, `too_deep`, `manual`), and absence clocks `started` and `stopped`. |
+| `outflare_lifecycle_evaluations_total` | `level`, `outcome` | [Lifecycle stages](product-lifecycle.md) checked for a record at a level (`company`, `person`, `any`): `moved`, or why not (`no_move`, `duplicate`, `late`, `stale`, `before_live`, `not_approved`, `off`). |
+| `outflare_lifecycle_sweep_seconds` | | How long one lifecycle inactivity sweep took. |
 | `outflare_emails_guarded_total` | `trigger`, `outcome` | Marketing emails from journeys and broadcasts that a workspace's guardrails stopped (`frequency_cap`) or held until morning (`quiet_hours`). |
 | `outflare_journeys_calls_total` | `kind`, `outcome` | Calls made by journeys' webhook, Slack, `push_to_sequencer`, `push_to_crm`, `sync_audience` and `ai` steps: `done`, `skipped` (nothing to do), `retried` (a try that will be tried again) or `failed`. |
 | `outflare_sequencers_leads_pushed_total` | `connector`, `outcome` | People journeys added to Smartlead, Instantly and EmailBison campaigns: `added`, `already_in`, `refused` (the sequencer left them out) or `error`. |
+| `outflare_mailboxes_sign_ins_moved_total` | `kind` (`admin`, `sign_in`), `outcome` (`moved`, `linked`, `skipped`, `failed`) | Mailbox sign-ins from before they were Gmail and Outlook connections, moved into connections at start-up. |
 | `outflare_crm_contacts_pushed_total` | `connector`, `outcome` | People journeys created or updated in a CRM (HubSpot): `created`, `updated` or `error`. |
 | `outflare_ads_audience_syncs_total` | `connector`, `outcome` | People journeys added to or removed from customer list audiences on ad accounts (Meta, Google Ads): `added`, `removed`, `skipped` (no ad consent, or no email or phone) or `error`. |
 | `outflare_journeys_call_duration_seconds` | `kind` | Time one try of a journey call took. |
@@ -94,6 +97,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_journeys_oldest_due_seconds` | | How long past its time the most overdue run of an active journey is. |
 | `outflare_automations_excluded_total` | `where` | People an exclusion left out: `journey` (refused entry), `broadcast` (skipped), `sequence` (not enrolled). |
 | `outflare_rules_active`, `outflare_rules_timers_due`, `outflare_rules_oldest_due_seconds` | `trigger` (active) | Active rules by trigger kind, and absence timers that ran out and wait to be handled, with how long the oldest has waited (normal is near 0 and under two minutes). |
+| `outflare_lifecycle_due`, `outflare_lifecycle_oldest_due_seconds` | | Lifecycle inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, with how long the oldest has waited (normal is near 0 and under two minutes). |
 | `outflare_ad_conversions_total` | `connector`, `outcome` (`sent`, `skipped`, `failed`) | Conversions sent back to ad platforms ([paid-media.md](paid-media.md#sending-conversions-back)). |
 | `outflare_ad_conversions_oldest_queued_seconds` | | How long the oldest conversion waiting to be sent has waited. |
 | `outflare_meeting_events_total` | `status` (`booked`, `held`, `no_show`, `canceled`) | Meeting events recorded on people's timelines ([customers.md](customers.md#meetings-as-events)). |
@@ -134,7 +138,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_reviews_new_total` | `platform` | Reviews kept for the first time. |
 | `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`) | Active review pages, and how many failed their last read. |
 | `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `page_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
-| `outflare_ads_item_days_synced_total` | `level` (`ad_group`, `ad`) | Days of numbers stored for ad sets, ad groups and ads (Meta and Google). |
+| `outflare_ads_item_days_synced_total` | `level` (`ad_group`, `ad`, `keyword`, `search_term`) | Days of numbers stored for ad sets, ad groups and ads (Meta and Google), and Google keywords and search terms. |
 | `outflare_sync_stuck` | `module`, `code` | Scheduled reads whose last 3 or more runs failed, retries included, by the last error code: connections' syncs, SEO site competitor and backlink reads (`seo_site_competitors`, `seo_site_backlinks`), news searches (`news`) and competitor looks (`competitor_glances`, always `crawl_failed`). |
 | `outflare_social_account_reads_total` | `channel`, `outcome` (`success`, `blocked`, `page_not_found`, `invalid_address`, `no_follower_count`, `save_failed`, `connector_error`) | Reads of social accounts' followers ([social](social.md)). |
 | `outflare_social_stuck_accounts` | `channel`, `code` | Active social accounts whose last 3 or more reads failed, retries included, by the last error code. |
@@ -159,6 +163,9 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_news_search_overdue_seconds` | | How long past its time the most overdue active news search is. |
 | `outflare_news_article_reads_total` | `status` (`up`, `gone`, `blocked`, `opted_out`, `unreachable`, `failed`), `journalist` | Reads of new news articles for their byline; `journalist` is `true` when one found a new journalist. |
 | `outflare_news_story_ai_runs_total` | `kind` (`ideas`, `draft`, `pitch`, `reply`), `outcome` (`success`, `connector_needed`, `ai_model_needed`, `ai_budget_reached`, `connector_auth`, `ai_failed`, `check_failed`) | Runs of the workspace's own AI on [stories](stories.md): suggesting ideas, drafting releases, writing pitch openers and reading journalists' replies. |
+| `outflare_stories_quote_approval_emails_total` | `outcome` (`sent`, `blocked`, `failed`, `bounced`) | Emails asking a PR expert to [approve a quote](stories.md#asking-the-expert), as their outreach sequence finished them. |
+| `outflare_stories_quote_approval_pages_total` | `action` (`view`, `decide`), `outcome` (`ok`, `gone`, `invalid`, `limited`, `error`) | Requests to the public quote approval page. `gone` is a used, expired or replaced link. |
+| `outflare_stories_quote_approval_decisions_total` | `decision` (`approved`, `changes_suggested`, `declined`) | Experts' decisions through their approval links. |
 | `outflare_social_publishes_total` | `channel`, `outcome` (`published`, `failed`, `retried`) | Tries of the job that posts the brand's own [social posts](social.md#publishing). |
 | `outflare_reddit_sends_total` | `kind`, `outcome` (`submitted`, `failed`, `unknown`) | [Reddit campaign](reddit-campaigns.md) actions sent to Engain. `unknown`: Engain didn't answer, so the action may or may not exist. |
 | `outflare_reddit_checks_total` | `outcome` (`ok`, `engain_error`, `reddit_error`), `reddit_read` | Checks of sent Reddit campaign actions on Engain and on Reddit as a logged-out visitor sees them. |
@@ -201,6 +208,12 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
 - `OutflareCoverageChecksFailing`: a Coverage check exhausted its retries.
 - `OutflareCoveragePagesUnreachable`: most recent Coverage page reads could not reach their site.
+- `OutflareMCPClientFailing`: over half of Outflare's calls to MCP servers failed in 30 minutes.
+- `OutflareActionsWaiting`: an agent's change has waited over two days for a person.
+- `OutflareActionsStuckRunning`: an agent change started running and never recorded how it ended.
+- `OutflareActionsFailing`: over 50 agent changes an hour ran and got an error answer.
+- `OutflareAgentRunsOverdue`: a running agent run's next turn is over 15 minutes overdue.
+- `OutflareAgentRunTurnsFailing`: more agent run turns fail than finish.
 
 `deploy/monitoring/alerts.yml` has rules for:
 
@@ -232,13 +245,16 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - meaning-based search on in workspaces while the database has no pgvector
 - most embedding jobs failing
 - most questions asked of the knowledge base failing, or answers from it taking over 20 seconds at the 95th percentile (info)
+- most support replies failing to become suggested answers for the knowledge review queue
 - a smart list not refreshed for over an hour
 - smart lists whose last refresh failed (info)
 - an absence rule's timer due for over 15 minutes, over 10,000 rule timers waiting, or rule jobs failing and retrying
+- a lifecycle inactivity check due for over 15 minutes (`OutflareLifecycleSweepBehind`), over 10,000 waiting (`OutflareLifecycleDuePiling`), or lifecycle jobs failing and retrying (`OutflareLifecycleJobsFailing`)
 - over 5,000 marketing emails stopped by frequency caps in an hour (info)
 - a journey run due for over 15 minutes
 - over half of journey webhook, Slack, sequencer or CRM calls failing (info), or taking over 10 seconds at the 95th percentile (info)
 - over half of the people journeys add to one sequencer's campaigns failing in 30 minutes
+- an older mailbox sign-in that could not be moved into a Gmail or Outlook connection at start-up (`OutflareMailSignInsNotMoved`)
 - over half of the people journeys create or update in one CRM failing in 30 minutes
 - over half of the people journeys add to or remove from one ad platform's audiences failing in 30 minutes
 - over a quarter of conversions sent to one ad platform failing
@@ -268,6 +284,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over half of news article reads failing to reach the page
 - over half of story ideas and release drafts failing at the AI call
 - over half of the AI's story work (ideas, release drafts, pitch openers, reading replies) failing at the AI call
+- over half of quote approval emails failing or bouncing in their sequences
+- the public quote approval page failing
 - an approved social post over 10 minutes past its time
 - over 5 social posts failing on one channel in an hour
 - over half of link reads failing for reasons other than a budget
@@ -290,6 +308,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - reports from Outflare for desktop failing on Outflare's side, the apps unable to read one AI tool on most computers (it likely changed its endpoint), or most linked computers silent for 12 hours (info)
 - over a quarter of support replies failing to send, a support reply waiting over 5 minutes for a worker, or replies taking over 20 seconds to send at the 95th percentile (info)
 - the support SLA check failing or not running for 15 minutes, or taking over 5 seconds at the 95th percentile (info)
+- over 5% of website chat requests failing, or many chat requests rate limited (info)
+- over 20% of support assistant runs failing (`OutflareSupportAssistantFailing`), or the assistant taking over 45 seconds to decide at the 95th percentile (`OutflareSupportAssistantSlow`, info)
+- searches of the website and Slack for missing answers failing most of the time (`OutflareKnowledgeAnswerSearchFailing`)
 - over 5% of public help centre pages failing
 - help centre views not being counted (info)
 - help centre pages taking over a second to build at the 95th percentile (info)
@@ -324,3 +345,5 @@ queue kind. The partner panels show outcome rate and oldest due age; future
 human-review holds do not count as overdue. `OutflarePartnerTaskChecksFailing`
 warns about repeated retries or dead checks, and `OutflareJobBacklog` covers
 checks waiting for workers.
+
+Personal CRM Google capture uses the existing per-kind queue throughput, duration, lag and retry metrics (`crm_mail.google_sync`). Its dashboard panel shows outcomes; `OutflarePersonalGoogleCaptureFailing` and `OutflarePersonalGoogleCaptureDelayed` flag repeated failures or a delayed queue. No user, account or email data is placed in metric labels.

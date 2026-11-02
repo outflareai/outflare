@@ -115,10 +115,12 @@ func (s *Server) getCrawlIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var after int64
-	if v := q.Get("after"); v != "" {
+	if v, ok := pageCursor(w, r, pageAfter); !ok {
+		return
+	} else if v != "" {
 		after, err = strconv.ParseInt(v, 10, 64)
 		if err != nil || after < 0 {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "after is an id from next_after")
+			invalidCursor(w, r)
 			return
 		}
 	}
@@ -146,7 +148,7 @@ func (s *Server) getCrawlIssue(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []crawlIssuePage{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rule": def, "data": list, "next_after": next})
+	writeJSON(w, http.StatusOK, map[string]any{"rule": def, "data": list, "next_cursor": nextCursor(pageAfter, next)})
 }
 
 // seoRules lists every audit rule.

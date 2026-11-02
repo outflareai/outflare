@@ -3232,7 +3232,7 @@
     {
       "type": "timeseries",
       "title": "Domain Connect lookups by outcome",
-      "description": "Lookups per minute when a DNS card opens: available means the person can approve the records at their DNS provider. no_provider and not_onboarded are normal (the card falls back to a Cloudflare token); lookup_failed should stay near zero.",
+      "description": "Lookups per minute when a DNS card opens: available means the person can approve the records at their DNS provider. no_provider, not_onboarded and conflict (a DKIM key, DMARC policy or MX already there, which the provider would keep beside the new one) are normal: the card falls back to a Cloudflare token. lookup_failed should stay near zero.",
       "id": 65,
       "datasource": {
         "type": "prometheus",
@@ -5670,8 +5670,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Ad sets and ads synced",
-      "description": "Days of numbers the ad sync stores for ad groups (Meta ad sets, Google ad groups) and ads, from the platforms that read below campaigns. Normal: a burst every six hours per connected account, larger the first time an account syncs (90 days). Flat at zero while ads sync runs succeed means the platforms list no ad sets or ads, or their reports came back empty.",
+      "title": "Ad sets, ads and keywords synced",
+      "description": "Days of numbers the ad sync stores below campaigns: ad groups (Meta ad sets, Google ad groups) and ads, and Google keywords and search terms. Normal: a burst every six hours per connected account, larger the first time an account syncs (90 days). Flat at zero while ads sync runs succeed means the platforms list nothing below campaigns, or their reports came back empty.",
       "id": 477,
       "datasource": {
         "type": "prometheus",
@@ -6599,7 +6599,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 461
       },
@@ -6608,6 +6608,74 @@
           "refId": "A",
           "expr": "sum by (kind, outcome) (rate(outflare_news_story_ai_runs_total{job=\"$job\"}[1h]))",
           "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Quote approval emails and experts' decisions",
+      "description": "Emails asking PR experts to approve a quote, as their outreach sequences finished them (sent, blocked by the send policy, failed, bounced), and the experts' decisions through their links. Normal: mostly sent; blocked is a suppressed or unverified address; failed or bounced climbing means the sequences' mailboxes can't deliver.",
+      "id": 494,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 461
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_stories_quote_approval_emails_total{job=\"$job\"}[1h]))",
+          "legendFormat": "email {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (decision) (rate(outflare_stories_quote_approval_decisions_total{job=\"$job\"}[1h]))",
+          "legendFormat": "expert {{decision}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (action) (rate(outflare_stories_quote_approval_pages_total{job=\"$job\", outcome=\"error\"}[1h]))",
+          "legendFormat": "page {{action}} error",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -10147,6 +10215,1188 @@
         "tooltip": {
           "mode": "multi",
           "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Mailbox sign-ins moved into connections",
+      "id": 482,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 797
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Older mailbox sign-ins moved into connections",
+      "description": "Mailbox sign-ins from before they were Gmail and Outlook connections, moved at start-up, per hour, by kind (admin: a service account or Entra app; sign_in: one mailbox's own sign-in) and outcome. Normal: a burst of moved and linked on the first start of this version, then nothing. failed is a row that could not be read or saved; it is tried again at every start, and mailbox.sign_in_move_failed in the logs names its workspace.",
+      "id": 483,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 798
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (increase(outflare_mailboxes_sign_ins_moved_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "title": "Knowledge review queue (suggested answers and conflicts)",
+      "id": 490,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 806
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Knowledge review queue, by outcome",
+      "description": "What happened to suggestions for the knowledge review queue per hour: created (an answer from a teammate's support reply, an agent, the website or Slack, or a conflict noticed while answering), approved or rejected by a person, and for support replies not_reusable (only about one customer), no_ai (the workspace has no AI model) or error. Normal is mostly created, approved and not_reusable; error should stay near zero.",
+      "id": 491,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 807
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_knowledge_suggestions_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Knowledge suggestions, by source",
+      "description": "Suggestions created per hour by where they came from: support_reply, website, slack, agent, person, answer (a conflict). Moves with how much support and AI answering workspaces do.",
+      "id": 492,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 807
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (source) (increase(outflare_knowledge_suggestions_total{job=\"$job\",outcome=\"created\"}[1h]))",
+          "legendFormat": "{{source}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "title": "Website chat (chat widgets on businesses' sites)",
+      "id": 484,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 815
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Website chat requests, by route",
+      "description": "Requests from chat widgets on businesses' websites per minute: loader and frame (opening the chat), session, poll (checking for replies every few seconds while open), send and articles. Normal is mostly poll, and grows with how many visitors have a chat open.",
+      "id": 485,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 816
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (rate(outflare_support_chat_requests_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{route}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Website chat requests refused or failing, by outcome",
+      "description": "Chat requests that didn't succeed per minute: limited (rate limits per network and visitor), not_found (a removed or switched-off widget still on a site), bad_token, invalid and error. Normal is a little not_found and limited; error should stay at zero.",
+      "id": 486,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 816
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_support_chat_requests_total{job=\"$job\",outcome!=\"ok\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 493,
+      "type": "timeseries",
+      "title": "Personal Gmail capture jobs",
+      "description": "Read-only CRM Google capture jobs, grouped by outcome. Eligible connected users poll roughly every five minutes; zero jobs is normal with no connected users. Retries or dead jobs need investigation. No mailbox or user labels are emitted.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 824
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=\"crm_mail.google_sync\"}[15m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Lifecycle stages per product",
+      "id": 495,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 832
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Lifecycle checks by outcome",
+      "description": "Lifecycle checks per minute, by level (company, person; any before a level is known) and outcome. moved is someone changing stage; no_move is usual. before_live (events from before a brand turned stages on), not_approved (held event names) and late are expected in small numbers; a steady rise in duplicate means events are being replayed.",
+      "id": 496,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 833
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (level, outcome) (rate(outflare_lifecycle_evaluations_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{level}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lifecycle jobs",
+      "description": "lifecycle.event jobs per minute by outcome, and how long they waited in the queue (p95). Normal: no dead jobs and a wait of seconds.",
+      "id": 497,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 833
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{job=\"$job\",kind=\"lifecycle.event\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_jobs_wait_seconds_bucket{job=\"$job\",kind=\"lifecycle.event\"}[5m])))",
+          "legendFormat": "wait p95 (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Inactivity checks due",
+      "description": "Inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, and how long the oldest has waited. Normal is near 0 and under two minutes: the sweep runs every minute, 200 at a time per worker.",
+      "id": 498,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 841
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_lifecycle_due{job=\"$job\"})",
+          "legendFormat": "due",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_lifecycle_oldest_due_seconds{job=\"$job\"})",
+          "legendFormat": "oldest (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Inactivity sweep duration",
+      "description": "How long one inactivity sweep takes (p95). Normal is well under a second; a sweep that takes many seconds is handling a backlog.",
+      "id": 499,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 841
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_lifecycle_sweep_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Agent actions (the action layer)",
+      "id": 500,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 849
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent changes, by what the gate did and why",
+      "description": "Changes per hour that agent tokens on the action layer made: run by a grant (running), held for a person (held: no grant matched, a grant holds it, a daily limit was reached, or it always needs a person), or refused by a grant. Mostly running and held is normal for agents people trust; a sudden jump in held usually means a grant was revoked or a daily limit is too low.",
+      "id": 501,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 850
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (decision, rule) (rate(outflare_actions_decided_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{decision}} {{rule}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "How agent changes ended",
+      "description": "Per hour: changes that ran (executed), ran and got an error answer (failed), or a person turned down (rejected). Some failed is normal (an agent sending a bad request); a steady rise means an agent keeps trying something the API refuses: look at its actions with status=failed.",
+      "id": 502,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 850
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_actions_finished_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Held agent changes waiting for a person",
+      "description": "How many agent changes wait for a person across every workspace, from the database scrape. It rises while agents work and falls as people decide. A line that only climbs means nobody is deciding: the approval inbox is GET .../actions?status=held.",
+      "id": 503,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 858
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_actions_held{job=\"$job\"})",
+          "legendFormat": "held"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Longest wait for a person, and changes stuck running",
+      "description": "How long the oldest held change has waited (left axis, seconds), and changes claimed to run over 15 minutes ago that never recorded how they ended (normally 0). A stuck change means an engine stopped mid-run: check action result in the engine log.",
+      "id": 504,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 858
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_actions_oldest_held_seconds{job=\"$job\"})",
+          "legendFormat": "oldest held"
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_actions_running_stuck{job=\"$job\"})",
+          "legendFormat": "stuck running"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "panels": [],
+      "title": "Support assistant",
+      "id": 505,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 866
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Support assistant runs, by action",
+      "description": "Customer messages the support assistant looked at per hour: answer and clarify are drafts for a person to send, handoff went to a person, skipped was stopped before the AI (automatic mail, a teammate on it), failed means the AI call broke. Normal follows support volume, with failed near zero.",
+      "id": 506,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 867
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action) (rate(outflare_support_assistant_runs_total{job=\"$job\"}[5m])) * 3600",
+          "legendFormat": "{{action}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Support assistant time to decide (p95)",
+      "description": "How long the assistant takes to decide on one message at the 95th percentile, model calls and checks included. Normal is a few seconds to about 20; a chat visitor waits on it.",
+      "id": 507,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 867
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_support_assistant_seconds_bucket{job=\"$job\"}[15m])))",
+          "legendFormat": "p95",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Missing-answer searches, by source and outcome",
+      "description": "Each time the assistant had no answer, its search of the website and then the picked Slack channels, per hour: found (suggested in Knowledge), none, nothing_to_read, off, no_ai or error. Normal is mostly none and some found; error should stay near zero.",
+      "id": 508,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 875
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (source, outcome) (rate(outflare_knowledge_answer_searches_total{job=\"$job\"}[15m])) * 3600",
+          "legendFormat": "{{source}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "MCP servers (tools Outflare calls)",
+      "id": 509,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 883
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Calls to MCP servers, by operation and outcome",
+      "description": "Calls per minute Outflare made to MCP servers: connecting, listing tools and calling them. Mostly success is normal; a share of error means a server is down, refused the credentials, or sits on a private address that isn't allowed.",
+      "id": 510,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 884
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (op, outcome) (rate(outflare_mcp_client_calls_total{job=\"$job\"}[$__rate_interval])) * 60",
+          "legendFormat": "{{op}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "MCP call time (p95), by operation",
+      "description": "How long the slowest 5% of calls to MCP servers took. Tool calls that drive a browser can take tens of seconds; a climb toward two minutes means calls are timing out.",
+      "id": 511,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 884
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, op) (rate(outflare_mcp_client_call_duration_seconds_bucket{job=\"$job\"}[$__rate_interval])))",
+          "legendFormat": "{{op}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Agent runs (Outflare's agent on the action layer)",
+      "id": 512,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 892
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent run turns an hour, by how they ended",
+      "description": "Turns Outflare's agent took in agent runs (playbooks started on the action layer). Normal: mostly done; failed means the model or the API broke (three in a row pause the run); paused is a run that stopped itself with a reason a person acts on.",
+      "id": 513,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 893
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(outflare_agent_runs_turns_total[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent runs live, and the most overdue turn",
+      "description": "Runs taking turns (running) or waiting for a person (paused), and how long past its time the most overdue running run's next turn is. Normal: overdue near 0; over 15 minutes means the runner isn't running.",
+      "id": 514,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 893
+      },
+      "targets": [
+        {
+          "expr": "max(outflare_agent_runs_live{status=\"running\"})",
+          "legendFormat": "running",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "refId": "A"
+        },
+        {
+          "expr": "max(outflare_agent_runs_live{status=\"paused\"})",
+          "legendFormat": "paused",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "refId": "B"
+        },
+        {
+          "expr": "max(outflare_agent_runs_overdue_seconds)",
+          "legendFormat": "overdue (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
         }
       }
     }

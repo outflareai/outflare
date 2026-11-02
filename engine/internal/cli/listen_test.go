@@ -18,13 +18,17 @@ import (
 func TestListenForwardsSignedEvents(t *testing.T) {
 	const event = `{"id":"evt_8","type":"lead.replied","created_at":"2026-10-25T10:00:00Z","data":{}}`
 	api, got := fakeAPI(t, func(r *http.Request, n int) (int, string) {
-		switch r.URL.Query().Get("after") {
-		case "latest":
-			return 200, `{"data":[],"next_after":"evt_7","has_more":false}`
+		q := r.URL.Query()
+		switch q.Get("cursor") {
+		case "":
+			if q.Get("start") != "latest" {
+				return 400, `{"error":{"code":"invalid_request","message":"no start"}}`
+			}
+			return 200, `{"data":[],"next_cursor":"evt_7","has_more":false}`
 		case "evt_7":
-			return 200, `{"data":[` + event + `],"next_after":"evt_8","has_more":false}`
+			return 200, `{"data":[` + event + `],"next_cursor":"evt_8","has_more":false}`
 		}
-		return 200, `{"data":[],"next_after":"evt_8","has_more":false}`
+		return 200, `{"data":[],"next_cursor":"evt_8","has_more":false}`
 	})
 	var mu sync.Mutex
 	var forwarded []*http.Request
@@ -82,7 +86,7 @@ func TestListenForwardsSignedEvents(t *testing.T) {
 	if h.Get("webhook-id") != "evt_8" || h.Get("webhook-signature") != want {
 		t.Fatalf("headers %v, want signature %s", h, want)
 	}
-	if q := (*got)[1].query; !strings.Contains(q, "types=lead.%2A") || !strings.Contains(q, "after=evt_7") {
+	if q := (*got)[1].query; !strings.Contains(q, "types=lead.%2A") || !strings.Contains(q, "cursor=evt_7") {
 		t.Fatalf("second poll %q", q)
 	}
 	if !strings.Contains(errb.String(), "204 No Content") || !strings.Contains(errb.String(), secret) {
@@ -92,10 +96,10 @@ func TestListenForwardsSignedEvents(t *testing.T) {
 
 func TestListenPrintsEvents(t *testing.T) {
 	api, _ := fakeAPI(t, func(r *http.Request, n int) (int, string) {
-		if r.URL.Query().Get("after") == "latest" {
-			return 200, `{"data":[],"next_after":"evt_1","has_more":false}`
+		if r.URL.Query().Get("start") == "latest" {
+			return 200, `{"data":[],"next_cursor":"evt_1","has_more":false}`
 		}
-		return 200, `{"data":[{"id":"evt_2","type":"lead.created"}],"next_after":"evt_2","has_more":false}`
+		return 200, `{"data":[{"id":"evt_2","type":"lead.created"}],"next_cursor":"evt_2","has_more":false}`
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -163,14 +167,14 @@ func TestLogsPrintsRecentThenFollows(t *testing.T) {
 	api, reqs := fakeAPI(t, func(r *http.Request, n int) (int, string) {
 		q := r.URL.Query()
 		switch {
-		case q.Get("after") == "latest":
-			return 200, `{"data":[],"next_before":null,"next_after":"log_2","next_cursor":null}`
-		case q.Get("after") == "log_2":
-			return 200, `{"data":[{"id":"log_3","status":500}],"next_before":null,"next_after":"log_3","next_cursor":null}`
-		case q.Get("after") != "":
-			return 200, `{"data":[],"next_before":null,"next_after":"log_3","next_cursor":null}`
+		case q.Get("start") == "latest":
+			return 200, `{"data":[],"next_cursor":"log_2","has_more":false}`
+		case q.Get("cursor") == "log_2":
+			return 200, `{"data":[{"id":"log_3","status":500}],"next_cursor":"log_3","has_more":false}`
+		case q.Get("cursor") != "":
+			return 200, `{"data":[],"next_cursor":"log_3","has_more":false}`
 		}
-		return 200, `{"data":[{"id":"log_2"},{"id":"log_1"}],"next_before":null,"next_after":null,"next_cursor":null}`
+		return 200, `{"data":[{"id":"log_2"},{"id":"log_1"}],"next_cursor":null}`
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

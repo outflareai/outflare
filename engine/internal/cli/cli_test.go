@@ -192,13 +192,13 @@ func TestErrorsAndHeldWrites(t *testing.T) {
 
 func TestAllFollowsPages(t *testing.T) {
 	srv, got := fakeAPI(t, func(r *http.Request, _ int) (int, string) {
-		if r.URL.Query().Get("before") == "" {
-			return 200, `{"data":[{"id":3},{"id":2}],"next_before":2}`
+		if r.URL.Query().Get("cursor") == "" {
+			return 200, `{"data":[{"id":3},{"id":2}],"next_cursor":"c2"}`
 		}
-		return 200, `{"data":[{"id":1}],"next_before":null}`
+		return 200, `{"data":[{"id":1}],"next_cursor":null}`
 	})
 	code, out, _ := run(t, srv, t.TempDir(), "", "list-audit-events", "--all", "--limit", "2")
-	if code != 0 || strings.TrimSpace(out) != `{"data":[{"id":3},{"id":2},{"id":1}]}` || !strings.Contains((*got)[1].query, "before=2") {
+	if code != 0 || strings.TrimSpace(out) != `{"data":[{"id":3},{"id":2},{"id":1}]}` || !strings.Contains((*got)[1].query, "cursor=c2") {
 		t.Fatalf("all: %d %s %v", code, out, *got)
 	}
 }

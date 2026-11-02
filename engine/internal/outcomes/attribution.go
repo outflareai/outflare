@@ -180,3 +180,26 @@ func AttributeLead(ctx context.Context, q jobs.Querier, ws, leadID string, at ti
 	m := Match{Attribution: AttrLead, LeadID: &leadID}
 	return m, fillFromLead(ctx, q, ws, &m, at)
 }
+
+// inBrand keeps an automatic match within a brand (plans/brands/README.md):
+// a lead, sequence or reply of another brand found by address is dropped,
+// so a brand's meeting or deal never points at another brand's outreach.
+// An empty brand keeps the match.
+func inBrand(ctx context.Context, tx pgx.Tx, brand string, m *Match) error {
+	if brand == "" {
+		return nil
+	}
+	var other bool
+	err := tx.QueryRow(ctx, `SELECT
+		EXISTS (SELECT 1 FROM leads WHERE id = $2 AND brand_id IS DISTINCT FROM $1::uuid) OR
+		EXISTS (SELECT 1 FROM sequences WHERE id = $3 AND brand_id IS DISTINCT FROM $1::uuid) OR
+		EXISTS (SELECT 1 FROM inbound_messages WHERE id = $4 AND brand_id IS DISTINCT FROM $1::uuid)`,
+		brand, m.LeadID, m.SequenceID, m.InboundID).Scan(&other)
+	if err != nil {
+		return err
+	}
+	if other {
+		*m = Match{Attribution: AttrNone}
+	}
+	return nil
+}

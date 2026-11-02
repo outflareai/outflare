@@ -47,7 +47,8 @@ type Step struct {
 	// they end; skip doesn't send it, and the run goes on.
 	QuietHours string `json:"quiet_hours,omitempty"`
 	// wait: how long, in seconds.
-	WaitSeconds int64 `json:"wait_seconds,omitempty"`
+	WaitSeconds     int64 `json:"wait_seconds,omitempty"`
+	DueAfterSeconds int64 `json:"due_after_seconds,omitempty"`
 	// branch: the conditions, and whether all or any must hold.
 	Conditions []Condition `json:"conditions,omitempty"`
 	Match      string      `json:"match,omitempty"`

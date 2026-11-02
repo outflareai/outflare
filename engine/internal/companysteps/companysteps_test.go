@@ -163,3 +163,102 @@ func TestCompanySteps(t *testing.T) {
 		t.Fatalf("new company: %s %s %s %+v %v", origin, via, name, hooli, err)
 	}
 }
+
+// A feature can keep companies the workspace already has: they go through
+// the contact rules and are linked to their record, not stopped as known.
+func TestCompanyStepsKeepKnown(t *testing.T) {
+	pool := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var ws string
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug) VALUES ('Acme', 'acme-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`).Scan(&ws); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have, err := customers.EnsureCompanies(ctx, tx, ws, nil, "csv", []customers.Company{
+		{Domain: "northpeak.example", Name: "Northpeak"}, {Domain: "globex.example", Name: "Globex"}, {Domain: "hooli.example", Name: "Hooli"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO suppressions (workspace_id, kind, value, reason, method) VALUES ($1, 'domain', 'globex.example', 'do_not_contact', 'manual')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	links := map[string]linked{}
+	stops := map[string]string{}
+	r := pipeline.NewRunner(pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.PollInterval = 20 * time.Millisecond
+	for _, s := range Stages(pool, Config{
+		Pipeline: "companies_keep_test",
+		Via:      "lead_finder",
+		Company: func(_ context.Context, it pipeline.Item) (customers.Company, *string, error) {
+			return customers.Company{Name: "Renamed " + it.Ref}, nil, nil
+		},
+		Linked: func(_ context.Context, _ pgx.Tx, it pipeline.Item, id string, existed bool, warnings []string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			links[it.Ref] = linked{id, existed, warnings}
+			return nil
+		},
+		Stopped: func(_ context.Context, it pipeline.Item, code string, _ []string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			stops[it.Ref] = code
+			return nil
+		},
+		// Hooli isn't kept: it stops as known.
+		Keep: func(_ context.Context, it pipeline.Item) (bool, error) { return it.Ref != "hooli.example", nil },
+	}) {
+		r.Register(s)
+	}
+	go r.Run(ctx)
+
+	var run string
+	if err := pool.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&run); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.Start(ctx, pool, ws, "companies_keep_test", run); err != nil {
+		t.Fatal(err)
+	}
+	var items []pipeline.NewItem
+	for _, d := range []string{"northpeak.example", "globex.example", "hooli.example"} {
+		items = append(items, pipeline.NewItem{Ref: d, Stage: Known})
+	}
+	if _, err := pipeline.Add(ctx, pool, ws, run, items); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		mu.Lock()
+		n := len(links) + len(stops)
+		mu.Unlock()
+		if n == 3 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("links %v, stops %v", links, stops)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if l := links["northpeak.example"]; l.record != have["northpeak.example"] || l.existed {
+		t.Fatalf("kept company: %+v", l)
+	}
+	if stops["globex.example"] != OptedOut {
+		t.Fatalf("kept, but opted out: %v", stops)
+	}
+	if l := links["hooli.example"]; l.record != have["hooli.example"] || !l.existed {
+		t.Fatalf("not kept: %+v", l)
+	}
+	var name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM records WHERE id = $1`, have["northpeak.example"]).Scan(&name); err != nil || name != "Northpeak" {
+		t.Fatalf("existing record changed: %q %v", name, err)
+	}
+}

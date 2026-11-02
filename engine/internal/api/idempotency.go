@@ -73,8 +73,9 @@ func (s *Server) idempotent(w http.ResponseWriter, r *http.Request, a *access, n
 			s.releaseIdempotencyKey(ctx, a, key)
 		}
 	}()
-	next(rec, r)
-	if rec.status >= 500 || rec.overflow {
+	noReplay := new(bool)
+	next(rec, r.WithContext(context.WithValue(ctx, noReplayKey{}, noReplay)))
+	if rec.status >= 500 || rec.overflow || *noReplay {
 		return
 	}
 	_, err = s.pool.Exec(context.WithoutCancel(ctx), `
@@ -86,6 +87,17 @@ func (s *Server) idempotent(w http.ResponseWriter, r *http.Request, a *access, n
 		return
 	}
 	completed = true
+}
+
+type noReplayKey struct{}
+
+// noIdempotentReplay keeps a write's answer out of the Idempotency-Key
+// store, for an answer that must be shown once and never kept (a one-time
+// link): the key is released, so a retry runs again.
+func noIdempotentReplay(r *http.Request) {
+	if p, ok := r.Context().Value(noReplayKey{}).(*bool); ok {
+		*p = true
+	}
 }
 
 func (s *Server) replayIdempotent(w http.ResponseWriter, r *http.Request, a *access, key string, hash []byte) {

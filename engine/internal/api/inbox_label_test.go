@@ -148,4 +148,32 @@ func TestAILabelsRepliesTheRulesCannot(t *testing.T) {
 	if b := get(busy); b["category"] != "interested" || b["category_source"] != "human" {
 		t.Fatalf("relabelled over a person: %v", b)
 	}
+
+	// Each settled label is a reply.labeled event on the sender's
+	// timeline, once per label: Kim's sure not_now and then interested,
+	// and Lou's only once a person settled it (an unsure label waits).
+	labeled := func(from string) (cats []string) {
+		t.Helper()
+		rows, err := e.pool.Query(ctx, `SELECT e.properties->>'category' FROM customer_events e JOIN leads l ON l.record_id = e.record_id
+			WHERE e.workspace_id = $1 AND l.email = $2 AND e.name = 'reply.labeled' AND e.source = 'replies' AND e.properties ? 'inbound_id'
+			ORDER BY e.occurred_at, e.id`, ws, from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c string
+			rows.Scan(&c)
+			cats = append(cats, c)
+		}
+		return cats
+	}
+	if k, l := labeled("kim@prospect.test"), labeled("lou@prospect.test"); strings.Join(k, ",") != "not_now,interested" || strings.Join(l, ",") != "not_now" {
+		t.Fatalf("reply.labeled: kim %v, lou %v", k, l)
+	}
+	var group, text string
+	e.pool.QueryRow(ctx, `SELECT properties->>'group', properties::text FROM customer_events WHERE workspace_id = $1 AND name = 'reply.labeled' AND properties->>'category' = 'interested'`, ws).Scan(&group, &text)
+	if group != "hot" || strings.Contains(text, "lots going on") {
+		t.Fatalf("reply.labeled properties: %s", text)
+	}
 }

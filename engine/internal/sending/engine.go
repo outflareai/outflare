@@ -17,6 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/holdout"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/leads"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
@@ -46,6 +47,37 @@ type Engine struct {
 	Log       *slog.Logger
 	// Now is the clock; tests replace it.
 	Now func() time.Time
+	// OnStep are told, in the transaction that records it, when a step is
+	// sent or an enrollment ends blocked, failed or bounced, so a feature
+	// that enrolled someone can follow its email.
+	OnStep []func(ctx context.Context, tx pgx.Tx, ev StepEvent) error
+}
+
+// StepEvent is what became of one step of an enrollment.
+type StepEvent struct {
+	WorkspaceID, EnrollmentID string
+	Step                      int
+	// Outcome is sent, blocked, failed or bounced.
+	Outcome string
+	// Reason is the code of why it didn't go (the first part of the
+	// enrollment's status reason), "" when sent.
+	Reason string
+	// The message row and mailbox, when one was sent or tried.
+	MessageID, MailboxID string
+}
+
+// stepped tells OnStep.
+func (e *Engine) stepped(ctx context.Context, tx pgx.Tx, ev StepEvent) error {
+	if ev.Reason != "" {
+		code, _, _ := strings.Cut(strings.Split(ev.Reason, ", ")[0], ":")
+		ev.Reason = strings.TrimSpace(code)
+	}
+	for _, f := range e.OnStep {
+		if err := f(ctx, tx, ev); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) now() time.Time {
@@ -193,6 +225,8 @@ type enrollment struct {
 	// (nil when the rule is off).
 	BrandID        *string
 	CrossBrandDays *int
+	// The share of enrollments the sequence holds out on purpose.
+	HoldoutPercent int
 }
 
 // prepared is a message reserved in phase one and sent in phase two.
@@ -237,7 +271,7 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		       en.thread_subject, en.last_message_id, en.references_ids, en.handoff,
 		       s.status, s.timezone, s.send_days, s.send_start, s.send_end, s.daily_new_limit, s.daily_send_limit,
 		       s.created_by, t.daily_send_budget, s.mission_id,
-		       s.brand_id::text, w.cross_brand_days
+		       s.brand_id::text, w.cross_brand_days, s.holdout_percent
 		FROM enrollments en JOIN sequences s ON s.id = en.sequence_id JOIN workspaces w ON w.id = en.workspace_id
 		LEFT JOIN api_tokens t ON t.actor_id = s.created_by
 		WHERE en.id = $1 FOR UPDATE OF en`, enrollmentID,
@@ -245,7 +279,7 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		&en.ThreadSubject, &en.LastMessageID, &en.References, &en.Handoff,
 		&en.SeqStatus, &en.Timezone, &en.SendDays, &en.SendStart, &en.SendEnd, &en.DailyNewLimit, &en.DailySendLimit,
 		&en.CreatedBy, &en.TokenBudget, &en.MissionID,
-		&en.BrandID, &en.CrossBrandDays)
+		&en.BrandID, &en.CrossBrandDays, &en.HoldoutPercent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, en, nil
 	}
@@ -259,6 +293,9 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	}
 	end := func(status, reason string) (*prepared, enrollment, error) {
 		_, err := tx.Exec(ctx, `UPDATE enrollments SET status = $2, status_reason = NULLIF($3, ''), next_send_at = NULL, updated_at = now() WHERE id = $1`, en.ID, status, reason)
+		if err == nil && (status == "blocked" || status == "failed") {
+			err = e.stepped(ctx, tx, StepEvent{WorkspaceID: en.WorkspaceID, EnrollmentID: en.ID, Step: en.NextStep, Outcome: status, Reason: reason})
+		}
 		return nil, en, err
 	}
 	if en.SeqStatus != "active" {
@@ -293,6 +330,12 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 		return nil, en, e.advance(ctx, tx, en, nil, "")
 	}
 
+	// Held out on purpose: the enrollment stops before its first email, so
+	// what these people do shows what the sequence added (GET .../lift).
+	if en.NextStep == 0 && holdout.In(en.SequenceID, en.LeadID, en.HoldoutPercent) {
+		return end("stopped", "holdout")
+	}
+
 	var lead struct {
 		Email, FirstName, LastName, Company, Title, Phone, LinkedIn, Website, Domain string
 		Custom                                                                       map[string]string
@@ -306,7 +349,13 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	}
 
 	// 1. Recipient: never email someone suppressed or invalid.
-	decisions, err := policy.CheckRecipients(ctx, tx, en.WorkspaceID, []string{lead.Email})
+	// The sequence's brand's suppressions and those for every brand count
+	// (plans/brands/README.md, decision 5).
+	brand := ""
+	if en.BrandID != nil {
+		brand = *en.BrandID
+	}
+	decisions, err := policy.CheckRecipientsIn(ctx, tx, en.WorkspaceID, brand, []string{lead.Email})
 	if err != nil {
 		return nil, en, err
 	}
@@ -761,7 +810,11 @@ func (e *Engine) finish(ctx context.Context, tx pgx.Tx, en enrollment, p *prepar
 		if _, err := tx.Exec(ctx, `UPDATE messages SET status = 'sent', sent_at = $2, error = NULL WHERE id = $1`, p.messageID, now); err != nil {
 			return err
 		}
-		return e.advance(ctx, tx, en, p, "")
+		if err := e.advance(ctx, tx, en, p, ""); err != nil {
+			return err
+		}
+		return e.stepped(ctx, tx, StepEvent{WorkspaceID: en.WorkspaceID, EnrollmentID: en.ID, Step: en.NextStep, Outcome: "sent",
+			MessageID: p.messageID, MailboxID: p.account.ID})
 	}
 
 	errText := sendErr.Error()
@@ -769,9 +822,17 @@ func (e *Engine) finish(ctx context.Context, tx pgx.Tx, en enrollment, p *prepar
 		return err
 	}
 	end := func(status, reason string) error {
-		_, err := tx.Exec(ctx, `UPDATE enrollments SET status = $2, status_reason = $3, next_send_at = NULL, updated_at = now() WHERE id = $1`,
-			en.ID, status, reason)
-		return err
+		if _, err := tx.Exec(ctx, `UPDATE enrollments SET status = $2, status_reason = $3, next_send_at = NULL, updated_at = now() WHERE id = $1`,
+			en.ID, status, reason); err != nil {
+			return err
+		}
+		// The server's words can quote anything; the event carries a code.
+		code := "send_failed"
+		if status == "bounced" {
+			code = "bounced"
+		}
+		return e.stepped(ctx, tx, StepEvent{WorkspaceID: en.WorkspaceID, EnrollmentID: en.ID, Step: en.NextStep, Outcome: status, Reason: code,
+			MessageID: p.messageID, MailboxID: p.account.ID})
 	}
 	switch {
 	case mailbox.IsHardBounce(sendErr):
@@ -880,25 +941,28 @@ func (e *Engine) ParseUnsubscribeToken(token string) (string, bool) {
 // enrollment for that address in the workspace. It is idempotent.
 func (e *Engine) Unsubscribe(ctx context.Context, enrollmentID string) error {
 	return pgx.BeginFunc(ctx, e.Pool, func(tx pgx.Tx) error {
-		var ws, leadID, email string
+		var ws, leadID, email, brand string
 		err := tx.QueryRow(ctx, `
-			SELECT en.workspace_id, en.lead_id, l.email FROM enrollments en JOIN leads l ON l.id = en.lead_id
-			WHERE en.id = $1`, enrollmentID).Scan(&ws, &leadID, &email)
+			SELECT en.workspace_id, en.lead_id, l.email, COALESCE(en.brand_id::text, '') FROM enrollments en JOIN leads l ON l.id = en.lead_id
+			WHERE en.id = $1`, enrollmentID).Scan(&ws, &leadID, &email, &brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already gone
 		}
 		if err != nil {
 			return err
 		}
-		added, err := leads.AddSuppressions(ctx, tx, ws, "unsubscribed", "unsubscribe_link", "",
+		// An unsubscribe applies to the sequence's brand (plans/brands,
+		// decision 5): its suppression and the brand's other sequences.
+		added, err := leads.Suppress(ctx, tx, ws, leads.Added{Reason: "unsubscribed", Source: "unsubscribe_link", BrandID: brand},
 			[]leads.Suppression{{Kind: "email", Value: strings.ToLower(email)}})
 		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE enrollments en SET status = 'unsubscribed', next_send_at = NULL, status_reason = 'unsubscribe link', updated_at = now()
-			FROM leads l WHERE l.id = en.lead_id AND en.workspace_id = $1 AND lower(l.email) = lower($2) AND en.status = 'active'`,
-			ws, email); err != nil {
+			FROM leads l WHERE l.id = en.lead_id AND en.workspace_id = $1 AND lower(l.email) = lower($2) AND en.status = 'active'
+			  AND ($3 = '' OR en.brand_id = NULLIF($3, '')::uuid)`,
+			ws, email, brand); err != nil {
 			return err
 		}
 		if added == 0 {
