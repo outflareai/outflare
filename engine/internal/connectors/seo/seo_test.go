@@ -79,6 +79,10 @@ func TestDataForSEO(t *testing.T) {
 			"ranked_serp_element": map[string]any{"serp_item": map[string]any{"url": "https://example.com/", "rank_group": 3, "etv": 310.2}},
 		}}}),
 		"POST /v3/backlinks/referring_domains/live": dfs(0.0203, map[string]any{"total_count": 380, "items": []any{map[string]any{"domain": "news.example.org", "rank": 72, "backlinks": 4}}}),
+		"POST /v3/dataforseo_labs/google/relevant_pages/live": dfs(0.0102, map[string]any{"items": []any{
+			map[string]any{"page_address": "https://example.com/guide", "metrics": map[string]any{"organic": map[string]any{"etv": 812.5, "count": 140}}},
+			map[string]any{"page_address": ""},
+		}}),
 		"POST /v3/dataforseo_labs/google/competitors_domain/live": dfs(0.0102, map[string]any{"items": []any{
 			map[string]any{"domain": "example.com", "intersections": 1200},
 			map[string]any{"domain": "rival-com.example", "intersections": 300, "avg_position": 12.5, "full_domain_metrics": map[string]any{"organic": map[string]any{"count": 900, "etv": 2000}}},
@@ -111,6 +115,13 @@ func TestDataForSEO(t *testing.T) {
 	rep, err = d.SEOReport(ctx, cl, creds, q(c.SEOCompetitors))
 	if err != nil || len(rep.Rows) != 1 || rep.Rows[0].Key != "rival-com.example" || val(rep.Rows[0].CommonKeywords) != 300 {
 		t.Fatalf("competitors: %+v %v", rep, err)
+	}
+	rep, err = d.SEOReport(ctx, cl, creds, q(c.SEOPages))
+	if err != nil || len(rep.Rows) != 1 || rep.Rows[0].URL != "https://example.com/guide" || val(rep.Rows[0].OrganicTraffic) != 812.5 || val(rep.Rows[0].OrganicKeywords) != 140 {
+		t.Fatalf("pages: %+v %v", rep, err)
+	}
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, `"order_by":["metrics.organic.etv,desc"]`) || !strings.Contains(last, `"limit":10`) {
+		t.Fatalf("pages call: %s", last)
 	}
 	if _, err := d.SEOReport(ctx, cl, creds, q(c.SEOAudit)); c.KindOf(err) != c.ErrInvalid {
 		t.Fatalf("audit: %v", err)
@@ -149,7 +160,10 @@ func TestAhrefs(t *testing.T) {
 		}},
 		"GET /site-explorer/refdomains":          map[string]any{"refdomains": []any{map[string]any{"domain": "big.org", "domain_rating": 88, "links_to_target": 3}}},
 		"GET /site-explorer/organic-competitors": map[string]any{"competitors": []any{map[string]any{"competitor_domain": "rival-com.example", "keywords_common": 410, "domain_rating": 60}}},
-		"GET /site-audit/projects":               map[string]any{"healthscores": []any{map[string]any{"project_id": "77", "target_url": "https://example.com/", "health_score": 86, "total": 420}}},
+		"GET /site-explorer/top-pages": map[string]any{"pages": []any{
+			map[string]any{"url": "https://example.com/guide", "sum_traffic": 950, "keywords": 210, "top_keyword": "hiking guide", "top_keyword_volume": 5400},
+		}},
+		"GET /site-audit/projects": map[string]any{"healthscores": []any{map[string]any{"project_id": "77", "target_url": "https://example.com/", "health_score": 86, "total": 420}}},
 		"GET /site-audit/issues": map[string]any{"issues": []any{
 			map[string]any{"name": "Missing alt text", "importance": "Notice", "crawled": 50},
 			map[string]any{"name": "404 page", "importance": "Error", "crawled": 3},
@@ -186,6 +200,14 @@ func TestAhrefs(t *testing.T) {
 	rep, err = a.SEOReport(ctx, cl, creds, q(c.SEOCompetitors))
 	if err != nil || len(rep.Rows) != 1 || val(rep.Rows[0].CommonKeywords) != 410 {
 		t.Fatalf("competitors: %+v %v", rep, err)
+	}
+	rep, err = a.SEOReport(ctx, cl, creds, q(c.SEOPages))
+	if err != nil || len(rep.Rows) != 1 || rep.Rows[0].URL != "https://example.com/guide" || val(rep.Rows[0].OrganicTraffic) != 950 ||
+		val(rep.Rows[0].OrganicKeywords) != 210 || rep.Rows[0].TopKeyword != "hiking guide" || val(rep.Rows[0].Volume) != 5400 || rep.Cost.Units != 50 {
+		t.Fatalf("pages: %+v %v", rep, err)
+	}
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "order_by=sum_traffic%3Adesc") || !strings.Contains(last, "select=url%2Csum_traffic") {
+		t.Fatalf("pages call: %s", last)
 	}
 	rep, err = a.SEOReport(ctx, cl, creds, q(c.SEOAudit))
 	if err != nil || val(rep.Totals.HealthScore) != 86 || len(rep.Rows) != 2 || rep.Rows[0].Key != "404 page" || rep.Rows[0].Kind != "error" {

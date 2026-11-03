@@ -8,13 +8,15 @@ import { ago, plural, stamp, when } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Snippet } from "./Tokens";
 import { ConnectorLogo } from "@/components/connector-logo";
 import { appPath } from "../lib/paths";
+import type { Tab } from "../App";
 
-// Missions: goals agents work toward. This page is where a person sees what
-// an agent is doing and why, approves its plan and its writes, answers its
-// questions, and stops it.
+// Missions: goals agents worked toward before agent runs on the action
+// layer. They are being retired: nothing starts a new one here. This page
+// is where a person sees what an agent did and why in a mission made
+// before, approves its plan and its writes, answers its questions, and
+// stops it.
 
 const statusLabel: Record<Mission["status"], string> = {
   draft: "Draft",
@@ -49,9 +51,9 @@ const isLive = (m: Mission) => !["completed", "stopped", "failed"].includes(m.st
 
 type Detail = { mission: Mission; brand?: BrandContext | null; updates: MissionUpdate[]; open_connect_requests: MissionUpdate[]; how_to_act: { header: string; writes: string } };
 
-export function Missions({ ws, canManage, open, setOpen }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void }) {
+export function Missions({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (tab: Tab) => void }) {
   if (open) return <MissionDetail key={open} ws={ws} id={open} canManage={canManage} onBack={() => setOpen(undefined)} />;
-  return <MissionList ws={ws} canManage={canManage} onOpen={setOpen} />;
+  return <MissionList ws={ws} onOpen={setOpen} go={go} />;
 }
 
 // ---- List ----
@@ -106,9 +108,8 @@ const columns: ColumnDef<Mission, unknown>[] = [
   { id: "last", header: "Last call", accessorFn: (m) => m.last_call_at ?? "", meta: { mono: true }, cell: ({ row: { original: m } }) => <span className="whitespace-nowrap text-muted-foreground">{m.last_call_at ? ago(m.last_call_at) : "never"}</span> },
 ];
 
-function MissionList({ ws, canManage, onOpen }: { ws: string; canManage: boolean; onOpen: (id: string) => void }) {
+function MissionList({ ws, onOpen, go }: { ws: string; onOpen: (id: string) => void; go: (tab: Tab) => void }) {
   const [list, setList] = useState<Mission[] | null>(null);
-  const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<"live" | "ended" | "all">("live");
 
   const brand = useBrand(ws).brand?.handle;
@@ -131,12 +132,11 @@ function MissionList({ ws, canManage, onOpen }: { ws: string; canManage: boolean
     <div className="space-y-6">
       <PageHeader
         title="Missions"
-        description="Goals your agents work toward, such as 10 meetings by a date. See every call an agent made and why, approve its plan and its changes, and stop it at any time."
-        action={canManage && list.length > 0 && <Button onClick={() => setCreating(true)}>New mission</Button>}
+        description="Goals your agents worked toward before agent runs. See every call an agent made and why, approve a plan or a change, and stop a mission at any time."
       />
-      {canManage && <GoalBox ws={ws} first={list.length === 0} onPlanned={(m) => onOpen(m.id)} />}
+      <Retired go={go} />
       {list.length === 0 ? (
-        <FirstMission ws={ws} canManage={canManage} onCreate={() => setCreating(true)} />
+        <Empty title="No missions">Missions are retired: work runs on the Agents page now. Missions made before keep working here until they end.</Empty>
       ) : (
         <>
           <Stats cols={4}>
@@ -185,16 +185,24 @@ function MissionList({ ws, canManage, onOpen }: { ws: string; canManage: boolean
           />
         </>
       )}
-      {creating && <MissionForm ws={ws} onClose={() => setCreating(false)} onSaved={(m) => { setCreating(false); onOpen(m.id); }} />}
     </div>
   );
 }
 
-const examples = [
-  "Book 10 meetings with CFOs at Australian fintechs with 50 to 500 staff by 30 November",
-  "Get 30 replies from SaaS founders in London this month",
-  "Re-engage leads who replied last quarter but never booked",
-];
+// Retired says where the work went: missions are being retired for agent
+// runs on the action layer, and nothing starts a new one from here.
+function Retired({ go }: { go: (tab: Tab) => void }) {
+  return (
+    <div className="rounded-lg border bg-muted/40 px-4 py-3 text-[13px]">
+      <p className="font-medium">Missions are being retired.</p>
+      <p className="mt-1 text-muted-foreground">
+        New work runs as an <button type="button" className="underline underline-offset-2" onClick={() => go("agents")}>agent run</button>: start a playbook from the{" "}
+        <button type="button" className="underline underline-offset-2" onClick={() => go("playbooks")}>Playbooks</button> page and Outflare's agent carries it out on your AI model, with every change through the action layer.
+        Your own agent works as an API token with the action layer on, with no mission. Missions already made keep working here until they end.
+      </p>
+    </div>
+  );
+}
 
 // What stops the AI model being used, when the server says so.
 const aiCodes = ["connector_needed", "ai_model_needed", "ai_budget_reached"];
@@ -215,105 +223,10 @@ function AINeeded({ ws, block }: { ws: string; block: AIBlock }) {
 }
 
 // The model in use, under the goal box.
-function useAIModel(ws: string) {
-  const [label, setLabel] = useState("");
-  useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/ai-settings", { params: { path: { ws } } }).then(({ data }) => {
-      if (data?.active && !data.problem) setLabel(`${data.active.provider_name}, ${data.active.model}`);
-    });
-  }, [ws]);
-  return label;
-}
 
 // Type a goal, and the workspace's AI model drafts the mission: steps,
 // limits and the connectors it needs. The draft waits for a person to
 // approve it.
-function GoalBox({ ws, first, onPlanned }: { ws: string; first: boolean; onPlanned: (m: Mission) => void }) {
-  const [goal, setGoal] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [block, setBlock] = useState<AIBlock>(null);
-  const [err, setErr] = useState("");
-  const model = useAIModel(ws);
-  async function plan(e: FormEvent) {
-    e.preventDefault();
-    if (!goal.trim()) return;
-    setBusy(true);
-    setErr("");
-    setBlock(null);
-    const { data, error, response } = await api.POST("/v1/workspaces/{ws}/missions/plan", { params: { path: { ws } }, body: { goal: goal.trim() } });
-    setBusy(false);
-    const b = aiBlock(response.status, error);
-    if (b) return setBlock(b);
-    if (error || !data) return setErr(errorMessage(error));
-    toast("Plan drafted. Review it, then approve to start.");
-    onPlanned(data.mission);
-  }
-  return (
-    <Card title={first ? "Start with a goal" : "New mission from a goal"} description="Say what you want in plain words. Your AI model drafts the plan, the limits and the tools it needs. Nothing runs until you approve it.">
-      <form onSubmit={plan} className="space-y-3">
-        <textarea
-          className={`${field} w-full text-[14px]`}
-          rows={first ? 3 : 2}
-          placeholder={`e.g. ${examples[0]}`}
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) plan(e); }}
-          aria-label="Goal"
-          maxLength={2000}
-          disabled={busy}
-        />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-1.5">
-            {!goal && examples.map((x) => (
-              <button key={x} type="button" onClick={() => setGoal(x)} className="rounded-full border px-2.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground">
-                {x.length > 48 ? x.slice(0, 46) + "…" : x}
-              </button>
-            ))}
-            {busy && <span className="text-[12px] text-muted-foreground">{model ? model.split(",")[0] : "The model"} is drafting the plan. This takes up to a minute.</span>}
-            {!busy && goal && model && (
-              <span className="text-[12px] text-muted-foreground">
-                Uses {model}. <a className="underline underline-offset-2" href={appPath(ws, "workspace")}>Change</a>
-              </span>
-            )}
-          </div>
-          <Button type="submit" disabled={busy || !goal.trim()}>{busy ? "Planning…" : "Plan it"}</Button>
-        </div>
-        <AINeeded ws={ws} block={block} />
-        {err && <ErrorText>{err}</ErrorText>}
-      </form>
-    </Card>
-  );
-}
-
-function FirstMission({ ws, canManage, onCreate }: { ws: string; canManage: boolean; onCreate: () => void }) {
-  return (
-    <div className="space-y-4">
-      <Empty
-        title="No missions yet"
-        action={canManage && <Button onClick={onCreate}>New mission</Button>}
-      >
-        Give an agent a goal, like "book 10 meetings with fintech CFOs in Australia by 30 November". Type it in the box above and your AI model drafts the plan, or let your own agent start one over MCP. Either way it reads your company and brand context, rehearses in a dry run, waits for your approval, and works within the limits you set.
-      </Empty>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Snippet
-          title="Claude Code"
-          code={`claude mcp add outflare \\\n  -e OUTFLARE_URL=${location.origin} \\\n  -e OUTFLARE_TOKEN=oft_... \\\n  -e OUTFLARE_WORKSPACE=${ws} \\\n  -- node mcp/dist/index.js\n\n# Then ask: "Start a mission to book 10 meetings\n# with fintech CFOs in Australia by 30 November."`}
-        />
-        <Card title="How a mission runs">
-          <ol className="list-decimal space-y-1.5 pl-5 text-[13px]">
-            <li>The agent creates the mission and reads the company and brand context. Its changes are dry runs.</li>
-            <li>It asks you to connect any tool it needs, like an email verifier.</li>
-            <li>It sends you its plan. You approve it and choose how changes run.</li>
-            <li>It works, posting progress here. You approve changes, answer questions or pause it.</li>
-            <li>It finishes with a report.</li>
-          </ol>
-          <p className="mt-3 text-[12px] text-muted-foreground">The agent's API token needs the missions.read and missions.run scopes. It can never approve its own plan or changes.</p>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
 // ---- Create and edit ----
 
 function MissionForm({ ws, mission, canApprove = true, onClose, onSaved }: { ws: string; mission?: Mission; canApprove?: boolean; onClose: () => void; onSaved: (m: Mission) => void }) {

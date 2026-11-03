@@ -629,6 +629,24 @@ func TestBrandCoverageCommercialMaintenance(t *testing.T) {
 	placement := owner.must(201, "POST", root+"/placements", map[string]any{"title": "Newsletter sponsorship", "publisher_id": pub["id"], "agreement_id": aid, "kind": "newsletter", "arrangement": "paid", "monitor": false})
 	pid := placement["id"].(string)
 	owner.must(201, "POST", root+"/deliverables", map[string]any{"title": "Newsletter", "agreement_id": aid, "placement_id": pid, "due_on": yesterday})
+	// A sponsorship deliverable without a placement gets one on the
+	// agreement's publisher, agreed and due with it; accepting it moves
+	// the placement to live, dated today, without a page check.
+	podcast := owner.must(201, "POST", root+"/deliverables", map[string]any{"title": "Episode 12 sponsor read", "agreement_id": aid, "unit": "episode", "due_on": today, "quantity": 1})
+	ppid, _ := podcast["placement_id"].(string)
+	if ppid == "" {
+		t.Fatalf("the deliverable got no placement: %v", podcast)
+	}
+	if p := owner.must(200, "GET", root+"/placements/"+ppid, nil); p["kind"] != "podcast" || p["stage"] != "agreed" || p["arrangement"] != "paid" || p["agreement_id"] != aid || p["expected_on"] != today {
+		t.Fatalf("the sponsorship placement: %v", p)
+	}
+	owner.must(200, "PATCH", root+"/deliverables/"+podcast["id"].(string), map[string]any{"version": podcast["version"], "accepted_quantity": 1, "status": "accepted", "evidence": "Aired in episode 12"})
+	if p := owner.must(200, "GET", root+"/placements/"+ppid, nil); p["stage"] != "live" || p["published_on"] != today || p["health"] != "unchecked" {
+		t.Fatalf("after acceptance: %v", p)
+	}
+	if h := owner.must(200, "GET", root+"/placements/"+ppid+"/history", nil)["data"].([]any); len(h) < 2 || !strings.Contains(jsonText(h), "delivered") {
+		t.Fatalf("the acceptance is in the placement's history: %v", h)
+	}
 	invoice := owner.must(201, "POST", root+"/invoices", map[string]any{"title": "Campaign invoice", "agreement_id": aid, "reference": "INV-1", "status": "received", "due_on": today, "amount_minor": 10000})
 	for i := 0; i < 2; i++ {
 		if _, err := e.srv.QueueDueCoverage(ctx); err != nil {
@@ -665,8 +683,8 @@ func TestBrandCoverageCommercialMaintenance(t *testing.T) {
 	snapshot := owner.must(201, "POST", root+"/report-snapshots", map[string]any{"title": "Weekly coverage", "from": yesterday, "to": today})
 	sid := snapshot["id"].(string)
 	frozen := snapshot["data"].(map[string]any)
-	if frozen["placements"] != 1.0 {
-		t.Fatal("snapshot inventory missing")
+	if frozen["placements"] != 2.0 { // the newsletter placement and the podcast sponsorship's
+		t.Fatalf("snapshot inventory missing: %v", frozen["placements"])
 	}
 	if delivery := frozen["reported_delivery"].([]any); len(delivery) != 1 || delivery[0].(map[string]any)["impressions"] != 1200.0 {
 		t.Fatal("reported delivery absent")
@@ -674,7 +692,7 @@ func TestBrandCoverageCommercialMaintenance(t *testing.T) {
 	owner.must(201, "POST", root+"/placements", map[string]any{"title": "Another mention", "publisher_id": pub["id"], "monitor": false})
 	reader.must(200, "GET", root+"/report-snapshots/"+sid, nil)
 	saved := owner.must(200, "GET", root+"/report-snapshots/"+sid, nil)
-	if saved["data"].(map[string]any)["placements"] != 1.0 {
+	if saved["data"].(map[string]any)["placements"] != 2.0 {
 		t.Fatal("snapshot changed after editing inventory")
 	}
 	owner.must(404, "GET", "/v1/brands/"+other+"/coverage/report-snapshots/"+sid, nil)

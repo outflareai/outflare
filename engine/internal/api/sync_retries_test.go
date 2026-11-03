@@ -117,3 +117,28 @@ func TestFailedSyncsRetrySoon(t *testing.T) {
 		t.Fatalf("retried before the second wait: %v", r)
 	}
 }
+
+// A connection that has never synced (no analytics_syncs row yet) is due at
+// once, and never stops the scheduling pass for every other connection.
+func TestNeverSyncedAnalyticsAreQueued(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	analytics := &analyticsync.Syncer{Pool: e.pool, Store: e.integrations, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	pl := owner.must(201, "POST", "/v1/workspaces/"+ws+"/integrations", map[string]any{"connector": "plausible", "credentials": map[string]string{"api_key": "pk", "site_id": "example.com"}})["id"].(string)
+	for _, sql := range []string{`DELETE FROM jobs WHERE workspace_id = $1`, `DELETE FROM analytics_syncs WHERE workspace_id = $1`} {
+		if _, err := e.pool.Exec(ctx, sql, ws); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := analytics.QueueDue(ctx); err != nil {
+		t.Fatalf("a never-synced connection broke scheduling: %v", err)
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = $2 AND payload->>'integration_id' = $3`, ws, analyticsync.JobSync, pl).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("never-synced connection queued %d times, want 1", n)
+	}
+}

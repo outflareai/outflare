@@ -325,6 +325,8 @@ type workspaceView struct {
 	// A test workspace: its mailboxes are simulated, so nothing it sends
 	// reaches anyone.
 	Test bool `json:"test"`
+	// Only owners and admins change customer records when true.
+	RecordsEditOwnersOnly bool `json:"records_edit_owners_only"`
 	// Parts of Outflare switched on for this workspace (package
 	// features). Left out when none is on, and in lists other than /v1/me.
 	Features []string `json:"features,omitempty"`
@@ -353,7 +355,7 @@ func scanWorkspace(row pgx.Row, v *workspaceView, withRole bool) error {
 	if withRole {
 		dest = append(dest, &v.Role, &v.BrandIDs, &v.roleID, &v.Scopes)
 	}
-	dest = append(dest, &v.Test)
+	dest = append(dest, &v.Test, &v.RecordsEditOwnersOnly)
 	if err := row.Scan(dest...); err != nil {
 		return err
 	}
@@ -393,7 +395,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	}
 	// Workspaces the person is a member of, with their role.
 	rows, err := s.pool.Query(ctx, `
-		SELECT w.id, w.name, w.slug, m.role, m.brand_ids::text[], m.role_id::text, `+memberRoleScopes+`, w.test
+		SELECT w.id, w.name, w.slug, m.role, m.brand_ids::text[], m.role_id::text, `+memberRoleScopes+`, w.test, w.records_edit_owners_only
 		FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
 		WHERE m.user_id = $1
 		ORDER BY w.created_at`, p.UserID)
@@ -499,7 +501,7 @@ func (s *Server) writeWorkspace(w http.ResponseWriter, r *http.Request, id, role
 	if role != "" {
 		v.Scopes = effectiveScopes(role, nil)
 	}
-	row := s.pool.QueryRow(r.Context(), `SELECT w.id, w.name, w.slug, w.test FROM workspaces w WHERE w.id = $1`, id)
+	row := s.pool.QueryRow(r.Context(), `SELECT w.id, w.name, w.slug, w.test, w.records_edit_owners_only FROM workspaces w WHERE w.id = $1`, id)
 	if err := scanWorkspace(row, &v, false); err != nil {
 		s.internal(w, r, err)
 		return

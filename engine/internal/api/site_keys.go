@@ -25,6 +25,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"github.com/outflareai/outflare/engine/internal/utm"
 	"github.com/outflareai/outflare/engine/internal/visitors"
 )
@@ -600,6 +601,9 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]int{"accepted": 0, "rejected": 0})
+		return
+	}
+	if !s.allowQuota(w, r, k.workspaceID, quota.TrackedEvents, int64(len(in.Batch))) {
 		return
 	}
 	var today int

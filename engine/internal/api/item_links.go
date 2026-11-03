@@ -29,7 +29,7 @@ var linkKinds = map[string]linkKind{
 	"sequence":   {scope: auth.ScopeSequencesRead, table: "sequences", name: "name"},
 	"list":       {scope: auth.ScopeLeadsRead, table: "lead_lists", name: "name"},
 	"mission":    {scope: auth.ScopeMissionsRead, table: "missions", name: "name"},
-	"run":        {scope: auth.ScopeMissionsRead, table: "agent_runs", name: "name"},
+	"run":        {scope: auth.ScopeAgentsRead, table: "agent_runs", name: "name"},
 	"server":     {scope: auth.ScopeMailboxesRead, table: "sending_servers", name: "COALESCE(NULLIF(name, ''), host)"},
 	"plan":       {scope: auth.ScopeInfraRead, table: "infra_plans", name: "name"},
 	"connection": {scope: auth.ScopeIntegrationsRead, table: "integrations", name: "name", from: "connector"},

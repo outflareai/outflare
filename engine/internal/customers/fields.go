@@ -99,9 +99,35 @@ func SetFields(ctx context.Context, tx pgx.Tx, workspaceID, recordID, source str
 		if valueType != f.Type || policy == "computed" || policy == "source_owned" {
 			continue
 		}
+		// Every source's latest value is kept, whether or not it wins
+		// (field sources: what "Use this" offers).
+		raw, _ := json.Marshal(v)
+		if brand == nil {
+			// A workspace with no brand keeps no field sources.
+		} else if _, err := tx.Exec(ctx, `INSERT INTO field_values (workspace_id, brand_id, record_id, field_key, source, value)
+			VALUES ($1, $2::uuid, $3, $4, $5, $6) ON CONFLICT (record_id, field_key, source) DO UPDATE SET value = EXCLUDED.value, seen_at = now()`,
+			workspaceID, brand, recordID, f.Key, source, string(raw)); err != nil {
+			return changed, err
+		}
 		prev, had := attrs[f.Key]
 		if had && outranks(precedence, sources[f.Key], source) {
-			continue
+			// A person's edit wins only until its time runs out.
+			var expired bool
+			if sources[f.Key] != "manual" {
+				continue
+			}
+			if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT NOT pinned AND (expired_at IS NOT NULL OR COALESCE(expires_at <= now(), false))
+				FROM hand_edits WHERE record_id = $1 AND field_key = $2), false)`, recordID, f.Key).Scan(&expired); err != nil {
+				return changed, err
+			}
+			if !expired {
+				continue
+			}
+		}
+		if sources[f.Key] == "manual" && source != "manual" && !(had && sameValue(prev, v)) {
+			if _, err := tx.Exec(ctx, `DELETE FROM hand_edits WHERE record_id = $1 AND field_key = $2`, recordID, f.Key); err != nil {
+				return changed, err
+			}
 		}
 		if had && sameValue(prev, v) {
 			if sources[f.Key] != source {

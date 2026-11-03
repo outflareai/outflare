@@ -178,6 +178,19 @@ type attributionFilter struct {
 	// record, and credit on those visits. Visits known only by the
 	// browser's cookie are left out.
 	identified bool
+	// signedIn narrows identified to browsers the person identified on
+	// through the workspace's own product (a sign-in, or a form or identify
+	// call that names them), leaving out ones known only from a click on a
+	// tracked email link, which a forwarded email can put on someone else.
+	signedIn bool
+}
+
+// signedInSQL is the condition that the visit's browser became known
+// through the workspace's own product; col is the visit table's alias
+// with its dot.
+func signedInSQL(col string) string {
+	return ` AND EXISTS (SELECT 1 FROM site_visitors sv WHERE sv.workspace_id = ` + col + `workspace_id
+		AND sv.anonymous_id = ` + col + `anonymous_id AND sv.identified_by = 'product')`
 }
 
 // visitsSQL narrows a site_sessions query to identified visits when the
@@ -186,7 +199,28 @@ func (f attributionFilter) visitsSQL(alias string) string {
 	if !f.identified {
 		return ""
 	}
-	return " AND " + alias + "record_id IS NOT NULL"
+	out := " AND " + alias + "record_id IS NOT NULL"
+	if f.signedIn {
+		col := alias
+		if col == "" {
+			col = "site_sessions."
+		}
+		out += signedInSQL(col)
+	}
+	return out
+}
+
+// creditSQL is the join and condition that keep only credit on visits the
+// person was identified on, for the filter's level; empty for all.
+func (f attributionFilter) creditSQL() (join, where string) {
+	if !f.identified {
+		return "", ""
+	}
+	where = ` AND mq.record_id = c.record_id`
+	if f.signedIn {
+		where += signedInSQL("mq.")
+	}
+	return ` JOIN site_sessions mq ON mq.id = cr.session_id`, where
 }
 
 func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attributionFilter, bool) {
@@ -214,8 +248,8 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		return attributionFilter{}, false
 	}
 	match := q.Get("match")
-	if match != "" && match != "all" && match != "identified" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "match is all (the default) or identified")
+	if match != "" && match != "all" && match != "identified" && match != "signed_in" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "match is all (the default), identified or signed_in")
 		return attributionFilter{}, false
 	}
 	ref := q.Get("model")
@@ -232,7 +266,7 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		ref = settings.Model
 	}
 	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand,
-		identified: match == "identified"}
+		identified: match == "identified" || match == "signed_in", signedIn: match == "signed_in"}
 	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, ref)
 	switch {
 	case errors.Is(err, attribution.ErrUnknownModel):
@@ -318,11 +352,11 @@ func moneyList(m map[string]float64) []money {
 func (s *Server) creditRows(ctx context.Context, ws string, f attributionFilter, join, keys, where string, args []any,
 	add func(key []any, name string, weight float64, currency *string, value *float64) error) error {
 	args = append([]any{ws, f.from, f.to, f.model}, args...)
-	if f.identified {
-		// Only credit on a visit the person was identified on.
-		join += ` JOIN site_sessions mq ON mq.id = cr.session_id`
-		where += ` AND mq.record_id = c.record_id`
-	}
+	// Only credit on a visit the person was identified on, at the
+	// filter's level.
+	j, w := f.creditSQL()
+	join += j
+	where += w
 	sql := `SELECT ` + keys + `, c.name, sum(cr.weight)::float8, c.currency, sum(cr.weight * c.value_minor)::float8
 		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id` + join + `
 		WHERE cr.workspace_id = $1 AND cr.model = $4 AND c.occurred_at >= $2::date AND c.occurred_at < $3::date + 1` + where +
@@ -628,6 +662,11 @@ type attributionCredit struct {
 	// person was identified on it), browser (only the browser's cookie) or
 	// none (no visit; the credit is direct).
 	MatchedBy string `json:"matched_by"`
+	// IdentifiedBy is how the visit's browser became known as the person,
+	// for matched_by record: product (the workspace's own sign-in, or a
+	// form or identify call that names them) or email_click (a click on a
+	// tracked link in an email Outflare sent). Empty otherwise.
+	IdentifiedBy string `json:"identified_by"`
 }
 
 type attributionConversion struct {
@@ -708,9 +747,11 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		}
 		cr, err := s.pool.Query(ctx, `SELECT cr.event_id::text, cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text, cr.session_id::text,
 				cr.touch_at, cr.tag_method, cr.weight::float8,
-				CASE WHEN ss.id IS NULL THEN 'none' WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id THEN 'record' ELSE 'browser' END
+				CASE WHEN ss.id IS NULL THEN 'none' WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id THEN 'record' ELSE 'browser' END,
+				CASE WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id AND sv.identified_by IN ('product', 'email_click') THEN sv.identified_by ELSE '' END
 			FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id
 			LEFT JOIN site_sessions ss ON ss.id = cr.session_id
+			LEFT JOIN site_visitors sv ON sv.workspace_id = ss.workspace_id AND sv.anonymous_id = ss.anonymous_id
 			WHERE cr.workspace_id = $1 AND cr.model = $2 AND cr.event_id = ANY($3::uuid[]) ORDER BY cr.event_id, cr.position`, a.WorkspaceID, f.model, ids)
 		if err != nil {
 			s.internal(w, r, err)
@@ -719,7 +760,7 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		for cr.Next() {
 			var id string
 			var c attributionCredit
-			if err := cr.Scan(&id, &c.Channel, &c.Source, &c.Campaign, &c.TrackingCampaignID, &c.SessionID, &c.TouchAt, &c.TagMethod, &c.Weight, &c.MatchedBy); err != nil {
+			if err := cr.Scan(&id, &c.Channel, &c.Source, &c.Campaign, &c.TrackingCampaignID, &c.SessionID, &c.TouchAt, &c.TagMethod, &c.Weight, &c.MatchedBy, &c.IdentifiedBy); err != nil {
 				cr.Close()
 				s.internal(w, r, err)
 				return

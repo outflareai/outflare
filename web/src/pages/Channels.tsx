@@ -78,7 +78,7 @@ export function Channels({ ws, canManage, go }: Props) {
   const brandKey = brand.query.brand ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
   // identified: only visits the person was identified on, and their credit.
-  const [match, setMatch] = useState<"all" | "identified">("all");
+  const [match, setMatch] = useState<"all" | "identified" | "signed_in">("all");
   const [settings, setSettings] = useState<AttributionSettings | null>(null);
   const [model, setModel] = useState<Model | "">("");
   // The workspace's own models (GET .../attribution/models) after the
@@ -95,7 +95,7 @@ export function Channels({ ws, canManage, go }: Props) {
   }, [days]);
 
   const load = useCallback(async () => {
-    const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}), ...(match === "identified" ? { match } : {}) };
+    const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}), ...(match !== "all" ? { match } : {}) };
     const [s, r, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }),
@@ -134,10 +134,11 @@ export function Channels({ ws, canManage, go }: Props) {
             title="Identified people only leaves out visits known only by the browser's cookie, and their credit"
             className={field}
             value={match}
-            onChange={(e) => setMatch(e.target.value as "all" | "identified")}
+            onChange={(e) => setMatch(e.target.value as "all" | "identified" | "signed_in")}
           >
             <option value="all">All visits</option>
             <option value="identified">Identified people only</option>
+            <option value="signed_in">Signed in on your product only</option>
           </select>
           <div className="flex rounded-md border" role="group" aria-label="Date range">
             {ranges.map((r) => (
@@ -207,18 +208,18 @@ export function Channels({ ws, canManage, go }: Props) {
               )}
             />
           </Card>
-          <PeopleAndCohorts ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} />
-          <AccountsAndDeals ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} />
+          <PeopleAndCohorts ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match !== "all" ? { match } : {}) }} />
+          <AccountsAndDeals ws={ws} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match !== "all" ? { match } : {}) }} />
         </>
       )}
       <AttributionModels ws={ws} canManage={canManage} defaultModel={settings?.model} onChanged={load} />
       <ConversionDefinitions ws={ws} canManage={canManage} onChanged={load} />
-      <Drilldown ws={ws} row={open} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match === "identified" ? { match } : {}) }} onClose={() => setOpen(null)} />
+      <Drilldown ws={ws} row={open} query={{ ...range(), ...(brandKey ? { brand: brandKey } : {}), model: shown, ...(match !== "all" ? { match } : {}) }} onClose={() => setOpen(null)} />
     </div>
   );
 }
 
-function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" }; onClose: () => void }) {
+function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" | "signed_in" }; onClose: () => void }) {
   const [list, setList] = useState<AttributionCampaignRow[] | null>(null);
   const [error, setError] = useState("");
   // By content: each campaign split by utm_content, such as the sequence
@@ -292,7 +293,7 @@ type CohortRow = { channel: string; label: string; people: number; customers: nu
 // PeopleAndCohorts answers who each channel brings: people already known
 // or new to you, first or repeat revenue, and what the people a channel
 // first brought are worth over time.
-function PeopleAndCohorts({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" } }) {
+function PeopleAndCohorts({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" | "signed_in" } }) {
   const [customers, setCustomers] = useState<CustomerRow[] | null>(null);
   const [cohorts, setCohorts] = useState<CohortRow[] | null>(null);
   const [error, setError] = useState("");
@@ -359,7 +360,7 @@ type DealRow = { channel: string; label: string; deals: number; value: Money[] }
 
 // AccountsAndDeals is the B2B view: credit rolled up to each company, and
 // won deals spread across the channels their people came from.
-function AccountsAndDeals({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" } }) {
+function AccountsAndDeals({ ws, query }: { ws: string; query: { from: string; to: string; brand?: string; model: Model; match?: "identified" | "signed_in" } }) {
   const [accounts, setAccounts] = useState<AccountRow[] | null>(null);
   const [deals, setDeals] = useState<DealRow[] | null>(null);
   const [unattributed, setUnattributed] = useState<{ deals: number; value: Money[] } | null>(null);

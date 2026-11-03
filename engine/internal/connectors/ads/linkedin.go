@@ -23,11 +23,12 @@ func (LinkedInAds) Definition() c.Definition {
 	d := def("linkedin_ads", "LinkedIn Ads", "https://business.linkedin.com/marketing-solutions/ads",
 		"https://learn.microsoft.com/linkedin/marketing/integrations/ads-reporting/ads-reporting", "",
 		"Spend, impressions, clicks and conversions per campaign from your LinkedIn ad accounts.",
-		"Signs in with LinkedIn and reads every ad account the member can see, with read-only access. Conversions are LinkedIn's website conversions as LinkedIn counts them.")
+		"Signs in with LinkedIn and reads every ad account the member can see. Conversions are LinkedIn's website conversions as LinkedIn counts them. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget (the rw_ads permission; a connection made before it was asked for is connected again to manage campaigns).")
+	d.Capabilities = append(d.Capabilities, c.CapAdsManage)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://www.linkedin.com/oauth/v2/authorization",
 		TokenURL: "https://www.linkedin.com/oauth/v2/accessToken",
-		Scopes:   []string{"r_ads", "r_ads_reporting"},
+		Scopes:   []string{"r_ads", "r_ads_reporting", "rw_ads"},
 	}
 	return d
 }
@@ -128,6 +129,66 @@ func (l LinkedInAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Cred
 		}
 	}
 	return out, nil
+}
+
+// ---- managing campaigns ----
+
+func (l LinkedInAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	if atoi64(campaignID) <= 0 {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "LinkedIn campaign ids are numbers")
+	}
+	var e struct {
+		ID          flexInt `json:"id"`
+		Name        string  `json:"name"`
+		Status      string  `json:"status"`
+		Objective   string  `json:"objectiveType"`
+		DailyBudget *struct {
+			Amount string `json:"amount"`
+		} `json:"dailyBudget"`
+	}
+	if err := l.call(cl, creds).get(ctx, l.base(cl)+"/adAccounts/"+esc(acct.ID)+"/adCampaigns/"+esc(campaignID), &e); err != nil {
+		return c.AdCampaign{}, err
+	}
+	if fmt.Sprint(int64(e.ID)) != campaignID {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "LinkedIn has no campaign %s in account %s", campaignID, acct.ID)
+	}
+	cp := c.AdCampaign{ID: campaignID, Name: e.Name, Status: status(e.Status), ProviderStatus: e.Status, Objective: strings.ToLower(e.Objective)}
+	if e.DailyBudget != nil {
+		if b := c.MicrosOf(e.DailyBudget.Amount); b > 0 {
+			cp.DailyBudgetMicros = ptrI(b)
+		}
+	}
+	return cp, nil
+}
+
+// liPatch sends a Rest.li partial update that sets the fields given.
+func (l LinkedInAds) liPatch(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, set map[string]any) error {
+	return l.call(cl, creds).set("X-RestLi-Method", "PARTIAL_UPDATE").post(ctx, l.base(cl)+"/adAccounts/"+esc(acct.ID)+"/adCampaigns/"+esc(campaignID),
+		map[string]any{"patch": map[string]any{"$set": set}}, nil)
+}
+
+func (l LinkedInAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	if atoi64(campaignID) <= 0 {
+		return c.Errf(c.ErrInvalid, "LinkedIn campaign ids are numbers")
+	}
+	st := "PAUSED"
+	if active {
+		st = "ACTIVE"
+	}
+	return l.liPatch(ctx, cl, creds, acct, campaignID, map[string]any{"status": st})
+}
+
+// SetCampaignDailyBudget sets the daily budget in the account's currency,
+// as a decimal string with two places.
+func (l LinkedInAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, micros int64) error {
+	if atoi64(campaignID) <= 0 {
+		return c.Errf(c.ErrInvalid, "LinkedIn campaign ids are numbers")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	cents := (micros + 5_000) / 10_000
+	return l.liPatch(ctx, cl, creds, acct, campaignID, map[string]any{"dailyBudget": map[string]any{"amount": fmt.Sprintf("%d.%02d", cents/100, cents%100), "currencyCode": acct.Currency}})
 }
 
 func liDate(s string) string {

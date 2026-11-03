@@ -117,9 +117,11 @@ func (s *Syncer) QueueDue(ctx context.Context) error {
 		// A connection is due after its interval, or sooner while its last
 		// runs failed (retry.After), so a failed sync is tried again the
 		// same day. failures is the most runs in a row that failed of its
-		// analytics, Search Console and conversions syncs.
+		// analytics, Search Console and conversions syncs. A connection
+		// that never ran has no last run (-infinity makes it due; its
+		// epoch is NULL, since -infinity has no bigint value).
 		rows, err := s.Pool.Query(ctx, `
-			SELECT d.id, d.workspace_id, d.failures, extract(epoch FROM d.last_run)::bigint FROM (
+			SELECT d.id, d.workspace_id, d.failures, extract(epoch FROM NULLIF(d.last_run, '-infinity'::timestamptz))::bigint FROM (
 				SELECT i.id, i.workspace_id,
 					COALESCE((SELECT max(a.last_run_at) FROM analytics_syncs a WHERE a.integration_id = i.id), '-infinity') AS last_run,
 					GREATEST((SELECT max(a.failures) FROM analytics_syncs a WHERE a.integration_id = i.id),

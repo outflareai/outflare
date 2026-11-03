@@ -108,6 +108,14 @@ func TestAnalyticsReports(t *testing.T) {
 	if len(sum) != 1 || sum[0].(map[string]any)["error"] != nil || sum[0].(map[string]any)["totals"].(map[string]any)["pageviews"] != 90.0 {
 		t.Fatalf("summary: %v", sum)
 	}
+	// A token kept to a brand reads the summary too: its brand's sites and
+	// the shared ones (a site no brand owns is every brand's).
+	acme := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme"})["id"].(string)
+	limited := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Acme reader", "scopes": []string{"analytics.read"}, "brand": acme})
+	reader := &client{t: t, h: owner.h, bearer: limited["token"].(string)}
+	if got := reader.must(200, "GET", base+"/analytics/summary?from=2026-10-01&to=2026-10-03", nil)["data"].([]any); len(got) != 1 {
+		t.Fatalf("summary as a brand-limited token: %v", got)
+	}
 
 	// Other connections are not analytics.
 	zb := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "zerobounce", "credentials": map[string]string{"api_key": "good-key"}})

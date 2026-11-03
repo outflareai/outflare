@@ -2,12 +2,9 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/missions"
@@ -21,12 +18,15 @@ import (
 // approves it.
 
 func (s *Server) routesPlaybooks(mux *http.ServeMux) {
-	read, run := auth.ScopeMissionsRead, auth.ScopeMissionsRun
+	// Playbooks are the agent's: reading them is agents.read and running
+	// one is agents.run. Starting one as a mission is retired (410); its
+	// route keeps the scope it had until it is removed.
+	read, run := auth.ScopeAgentsRead, auth.ScopeAgentsRun
 	mux.HandleFunc("GET /v1/playbooks", s.listPlaybookCatalog)
 	mux.HandleFunc("GET /v1/playbooks/{id}", s.getPlaybookCatalog)
 	mux.HandleFunc("GET /v1/workspaces/{ws}/playbooks", s.inWorkspace(read, s.listPlaybooks))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/playbooks/{id}", s.inWorkspace(read, s.getPlaybook))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/playbooks/{id}/runs", s.inWorkspace(run, s.startPlaybook))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/playbooks/{id}/runs", s.inWorkspace(auth.ScopeMissionsRun, s.startPlaybook))
 	// Start a playbook as an agent run on the action layer (agent_runs.go).
 	mux.HandleFunc("POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs", s.inBrand(run, s.runPlaybook))
 }
@@ -113,7 +113,9 @@ func (s *Server) playbookReadiness(ctx context.Context, ws string, list []playbo
 		return nil, err
 	}
 	runs := map[string]int{}
-	rows, err := s.pool.Query(ctx, `SELECT playbook_id, count(*)::int FROM missions WHERE workspace_id = $1 AND playbook_id IS NOT NULL GROUP BY 1`, ws)
+	rows, err := s.pool.Query(ctx, `SELECT playbook_id, sum(n)::int FROM (
+		SELECT playbook_id, count(*) AS n FROM agent_runs WHERE workspace_id = $1 AND playbook_id IS NOT NULL GROUP BY 1
+		UNION ALL SELECT playbook_id, count(*) FROM missions WHERE workspace_id = $1 AND playbook_id IS NOT NULL GROUP BY 1) t GROUP BY 1`, ws)
 	if err != nil {
 		return nil, err
 	}
@@ -174,92 +176,15 @@ type playbookRunInput struct {
 	ApplyKit bool `json:"apply_kit"`
 }
 
-// startPlaybook creates a mission draft from a playbook. Required
-// connections must be in place: a playbook never falls back to anyone
-// else's account. Missing data doesn't stop it; the agent reports what it
-// found.
+// startPlaybook is retired: a playbook started by hand is an agent run
+// (runPlaybook, POST .../playbooks/{id}/agent-runs). It answers 410 so an
+// agent or script still posting here is told where to go.
 func (s *Server) startPlaybook(w http.ResponseWriter, r *http.Request) {
-	a := accessFrom(r.Context())
-	ctx := r.Context()
-	p, ok := playbooks.Get(r.PathValue("id"))
-	if !ok {
+	if _, ok := playbooks.Get(r.PathValue("id")); !ok {
 		writeError(w, r, http.StatusNotFound, "not_found", "no playbook "+r.PathValue("id")+"; GET /v1/workspaces/{ws}/playbooks lists them")
 		return
 	}
-	var in playbookRunInput
-	if !decode(w, r, &in) {
-		return
-	}
-	if msg := checkPlaybookInputs(p, in.Inputs); msg != "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
-		return
-	}
-	var kit playbooks.Kit
-	if in.ApplyKit {
-		var ok bool
-		if kit, ok = playbooks.GetKit(p.Kit); !ok {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "this playbook has no setup kit, so apply_kit is not for it")
-			return
-		}
-		if !a.has(auth.ScopeCatalogManage) {
-			writeError(w, r, http.StatusForbidden, "forbidden", "applying the setup kit needs the catalog.manage scope; start without apply_kit, or ask someone who can")
-			return
-		}
-	}
-	ready, err := s.playbookReadiness(ctx, a.WorkspaceID, []playbooks.Playbook{p})
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	if missing := ready[0].Readiness.MissingConnections; len(missing) > 0 {
-		labels := make([]string, 0, len(missing))
-		for _, m := range missing {
-			labels = append(labels, m.Label)
-		}
-		writeError(w, r, http.StatusConflict, "connector_needed", "connect "+strings.Join(labels, " and ")+" under Connectors first; this playbook runs only on the workspace's own accounts")
-		return
-	}
-	name, goal := p.Title, p.Summary
-	instructions, plan := playbookBrief(p, in.Inputs, false)
-	mi := missionInput{Name: &name, Goal: &goal, Instructions: &instructions, Plan: &plan, Mode: in.Mode,
-		TokenID: in.TokenID, MaxSpendCents: in.MaxSpendCents,
-		playbookID: &p.ID, playbookVersion: &p.Version}
-	if err := mi.validate(); s.missionError(w, r, err) {
-		return
-	}
-	var id string
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var err error
-		if in.ApplyKit {
-			// The playbook takes every input its kit does (playbooks test).
-			kitInputs := map[string]string{}
-			for _, ki := range kit.Inputs {
-				if v, ok := in.Inputs[ki.Name]; ok {
-					kitInputs[ki.Name] = v
-				}
-			}
-			if _, err = applyKit(ctx, tx, a, kit, kitInputs, kitFromCatalog); err != nil {
-				return err
-			}
-		}
-		if id, err = s.insertMission(ctx, tx, a, &mi); err != nil {
-			return err
-		}
-		props := map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mode": modeOr(in.Mode), "publisher": p.Publisher, "kit_applied": in.ApplyKit}
-		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "playbook.started", "mission", id,
-			map[string]any{"playbook_id": p.ID, "playbook_version": p.Version, "mission_id": id, "mode": modeOr(in.Mode)}, props)
-	})
-	if (errors.As(err, new(errKitConflict)) || errors.As(err, new(errInvalid)) || errors.As(err, new(errDenied))) && s.kitError(w, r, err) {
-		return
-	}
-	if s.missionError(w, r, err) {
-		return
-	}
-	v, err := s.loadMission(ctx, a.WorkspaceID, id)
-	if s.missionError(w, r, err) {
-		return
-	}
-	writeJSON(w, http.StatusCreated, v)
+	writeError(w, r, http.StatusGone, "mission_retired", "starting a playbook as a mission is retired: start it as an agent run with POST /v1/workspaces/{ws}/playbooks/"+r.PathValue("id")+"/agent-runs (the MCP tool run_playbook), with the same inputs, mode and apply_kit")
 }
 
 // checkPlaybookInputs checks a playbook's inputs: known names, up to 500

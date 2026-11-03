@@ -41,12 +41,12 @@ func (Ahrefs) Definition() c.Definition {
 }
 
 func (Ahrefs) SEOReports() []string {
-	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors, c.SEOAudit}
+	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors, c.SEOPages, c.SEOAudit}
 }
 
 // rowUnits is what one row costs: 1, plus 10 for each volume or traffic
 // column the report asks for.
-var rowUnits = map[string]float64{c.SEOKeywords: 21, c.SEOBacklinks: 11, c.SEOCompetitors: 11, c.SEOLinks: 1}
+var rowUnits = map[string]float64{c.SEOKeywords: 21, c.SEOBacklinks: 11, c.SEOCompetitors: 11, c.SEOLinks: 1, c.SEOPages: 21}
 
 func (Ahrefs) Estimate(q c.SEOQuery) c.SEOCost {
 	switch q.Report {
@@ -334,6 +334,32 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 			rep.Rows = append(rep.Rows, c.SEORow{Key: *x.Domain, SEOMetrics: c.SEOMetrics{CommonKeywords: n(x.Common), DomainRating: n(x.DR), OrganicTraffic: n(x.Traffic)}})
 		}
 		rep.Cost.Units = math.Max(50, float64(len(resp.Competitors))*rowUnits[q.Report])
+	case c.SEOPages:
+		v := cloneValues(base)
+		v.Set("country", country)
+		v.Set("select", "url,sum_traffic,keywords,top_keyword,top_keyword_volume")
+		v.Set("order_by", "sum_traffic:desc")
+		v.Set("limit", itoa(q.Limit))
+		var resp struct {
+			Pages []struct {
+				URL        string   `json:"url"`
+				Traffic    *float64 `json:"sum_traffic"`
+				Keywords   *float64 `json:"keywords"`
+				TopKeyword *string  `json:"top_keyword"`
+				TopVolume  *float64 `json:"top_keyword_volume"`
+			} `json:"pages"`
+		}
+		if err := a.get(ctx, cl, creds, "/site-explorer/top-pages", v, &resp); err != nil {
+			return rep, err
+		}
+		for _, p := range resp.Pages {
+			row := c.SEORow{Key: p.URL, URL: p.URL, SEOMetrics: c.SEOMetrics{OrganicTraffic: n(p.Traffic), OrganicKeywords: n(p.Keywords), Volume: n(p.TopVolume)}}
+			if p.TopKeyword != nil {
+				row.TopKeyword = *p.TopKeyword
+			}
+			rep.Rows = append(rep.Rows, row)
+		}
+		rep.Cost.Units = math.Max(50, float64(len(resp.Pages))*rowUnits[q.Report])
 	case c.SEOAudit:
 		var projects struct {
 			Healthscores []struct {

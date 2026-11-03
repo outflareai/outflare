@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"math"
 	"slices"
 	"strings"
@@ -265,6 +266,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(jobCRMGoogleSync, s.crmGoogleSyncJob)
 	q.Handle(jobCRMImport, s.crmImportJob)
 	q.Handle(jobBatchUndo, s.batchUndoJob)
+	q.Handle(jobBulkEdit, s.bulkEditJob)
 	q.Handle(jobEventsProcess, s.eventsProcessJob)
 	q.Handle(jobPrivacyExport, s.privacyExportJob)
 	if s.inboundEmail != nil {
@@ -293,6 +295,8 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	s.registerSocialJobs(q)
 	s.registerSemanticJobs(q)
 	s.registerKnowledgeJobs(q)
+	s.registerWebsiteImportJobs(q)
+	q.Handle(jobLearnReplies, s.learnRepliesJob)
 }
 
 func (s *Server) crmImportJob(ctx context.Context, job jobs.Job) error {
@@ -351,7 +355,8 @@ func (s *Server) runCRMImportStep(ctx context.Context, ws, id string, last bool)
 
 	done, err := run.step(ctx, integrationID)
 	if err != nil {
-		permanent := errors.Is(err, connectors.ErrNotFound) || connectors.KindOf(err) == connectors.ErrAuth || errors.As(err, new(errInvalid))
+		_, refused := quota.Refusal(err)
+		permanent := refused || errors.Is(err, connectors.ErrNotFound) || connectors.KindOf(err) == connectors.ErrAuth || errors.As(err, new(errInvalid))
 		if !last && !permanent {
 			return err
 		}
@@ -414,6 +419,9 @@ func (r *crmRun) finish(ctx context.Context, runErr error) error {
 }
 
 func crmImportErrorCode(err error) string {
+	if _, ok := quota.Refusal(err); ok {
+		return "quota_exceeded"
+	}
 	switch {
 	case errors.Is(err, connectors.ErrNotFound):
 		return "not_found"
@@ -458,6 +466,11 @@ func (r *crmRun) step(ctx context.Context, integrationID string) (bool, error) {
 			page, err = r.imp.CRMRecords(ctx, o.Client, o.Creds, op.Slug, r.progress.Offset, crmImportPage)
 		}
 		if err != nil {
+			return false, err
+		}
+		// The page may add up to len(page) records; a workspace that may
+		// add no more ends the import with the reason.
+		if err := quota.Check(ctx, r.s.quota, r.s.log, r.a.WorkspaceID, quota.Records, int64(len(page))); err != nil {
 			return false, err
 		}
 		res := r.result(op)

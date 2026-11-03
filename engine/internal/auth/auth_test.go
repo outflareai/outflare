@@ -73,6 +73,17 @@ func TestManageIncludesRead(t *testing.T) {
 		{[]string{ScopeMyAIAccountsManage}, ScopeMyAIAccountsRead, true},
 		{[]string{ScopeMyAIAccountsManage}, ScopeAIAccountsRead, false},
 		{[]string{ScopeAISpendRead}, ScopeAIAccountsRead, false},
+		// The agents scopes and the mission scopes stand for each other
+		// while missions retire, reads included.
+		{[]string{ScopeMissionsRun}, ScopeAgentsRun, true},
+		{[]string{ScopeMissionsRun}, ScopeAgentsRead, true},
+		{[]string{ScopeMissionsRead}, ScopeAgentsRead, true},
+		{[]string{ScopeMissionsRead}, ScopeAgentsRun, false},
+		{[]string{ScopeAgentsRun}, ScopeMissionsRun, true},
+		{[]string{ScopeAgentsRun}, ScopeMissionsRead, true},
+		{[]string{ScopeAgentsRead}, ScopeMissionsRun, false},
+		{[]string{ScopeAgentsRead}, ScopeMissionsApprove, false},
+		{[]string{ScopeAgentsRun}, ScopeMissionsApprove, false},
 	} {
 		if got := Grants(c.scopes, c.want); got != c.ok {
 			t.Errorf("Grants(%v, %s) = %v", c.scopes, c.want, got)

@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/actionctx"
+	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/missions"
@@ -637,6 +638,19 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 			status, rule, holdWhy = actionHeld, ruleGrant, "this agent's grant holds this change for a person"
 		case "refuse":
 			status, rule, holdWhy = actionRefused, ruleGrant, "this agent's grant refuses this change"
+		}
+	}
+	if status == actionRunning && why == "" {
+		// Paid ads: a budget raise past a fifth always needs a person, and
+		// a change that would put the brand's campaigns over the grant's
+		// spend caps waits for one.
+		adsRule, adsWhy, err := s.adsHold(ctx, a.WorkspaceID, r, parsed, g)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if adsWhy != "" {
+			status, rule, holdWhy = actionHeld, adsRule, adsWhy
 		}
 	}
 	if why != "" && status != actionRefused {
@@ -1345,4 +1359,107 @@ func (s *Server) decideActions(w http.ResponseWriter, r *http.Request) {
 	run(req.Approve, true)
 	run(req.Reject, false)
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+// ---- paid ads rules ----
+
+var (
+	adCampaignChange = regexp.MustCompile(`^/v1/workspaces/[^/]+/ads/campaigns/([0-9a-fA-F-]{36})(/resume)?/?$`)
+	// adBudgetRaiseMax is the largest raise of a campaign's daily budget
+	// an agent makes on its own: a fifth. More always needs a person.
+	adBudgetRaiseMax = 0.2
+)
+
+// adsHold decides the paid ads rules for an agent's change to a campaign
+// (PATCH .../ads/campaigns/{id} with a daily budget, or POST .../resume):
+// the rule and why it waits for a person, or "" to let it run. A pause
+// spends nothing and is never held here. The brand's total is what its
+// active campaigns would be budgeted a day after the change, in cents of
+// their accounts' currencies.
+func (s *Server) adsHold(ctx context.Context, ws string, r *http.Request, body map[string]any, g grantRule) (string, string, error) {
+	m := adCampaignChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/"))
+	if m == nil {
+		return "", "", nil
+	}
+	resume := m[2] != ""
+	if (resume && r.Method != http.MethodPost) || (!resume && r.Method != http.MethodPatch) {
+		return "", "", nil
+	}
+	var newBudget *int64
+	if !resume {
+		v, ok := body["daily_budget_micros"].(float64)
+		if !ok {
+			return "", "", nil
+		}
+		b := int64(v)
+		newBudget = &b
+	}
+	var current *int64
+	var brand *string
+	var status string
+	err := s.pool.QueryRow(ctx, `SELECT e.daily_budget_micros, e.status, COALESCE(e.brand_id, a.brand_id) FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+		WHERE e.workspace_id = $1 AND e.id = $2 AND e.level = 'campaign'`, ws, m[1]).Scan(&current, &status, &brand)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", nil // the handler answers the missing campaign
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if newBudget != nil {
+		switch {
+		case current == nil || *current <= 0:
+			return ruleAlwaysPerson, "setting a budget on a campaign that had none is a new paid commitment, so a person always approves it", nil
+		case float64(*newBudget) > float64(*current)*(1+adBudgetRaiseMax):
+			return ruleAlwaysPerson, fmt.Sprintf("raising a campaign's daily budget by more than a fifth (from %s to %s a day) always needs a person", micros(*current), micros(*newBudget)), nil
+		case *newBudget <= *current:
+			return "", "", nil // lowering spends less
+		}
+	}
+	if g.dailySpend == nil && g.monthSpend == nil {
+		return "", "", nil
+	}
+	// The brand's active campaigns' budgets a day after the change.
+	var others int64
+	if err := s.pool.QueryRow(ctx, `SELECT coalesce(sum(e.daily_budget_micros), 0) FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
+		WHERE e.workspace_id = $1 AND e.level = 'campaign' AND e.status = 'active' AND a.status = 'active' AND e.id <> $2
+		AND COALESCE(e.brand_id, a.brand_id) IS NOT DISTINCT FROM $3`, ws, m[1], brand).Scan(&others); err != nil {
+		return "", "", err
+	}
+	mine := int64(0)
+	if current != nil {
+		mine = *current
+	}
+	if newBudget != nil {
+		mine = *newBudget
+	}
+	dailyCents := (others + mine) / 10_000
+	if g.dailySpend != nil && dailyCents > *g.dailySpend {
+		return ruleSpendLimit, fmt.Sprintf("with this change the brand's campaigns would be budgeted $%.2f a day, over the grant's $%.2f, so it waits for a person", float64(dailyCents)/100, float64(*g.dailySpend)/100), nil
+	}
+	if g.monthSpend != nil {
+		// What the month has spent so far, plus the daily total for the
+		// rest of it (today included).
+		now := time.Now().UTC()
+		var spent int64
+		if err := s.pool.QueryRow(ctx, `SELECT coalesce(sum(amount_cents), 0) FROM spend_entries WHERE workspace_id = $1 AND channel = $2
+			AND occurred_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AND brand_id IS NOT DISTINCT FROM $3`, ws, adsync.Channel, brand).Scan(&spent); err != nil {
+			return "", "", err
+		}
+		monthEnd := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+		left := int64(monthEnd.Sub(now).Hours()/24) + 1
+		if projected := spent + dailyCents*left; projected > *g.monthSpend {
+			return ruleSpendLimit, fmt.Sprintf("with this change the brand's ads would come to about $%.2f this month ($%.2f spent, $%.2f a day for %d more days), over the grant's $%.2f, so it waits for a person",
+				float64(projected)/100, float64(spent)/100, float64(dailyCents)/100, left, float64(*g.monthSpend)/100), nil
+		}
+	}
+	return "", "", nil
+}
+
+// micros writes a money amount in micros as $12 or $12.50.
+func micros(v int64) string {
+	cents := v / 10_000
+	if cents%100 == 0 {
+		return fmt.Sprintf("$%d", cents/100)
+	}
+	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
 }

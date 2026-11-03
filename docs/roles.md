@@ -9,7 +9,7 @@ Everyone in a workspace has one role, and the role decides what they can do. Eve
 | **Member** | All the marketing work, and connecting tools. No settings, people, API tokens or audit log. Stored and sent in the API as `operator`. |
 | **Viewer** | Sees everything, changes nothing. |
 
-Change what Admin, Member or Viewer allows, or add roles of your own (a "Content writer" with only SEO and Social, say), under **Settings → Members → Roles**. Each role is a list of areas set to None, View or Edit, plus switches for actions that need their own say: sending email, posting to social accounts, approving missions and spending, the unsubscribe list, shared fields, webhooks, settings, API tokens, the audit log, inviting people, removing people and editing roles. A changed starting role can be reset to its defaults.
+Change what Admin, Member or Viewer allows, or add roles of your own (a "Content writer" with only SEO and Social, say), under **Settings → Members → Roles**. Each role is a list of areas set to None, View or Edit, plus switches for actions that need their own say: sending email, posting to social accounts, approving missions and spending, the unsubscribe list, shared fields, calling published query endpoints (`query.endpoints`, the one scope a reporting tool's token needs), webhooks, settings, API tokens, the audit log, inviting people, removing people and editing roles. A changed starting role can be reset to its defaults.
 
 ## The rules
 

@@ -107,6 +107,9 @@ function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: 
   const [description, setDescription] = useState("");
   const [events, setEvents] = useState<string[]>(["*"]);
   const [replyLabels, setReplyLabels] = useState("");
+  // A webhook per rule: rule events only for the rules picked.
+  const [rules, setRules] = useState<{ id: string; name: string }[]>([]);
+  const [ruleIDs, setRuleIDs] = useState<string[]>([]);
   const { byId } = useBrand(ws);
   const [error, setError] = useState("");
   const [secret, setSecret] = useState<{ url: string; secret: string; rotated?: boolean } | null>(null);
@@ -115,7 +118,11 @@ function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: 
     const [e, c] = await Promise.all([api.GET("/v1/brands/{brand}/webhooks", { params: { path: { brand: brandId } } }), api.GET("/v1/webhook-events")]);
     setEndpoints(e.data?.data ?? []);
     setCatalog(c.data?.data ?? []);
-  }, [ws]);
+    if (brandId) {
+      const r = await api.GET("/v1/brands/{brand}/rules", { params: { path: { brand: brandId } } });
+      setRules((r.data?.data ?? []).filter((x) => x.status !== "archived").map((x) => ({ id: x.id, name: x.name })));
+    }
+  }, [ws, brandId]);
 
   useEffect(() => {
     load();
@@ -123,13 +130,14 @@ function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: 
 
   async function create(e: FormEvent) {
     e.preventDefault();
-    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks", { params: { path: { brand: brandId } }, body: { url: url.trim(), description: description.trim(), events, categories: replyLabels ? replyLabels.split(",") : [] } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/webhooks", { params: { path: { brand: brandId } }, body: { url: url.trim(), description: description.trim(), events, categories: replyLabels ? replyLabels.split(",") : [], rule_ids: ruleIDs } });
     if (error) return setError(errorMessage(error));
     setError("");
     setSecret({ url: data!.url, secret: data!.secret });
     setUrl("");
     setDescription("");
     setEvents(["*"]);
+    setRuleIDs([]);
     setAdding(false);
     load();
   }
@@ -219,6 +227,20 @@ function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: 
               </select>
               <span className="block text-[12px] text-muted-foreground">Events about a labelled reply (such as inbox.classified) go only for these labels. Other events are not affected.</span>
             </label>
+            {rules.length > 0 && (
+              <fieldset className="space-y-1.5 text-sm">
+                <legend className="font-medium">Rules</legend>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {rules.map((r) => (
+                    <label key={r.id} className="flex items-center gap-1.5">
+                      <input type="checkbox" checked={ruleIDs.includes(r.id)} onChange={(e) => setRuleIDs(e.target.checked ? [...ruleIDs, r.id] : ruleIDs.filter((x) => x !== r.id))} />
+                      {r.name}
+                    </label>
+                  ))}
+                </div>
+                <span className="block text-[12px] text-muted-foreground">Pick rules to make this a webhook for them: events about a rule (such as rule.fired) go only for those. None picked is every rule. Other events are not affected.</span>
+              </fieldset>
+            )}
             <ErrorText>{error}</ErrorText>
             <div className="flex gap-2">
               <Button disabled={!url.trim() || events.length === 0}>Add endpoint</Button>
@@ -242,7 +264,7 @@ function WebhooksPage({ ws, canManage, open, onOpen }: { ws: string; canManage: 
           mobile={(e) => (
             <span className="block space-y-1">
               <span className="block break-all font-mono text-[12px]">{e.url}</span>
-              <span className="block text-[12px] text-muted-foreground">{[e.description, eventsLabel(e.events), labelsText(e.categories)].filter(Boolean).join(" · ")}</span>
+              <span className="block text-[12px] text-muted-foreground">{[e.description, eventsLabel(e.events), labelsText(e.categories), e.rule_ids.length ? `${e.rule_ids.length} rule${e.rule_ids.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</span>
               {endpointStatus(e)}
             </span>
           )}

@@ -45,7 +45,7 @@ var onboardingSteps = []onboardingStepDef{
 	{"website", "Connect your website", "One script on your pages and one set of DNS records, so this brand's visits, sign-ups and search show up from today.", "setup", "get_brand_dns", true},
 	{"connect", "Connect your tools", "Only what your first goal needs, such as analytics, Search Console or your CRM.", "connectors", "request_connection", true},
 	{"community", "Star and follow Outflare", "Outflare is free and open source, and built in public. A star helps other teams find it, Outflare on X has every release, and following the builder shows each feature the day it ships.", "get-started", "", true},
-	{"mission", "Start your first mission", "Say what you want in plain words; your AI drafts the plan for you to approve.", "missions", "plan_mission", true},
+	{"mission", "Start your first run", "Pick a playbook for your goal; Outflare's agent carries it out on your AI model, and every change waits for you unless you say otherwise.", "playbooks", "run_playbook", true},
 	{"team", "Invite your team", "Teammates share the same connections, context and inbox.", "members", "", false},
 }
 
@@ -149,7 +149,7 @@ func (s *Server) loadOnboarding(ctx context.Context, ws string) (onboardingView,
 				OR EXISTS (SELECT 1 FROM oauth_grants g JOIN api_tokens t ON t.id = g.api_token_id
 					WHERE g.workspace_id = $1 AND t.revoked_at IS NULL AND g.expires_at > now()),
 			EXISTS (SELECT 1 FROM integrations WHERE workspace_id = $1 AND connector = ANY($3)),
-			EXISTS (SELECT 1 FROM missions WHERE workspace_id = $1)`,
+			EXISTS (SELECT 1 FROM agent_runs WHERE workspace_id = $1) OR EXISTS (SELECT 1 FROM missions WHERE workspace_id = $1)`,
 		ws, models, tools,
 	).Scan(&brand, &team, &ai, &connected, &mission)
 	if err != nil {

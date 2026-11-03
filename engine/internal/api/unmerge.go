@@ -38,7 +38,7 @@ import (
 
 func (s *Server) routesUnmerge(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/merges", s.onBrand(auth.ScopeCustomersRead, s.listMerges))
-	mux.HandleFunc("POST /v1/brands/{brand}/merges/{merge}/undo", s.onBrand(auth.ScopeCustomersManage, s.undoMerge))
+	mux.HandleFunc("POST /v1/brands/{brand}/merges/{merge}/undo", s.onBrand(auth.ScopeCustomersManage, s.editsRecords(s.undoMerge)))
 }
 
 // ---- The ledger ----

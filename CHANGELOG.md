@@ -6,6 +6,65 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.81.0] - 2026-11-03
+
+### Added
+
+- Accounts: record every external account your brand's agent may act through (social profiles, community and review sites, partner platforms, sites with no API), how each signs in and what it depends on. Every use is tracked with its outcome, failures become incidents with an owner and a next try, and secrets live in a sealed vault that is never read back and that only a person can fill.
+- Findings: agents and people can record what they learned about a brand's marketing, with the evidence, how sure they are, where it holds and when to review it. The brand's context carries its active findings, so every agent working on the brand starts from what was learned.
+- Bulk edits: owners can change many people or companies at once (from a list, a saved query or by hand): set an owner or a field, add or remove tags, move them in or out of a static list, or archive them, after a preview and with undo for 7 days. Every change is in each record's own history.
+- Content: write posts and pages for a brand's website in Outflare, approve them, and publish them on your own WordPress or Ghost site, as drafts there or live. An agent can draft and publish too, within the approvals you set. Each item keeps the post it became, so edits update it rather than making a second one.
+- Extensions can set a quota that decides whether a workspace may add more brands, mailboxes, tracking domains or records, or send more email. Refused additions answer `402 quota_exceeded`; refused emails wait and try again. Self-hosted servers have no quota and nothing changes.
+- Every source's value of a field is now kept: a record shows what your CRM, enrichment and your own data each say, with **Use this** to pick one. A person's edit wins over the other sources for 180 days by default, then the best other value takes over, as a change in the record's history. Change the days per brand or per field (or set them to never), and **Pin** an edit to keep it for good.
+- Import your website into Knowledge: Outflare reads your site's pages and keeps each as an article that support answers use, updating them when you run it again. The support assistant also finds Slack answers by meaning, not just matching words, when you have an embedding model connected.
+- Outflare now manages campaigns on your own Google Ads and Meta accounts: pause or resume one, set its daily budget, or pause every campaign of a brand at once, from the Paid ads page, the API or MCP. Each change is read back from the platform. An agent's change goes through the action layer: a budget raise past a fifth always waits for you, and so does anything over its spend caps.
+- Published query endpoints: owners and admins can publish a saved query as an endpoint that a BI tool or script calls with a brand API token, with parameters, a row cap, a rate limit and every call logged.
+- Lists can now be built from a saved query: pick "A saved query" when making a smart list, and its members are the people in the query's `record_id` column, refreshed every 15 minutes (up to 50,000). If the query fails, the list keeps who it had and says why. Any list of people can also be saved as a static copy of who is in it now, from the list's menu ("Save a copy").
+- Metrics: live totals for every company and person, such as spend in the last 30 days, usage this week and last seen, also per product. Rules, journeys and smart lists can act on them. Turning metrics on fills them from your history without sending anything for the past.
+- A workspace setting lets only owners and admins edit people, companies and other records; everyone else can still see them. Imports and syncs keep running.
+- Smart lists keep their history and can hold companies: see who joined and left a list and when (also on each person's timeline), make a list of companies from their fields, events and product stage, and exclude a list of companies to leave out everyone who works there. Lists can now pick people by lifecycle stage per product.
+- The support assistant's Auto email replies now wait a few minutes you choose, so your team can stop one first, and hand-off topics send each handed-over conversation to the right person and team. Knowledge can learn answers from your past support replies, and imported websites are checked again every day.
+- Transactions: every payment, refund, chargeback and credit is now one row per brand, from your billing connectors (from when they connect) and from your own billing through the API, where the same id never counts twice. Amounts keep their currency and are converted to the brand's. List them per person or company, query them in Query, and get a webhook for each.
+
+### Changed
+
+- New `agents.read` and `agents.run` scopes cover Outflare's agent: its runs, the playbooks it runs and writing to a run. Tokens and roles with the mission scopes keep working as before while missions are retired. Extensions can start agent runs for the caller.
+- The analytics summary answers people and tokens kept to some brands with their brands' sites, like the other analytics reports.
+- Analytics → Channels can count only people who signed in on your own product, leaving out browsers known only from a click on an email link, and each credited visit now says whether it was tied to the person by a sign-in or an email click.
+- On Outflare Cloud, the link and PR autopilot pages give your brand's agent a link building or press coverage objective instead of starting a separate autopilot, and show where each objective stands; autopilots already running keep going.
+- The link and PR autopilot pages open an autopilot's agent run on the Agents page, where you write to it, pause or stop it; autopilots started earlier still open their mission.
+- Channels: Outflare now lists every channel an agent can work on, with what each needs connected, the actions an agent may take and their approval category, how results are measured, and whether the channel is ready for your workspace or brand, so an agent starts on what works today and you see what to connect next.
+- Coverage now records a partner's approved post or page as a placement, and keeps a sponsorship's placement in step with its deliverable: agreed when the deliverable is added, live when you accept it.
+- Coverage now fills itself: a link your outreach wins, press coverage you confirm and a review profile Outflare finds each become a live placement of its publisher, with the evidence and the date, so where your brand appears is one record across link building, PR and reviews.
+- After you approve DNS records in Cloudflare, the card shows Outflare checking for them with a spinner and moves on by itself, instead of asking you to press Check now. A just-approved tracking domain no longer shows the record, the ways to add it again or an old error while it's being looked for.
+- Extensions can add their own kinds of alert, shown in Settings → Alerts and emailed, posted to Slack and sent as webhooks like the engine's own.
+- Edit lifecycle stages and the moves between them in the app: rename, add and remove stages, and change which event, usage or time without usage moves a company or person from one stage to another. The Products page's buttons now show only to people who can change the catalog.
+- Link prospects and backlinks are tables in Query, so you or an agent can answer questions like "live links by method this quarter" or "lost links from strong sites" in SQL, for the brands you can see.
+- When a link you won is removed from a page that is still up, the page goes back on your link prospects to win it back, with when the link was live, and its pitch says the page used to link to you. Nothing is sent until you pitch it.
+- Create another workspace from the app: the workspace menu at the top of the sidebar (and the command palette) now has "New workspace", and the menu lists all your workspaces even when you only have one, so you can switch between them in one place.
+- Campaigns on Microsoft Advertising, LinkedIn and TikTok can now be paused, resumed and re-budgeted from Outflare too, as Google Ads and Meta campaigns can, by you or by an agent within its grants.
+- Extensions can limit how many website and product events a workspace stores: past a quota, the event APIs and the website snippet answer 402 quota_exceeded and store nothing. Self-hosted servers have no quota and store everything.
+- Missions are being retired for agent runs on the action layer: nothing starts a new one. Starting a playbook, the Get started step and automations run as agent runs, the web app and MCP no longer create missions, and an AI app connected with OAuth now has each change held for your approval on the Agents page instead of needing a mission. Missions made before keep working until they end.
+- Trying an event rule replays up to a year of events when the ClickHouse event store is set up, not only what Postgres keeps.
+- See which pages of any site get the most search traffic: on Link building's top pages, Read search traffic adds each page's visits a month, keywords and top search from your Ahrefs or DataForSEO connection, so you can pick the best page to pitch. It's a paid read that runs only when you ask.
+- Website chat: visitors can say whether the support assistant's answer helped. "No" hands the chat to your team right away, and the chat shows when the assistant is typing a reply.
+- The support assistant's report in Support settings now shows how often it answered, left conversations to your team, had drafts sent as written and was rated helpful, against the 30 days before, with the commonest reasons it handed off. You're alerted once a day when answers it found wait for review, and the digest has a Support section.
+- Support settings say why the assistant's Auto mode is off: on a self-hosted server it is part of Outflare Cloud, and on Outflare Cloud staff can turn it off for one workspace.
+- Give a rule its own webhook: pick rules on a webhook endpoint, and events about a rule (such as rule.fired) reach it only for those rules.
+
+### Fixed
+
+- Paid ads: campaigns, keywords and search terms now include today's numbers for ad accounts in time zones ahead of UTC, such as Europe, late in the UTC day.
+- Analytics syncs are scheduled again when a connected analytics account has never synced: one such account stopped the scheduler from queueing syncs for every analytics connection on the server.
+- The one-click DNS approval ("Approve in Cloudflare") now finds a domain's DNS provider on hosted installs whose resolver didn't answer cleanly for a subdomain, where it answered "lookup failed" and offered only the API connection.
+- "Approve in Cloudflare" now appears for subdomains, such as a tracking domain, on servers whose DNS resolver answers a missing subdomain record with an error instead of "not found".
+- Connecting Google Calendar no longer fails with "refused the API key (HTTP 403)" right after signing in with Google.
+- Static lists now open as static lists, with their member count and a Remove button for each person, instead of as a smart list stuck on "filling". The owner and other member fields show the member's name on a record's page, timeline and history instead of an id.
+- The Tolt import reads more of Tolt's commission flows: percentage rewards however Tolt words them, and the "Created date is within N years" condition. A flow it still can't read is listed with its settings, so it can be added by hand or taught to the import.
+- The Tolt import now reads commission flows as Tolt's API sends them, so a program's flows come over with their conditions, approval and partner overrides. Tolt's "number of customer transactions" counts the payment itself, and the import adjusts for that, so a "first payment" flow still pays only on the first payment. Paused flows stay behind.
+- A verified tracking domain no longer flips to "not pointing here" because of one stale DNS answer: it stays in use unless its record has been missing for over an hour. Its HTTPS certificate is also checked every two minutes at first, so the page shows it sooner.
+- A tracking domain no longer stays on "Setting up HTTPS" for good when its certificate checks stop: "Check now" and a server restart start them again.
+
 ## [0.80.0] - 2026-11-02
 
 ### Changed

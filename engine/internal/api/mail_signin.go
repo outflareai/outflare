@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"net/http"
 	"strings"
 
@@ -110,6 +111,12 @@ func (s *Server) finishMailSignIn(ctx context.Context, st integrationState, def 
 	}
 	row := mailbox.Row{Email: email, DisplayName: account.Name, Provider: ms.MailProvider(), SMTPUsername: email, IMAPUsername: email,
 		Pool: st.Pool, IntegrationID: &id}
+	// The sign-in stays connected, but the mailbox isn't added while the
+	// workspace may have no more (package quota): the reason is shown, and
+	// signing in again adds it once it may.
+	if err := quota.Check(ctx, s.quota, s.log, st.Workspace, quota.Mailboxes, 1); err != nil {
+		return id, err.Error(), nil
+	}
 	res, err := s.importRows(ctx, a, "oauth", []mailbox.Row{row}, nil)
 	if err != nil {
 		return "", "", err

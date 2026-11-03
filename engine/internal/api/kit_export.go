@@ -434,6 +434,11 @@ func (x *exporter) kit(in kitExportInput) (playbooks.Kit, error) {
 	k.Summary = cut(k.Summary, 200)
 	for _, l := range x.lists {
 		kl := playbooks.KitSmartList{Key: x.lKeys[l.ID], Name: l.Name, Description: l.Description, Kind: l.Kind}
+		if l.Kind == smartlists.KindQuery {
+			// Its saved query is the workspace's own: the kit carries an
+			// empty list for the journey to use.
+			kl.Kind = smartlists.KindStatic
+		}
 		if l.Kind == smartlists.KindSmart {
 			kl.Rules = generic(l.Rules).([]any)
 			if l.Match != "all" {

@@ -10,6 +10,7 @@ import { nameItem, useCatalog } from "@/lib/records";
 import { PickBrand } from "@/components/pick-brand";
 import { insertAt, SqlEditor, type SqlSchema } from "@/components/sql-editor";
 import { defaultChart, numericColumns, QueryChart, type ChartSpec, type ChartType } from "@/components/query-chart";
+import { EndpointSheet, EndpointsList, PublishSheet, useEndpoints } from "./QueryEndpoints";
 
 // Query Studio (plans/brands/README.md, "Data pages"): SQL over one brand's
 // data. The tables and the brand's record types on the left, an editor
@@ -25,7 +26,7 @@ type Table = Schemas["QueryTable"];
 const rowsShown = 1000;
 const sameChart = (a: ChartSpec | null | undefined, b: ChartSpec | null | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-export function Query({ ws, canManage, open, onOpen }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void }) {
+export function Query({ ws, canManage, canPublish = false, open, onOpen }: { ws: string; canManage: boolean; canPublish?: boolean; open: string; onOpen: (item: string) => void }) {
   const { brand, active } = useBrand(ws);
   useEffect(() => nameItem("query", "Query"), []);
   if (!brand) {
@@ -36,10 +37,13 @@ export function Query({ ws, canManage, open, onOpen }: { ws: string; canManage: 
       </div>
     );
   }
-  return <Studio key={brand.id} ws={ws} brand={brand.id} canManage={canManage} open={open} onOpen={onOpen} />;
+  return <Studio key={brand.id} ws={ws} brand={brand.id} canManage={canManage} canPublish={canPublish} open={open} onOpen={onOpen} />;
 }
 
-function Studio({ ws, brand, canManage, open, onOpen }: { ws: string; brand: string; canManage: boolean; open: string; onOpen: (item: string) => void }) {
+function Studio({ ws, brand, canManage, canPublish, open, onOpen }: { ws: string; brand: string; canManage: boolean; canPublish: boolean; open: string; onOpen: (item: string) => void }) {
+  const endpoints = useEndpoints(brand);
+  const [publishing, setPublishing] = useState(false);
+  const [endpoint, setEndpoint] = useState<Schemas["QueryEndpoint"] | null>(null);
   const [tables, setTables] = useState<Table[]>([]);
   const [saved, setSaved] = useState<Saved[] | null>(null);
   const [current, setCurrent] = useState<Saved | null>(null);
@@ -243,6 +247,7 @@ function Studio({ ws, brand, canManage, open, onOpen }: { ws: string; brand: str
                   { label: "Rename", onClick: rename },
                   current.mine && { label: current.visibility === "brand" ? "Make private" : "Share with the brand", onClick: () => patch({ visibility: current.visibility === "brand" ? "private" : "brand" }, current.visibility === "brand" ? "Only you see it now." : "Shared with everyone who can query this brand.") },
                   { label: "Save as new query", onClick: saveAs },
+                  canPublish && !current.archived_at && { label: "Publish as an endpoint", onClick: () => setPublishing(true) },
                   { label: "Archive", onClick: archive, danger: true },
                 ]}
               />
@@ -254,6 +259,7 @@ function Studio({ ws, brand, canManage, open, onOpen }: { ws: string; brand: str
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="space-y-4">
           <SavedList saved={saved} current={current?.id} onPick={(q) => { openSaved(q); onOpen(q.id); track("ui.query_saved_opened", { shared: q.visibility === "brand", mine: q.mine }); }} />
+          <EndpointsList list={endpoints.list} onPick={setEndpoint} />
           <Tables tables={tables} onInsert={insert} />
           <CatalogTypes ws={ws} brand={brand} tables={tables} onInsert={insert} />
         </aside>
@@ -287,6 +293,10 @@ function Studio({ ws, brand, canManage, open, onOpen }: { ws: string; brand: str
           )}
         </main>
       </div>
+      {publishing && current && (
+        <PublishSheet brand={brand} query={current} onClose={() => setPublishing(false)} onDone={(e) => { setPublishing(false); endpoints.load(); setEndpoint(e); }} />
+      )}
+      {endpoint && <EndpointSheet brand={brand} endpoint={endpoint} canPublish={canPublish} onClose={() => setEndpoint(null)} onChanged={endpoints.load} />}
     </div>
   );
 }

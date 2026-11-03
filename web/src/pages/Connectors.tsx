@@ -41,6 +41,7 @@ const categories: { id: ConnectorCategory; label: string; help: string }[] = [
   { id: "partners", label: "Partner programs", help: "Move a referral or affiliate program over from Tolt: partners, codes, referred customers and commissions. Read only; run it from Partners." },
   { id: "ads", label: "Ad platforms", help: "Read spend, clicks and platform-reported conversions from your own ad accounts. Read only; see them under Paid ads." },
   { id: "social", label: "Social", help: "Find posts your brand can help with and reply from the brand's own account, through your own app. Set up under Social." },
+  { id: "cms", label: "Website CMS", help: "Publish posts and pages written in Outflare on your own site: WordPress, Ghost. Drafts for review, or live." },
   { id: "crm", label: "CRM", help: "Send interested replies and meetings to your CRM." },
   { id: "calendar", label: "Calendars", help: "Count meetings booked from outreach." },
   { id: "dns", label: "DNS", help: "Add the records Outflare needs in one click: site verification, SPF, DKIM and DMARC." },

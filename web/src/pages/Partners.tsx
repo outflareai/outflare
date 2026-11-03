@@ -1175,6 +1175,7 @@ const importReasons: Record<string, string> = {
   flow_approval_unsupported: "a flow whose approval Outflare can't read yet: add it on the Flows tab",
   flow_custom_rate_unsupported: "a flow with a custom rate Outflare can't read yet: add it on the Flows tab",
   flow_invalid: "a flow Outflare can't accept as it is: add it on the Flows tab",
+  flow_paused: "a flow that's paused in Tolt, so it didn't come over",
   groups_unavailable: "Tolt didn't list groups for this account, so none came over",
   flows_unavailable: "Tolt didn't list flows for this account, so none came over: add them on the Flows tab",
   custom_rate_partner_missing: "a flow's custom rate for a partner who didn't come over (the flow came over without it)",

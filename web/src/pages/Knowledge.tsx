@@ -11,6 +11,8 @@ import { BrandBadge } from "@/components/brand-badge";
 import { Markdown, MarkdownEditor } from "@/components/markdown-editor";
 import { KnowledgeAsk } from "@/components/knowledge-ask";
 import { KnowledgeReview } from "@/components/knowledge-review";
+import { KnowledgeWebsiteImportPanel } from "@/components/knowledge-website-import";
+import { LearnFromReplies } from "@/components/knowledge-learn-replies";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -76,6 +78,7 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
   const [view, setView] = useState<View>({ kind: "overview" });
   const [peek, setPeek] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  const [importing, setImporting] = useState(false);
   // What a new item starts from, while the editor is open on "new"; gap is
   // the unanswered question it answers, set aside once it is saved.
   const [draft, setDraft] = useState<Draft>({ kind: "article", title: "", body: "", folder: null });
@@ -194,6 +197,7 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
         action={
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => setTesting(true)}><Icon name="ai" className="size-3.5" /> Test an answer</Button>
+            <Button variant="ghost" onClick={() => setImporting(true)}><Icon name="seo" className="size-3.5" /> Import website</Button>
             {canManage && <NewMenu onStart={start} />}
           </div>
         }
@@ -315,6 +319,18 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
           onChanged={refresh}
         />
       )}
+
+      <Sheet open={importing} onOpenChange={setImporting}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetHeader>
+            <SheetTitle>Import your website</SheetTitle>
+            <SheetDescription>Turn your website's pages into knowledge, so answers can use what's already on your site.</SheetDescription>
+          </SheetHeader>
+          <div className="px-4 pb-6">
+            <KnowledgeWebsiteImportPanel ws={ws} canManage={canManage} onDone={refresh} />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Sheet open={testing} onOpenChange={setTesting}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
@@ -848,6 +864,7 @@ function Gaps({ ws, canManage, tick, onWrite, onChanged, onTest }: { ws: string;
 
   return (
     <div className="space-y-8">
+      <LearnFromReplies ws={ws} canManage={canManage} onDone={onChanged} />
       <KnowledgeReview ws={ws} canManage={canManage} tick={tick} onChanged={onChanged} />
       <section className="space-y-3">
         <SectionTitle

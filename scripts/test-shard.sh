@@ -4,13 +4,19 @@
 # package's tests (the slowest package by far) by name; "rest" runs every
 # other package. Every test runs in exactly one part.
 #
-#   scripts/test-shard.sh api 1 2
+#   scripts/test-shard.sh api 1 3
 #   scripts/test-shard.sh rest
 #   CHANGED="$(git diff --name-only main...)" scripts/test-shard.sh light
+#   CHANGED=... scripts/test-shard.sh light 1 2
 #
 # "light" is a pull request's check (the merge queue's batch runs every
 # part): the packages holding the files in $CHANGED, the packages that import
-# them, and the bring-your-own-keys scan.
+# them, and the bring-your-own-keys scan. The API package, the slowest by
+# far and an importer of nearly everything, is in it only when api/ or the
+# package itself changed: on 2026-11-01 it made the light part take 15
+# minutes for most pull requests, for failures the batch finds anyway.
+# "light i of n" splits it: shard 1 runs the other packages and its share of
+# the API tests, the rest only their share.
 #
 # RACE (default -race) is the race detector flag. CI runs the race detector
 # nightly on main and leaves it off elsewhere: it makes the tests two to three
@@ -70,7 +76,7 @@ split_db() {
 	fi
 }
 
-case "${1:?usage: scripts/test-shard.sh api <i> <n> | rest | light}" in
+case "${1:?usage: scripts/test-shard.sh api <i> <n> | rest | light [<i> <n>]}" in
 api)
 	i="${2:?shard number}"
 	n="${3:?shard count}"
@@ -117,10 +123,27 @@ light)
 	importers=$(go list -f '{{.ImportPath}}{{range .Imports}} {{.}}{{end}}{{range .TestImports}} {{.}}{{end}}{{range .XTestImports}} {{.}}{{end}}' ./... |
 		awk -v c="$changed" 'BEGIN { n = split(c, a, "\n"); for (k = 1; k <= n; k++) want[a[k]] = 1 } { for (i = 2; i <= NF; i++) if (want[$i]) { print $1; next } }')
 	pkgs=$(printf '%s\n%s\n%s\n' "$changed" "$importers" "$mod/engine/internal/ownkeys" | sed '/^$/d' | sort -u | sed "s|^$mod|.|")
-	echo "Testing the changed packages and their importers:" >&2
-	echo "$pkgs" >&2
-	# shellcheck disable=SC2086
-	split_db $pkgs
+	# The API package only when it changed itself (api/ is its data).
+	if ! printf '%s\n' "$changed" | grep -qxF "$mod/engine/internal/api"; then
+		pkgs=$(printf '%s\n' "$pkgs" | grep -vxF "$api" || true)
+	fi
+	i="${2:-1}"
+	n="${3:-1}"
+	others=$(printf '%s\n' "$pkgs" | grep -vxF "$api" || true)
+	if printf '%s\n' "$pkgs" | grep -qxF "$api"; then
+		tests=$(go test $race -list '.*' "$api" | grep -E '^(Test|Example|Fuzz)' | sort |
+			awk -v i="$i" -v n="$n" '(NR - 1) % n == i - 1' | paste -sd '|' -)
+		echo "Testing the API package (shard $i of $n)" >&2
+		run_tests -run "^($tests)\$" "$api"
+	fi
+	if [ "$i" = 1 ] && [ -n "$others" ]; then
+		echo "Testing the changed packages and their importers:" >&2
+		echo "$others" >&2
+		# shellcheck disable=SC2086
+		split_db $others
+	elif [ -z "$others" ] && ! printf '%s\n' "$pkgs" | grep -qxF "$api"; then
+		echo "No Go package changed." >&2
+	fi
 	;;
 *)
 	echo "unknown part: $1" >&2

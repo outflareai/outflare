@@ -14,7 +14,10 @@ import (
 // Google reads a Google Calendar with incremental sync tokens.
 type Google struct{}
 
-const googleAPI = "https://www.googleapis.com/calendar/v3"
+const (
+	googleAPI  = "https://www.googleapis.com/calendar/v3"
+	googleUser = "https://openidconnect.googleapis.com"
+)
 
 func (Google) Definition() c.Definition {
 	return c.Definition{
@@ -33,17 +36,25 @@ func (Google) Definition() c.Definition {
 	}
 }
 
+// Test reads one event from the primary calendar and the signed-in email.
+// The calendar.events.readonly scope allows listing events but not reading
+// the calendar itself (GET /calendars/primary answers 403), so the time
+// zone comes from the events list.
 func (g Google) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
+	var me struct {
+		Email string `json:"email"`
+	}
+	if _, err := doJSON(ctx, cl, "Google", bearer(http.MethodGet, cl.Base("google.userinfo", googleUser)+"/v1/userinfo", creds["access_token"], nil), &me); err != nil {
+		return c.Account{}, err
+	}
 	var cal struct {
-		ID       string `json:"id"`
-		Summary  string `json:"summary"`
 		TimeZone string `json:"timeZone"`
 	}
 	base := cl.Base("google_calendar", googleAPI)
-	if _, err := doJSON(ctx, cl, "Google Calendar", bearer(http.MethodGet, base+"/calendars/primary", creds["access_token"], nil), &cal); err != nil {
+	if _, err := doJSON(ctx, cl, "Google Calendar", bearer(http.MethodGet, base+"/calendars/primary/events?maxResults=1", creds["access_token"], nil), &cal); err != nil {
 		return c.Account{}, err
 	}
-	return c.Account{ID: cal.ID, Name: cal.Summary, Email: cal.ID, Details: map[string]string{"time_zone": cal.TimeZone}}, nil
+	return c.Account{ID: me.Email, Name: me.Email, Email: me.Email, Details: map[string]string{"time_zone": cal.TimeZone}}, nil
 }
 
 type googleCursor struct {

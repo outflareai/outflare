@@ -12,8 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
@@ -126,6 +128,12 @@ func fileKnowledgeSuggestion(ctx context.Context, tx pgx.Tx, s knowledgeSuggesti
 		return "", false, err
 	}
 	metrics.KnowledgeSuggestion(s.Source, "created")
+	// Tell the team once a day that answers are waiting for review.
+	if _, err := alerts.Raise(ctx, tx, alerts.Alert{WorkspaceID: s.WorkspaceID, BrandID: s.BrandID, Kind: alertReviewWaiting,
+		DedupeKey: "knowledge-review:" + time.Now().UTC().Format(time.DateOnly), TargetType: "knowledge_suggestion", TargetID: id,
+		Data: map[string]any{"kind": s.Kind, "source": s.Source}}); err != nil {
+		return "", false, err
+	}
 	actor := "system"
 	if s.CreatedBy != "" {
 		actor = "agent"
@@ -519,4 +527,35 @@ func (s *Server) rejectKnowledgeSuggestion(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// alertReviewWaiting tells the team that suggested answers or conflicts
+// wait for review in Knowledge: once a day at most, when the first one of
+// the day is filed.
+const alertReviewWaiting = "knowledge.review_waiting"
+
+func init() {
+	alerts.Register(alerts.Kind{ID: alertReviewWaiting, Title: "Answers waiting for review",
+		Description: "Outflare found answers to questions your knowledge couldn't answer, or articles that disagree, and they wait for a person to approve them. At most once a day; it goes to the owners and admins.",
+		Scope:       auth.ScopeWorkspaceRead, Describe: describeReviewWaiting})
+}
+
+func describeReviewWaiting(ctx context.Context, q jobs.Querier, a alerts.Row) (alerts.View, error) {
+	var answers, conflicts int
+	if err := q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE kind = 'answer'), count(*) FILTER (WHERE kind = 'conflict')
+		FROM knowledge_suggestions WHERE workspace_id = $1 AND status = 'pending'`, a.WorkspaceID).Scan(&answers, &conflicts); err != nil {
+		return alerts.View{}, err
+	}
+	v := alerts.View{Path: "knowledge", Title: "Answers are waiting for review"}
+	switch {
+	case answers > 0 && conflicts > 0:
+		v.Text = itoa(answers) + " suggested answers and " + itoa(conflicts) + " conflicts to settle in Knowledge. Approved answers are used by support from then on."
+	case conflicts > 0:
+		v.Title, v.Text = "Articles disagree", itoa(conflicts)+" conflicts to settle in Knowledge, so answers don't say two different things."
+	case answers > 0:
+		v.Text = itoa(answers) + " suggested answers in Knowledge. Approved answers are used by support from then on."
+	default:
+		v.Title, v.Text = "Nothing waiting for review", "Someone has already gone through the suggestions in Knowledge."
+	}
+	return v, nil
 }

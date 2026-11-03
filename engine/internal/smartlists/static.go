@@ -14,7 +14,9 @@ import (
 // Kinds of list. A smart list fills itself from its rules; a static list
 // holds the people someone, the API or a journey step puts in it.
 const (
-	KindSmart  = "smart"
+	KindSmart = "smart"
+	// KindQuery is a list whose members are a saved query's records.
+	KindQuery  = "query"
 	KindStatic = "static"
 )
 
@@ -103,6 +105,11 @@ func staticChanged(ctx context.Context, tx pgx.Tx, ws, listID, on string, ids []
 	}
 	if len(ids) == 0 {
 		return c, nil
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO smart_list_changes (workspace_id, brand_id, list_id, record_id, change)
+		SELECT $1, COALESCE(l.brand_id, outflare_first_brand($1)), l.id, x::uuid, $3 FROM smart_lists l, unnest($4::text[]) x
+		WHERE l.workspace_id = $1 AND l.id = $2`, ws, listID, on, ids); err != nil {
+		return c, err
 	}
 	watched, err := customers.ListWatched(ctx, tx, ws, listID)
 	if err != nil || !watched {

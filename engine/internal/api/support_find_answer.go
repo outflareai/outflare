@@ -11,12 +11,14 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/crawl"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -35,8 +37,12 @@ const (
 	findPages   = 6
 	findThreads = 6
 	// How far back Slack is read, and how many messages per channel.
-	slackLookback = 180 * 24 * time.Hour
-	slackPerChan  = 300
+	slackLookback = 365 * 24 * time.Hour
+	slackPerChan  = 500
+	// Threads ranked by meaning at most, and how close one must be to the
+	// question (cosine of unit vectors) to count without a shared word.
+	slackMeaningMax  = 200
+	slackMeaningNear = 0.35
 )
 
 // Paths most sites answer customers' questions on, tried after the
@@ -234,7 +240,7 @@ func (s *Server) findAnswer(ctx context.Context, ws string, brand *string, test 
 		}
 	}
 	if src.Slack != nil && len(src.Channels) > 0 {
-		threads, err := s.slackSources(ctx, ws, *src.Slack, src.Channels, ts)
+		threads, err := s.slackSources(ctx, ws, *src.Slack, src.Channels, question, ts)
 		if err != nil {
 			metrics.KnowledgeAnswerSearch("slack", "error", time.Since(start))
 			track.Fail(ctx, s.log, ev, "connector_"+connectors.KindOf(err), err)
@@ -335,7 +341,7 @@ func (s *Server) websiteSources(ctx context.Context, ws string, brand *string, t
 
 // slackSources reads the chosen channels and keeps the threads that match
 // the question best, people's messages only.
-func (s *Server) slackSources(ctx context.Context, ws, integration string, channels []connectors.Channel, ts []string) ([]answerSource, error) {
+func (s *Server) slackSources(ctx context.Context, ws, integration string, channels []connectors.Channel, question string, ts []string) ([]answerSource, error) {
 	o, err := s.integrations.Open(ctx, s.pool, ws, integration)
 	if err != nil {
 		return nil, err
@@ -347,7 +353,8 @@ func (s *Server) slackSources(ctx context.Context, ws, integration string, chann
 	type scored struct {
 		src   answerSource
 		msg   connectors.Message
-		score int
+		hits  int
+		score float64
 	}
 	var all []scored
 	since := time.Now().Add(-slackLookback)
@@ -369,11 +376,34 @@ func (s *Server) slackSources(ctx context.Context, ws, integration string, chann
 				}
 			}
 			text := b.String()
-			if sc := termHits(text, ts); sc > 0 {
-				all = append(all, scored{answerSource{Title: "#" + ch.Name, Text: truncate(text, 3000)}, m, sc})
+			if strings.TrimSpace(text) == "" {
+				continue
 			}
+			all = append(all, scored{src: answerSource{Title: "#" + ch.Name, Text: truncate(text, 3000)}, msg: m, hits: termHits(text, ts)})
 		}
 	}
+	// By meaning when the workspace can make embeddings: threads that
+	// answer in other words count too. Otherwise by shared words only.
+	byMeaning := s.rankByMeaning(ctx, ws, question, func(n int) []string {
+		// The threads sharing the most words first, then the newest.
+		sort.SliceStable(all, func(i, j int) bool { return all[i].hits > all[j].hits })
+		if len(all) > n {
+			all = all[:n]
+		}
+		texts := make([]string, len(all))
+		for i, a := range all {
+			texts[i] = a.src.Text
+		}
+		return texts
+	}, func(i int, near float64) { all[i].score = near })
+	kept := all[:0]
+	for _, a := range all {
+		if a.hits > 0 || byMeaning && a.score >= slackMeaningNear {
+			a.score += 0.05 * float64(a.hits)
+			kept = append(kept, a)
+		}
+	}
+	all = kept
 	sort.SliceStable(all, func(i, j int) bool { return all[i].score > all[j].score })
 	var out []answerSource
 	for _, a := range all {
@@ -434,4 +464,52 @@ func (s *Server) answerFromSources(ctx context.Context, ai aiChoice, ws string, 
 		return err
 	})
 	return added, err
+}
+
+// rankByMeaning scores texts by how close they are in meaning to q, with
+// the workspace's own embedding model: pick gives up to slackMeaningMax
+// texts, set takes each one's closeness. False when the workspace has no
+// embedding model, turned meaning-based search off, or the call failed;
+// then nothing was set.
+func (s *Server) rankByMeaning(ctx context.Context, ws, q string, pick func(n int) []string, set func(i int, near float64)) bool {
+	if on, err := s.semanticEnabled(ctx, s.pool, ws); err != nil || !on {
+		return false
+	}
+	c, cfg, err := s.embedder(ctx, ws)
+	if err != nil {
+		return false
+	}
+	qv, err := s.queryVector(ctx, ws, c, cfg, q)
+	if err != nil {
+		return false
+	}
+	texts := pick(slackMeaningMax)
+	runes := 0
+	for _, t := range texts {
+		runes += utf8.RuneCountInString(t)
+	}
+	if err := s.checkAIBudget(ctx, ws, c, estimateCents(c.Price, runes)); err != nil {
+		return false
+	}
+	batch := c.Provider.EmbedBatch()
+	for start := 0; start < len(texts); start += batch {
+		end := min(start+batch, len(texts))
+		vecs, u, err := llm.Embed(ctx, cfg, texts[start:end])
+		if serr := recordAISpend(ctx, s.pool, c, ws, nil, nil, u, "", "Searching Slack for a support answer"); serr != nil {
+			s.log.Error("slack meaning spend", "err", serr)
+		}
+		if err != nil {
+			track.Fail(ctx, s.log, track.Event{Name: "knowledge.answer_search_failed", WorkspaceID: ws, ActorType: "system", Surface: "job",
+				Props: map[string]any{"source": "slack", "step": "embed"}}, aiErrorCode(err), err)
+			return false
+		}
+		for i, v := range vecs {
+			var dot float64
+			for k := range min(len(v), len(qv)) {
+				dot += float64(v[k]) * float64(qv[k])
+			}
+			set(start+i, dot)
+		}
+	}
+	return true
 }

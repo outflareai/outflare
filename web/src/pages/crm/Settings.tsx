@@ -669,6 +669,9 @@ function AttributeEditor({
   const [label, setLabel] = useState(attribute.label);
   const [description, setDescription] = useState(attribute.description);
   const [archived, setArchived] = useState(attribute.archived);
+  // How long a person's edit wins over other sources: "" for the brand's
+  // setting, 0 for forever (docs/customers.md, "Where a value comes from").
+  const [days, setDays] = useState(attribute.manual_edit_days === null ? "" : String(attribute.manual_edit_days));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(e: FormEvent) {
@@ -681,7 +684,7 @@ function AttributeEditor({
         "/v1/workspaces/{ws}/catalog/types/{type}/fields/{field}",
         {
           params: { path: { ws, type, field: attribute.key } },
-          body: { label: label.trim(), description, archived },
+          body: { label: label.trim(), description, archived, manual_edit_days: days === "" ? null : Number(days) },
         },
       );
       if (error) {
@@ -727,6 +730,19 @@ function AttributeEditor({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </label>
+          <label className="block text-sm">
+            A person's edit wins over other sources for
+            <select className={`${field} mt-1 w-full`} value={days} onChange={(e) => setDays(e.target.value)}>
+              <option value="">The brand's setting</option>
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="180">180 days</option>
+              <option value="365">1 year</option>
+              <option value="0">Forever</option>
+              {days !== "" && !["0", "30", "90", "180", "365"].includes(days) && <option value={days}>{days} days</option>}
+            </select>
+            <span className="mt-1 block text-xs text-muted-foreground">After it, the value your CRM or enrichment gives takes over, unless the edit is pinned.</span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input

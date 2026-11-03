@@ -39,6 +39,15 @@
   .send { background: var(--accent); color: #fff; border: 0; border-radius: 8px; height: 40px; padding: 0 14px; cursor: pointer; font-weight: 600; }
   .send:disabled { opacity: .5; cursor: default; }
   .error { color: #b91c1c; font-size: 12px; }
+  .rate { align-self: flex-start; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: -2px 4px 2px; }
+  .rate button { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; cursor: pointer; color: inherit; font-size: 12px; }
+  .rate button:hover { background: var(--soft); }
+  .typing { align-self: flex-start; background: var(--soft); border-radius: 16px; border-top-left-radius: 4px; padding: 10px 12px; display: flex; gap: 4px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); opacity: .4; animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; }
+  .typing i:nth-child(3) { animation-delay: .4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .25; } 40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .typing i { animation: none; opacity: .6; } }
   .foot { text-align: center; font-size: 11px; color: var(--muted); padding: 0 0 8px; }
   [hidden] { display: none !important; }
 </style>
@@ -105,9 +114,55 @@
     el.className = "msg " + m.from;
     el.textContent = m.body;
     log.appendChild(el);
+    if (m.assistant) rate(m);
     if (m.created_at > last) last = m.created_at;
     log.scrollTop = log.scrollHeight;
     $("search").hidden = true;
+  }
+
+  // rate asks whether an answer from the assistant helped. "No" hands the
+  // chat to the team, which says so in the chat.
+  function rate(m) {
+    var box = document.createElement("div");
+    box.className = "rate";
+    if (m.feedback) {
+      box.textContent = m.feedback === "helpful" ? "Thanks for letting us know." : "Thanks. Someone from the team will reply.";
+      $("log").appendChild(box);
+      return;
+    }
+    var label = document.createElement("span");
+    label.textContent = "Did this help?";
+    box.appendChild(label);
+    [["Yes", true], ["No", false]].forEach(function (b) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = b[0];
+      btn.addEventListener("click", function () {
+        box.textContent = "…";
+        call("POST", "/messages/" + m.id + "/feedback", { helpful: b[1] }).then(function () {
+          box.textContent = b[1] ? "Thanks for letting us know." : "Thanks. Someone from the team will reply.";
+          if (!b[1]) poll();
+        }).catch(function () { box.textContent = ""; });
+      });
+      box.appendChild(btn);
+    });
+    $("log").appendChild(box);
+  }
+
+  // typing shows that the assistant is writing a reply.
+  var dots = null;
+  function typing(on) {
+    if (on && !dots) {
+      dots = document.createElement("div");
+      dots.className = "typing";
+      dots.setAttribute("aria-label", "Typing");
+      for (var i = 0; i < 3; i++) dots.appendChild(document.createElement("i"));
+      $("log").appendChild(dots);
+      $("log").scrollTop = $("log").scrollHeight;
+    } else if (!on && dots) {
+      dots.remove();
+      dots = null;
+    }
   }
 
   function note(text) {
@@ -135,14 +190,17 @@
     });
   }
 
-  var timer;
+  var timer, busy = false;
   function poll() {
     clearTimeout(timer);
     if (!token) return;
     call("GET", "/messages" + (last ? "?after=" + encodeURIComponent(last) : "")).then(function (res) {
+      typing(false);
       res.messages.forEach(show);
+      busy = !!res.typing;
+      typing(busy);
     }).catch(function () {}).then(function () {
-      timer = setTimeout(poll, document.hidden ? 20000 : 4000);
+      timer = setTimeout(poll, document.hidden ? 20000 : busy ? 1200 : 4000);
     });
   }
   document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });

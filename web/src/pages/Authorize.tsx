@@ -181,12 +181,12 @@ export function Authorize({ email, onSignOut }: { email?: string; onSignOut: () 
         </div>
         <p className="flex gap-2 text-[12px] text-muted-foreground">
           <Icon name="x" className="mt-0.5 size-3.5 shrink-0" />
-          It can never invite or remove people, create API tokens, approve its own missions, or send around your suppression list and send limits.
+          It can never invite or remove people, create API tokens, approve its own changes, or send around your suppression list and send limits.
         </p>
         {toggles.length > 0 && (
           <p className="flex gap-2 text-[12px] text-muted-foreground">
             <Icon name="check" className="mt-0.5 size-3.5 shrink-0" />
-            It makes changes only inside a mission you approve. You can turn this off for it under Connect your AI.
+            Every change it makes waits for your approval on the Agents page. You can turn this off for it under Connect your AI.
           </p>
         )}
       </fieldset>

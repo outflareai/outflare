@@ -153,9 +153,15 @@ Each takes `from`, `to`, `model`, `brand` and `match`. `match=identified`
 keeps only the visits the person was identified on (signed in, or named by
 a form or an identify call) and the credit on them: visits known only by
 the browser's cookie are left out, and so are conversions that matched
-nothing, for a deterministic-only view. Each credit in
+nothing, for a deterministic-only view. `match=signed_in` goes further:
+only browsers the person identified on through the workspace's own product
+(a sign-in, or a form or identify call that names them), leaving out ones
+known only from a click on a tracked link in an email Outflare sent, which
+a forwarded email can put on someone else. Each credit in
 `.../conversions` says how its visit was matched (`matched_by`: `record`,
-`browser` or `none`). Reading needs
+`browser` or `none`) and, for `record`, how its browser became known
+(`identified_by`: `product` or `email_click`, from the visitor's
+`site_visitors.identified_by`). Reading needs
 `analytics.read`; changing settings `analytics.manage`. Paid ads read the
 same credits for ad-level results; the conversions each ad platform reports
 stay separate ([paid-media.md](paid-media.md)).
@@ -220,5 +226,5 @@ audit actions `attribution.settings_updated`, `attribution.model_created`,
 
 - Deal credit is read when asked for, not stored, so it follows the
   model and the deal's people as they are now.
-- Identified visits don't say how the person was identified (a sign-in, a
-  form, an email link), only that they were.
+- A sign-in and a form that names the person both count as `product`:
+  the identify call doesn't say which it was.

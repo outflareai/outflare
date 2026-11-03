@@ -191,9 +191,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Write to a run.
 
-        Scope: missions.run. A person (or their own app on a token) writes an instruction or a note, and the agent answers in its next turn, brought forward to now. The run's own agent writes progress, a question, a report or a note. An agent on the action layer doesn't write to other runs.
+        Scope: agents.run. A person (or their own app on a token) writes an instruction or a note, and the agent answers in its next turn, brought forward to now. The run's own agent writes progress, a question, a report or a note. An agent on the action layer doesn't write to other runs.
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/agent-runs/{id}/updates
         """
         return self._call(
@@ -2255,6 +2255,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def archive_metric(
+        self,
+        brand: str,
+        metric: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a metric.
+
+        Scope: catalog.manage. It leaves every record's attributes.metrics, quietly.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/metrics/{metric}/archive
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/metrics/{metric}/archive",
+            path={"brand": brand, "metric": metric},
+            idempotency_key=idempotency_key,
+        )
+
     def archive_product(
         self,
         brand: str,
@@ -2516,6 +2537,27 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/crm/mail/google/authorize",
             path={"brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def backfill_metric(
+        self,
+        brand: str,
+        metric: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Refill a metric from stored events.
+
+        Scope: catalog.manage. Quietly, in the background: nothing fires for the past.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/metrics/{metric}/backfill
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/metrics/{metric}/backfill",
+            path={"brand": brand, "metric": metric},
             idempotency_key=idempotency_key,
         )
 
@@ -3502,9 +3544,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Complete an agent run.
 
-        Scope: missions.run. The run's own agent, or a person, marks the goal reached (or clearly out of reach) with a report. Revokes the run's token.
+        Scope: agents.run. The run's own agent, or a person, marks the goal reached (or clearly out of reach) with a report. Revokes the run's token.
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/agent-runs/{id}/complete
         """
         return self._call(
@@ -3586,6 +3628,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def copy_brand_smart_list(
+        self,
+        brand: str,
+        id: str,
+        *,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Save a copy of a list as a static list.
+
+        Scope: customers.manage. A new static list with the people in this list now: a snapshot that never changes on its own. Each person's history says they joined it as a copy. Lists of people only.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/smart-lists/{id}/copy
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/smart-lists/{id}/copy",
+            path={"brand": brand, "id": id},
+            body={"name": name},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_ab_test(
         self,
         *,
@@ -3625,6 +3692,56 @@ class Operations(_Mixin):
                 "hypothesis": hypothesis,
                 "min_effect": min_effect,
                 "name": name,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_account(
+        self,
+        brand: str,
+        *,
+        depends_on: str | None = None,
+        identity: str | None = None,
+        integration_id: str | None = None,
+        label: str | None = None,
+        mailbox_id: str | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        platform: str | None = None,
+        sign_in: str | None = None,
+        status: Literal["unverified", "blocked", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record an account the brand uses.
+
+        Scope: accounts.manage. The account starts unverified: recorded is
+        not verified. `depends_on` names the brand's identity it signs in
+        through (its Google account, a mailbox), so one upstream failure
+        is one incident. Secrets go in the vault afterwards
+        (setAccountSecret), never here.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/accounts
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/accounts",
+            path={"brand": brand},
+            body={
+                "depends_on": depends_on,
+                "identity": identity,
+                "integration_id": integration_id,
+                "label": label,
+                "mailbox_id": mailbox_id,
+                "notes": notes,
+                "owner_id": owner_id,
+                "platform": platform,
+                "sign_in": sign_in,
+                "status": status,
+                "url": url,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -3929,10 +4046,12 @@ class Operations(_Mixin):
         ws: str | None = None,
         business_model: str | None = None,
         colors: dict[str, Any] | None = None,
+        currency: str | None = None,
         domains: list[str] | None = None,
         handle: str | None = None,
         links: list[dict[str, Any]] | None = None,
         logo_url: str | None = None,
+        manual_edit_days: int | None = None,
         name: str | None = None,
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
@@ -3955,10 +4074,12 @@ class Operations(_Mixin):
             body={
                 "business_model": business_model,
                 "colors": colors,
+                "currency": currency,
                 "domains": domains,
                 "handle": handle,
                 "links": links,
                 "logo_url": logo_url,
+                "manual_edit_days": manual_edit_days,
                 "name": name,
                 "platforms": platforms,
                 "revenue_models": revenue_models,
@@ -4213,6 +4334,7 @@ class Operations(_Mixin):
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
+        manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
@@ -4243,6 +4365,7 @@ class Operations(_Mixin):
                 "filterable": filterable,
                 "key": key,
                 "label": label,
+                "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
                 "precedence": precedence,
@@ -4667,10 +4790,12 @@ class Operations(_Mixin):
         *,
         brand_id: str | None = None,
         description: str | None = None,
-        kind: Literal["smart", "static"] | None = None,
+        kind: Literal["smart", "static", "query"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
+        saved_query_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -4693,7 +4818,56 @@ class Operations(_Mixin):
                 "kind": kind,
                 "match": match,
                 "name": name,
+                "record_type": record_type,
                 "rules": rules,
+                "saved_query_id": saved_query_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_transaction(
+        self,
+        brand: str,
+        *,
+        amount_minor: int,
+        currency: str,
+        description: str | None = None,
+        kind: Literal["payment", "refund", "chargeback", "credit"],
+        occurred_at: str | None = None,
+        product: str | None = None,
+        record_id: str | None = None,
+        refund_of: str | None = None,
+        source_id: str,
+        status: Literal["succeeded", "pending", "failed", "reversed"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record a transaction.
+
+        Scope: customers.manage. A payment, refund, chargeback or credit from your own billing. source_id is your id for it:
+        sending the same one again never adds it twice, answers the one saved (200) and updates its status when it changed
+        (transaction.updated). The amount is kept in its currency and converted to the brand's at the day's rate
+        (brand_amount_minor, null until that rate is known).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/transactions
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/transactions",
+            path={"brand": brand},
+            body={
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "description": description,
+                "kind": kind,
+                "occurred_at": occurred_at,
+                "product": product,
+                "record_id": record_id,
+                "refund_of": refund_of,
+                "source_id": source_id,
+                "status": status,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -4707,6 +4881,7 @@ class Operations(_Mixin):
         description: str | None = None,
         enabled: bool | None = None,
         events: list[str] | None = None,
+        rule_ids: list[str] | None = None,
         url: str,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -4730,7 +4905,47 @@ class Operations(_Mixin):
                 "description": description,
                 "enabled": enabled,
                 "events": events,
+                "rule_ids": rule_ids,
                 "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_bulk_edit(
+        self,
+        brand: str,
+        *,
+        changes: dict[str, Any],
+        record_ids: list[str] | None = None,
+        saved_query_id: str | None = None,
+        smart_list_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Run a bulk edit.
+
+        Scope: customers.manage, and only the workspace's owners, signed in, run bulk edits (403 owner_only for
+        everyone else, API tokens included; they can preview). Changes the brand's people or companies from a smart
+        or static list, a saved query (its record_id or id column, up to 10,000 rows) or ids picked by hand, up to
+        50,000 records. The records are fixed now: exactly what the preview counts. It runs in the background: 202
+        with the bulk edit, whose status goes queued, running, then done (or failed). Every change is written to each
+        record's own history with the bulk edit's id (GET .../records/{record}/history, bulk_edit_id; list moves on
+        the timeline), and each changed record is a record.updated or record.archived, as a hand edit is, so rules,
+        journeys and webhooks hear of it. It can be undone for 7 days.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/bulk-edits
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/bulk-edits",
+            path={"brand": brand},
+            body={
+                "changes": changes,
+                "record_ids": record_ids,
+                "saved_query_id": saved_query_id,
+                "smart_list_id": smart_list_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -4769,6 +4984,52 @@ class Operations(_Mixin):
                 "name": name,
                 "reason": reason,
                 "use_for_verification": use_for_verification,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_content(
+        self,
+        brand: str,
+        *,
+        body: str | None = None,
+        canonical_url: str | None = None,
+        excerpt: str | None = None,
+        notes: str | None = None,
+        slug: str | None = None,
+        status: Literal["draft", "approved", "archived"] | None = None,
+        tags: list[str] | None = None,
+        target: Literal["posts", "pages"] | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Write a post or page.
+
+        Scope: content.manage. A new item for the brand's website, as a
+        draft unless `status` says approved. The body is Markdown; raw HTML
+        in it is left out when it is published. Check facts against the
+        brand's context and knowledge before writing them, and put the
+        brief and sources in `notes`.
+
+        Needs: the content.manage scope.
+        POST /v1/brands/{brand}/content
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/content",
+            path={"brand": brand},
+            body={
+                "body": body,
+                "canonical_url": canonical_url,
+                "excerpt": excerpt,
+                "notes": notes,
+                "slug": slug,
+                "status": status,
+                "tags": tags,
+                "target": target,
+                "title": title,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -5927,6 +6188,7 @@ class Operations(_Mixin):
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
+        manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
@@ -5957,6 +6219,7 @@ class Operations(_Mixin):
                 "filterable": filterable,
                 "key": key,
                 "label": label,
+                "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
                 "precedence": precedence,
@@ -6728,6 +6991,52 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_metric(
+        self,
+        brand: str,
+        *,
+        aggregate: Literal["count", "sum", "min", "max", "days", "last"] | None = None,
+        description: str | None = None,
+        events: list[str] | None = None,
+        key: str | None = None,
+        levels: list[Literal["company", "person"]] | None = None,
+        name: str | None = None,
+        offset_days: int | None = None,
+        per_product: bool | None = None,
+        property: str | None = None,
+        usage: bool | None = None,
+        window_days: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a metric.
+
+        Scope: catalog.manage. With metrics on, it is filled quietly from stored events, then kept live.
+
+        Needs: the catalog.manage scope.
+        POST /v1/brands/{brand}/metrics
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/metrics",
+            path={"brand": brand},
+            body={
+                "aggregate": aggregate,
+                "description": description,
+                "events": events,
+                "key": key,
+                "levels": levels,
+                "name": name,
+                "offset_days": offset_days,
+                "per_product": per_product,
+                "property": property,
+                "usage": usage,
+                "window_days": window_days,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_mission(
         self,
         *,
@@ -6746,7 +7055,14 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Create a mission.
+        """Create a mission (deprecated).
+
+        Deprecated: missions are being retired for agent runs on the action
+        layer (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`; an
+        agent of your own works as an API token with the action layer on,
+        with no mission). The web app and MCP no longer create missions; this
+        route still does, for agents built against it, until a later release
+        answers 410 `mission_retired`.
 
         Scope: missions.run. Starts as a draft: writes made in it are dry
         runs until a person approves it. A mission created with an API token
@@ -7441,6 +7757,52 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_query_endpoint(
+        self,
+        brand: str,
+        *,
+        description: str | None = None,
+        name: str | None = None,
+        params: list[dict[str, Any]] | None = None,
+        rate_per_minute: int | None = None,
+        row_cap: int | None = None,
+        saved_query_id: str | None = None,
+        slug: str | None = None,
+        status: Literal["active", "disabled"] | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Publish a query endpoint.
+
+        Scope: customers.manage, and only the workspace's owners and admins, signed in (403 admin_only). Publishes a
+        saved query, pinned to a version (default its current one), at slug, for API tokens holding query.endpoints
+        and made for this brand. The query reads what the publisher can read now (scopes), whoever calls it.
+        Parameters are bound in order as $1, $2, … in the SQL; every $n the SQL uses needs one. 409 when the slug is
+        taken.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/query-endpoints
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/query-endpoints",
+            path={"brand": brand},
+            body={
+                "description": description,
+                "name": name,
+                "params": params,
+                "rate_per_minute": rate_per_minute,
+                "row_cap": row_cap,
+                "saved_query_id": saved_query_id,
+                "slug": slug,
+                "status": status,
+                "version": version,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_record(
         self,
         *,
@@ -8062,10 +8424,12 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
-        kind: Literal["smart", "static"] | None = None,
+        kind: Literal["smart", "static", "query"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
+        saved_query_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -8089,7 +8453,9 @@ class Operations(_Mixin):
                 "kind": kind,
                 "match": match,
                 "name": name,
+                "record_type": record_type,
                 "rules": rules,
+                "saved_query_id": saved_query_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -8367,6 +8733,44 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_support_handoff_topic(
+        self,
+        *,
+        ws: str | None = None,
+        always_handoff: bool | None = None,
+        assignee_id: str | None = None,
+        brand: str | None = None,
+        description: str | None = None,
+        name: str,
+        team_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a hand-off topic.
+
+        Scope: inbox.manage. `description` tells the assistant what belongs in it. When the assistant hands a conversation
+        about it to people and nobody has it yet, it goes to `assignee_id` (a member) and `team_id`. `always_handoff`
+        means the assistant never answers it. At most 30 per brand; names are unique per brand.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/support/handoff-topics
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/support/handoff-topics",
+            path={"ws": ws},
+            body={
+                "always_handoff": always_handoff,
+                "assignee_id": assignee_id,
+                "brand": brand,
+                "description": description,
+                "name": name,
+                "team_id": team_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_team(
         self,
         *,
@@ -8476,6 +8880,7 @@ class Operations(_Mixin):
         description: str | None = None,
         enabled: bool | None = None,
         events: list[str] | None = None,
+        rule_ids: list[str] | None = None,
         url: str,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -8501,6 +8906,7 @@ class Operations(_Mixin):
                 "description": description,
                 "enabled": enabled,
                 "events": events,
+                "rule_ids": rule_ids,
                 "url": url,
             },
             extra_body=extra_body,
@@ -10096,6 +10502,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_support_handoff_topic(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a hand-off topic.
+
+        Scope: inbox.manage. Conversations tagged with it lose the tag; who has them doesn't change.
+
+        Needs: the inbox.manage scope.
+        DELETE /v1/workspaces/{ws}/support/handoff-topics/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/workspaces/{ws}/support/handoff-topics/{id}",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_support_sla_policy(
         self,
         scope: str,
@@ -11434,6 +11861,24 @@ class Operations(_Mixin):
             path={"test": test, "ws": ws},
         )
 
+    def get_account(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Read an account.
+
+        Scope: accounts.read. The account with its latest attempts and open incidents.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/accounts/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/accounts/{id}",
+            path={"brand": brand, "id": id},
+        )
+
     def get_action(
         self,
         id: str,
@@ -11541,9 +11986,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Read an agent run's check-in.
 
-        Scope: missions.read. The run, what Outflare knows about the company and its brand, the latest updates, and how the agent is to act. The agent reads it at the start of every turn.
+        Scope: agents.read. The run, what Outflare knows about the company and its brand, the latest updates, and how the agent is to act. The agent reads it at the start of every turn.
 
-        Needs: the missions.read scope.
+        Needs: the agents.read scope.
         GET /v1/workspaces/{ws}/agent-runs/{id}
         """
         return self._call(
@@ -11982,7 +12427,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """What each company's people brought, and the deals it won.
@@ -12010,7 +12455,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """What each ad campaign, ad set or ad brought, beside what it cost.
@@ -12042,7 +12487,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """Drill a channel down to its sources and campaigns.
@@ -12075,7 +12520,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """Visits, conversions, revenue and cost for every channel.
@@ -12129,7 +12574,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """New or known people, and new or repeat revenue, per channel.
@@ -12156,7 +12601,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
     ) -> Any:
         """Won deal value per channel.
@@ -13030,6 +13475,24 @@ class Operations(_Mixin):
             path={"brand": brand, "id": id},
         )
 
+    def get_brand_transaction(
+        self,
+        brand: str,
+        transaction: str,
+    ) -> Any:
+        """Get a transaction.
+
+        Scope: customers.read.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/transactions/{transaction}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/transactions/{transaction}",
+            path={"brand": brand, "transaction": transaction},
+        )
+
     def get_brand_webhook(
         self,
         brand: str,
@@ -13105,6 +13568,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/webhooks/{id}/secret",
             path={"brand": brand, "id": id},
+        )
+
+    def get_bulk_edit(
+        self,
+        brand: str,
+        bulk_edit: str,
+    ) -> Any:
+        """Read a bulk edit.
+
+        Scope: customers.read. One bulk edit or undo: its status, counts and whether it can still be undone (undo_until).
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/bulk-edits/{bulk_edit}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/bulk-edits/{bulk_edit}",
+            path={"brand": brand, "bulk_edit": bulk_edit},
         )
 
     def get_catalog(
@@ -13262,6 +13743,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/contact-rules",
             path={"ws": ws},
+        )
+
+    def get_content(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Read a post or page.
+
+        Scope: content.read. The item with its body and its latest publications.
+
+        Needs: the content.read scope.
+        GET /v1/brands/{brand}/content/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/content/{id}",
+            path={"brand": brand, "id": id},
         )
 
     def get_context(
@@ -14331,6 +14830,24 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_finding(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Read a finding.
+
+        Scope: workspace.read.
+
+        Needs: the workspace.read scope.
+        GET /v1/brands/{brand}/findings/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/findings/{id}",
+            path={"brand": brand, "id": id},
+        )
+
     def get_fix(
         self,
         fix: str,
@@ -14680,7 +15197,7 @@ class Operations(_Mixin):
         """Find an item by the slug in its web app URL.
 
         Scope: workspace.read, plus the item's own read scope (sequences.read, leads.read for lists,
-        missions.read for missions and agent runs, mailboxes.read for servers, infrastructure.read for plans, integrations.read for connections,
+        missions.read for missions, agents.read for agent runs, mailboxes.read for servers, infrastructure.read for plans, integrations.read for connections,
         tokens.manage for API tokens, webhooks.read for webhook endpoints). The web app names items by a slug made from
         their name (https://app.outflare.ai/acme/sequences/q3-founders); a connection's slug comes from its connector
         instead (https://app.outflare.ai/acme/connectors/posthog, then posthog-2 for a second PostHog). This answers the
@@ -14831,6 +15348,25 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
         )
 
+    def get_knowledge_reply_import(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a run that learned from past replies.
+
+        Scope: workspace.read. Where it stands: queued, running, done or failed (with `error`), how many conversations it read and suggestions it filed.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/knowledge/reply-imports/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/knowledge/reply-imports/{id}",
+            path={"id": id, "ws": ws},
+        )
+
     def get_knowledge_stats(
         self,
         *,
@@ -14851,6 +15387,25 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/knowledge/stats",
             path={"ws": ws},
             query={"brand": brand},
+        )
+
+    def get_knowledge_website_import(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Get a website import.
+
+        Scope: workspace.read. Where an import stands: queued, running, done or failed (with `error`), and what it did with the pages.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/knowledge/website-imports/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/knowledge/website-imports/{id}",
+            path={"id": id, "ws": ws},
         )
 
     def get_lead(
@@ -15462,9 +16017,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Get a playbook and whether this workspace is ready to run it.
 
-        Scope: missions.read.
+        Scope: agents.read.
 
-        Needs: the missions.read scope.
+        Needs: the agents.read scope.
         GET /v1/workspaces/{ws}/playbooks/{id}
         """
         return self._call(
@@ -15540,6 +16095,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/products/{product}",
             path={"brand": brand, "product": product},
+        )
+
+    def get_query_endpoint(
+        self,
+        brand: str,
+        endpoint: str,
+    ) -> Any:
+        """Read a query endpoint.
+
+        Scope: customers.read. One published endpoint, by id or slug.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/query-endpoints/{endpoint}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/query-endpoints/{endpoint}",
+            path={"brand": brand, "endpoint": endpoint},
         )
 
     def get_rank_history(
@@ -15635,6 +16208,24 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/records/{record}/lifecycle",
+            path={"brand": brand, "record": record},
+        )
+
+    def get_record_metrics(
+        self,
+        brand: str,
+        record: str,
+    ) -> Any:
+        """A company's or person's metrics.
+
+        Scope: customers.read. Each metric's value, overall (product_id null) and per product.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/metrics
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/metrics",
             path={"brand": brand, "record": record},
         )
 
@@ -16181,7 +16772,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         brand: str | None = None,
-        report: Literal["overview", "keywords", "backlinks", "links", "competitors", "audit"] | None = None,
+        report: Literal["overview", "keywords", "backlinks", "links", "competitors", "pages", "audit"] | None = None,
         host: str | None = None,
         integration: str | None = None,
         from_: str | None = None,
@@ -17063,7 +17654,8 @@ class Operations(_Mixin):
 
         Scope: inbox.read. Its runs in the last `days` (30 by default): how often it answered, asked back, handed off
         or was stopped before the AI; of its drafts, how many were sent as drafted, edited, discarded or are waiting;
-        and why it handed off.
+        why it handed off; what chat visitors said about its answers; four rates from 0 to 1 (null when there is
+        nothing to divide) with the same length of time before to compare; and a line per day.
 
         Needs: the inbox.read scope.
         GET /v1/workspaces/{ws}/support/assistant/stats
@@ -17963,6 +18555,74 @@ class Operations(_Mixin):
             query={"brand": brand, "status": status, "flag": flag},
         )
 
+    def list_account_attempts(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """The attempts made on an account.
+
+        Scope: accounts.read. The latest 100 managed sign-ins, verifications and session uses, newest first, with their outcome and evidence.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/accounts/{id}/attempts
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/accounts/{id}/attempts",
+            path={"brand": brand, "id": id},
+        )
+
+    def list_account_incidents(
+        self,
+        brand: str,
+        *,
+        status: Literal["open", "snoozed", "resolved", "all"] | None = None,
+    ) -> Any:
+        """What stops the brand's accounts from being used.
+
+        Scope: accounts.read. Open and snoozed incidents by default, root
+        incidents (an upstream identity's) first, then by severity. One
+        open incident per account and kind; repeats count up on it.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/account-incidents
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/account-incidents",
+            path={"brand": brand},
+            query={"status": status},
+        )
+
+    def list_accounts(
+        self,
+        brand: str,
+        *,
+        view: Literal["all", "needs_attention", "dependencies", "archived"] | None = None,
+        platform: str | None = None,
+    ) -> Any:
+        """The external accounts the brand's agent may act through.
+
+        Scope: accounts.read. Every account the brand uses on another site
+        or service (its social profiles, community and review site
+        accounts, partner platforms, sites with no API), how each signs
+        in, whether access works (`status`), what it depends on and what
+        depends on it, and which secrets the vault holds for it (their
+        kinds, never their values). `view`: `all` (default), `needs_attention`
+        (incidents), `dependencies` (identities other accounts sign in
+        through) or `archived`.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/accounts
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/accounts",
+            path={"brand": brand},
+            query={"view": view, "platform": platform},
+        )
+
     def list_action_grants(
         self,
         *,
@@ -18094,6 +18754,38 @@ class Operations(_Mixin):
                 "account_id": account_id,
                 "status": status,
                 "limit": limit,
+                "brand": brand,
+            },
+        )
+
+    def list_ad_changes(
+        self,
+        *,
+        ws: str | None = None,
+        campaign_id: str | None = None,
+        status: Literal["queued", "applied", "failed"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """Changes made to campaigns.
+
+        Scope: analytics.read. Every pause, resume and budget change asked for, newest first: what the campaign was before, what was asked, whether the job applied it, and whether the platform showed it afterwards. Page with cursor=next_cursor.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/changes
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/changes",
+            path={"ws": ws},
+            query={
+                "campaign_id": campaign_id,
+                "status": status,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
                 "brand": brand,
             },
         )
@@ -18415,9 +19107,9 @@ class Operations(_Mixin):
     ) -> Any:
         """List a run's updates.
 
-        Scope: missions.read. What the agent and people said to each other, oldest first; the latest 200.
+        Scope: agents.read. What the agent and people said to each other, oldest first; the latest 200.
 
-        Needs: the missions.read scope.
+        Needs: the agents.read scope.
         GET /v1/workspaces/{ws}/agent-runs/{id}/updates
         """
         return self._call(
@@ -18439,9 +19131,9 @@ class Operations(_Mixin):
     ) -> Any:
         """List agent runs.
 
-        Scope: missions.read. Runs of Outflare's agent on the action layer, newest first.
+        Scope: agents.read. Runs of Outflare's agent on the action layer, newest first.
 
-        Needs: the missions.read scope.
+        Needs: the agents.read scope.
         GET /v1/workspaces/{ws}/agent-runs
         """
         return self._call(
@@ -18915,7 +19607,7 @@ class Operations(_Mixin):
         from_: str | None = None,
         to: str | None = None,
         model: str | None = None,
-        match: Literal["all", "identified"] | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
         brand: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
@@ -19168,6 +19860,23 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/alerts",
             path={"brand": brand},
             query={"kind": kind, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
+    def list_brand_channels(
+        self,
+        brand: str,
+    ) -> Any:
+        """The channels and their readiness for one brand.
+
+        Scope: workspace.read. listChannels for one brand: readiness from the connections that serve it.
+
+        Needs: the workspace.read scope.
+        GET /v1/brands/{brand}/channels
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/channels",
+            path={"brand": brand},
         )
 
     def list_brand_crm_imports(
@@ -19964,6 +20673,26 @@ class Operations(_Mixin):
             },
         )
 
+    def list_brand_record_field_values(
+        self,
+        brand: str,
+        record: str,
+    ) -> Any:
+        """Every source's value of a record's fields.
+
+        Scope: customers.read. What each source (a person, first-party data, a CRM sync, enrichment) last said about each field,
+        whether or not it won, and the hand edits behind the record's values: when each stops winning, and whether it is pinned.
+        "Use this" is a PATCH of the record with that value, which is a hand edit.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/records/{record}/field-values
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/records/{record}/field-values",
+            path={"brand": brand, "record": record},
+        )
+
     def list_brand_record_identities(
         self,
         brand: str,
@@ -20138,6 +20867,31 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_brand_smart_list_changes(
+        self,
+        brand: str,
+        id: str,
+        *,
+        change: Literal["enter", "leave"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """Who joined and left a list, newest first.
+
+        Scope: customers.read. The list's membership history: each join (enter) and leave, from refreshes of a smart
+        list and changes to a static one, kept from when lists started keeping it. Page with cursor=next_cursor.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/smart-lists/{id}/changes
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/smart-lists/{id}/changes",
+            path={"brand": brand, "id": id},
+            query={"change": change, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
     def list_brand_smart_list_members(
         self,
         brand: str,
@@ -20223,6 +20977,31 @@ class Operations(_Mixin):
             },
         )
 
+    def list_brand_transactions(
+        self,
+        brand: str,
+        *,
+        record: str | None = None,
+        kind: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List transactions.
+
+        Scope: customers.read. The brand's payments, refunds, chargebacks and credits, newest first: all, or a person's or
+        company's (record). Saved from billing connectors and POST .../transactions, from when they were connected on.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/transactions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/transactions",
+            path={"brand": brand},
+            query={"record": record, "kind": kind, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
     def list_brand_webhook_deliveries(
         self,
         brand: str,
@@ -20289,6 +21068,29 @@ class Operations(_Mixin):
             query={"status": status},
         )
 
+    def list_bulk_edits(
+        self,
+        brand: str,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List bulk edits.
+
+        Scope: customers.read. The brand's bulk edits and undos, newest first: who ran each, where its records came
+        from, what it changed and how many records it changed (docs/bulk-edits.md).
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/bulk-edits
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/bulk-edits",
+            path={"brand": brand},
+            query={"limit": limit, "cursor": cursor, "fields": fields},
+        )
+
     def list_business_models(
         self,
     ) -> Any:
@@ -20304,6 +21106,35 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/business-models",
+        )
+
+    def list_channels(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """The channels an agent can work on, and whether each is ready.
+
+        Scope: workspace.read. The channel framework's catalog
+        (docs/channels.md): every channel with the connections and data
+        it needs, the actions an agent can take on it (with the approval
+        category of each), the reads it decides from, how its results are
+        measured, its playbooks, and its readiness for the workspace:
+        `ready`, `connect_first` (a required connection is missing, named
+        in `missing_connections` with recommended connectors) or
+        `needs_data`. With `brand`, readiness counts only the connections
+        that serve that brand. An agent reads this before choosing what to
+        work on; a person sees what to connect next.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/channels
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/channels",
+            path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_connect_requests(
@@ -20410,6 +21241,43 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/connectors",
             path={"ws": ws},
             query={"category": category},
+        )
+
+    def list_content(
+        self,
+        brand: str,
+        *,
+        status: Literal["draft", "approved", "published", "archived"] | None = None,
+        target: Literal["posts", "pages"] | None = None,
+        q: str | None = None,
+        published_since: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List a brand's posts and pages.
+
+        Scope: content.read. Posts and pages written in Outflare for the
+        brand's website (docs/content.md), newest first, without their
+        bodies (read one for its body). `published_since` counts what went
+        live since a time, for a content objective.
+
+        Needs: the content.read scope.
+        GET /v1/brands/{brand}/content
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/content",
+            path={"brand": brand},
+            query={
+                "status": status,
+                "target": target,
+                "q": q,
+                "published_since": published_since,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
         )
 
     def list_conversion_definitions(
@@ -21983,6 +22851,47 @@ class Operations(_Mixin):
             query={"site_id": site_id, "status": status, "brand": brand},
         )
 
+    def list_findings(
+        self,
+        brand: str,
+        *,
+        status: Literal["active", "retired"] | None = None,
+        channel: str | None = None,
+        objective_id: str | None = None,
+        due: bool | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List what was learned about a brand.
+
+        Scope: workspace.read. Findings are what an agent or a person
+        learned about the brand's marketing, each with its evidence, how
+        sure it is, where it holds (a channel, an audience, an objective)
+        and a date to review it. Newest first. `due: true` lists the
+        active ones past their review date, which an agent checks again
+        before trusting. The brand's context (getBrandContext) carries the
+        active ones nearest their review date, so reading the brand reads
+        its findings.
+
+        Needs: the workspace.read scope.
+        GET /v1/brands/{brand}/findings
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/findings",
+            path={"brand": brand},
+            query={
+                "status": status,
+                "channel": channel,
+                "objective_id": objective_id,
+                "due": due,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_fix_guidelines(
         self,
         *,
@@ -22736,6 +23645,26 @@ class Operations(_Mixin):
             },
         )
 
+    def list_knowledge_reply_imports(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List runs that learned from past replies.
+
+        Scope: workspace.read. The last 20 runs, newest first.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/knowledge/reply-imports
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/knowledge/reply-imports",
+            path={"ws": ws},
+            query={"brand": brand},
+        )
+
     def list_knowledge_suggestions(
         self,
         *,
@@ -22778,6 +23707,26 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/knowledge/items/{id}/versions",
             path={"id": id, "ws": ws},
+        )
+
+    def list_knowledge_website_imports(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List website imports.
+
+        Scope: workspace.read. The last 20 imports of the business's website into knowledge, newest first.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/knowledge/website-imports
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/knowledge/website-imports",
+            path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_lead_list_members(
@@ -23344,6 +24293,27 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_metrics(
+        self,
+        brand: str,
+        *,
+        archived: bool | None = None,
+    ) -> Any:
+        """List the brand's live metrics.
+
+        Scope: customers.read. Whether metrics are on, and each metric: a live total per company and person over a rolling
+        window, such as spend in the last 30 days, optionally per product. Archived ones with archived=true.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/metrics
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/metrics",
+            path={"brand": brand},
+            query={"archived": archived},
         )
 
     def list_mission_actions(
@@ -24064,12 +25034,12 @@ class Operations(_Mixin):
     ) -> Any:
         """Playbooks, with whether this workspace is ready to run each.
 
-        Scope: missions.read. Each playbook with `readiness`: the
+        Scope: agents.read. Each playbook with `readiness`: the
         connections the workspace still has to add (only its own accounts
         count), optional ones that would help, and data it doesn't collect
         yet. `runs` counts the missions started from it here.
 
-        Needs: the missions.read scope.
+        Needs: the agents.read scope.
         GET /v1/workspaces/{ws}/playbooks
         """
         return self._call(
@@ -24165,6 +25135,48 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/products",
             path={"brand": brand},
             query={"archived": archived},
+        )
+
+    def list_query_endpoint_calls(
+        self,
+        brand: str,
+        endpoint: str,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List a query endpoint's calls.
+
+        Scope: customers.read. Every call to the endpoint, newest first, allowed or refused: the token, the parameters
+        sent, the outcome and error code, rows and time. Kept 90 days.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/query-endpoints/{endpoint}/calls
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/query-endpoints/{endpoint}/calls",
+            path={"brand": brand, "endpoint": endpoint},
+            query={"limit": limit, "cursor": cursor, "fields": fields},
+        )
+
+    def list_query_endpoints(
+        self,
+        brand: str,
+    ) -> Any:
+        """List published query endpoints.
+
+        Scope: customers.read. The brand's published query endpoints, active first, with their calls in the last 24
+        hours (docs/query-endpoints.md).
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/query-endpoints
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/query-endpoints",
+            path={"brand": brand},
         )
 
     def list_query_tables(
@@ -25118,6 +26130,32 @@ class Operations(_Mixin):
             query={"brand": brand},
         )
 
+    def list_smart_list_changes(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        change: Literal["enter", "leave"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """Who joined and left a list, newest first.
+
+        Scope: customers.read. The list's membership history: each join (enter) and leave, from refreshes of a smart
+        list and changes to a static one, kept from when lists started keeping it. Page with cursor=next_cursor.
+        Deprecated: use GET /v1/brands/{brand}/smart-lists/{id}/changes. This workspace route stays until the brands contract step.
+
+        Needs: the customers.read scope.
+        GET /v1/workspaces/{ws}/smart-lists/{id}/changes
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/smart-lists/{id}/changes",
+            path={"id": id, "ws": ws},
+            query={"change": change, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
     def list_smart_list_members(
         self,
         id: str,
@@ -25636,6 +26674,7 @@ class Operations(_Mixin):
         status: Literal["open", "pending", "closed", "all"] | None = None,
         assignee: str | None = None,
         team_id: str | None = None,
+        topic_id: str | None = None,
         tag: str | None = None,
         record_id: str | None = None,
         q: str | None = None,
@@ -25665,6 +26704,7 @@ class Operations(_Mixin):
                 "status": status,
                 "assignee": assignee,
                 "team_id": team_id,
+                "topic_id": topic_id,
                 "tag": tag,
                 "record_id": record_id,
                 "q": q,
@@ -25675,6 +26715,28 @@ class Operations(_Mixin):
                 "limit": limit,
                 "cursor": cursor,
             },
+        )
+
+    def list_support_handoff_topics(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+    ) -> Any:
+        """List hand-off topics.
+
+        Scope: inbox.read. What support conversations are about, for the assistant to tag them and, when it hands one to
+        people, give it to the topic's person and team. Workspace topics (`brand_id` null) apply to every brand; a
+        brand's own topic of the same name wins.
+
+        Needs: the inbox.read scope.
+        GET /v1/workspaces/{ws}/support/handoff-topics
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/support/handoff-topics",
+            path={"ws": ws},
+            query={"brand": brand},
         )
 
     def list_support_mailboxes(
@@ -26500,6 +27562,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def pause_ad_campaign(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pause a campaign.
+
+        Scope: ads.manage. Asks the platform to pause the campaign (409
+        `not_active` when it is paused or removed already) and answers 202
+        with the queued change, as updateAdCampaign does. Pausing spends
+        nothing, so the action layer runs it under an agent's grant.
+
+        Needs: the ads.manage scope.
+        POST /v1/workspaces/{ws}/ads/campaigns/{id}/pause
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ads/campaigns/{id}/pause",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def pause_agent_run(
         self,
         id: str,
@@ -26509,15 +27595,39 @@ class Operations(_Mixin):
     ) -> Any:
         """Pause an agent run.
 
-        Scope: missions.run. No more turns until a person resumes it.
+        Scope: agents.run. No more turns until a person resumes it.
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/agent-runs/{id}/pause
         """
         return self._call(
             "POST",
             "/v1/workspaces/{ws}/agent-runs/{id}/pause",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def pause_all_ads(
+        self,
+        brand: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pause every active campaign of the brand (the kill switch).
+
+        Scope: ads.manage. Queues a pause for every active campaign on the
+        brand's ad accounts whose platform can be changed, as one batch,
+        and names the platforms that can't be changed yet so nothing is
+        skipped silently. Each change is applied and checked as
+        pauseAdCampaign's is.
+
+        Needs: the ads.manage scope.
+        POST /v1/brands/{brand}/ads/pause-all
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ads/pause-all",
+            path={"brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -26653,6 +27763,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def pin_brand_record_field(
+        self,
+        brand: str,
+        record: str,
+        field: str,
+        *,
+        pinned: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Pin or unpin a hand edit.
+
+        Scope: customers.manage. A pinned hand edit wins over other sources for good; unpinning starts its time again from now
+        (the field's or brand's manual_edit_days). Only a value set by hand can be pinned (not_a_hand_edit, 409). Both are in
+        the record's history (source pinned or unpinned) and the audit log.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/records/{record}/fields/{field}/pin
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/records/{record}/fields/{field}/pin",
+            path={"brand": brand, "record": record, "field": field},
+            body={"pinned": pinned},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def plan_ab_test(
         self,
         *,
@@ -26691,7 +27829,13 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Plan a mission from a goal.
+        """Plan a mission from a goal (deprecated).
+
+        Deprecated: missions are being retired for agent runs on the action
+        layer. Start a playbook as an agent run instead
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`). The web app
+        and MCP no longer plan missions; this route still does until a
+        later release answers 410 `mission_retired`.
 
         Scope: missions.run. Type a goal in plain words ("book 10 meetings
         with fintech CFOs in Australia by 30 November") and the workspace's
@@ -26944,6 +28088,7 @@ class Operations(_Mixin):
         *,
         brand_id: str | None = None,
         match: Literal["all", "any"] | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -26960,7 +28105,41 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/smart-lists/preview",
             path={"brand": brand},
-            body={"brand_id": brand_id, "match": match, "rules": rules},
+            body={"brand_id": brand_id, "match": match, "record_type": record_type, "rules": rules},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def preview_bulk_edit(
+        self,
+        brand: str,
+        *,
+        changes: dict[str, Any],
+        record_ids: list[str] | None = None,
+        saved_query_id: str | None = None,
+        smart_list_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Preview a bulk edit.
+
+        Scope: customers.manage. Checks a bulk edit and shows what it would do without changing anything: how many
+        records, and the first 20 with each change from and to (a list as list:{id}, archiving as archived).
+        can_run says whether the caller may run it (owners, signed in).
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/bulk-edits/preview
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/bulk-edits/preview",
+            path={"brand": brand},
+            body={
+                "changes": changes,
+                "record_ids": record_ids,
+                "saved_query_id": saved_query_id,
+                "smart_list_id": smart_list_id,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -27262,6 +28441,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         match: Literal["all", "any"] | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -27279,7 +28459,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/smart-lists/preview",
             path={"ws": ws},
-            body={"brand_id": brand_id, "match": match, "rules": rules},
+            body={"brand_id": brand_id, "match": match, "record_type": record_type, "rules": rules},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -27333,6 +28513,40 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/journeys/{id}/publish",
             path={"brand": brand, "id": id},
             body={"runs": runs},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def publish_content(
+        self,
+        brand: str,
+        id: str,
+        *,
+        integration_id: str | None = None,
+        live: bool | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Publish a post or page to the brand's CMS.
+
+        Scope: content.manage. Queues a publication on the brand's CMS
+        connection (WordPress, Ghost): `integration_id` names it, else
+        the one the item is already on, else the brand's one CMS. As a
+        draft on the CMS unless `live` is true, which needs the item
+        approved. A job makes the post (or updates the one the item
+        already is), reads it back and records the address and status on
+        the item; the item becomes published when it is live. For an
+        agent, the action layer holds the publication for a person
+        unless a grant lets it run.
+
+        Needs: the content.manage scope.
+        POST /v1/brands/{brand}/content/{id}/publish
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/content/{id}/publish",
+            path={"brand": brand, "id": id},
+            body={"integration_id": integration_id, "live": live},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -27625,6 +28839,7 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         chat_mode: Literal["off", "draft", "auto"] | None = None,
+        email_hold_minutes: int | None = None,
         email_mode: Literal["off", "draft", "auto"] | None = None,
         find_on_website: bool | None = None,
         name: str | None = None,
@@ -27636,8 +28851,10 @@ class Operations(_Mixin):
         """Set up the support assistant.
 
         Scope: inbox.manage. Per channel: off, or draft (it drafts a reply to each new customer message for a person to
-        send). auto (it sends on its own) is 403 `feature_locked` unless `auto_available`. A brand's setting wins over
-        the workspace's. `name` is how it signs (at most 60 characters); empty means "<brand>'s assistant".
+        send). auto (it sends on its own) is 403 `feature_locked` unless `auto_available`. By email, an Auto answer waits
+        `email_hold_minutes` (5 by default, 0 to 60) as a draft with `send_at`, so a teammate can stop, edit or discard it;
+        chat answers at once. A brand's setting wins over the workspace's. `name` is how it signs (at most 60 characters);
+        empty means "<brand>'s assistant".
 
         Needs: the inbox.manage scope.
         PUT /v1/workspaces/{ws}/support/assistant-settings/{scope}
@@ -27648,6 +28865,7 @@ class Operations(_Mixin):
             path={"scope": scope, "ws": ws},
             body={
                 "chat_mode": chat_mode,
+                "email_hold_minutes": email_hold_minutes,
                 "email_mode": email_mode,
                 "find_on_website": find_on_website,
                 "name": name,
@@ -27966,6 +29184,42 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def record_account_attempt(
+        self,
+        brand: str,
+        id: str,
+        *,
+        evidence: dict[str, Any] | None = None,
+        outcome: str,
+        purpose: Literal["verify", "sign_in", "session_use", "oauth_refresh", "verification_email"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record a use of the account and what came of it.
+
+        Scope: accounts.manage. Tracking is the tools' job: whatever signs
+        in, verifies or uses a session records the attempt with its
+        outcome and evidence (what was seen: a page title, a status, a
+        provider's error code; never a secret, a code or page text). The
+        outcome keeps the account's health: `authenticated` makes it
+        healthy and resolves its open incidents; a failure opens an
+        incident of its kind, or repeats the open one, and puts the
+        account at needs attention; `wrong_identity` and `locked` block
+        automated use until a person acts. A failure on an identity other
+        accounts sign in through is the root of theirs.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/accounts/{id}/attempts
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/accounts/{id}/attempts",
+            path={"brand": brand, "id": id},
+            body={"evidence": evidence, "outcome": outcome, "purpose": purpose},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def record_brand_consent(
         self,
         brand: str,
@@ -28044,6 +29298,50 @@ class Operations(_Mixin):
                 "source": source,
                 "status": status,
                 "topic": topic,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def record_finding(
+        self,
+        brand: str,
+        *,
+        confidence: Literal["low", "medium", "high"] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        retired_reason: str | None = None,
+        review_at: str | None = None,
+        scope: dict[str, Any] | None = None,
+        status: Literal["active", "retired"] | None = None,
+        text: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record something learned about a brand.
+
+        Scope: context.manage. Save what was learned in a sentence or two
+        with the evidence it rests on (a metric, an action, an experiment
+        or an observation, each with a note saying what it showed), how
+        sure you are, and where it holds. Without `review_at` the finding
+        is reviewed in 90 days. A finding is data every agent reads about
+        the brand; it never changes limits, grants or policy. A brand
+        keeps at most 500 active findings.
+
+        Needs: the context.manage scope.
+        POST /v1/brands/{brand}/findings
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/findings",
+            path={"brand": brand},
+            body={
+                "confidence": confidence,
+                "evidence": evidence,
+                "retired_reason": retired_reason,
+                "review_at": review_at,
+                "scope": scope,
+                "status": status,
+                "text": text,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -28463,6 +29761,28 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={"mailbox_ids": mailbox_ids},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def remove_account_secret(
+        self,
+        brand: str,
+        id: str,
+        kind: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take a secret out of the vault.
+
+        Scope: accounts.manage. An agent asking always waits for a person.
+
+        Needs: the accounts.manage scope.
+        DELETE /v1/brands/{brand}/accounts/{id}/secrets/{kind}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/accounts/{id}/secrets/{kind}",
+            path={"brand": brand, "id": id, "kind": kind},
             idempotency_key=idempotency_key,
         )
 
@@ -29458,6 +30778,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def resume_ad_campaign(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Resume a paused campaign.
+
+        Scope: ads.manage. Asks the platform to run the campaign again (409
+        `not_active` when it is active or removed) and answers 202 with
+        the queued change. For an agent, resuming waits for a person when
+        the brand's active campaigns would then be budgeted over the
+        grant's daily cap, or the month would pass its monthly cap.
+
+        Needs: the ads.manage scope.
+        POST /v1/workspaces/{ws}/ads/campaigns/{id}/resume
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ads/campaigns/{id}/resume",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def resume_agent_run(
         self,
         id: str,
@@ -29467,9 +30812,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Resume an agent run.
 
-        Scope: missions.run, a signed-in person. The next turn runs now.
+        Scope: agents.run, a signed-in person. The next turn runs now.
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/agent-runs/{id}/resume
         """
         return self._call(
@@ -30065,14 +31410,14 @@ class Operations(_Mixin):
     ) -> Any:
         """Start a playbook as an agent run.
 
-        Scope: missions.run. Outflare's agent carries the playbook out in turns on the workspace's own AI model,
+        Scope: agents.run. Outflare's agent carries the playbook out in turns on the workspace's own AI model,
         as an agent token of its own on the action layer (ADR 13). The mode is the person's approval of what the
         run may do on its own: copilot (the default) holds every change for a person; autonomous runs changes
         within max_spend_cents a month, except those that always need a person; dry_run refuses and keeps every
         change, so people see what it would have done. Every change is an action on the Agents page. Needs the
         playbook's connections and an AI model (409 connector_needed or ai_model_needed otherwise).
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs
         """
         return self._call(
@@ -30142,6 +31487,35 @@ class Operations(_Mixin):
             path={"ws": ws},
             query={"brand": brand},
             body={"limit": limit, "sql": sql},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def run_query_endpoint(
+        self,
+        brand: str,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Call a query endpoint.
+
+        Scope: query.endpoints, from an API token made for this brand only (403 token_required from a signed-in
+        session, 403 brand_token_required from a token for every brand). Runs the endpoint's pinned query with the
+        parameters bound, up to its row cap (truncated says there were more). Each token may call it rate_per_minute
+        times a minute (429 rate_limited with Retry-After). Every call is logged. 404 when it is turned off; 409
+        endpoint_broken when its saved query was archived.
+
+        Needs: the query.endpoints scope.
+        POST /v1/brands/{brand}/query-endpoints/{endpoint}/run
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/query-endpoints/{endpoint}/run",
+            path={"brand": brand, "endpoint": endpoint},
+            body={"params": params},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -30885,6 +32259,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_account_secret(
+        self,
+        brand: str,
+        id: str,
+        kind: str,
+        *,
+        value: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Put a secret in the vault.
+
+        Scope: accounts.manage. Sets the account's password, TOTP seed,
+        recovery secret or session, sealed with the server's key. It is
+        never returned: the account shows only which kinds it holds. An
+        agent asking for this always waits for a person, whatever its
+        grants: secrets never pass through a model.
+
+        Needs: the accounts.manage scope.
+        PUT /v1/brands/{brand}/accounts/{id}/secrets/{kind}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/accounts/{id}/secrets/{kind}",
+            path={"brand": brand, "id": id, "kind": kind},
+            body={"value": value},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_ad_connection_setup(
         self,
         id: str,
@@ -31601,7 +33005,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Dry-run a rule over recent days.
 
-        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90), as if it had
+        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90; for an event or absence rule up to 365 when the ClickHouse event store is set up, which it then replays), as if it had
         been active: how many records it would have fired for, how many times, and a sample. Nothing is stored, emitted
         or sent. Event and absence rules replay the events Postgres keeps; change and audience rules look at records and
         list members as they are now (see note). Stops after 15 seconds with query_timeout.
@@ -31659,7 +33063,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Dry-run a rule over recent days.
 
-        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90), as if it had
+        Scope: customers.read. What the rule would have done over the last days (default 30, at most 90; for an event or absence rule up to 365 when the ClickHouse event store is set up, which it then replays), as if it had
         been active: how many records it would have fired for, how many times, and a sample. Nothing is stored, emitted
         or sent. Event and absence rules replay the events Postgres keeps; change and audience rules look at records and
         list members as they are now (see note). Stops after 15 seconds with query_timeout.
@@ -32052,6 +33456,73 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def start_knowledge_reply_import(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        days: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Learn answers from past support replies.
+
+        Scope: context.manage. Reads the support conversations closed in the last `days` (90 by default, at most 365; up
+        to 400 of them): each customer's question and the first reply a person sent. With the workspace's own AI model
+        (409 with the AI's problem, such as `connector_needed`, without one) it files the general answers among them as
+        suggestions in Knowledge → Review, one per question, leaving out anything about one customer. Nothing is
+        published until a person approves it. One run at a time per workspace (409 `reply_learning_running`).
+
+        Needs: the context.manage scope.
+        POST /v1/workspaces/{ws}/knowledge/reply-imports
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/knowledge/reply-imports",
+            path={"ws": ws},
+            body={"brand": brand, "days": days},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def start_knowledge_website_import(
+        self,
+        *,
+        ws: str | None = None,
+        brand: str | None = None,
+        max_pages: int | None = None,
+        publish: bool | None = None,
+        url: str | None = None,
+        visibility: Literal["public", "customers_ai", "team"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Import the website into knowledge.
+
+        Scope: context.manage. Reads up to `max_pages` pages (100 by default, at most 500) of the website at `url`
+        (else the brand's website, else the workspace's): the sitemap's, else what the home page links to, politely as
+        OutflareBot (robots.txt, its crawl delay, sites that opted out, never private addresses). Each page with enough
+        words becomes an article in a "Website" folder, with the page's address at its end, and is used by AI answers
+        as `visibility` says (customers_ai by default); `publish: false` keeps them as drafts for a person to go through
+        first. Running it again updates the articles whose page changed instead of adding them twice; one moved to
+        the bin stays there. It reads the sitemaps robots.txt names as well as /sitemap.xml and /sitemap_index.xml.
+        After the first import the site is re-checked every day with the same settings (`scheduled: true`): changed
+        pages update, new pages are added, and when the sitemaps list every page, articles whose page left the site are
+        unpublished (and published again if it comes back). One import runs at a time per workspace (409
+        `website_import_running`).
+
+        Needs: the context.manage scope.
+        POST /v1/workspaces/{ws}/knowledge/website-imports
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/knowledge/website-imports",
+            path={"ws": ws},
+            body={"brand": brand, "max_pages": max_pages, "publish": publish, "url": url, "visibility": visibility},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def start_link_pitch(
         self,
         prospect: str,
@@ -32185,19 +33656,13 @@ class Operations(_Mixin):
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Start a playbook as a mission.
+        """Retired. Start a playbook as a mission.
 
-        Scope: missions.run. Creates a mission draft named after the
-        playbook, with its prompt filled in from `inputs`, its steps as the
-        plan and its guardrails in the instructions. Like any mission it
-        does nothing until a person approves it, and the mode decides
-        whether writes are dry runs, wait for approval or run within the
-        limits. Fails with 409 `connector_needed` while a required
-        connection is missing: playbooks run only on the workspace's own
-        accounts. Missing data doesn't stop it. With `apply_kit`, the
-        playbook's setup kit is applied in the same step (see
-        `POST /v1/workspaces/{ws}/kits/{id}/apply` for the scopes it
-        needs, and its 409 `conflict`).
+        Retired with missions: it answers 410 `mission_retired`. Start the
+        playbook as an agent run instead, with the same `inputs`, `mode`
+        and `apply_kit`: `POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`
+        (the MCP tool `run_playbook`). The route goes away in a later
+        release.
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/playbooks/{id}/runs
@@ -32291,9 +33756,9 @@ class Operations(_Mixin):
     ) -> Any:
         """Stop an agent run.
 
-        Scope: missions.run. Ends the run for good and revokes its token; its held changes stay for a person to decide or expire.
+        Scope: agents.run. Ends the run for good and revokes its token; its held changes stay for a person to decide or expire.
 
-        Needs: the missions.run scope.
+        Needs: the agents.run scope.
         POST /v1/workspaces/{ws}/agent-runs/{id}/stop
         """
         return self._call(
@@ -32433,6 +33898,29 @@ class Operations(_Mixin):
             path={"id": id, "ws": ws},
             body={"reason": reason},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def stop_support_assistant_run(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Stop a held Auto reply.
+
+        Scope: inbox.manage. Stops an Auto email reply waiting its hold (`send_at`): it stays a draft for the team to send,
+        edit or discard. 409 `already_decided` when it isn't waiting (sent, stopped or discarded already). A held reply
+        also never goes when the team replies, the customer writes again, the conversation is closed or Auto is turned off.
+
+        Needs: the inbox.manage scope.
+        POST /v1/workspaces/{ws}/support/assistant-runs/{id}/stop
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/support/assistant-runs/{id}/stop",
+            path={"id": id, "ws": ws},
             idempotency_key=idempotency_key,
         )
 
@@ -33205,6 +34693,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def undo_bulk_edit(
+        self,
+        brand: str,
+        bulk_edit: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Undo a bulk edit.
+
+        Scope: customers.manage, owners only, signed in (403 owner_only). Within 7 days, puts the records back: each
+        field it set goes back unless someone changed it since, records it archived are restored, and list moves
+        are reversed; what changed since stays and is counted as kept. The undo is a new bulk edit (source undo) that
+        writes new history; the bulk edit's own history stays. 202 with the undo. 409 when it was already undone,
+        is still running or is itself an undo; 409 undo_expired after 7 days.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/bulk-edits/{bulk_edit}/undo
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/bulk-edits/{bulk_edit}/undo",
+            path={"brand": brand, "bulk_edit": bulk_edit},
+            idempotency_key=idempotency_key,
+        )
+
     def undo_merge(
         self,
         brand: str,
@@ -33381,6 +34894,88 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_account(
+        self,
+        brand: str,
+        id: str,
+        *,
+        depends_on: str | None = None,
+        identity: str | None = None,
+        integration_id: str | None = None,
+        label: str | None = None,
+        mailbox_id: str | None = None,
+        notes: str | None = None,
+        owner_id: str | None = None,
+        platform: str | None = None,
+        sign_in: str | None = None,
+        status: Literal["unverified", "blocked", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change an account, block it or archive it.
+
+        Scope: accounts.manage. Change what it is called, how it signs in
+        or what it depends on, or set `status`: `blocked` takes it out of
+        automated use, `unverified` puts it back, `archived` retires it.
+        `healthy` and `needs_attention` come from attempts, never from
+        here.
+
+        Needs: the accounts.manage scope.
+        PATCH /v1/brands/{brand}/accounts/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/accounts/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "depends_on": depends_on,
+                "identity": identity,
+                "integration_id": integration_id,
+                "label": label,
+                "mailbox_id": mailbox_id,
+                "notes": notes,
+                "owner_id": owner_id,
+                "platform": platform,
+                "sign_in": sign_in,
+                "status": status,
+                "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_account_incident(
+        self,
+        brand: str,
+        id: str,
+        *,
+        next_retry_at: str | None = None,
+        owner_id: str | None = None,
+        resolution: str | None = None,
+        status: Literal["open", "snoozed", "resolved"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Own, snooze or resolve an incident.
+
+        Scope: accounts.manage. Give it an owner, snooze it until
+        `next_retry_at` (monitoring goes on), or resolve it with a
+        `resolution`; resolving the last open incident on an account puts
+        it back to unverified until its next use.
+
+        Needs: the accounts.manage scope.
+        PATCH /v1/brands/{brand}/account-incidents/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/account-incidents/{id}",
+            path={"brand": brand, "id": id},
+            body={"next_retry_at": next_retry_at, "owner_id": owner_id, "resolution": resolution, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_ad_account(
         self,
         id: str,
@@ -33403,6 +34998,42 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/accounts/{id}",
             path={"id": id, "ws": ws},
             body={"brand": brand, "sync_on": sync_on},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_ad_campaign(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        daily_budget_micros: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a campaign's daily budget.
+
+        Scope: ads.manage. Asks the campaign's platform (Google Ads, Meta,
+        Microsoft Advertising, LinkedIn or TikTok; the others can be read
+        but not changed yet, 422 `connector_invalid`) to set its daily budget, in micros of the
+        account's currency, and answers 202 with the queued change: a job
+        makes the one call on the workspace's own account, reads the
+        campaign back and records whether the platform shows the budget
+        (`verified_at`, else `verify_note`). `GET .../ads/changes` follows
+        it. For an agent on the action layer, a raise of more than a
+        fifth, or a budget where the campaign had none, always waits for a
+        person, and a budget that would put the brand's active campaigns
+        over the grant's daily cap, or its month over the monthly cap,
+        waits too (docs/actions.md).
+
+        Needs: the ads.manage scope.
+        PATCH /v1/workspaces/{ws}/ads/campaigns/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/ads/campaigns/{id}",
+            path={"id": id, "ws": ws},
+            body={"daily_budget_micros": daily_budget_micros},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -33924,10 +35555,12 @@ class Operations(_Mixin):
         ws: str | None = None,
         business_model: str | None = None,
         colors: dict[str, Any] | None = None,
+        currency: str | None = None,
         domains: list[str] | None = None,
         handle: str | None = None,
         links: list[dict[str, Any]] | None = None,
         logo_url: str | None = None,
+        manual_edit_days: int | None = None,
         name: str | None = None,
         platforms: list[Literal["web", "ios", "android", "tv", "desktop", "console", "extension", "api"]] | None = None,
         revenue_models: list[str] | None = None,
@@ -33950,10 +35583,12 @@ class Operations(_Mixin):
             body={
                 "business_model": business_model,
                 "colors": colors,
+                "currency": currency,
                 "domains": domains,
                 "handle": handle,
                 "links": links,
                 "logo_url": logo_url,
+                "manual_edit_days": manual_edit_days,
                 "name": name,
                 "platforms": platforms,
                 "revenue_models": revenue_models,
@@ -34238,6 +35873,7 @@ class Operations(_Mixin):
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
+        manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
@@ -34267,6 +35903,7 @@ class Operations(_Mixin):
                 "filterable": filterable,
                 "key": key,
                 "label": label,
+                "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
                 "precedence": precedence,
@@ -34847,10 +36484,12 @@ class Operations(_Mixin):
         *,
         brand_id: str | None = None,
         description: str | None = None,
-        kind: Literal["smart", "static"] | None = None,
+        kind: Literal["smart", "static", "query"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
+        saved_query_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -34872,7 +36511,9 @@ class Operations(_Mixin):
                 "kind": kind,
                 "match": match,
                 "name": name,
+                "record_type": record_type,
                 "rules": rules,
+                "saved_query_id": saved_query_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -34887,6 +36528,7 @@ class Operations(_Mixin):
         description: str | None = None,
         enabled: bool | None = None,
         events: list[str] | None = None,
+        rule_ids: list[str] | None = None,
         url: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -34908,6 +36550,7 @@ class Operations(_Mixin):
                 "description": description,
                 "enabled": enabled,
                 "events": events,
+                "rule_ids": rule_ids,
                 "url": url,
             },
             extra_body=extra_body,
@@ -35032,6 +36675,52 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/contact-rules",
             path={"ws": ws},
             body={"customer_marketing": customer_marketing},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_content(
+        self,
+        brand: str,
+        id: str,
+        *,
+        body: str | None = None,
+        canonical_url: str | None = None,
+        excerpt: str | None = None,
+        notes: str | None = None,
+        slug: str | None = None,
+        status: Literal["draft", "approved", "archived"] | None = None,
+        tags: list[str] | None = None,
+        target: Literal["posts", "pages"] | None = None,
+        title: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change or approve a post or page.
+
+        Scope: content.manage. Change any field, or set `status`: approved
+        (it may go live), draft, or archived. An item that is live and is
+        edited goes back to approved until it is published again.
+        `published` is set by a publication, never here.
+
+        Needs: the content.manage scope.
+        PATCH /v1/brands/{brand}/content/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/content/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "body": body,
+                "canonical_url": canonical_url,
+                "excerpt": excerpt,
+                "notes": notes,
+                "slug": slug,
+                "status": status,
+                "tags": tags,
+                "target": target,
+                "title": title,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36346,6 +38035,7 @@ class Operations(_Mixin):
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
+        manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
@@ -36373,6 +38063,7 @@ class Operations(_Mixin):
                 "filterable": filterable,
                 "key": key,
                 "label": label,
+                "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
                 "precedence": precedence,
@@ -36380,6 +38071,50 @@ class Operations(_Mixin):
                 "target_type": target_type,
                 "value_type": value_type,
                 "write_policy": write_policy,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_finding(
+        self,
+        brand: str,
+        id: str,
+        *,
+        confidence: Literal["low", "medium", "high"] | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+        retired_reason: str | None = None,
+        review_at: str | None = None,
+        scope: dict[str, Any] | None = None,
+        status: Literal["active", "retired"] | None = None,
+        text: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change or retire a finding.
+
+        Scope: context.manage. Correct its text, replace its evidence,
+        change how sure it is, its scope or its review date (after a
+        review, set `review_at` forward). `status: retired` with
+        `retired_reason` retires one that no longer holds; `status:
+        active` brings a retired one back. Retired findings stay, so the
+        record of what was believed and why is kept.
+
+        Needs: the context.manage scope.
+        PATCH /v1/brands/{brand}/findings/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/findings/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "confidence": confidence,
+                "evidence": evidence,
+                "retired_reason": retired_reason,
+                "review_at": review_at,
+                "scope": scope,
+                "status": status,
+                "text": text,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -37301,6 +39036,80 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_metric(
+        self,
+        brand: str,
+        metric: str,
+        *,
+        aggregate: Literal["count", "sum", "min", "max", "days", "last"] | None = None,
+        description: str | None = None,
+        events: list[str] | None = None,
+        key: str | None = None,
+        levels: list[Literal["company", "person"]] | None = None,
+        name: str | None = None,
+        offset_days: int | None = None,
+        per_product: bool | None = None,
+        property: str | None = None,
+        usage: bool | None = None,
+        window_days: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a metric.
+
+        Scope: catalog.manage. The key never changes. A change to what it counts makes a new version, refilled quietly
+        from stored events.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/metrics/{metric}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/metrics/{metric}",
+            path={"brand": brand, "metric": metric},
+            body={
+                "aggregate": aggregate,
+                "description": description,
+                "events": events,
+                "key": key,
+                "levels": levels,
+                "name": name,
+                "offset_days": offset_days,
+                "per_product": per_product,
+                "property": property,
+                "usage": usage,
+                "window_days": window_days,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_metric_settings(
+        self,
+        brand: str,
+        *,
+        enabled: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Turn metrics on or off.
+
+        Scope: catalog.manage. Turning them on adds the default metrics to a brand with none and fills every metric
+        quietly from stored events: nothing fires for the past, and a record already past a rule's threshold counts as
+        having crossed it. Values are kept under the record's attributes.metrics.
+
+        Needs: the catalog.manage scope.
+        PATCH /v1/brands/{brand}/metrics
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/metrics",
+            path={"brand": brand},
+            body={"enabled": enabled},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_mission(
         self,
         id: str,
@@ -37995,6 +39804,51 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/product-names/{name}",
             path={"brand": brand, "name": name},
             body={"product_id": product_id, "source": source, "status": status, "value": value},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_query_endpoint(
+        self,
+        brand: str,
+        endpoint: str,
+        *,
+        description: str | None = None,
+        name: str | None = None,
+        params: list[dict[str, Any]] | None = None,
+        rate_per_minute: int | None = None,
+        row_cap: int | None = None,
+        saved_query_id: str | None = None,
+        slug: str | None = None,
+        status: Literal["active", "disabled"] | None = None,
+        version: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a query endpoint.
+
+        Scope: customers.manage, owners and admins only, signed in (403 admin_only). Moves it to another version of
+        its saved query, changes its name, description, parameters, row cap or rate limit, or turns it off and on
+        (status). What it reads becomes the changer's read scopes. Its saved query and slug never change.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/query-endpoints/{endpoint}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/query-endpoints/{endpoint}",
+            path={"brand": brand, "endpoint": endpoint},
+            body={
+                "description": description,
+                "name": name,
+                "params": params,
+                "rate_per_minute": rate_per_minute,
+                "row_cap": row_cap,
+                "saved_query_id": saved_query_id,
+                "slug": slug,
+                "status": status,
+                "version": version,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -38766,10 +40620,12 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         description: str | None = None,
-        kind: Literal["smart", "static"] | None = None,
+        kind: Literal["smart", "static", "query"] | None = None,
         match: Literal["all", "any"] | None = None,
         name: str | None = None,
+        record_type: Literal["person", "account"] | None = None,
         rules: list[dict[str, Any]] | None = None,
+        saved_query_id: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -38792,7 +40648,9 @@ class Operations(_Mixin):
                 "kind": kind,
                 "match": match,
                 "name": name,
+                "record_type": record_type,
                 "rules": rules,
+                "saved_query_id": saved_query_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -39184,6 +41042,41 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_support_handoff_topic(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        always_handoff: bool | None = None,
+        assignee_id: str | None = None,
+        description: str | None = None,
+        name: str | None = None,
+        team_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a hand-off topic.
+
+        Scope: inbox.manage. Only the fields given change; null clears assignee_id or team_id.
+
+        Needs: the inbox.manage scope.
+        PATCH /v1/workspaces/{ws}/support/handoff-topics/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/support/handoff-topics/{id}",
+            path={"id": id, "ws": ws},
+            body={
+                "always_handoff": always_handoff,
+                "assignee_id": assignee_id,
+                "description": description,
+                "name": name,
+                "team_id": team_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_suppression_sync(
         self,
         integration: str,
@@ -39437,6 +41330,7 @@ class Operations(_Mixin):
         description: str | None = None,
         enabled: bool | None = None,
         events: list[str] | None = None,
+        rule_ids: list[str] | None = None,
         url: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -39460,6 +41354,7 @@ class Operations(_Mixin):
                 "description": description,
                 "enabled": enabled,
                 "events": events,
+                "rule_ids": rule_ids,
                 "url": url,
             },
             extra_body=extra_body,
@@ -39471,13 +41366,15 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         name: str | None = None,
+        records_edit_owners_only: bool | None = None,
         slug: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Rename a workspace or change its slug.
+        """Rename a workspace, change its slug, or who edits records.
 
-        Scope: workspace.manage. Send only the fields to change. The slug is the workspace's name in web app
+        Scope: workspace.manage. Send only the fields to change. records_edit_owners_only lets only owners and admins
+        change customer records (owners and admins set it). The slug is the workspace's name in web app
         URLs (https://app.outflare.ai/{slug}/overview) and works in place of its ID in API paths. The old slug
         keeps working, in the app and the API, until another workspace takes it; store the ID, which never changes.
 
@@ -39488,7 +41385,7 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}",
             path={"ws": ws},
-            body={"name": name, "slug": slug},
+            body={"name": name, "records_edit_owners_only": records_edit_owners_only, "slug": slug},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

@@ -22,6 +22,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/analyticsync"
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/classify"
+	"github.com/outflareai/outflare/engine/internal/cmspublish"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/connectors/catalog"
 	"github.com/outflareai/outflare/engine/internal/connectors/verifiers"
@@ -69,6 +70,7 @@ type env struct {
 	platforms    *platforms.Service
 	outbox       *outbox // account emails the server sent
 	ads          *adsync.Syncer
+	content      *cmspublish.Publisher
 }
 
 func freshEnv(t *testing.T) *env {
@@ -123,8 +125,13 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	t.Cleanup(ma.Close)
 	ga := httptest.NewServer(fakeGoogleAds{})
 	t.Cleanup(ga.Close)
+	wpFake, ghostFake = &fakeWordPress{}, &fakeGhost{}
+	wps := httptest.NewServer(wpFake)
+	t.Cleanup(wps.Close)
+	ghs := httptest.NewServer(ghostFake)
+	t.Cleanup(ghs.Close)
 	integrations := &connectors.Store{Pool: pool, Box: box, Registry: catalog.New(),
-		Client: &connectors.Client{BaseURLs: map[string]string{"zerobounce": zb.URL, "smartlead": sl.URL, "emailbison": eb.URL, "claude": cl.URL, "plausible": pl.URL, "dataforseo": dfs.URL, "geonode": gn.URL, "meta_ads": ma.URL, "google_ads": ga.URL}}}
+		Client: &connectors.Client{BaseURLs: map[string]string{"zerobounce": zb.URL, "smartlead": sl.URL, "emailbison": eb.URL, "claude": cl.URL, "plausible": pl.URL, "dataforseo": dfs.URL, "geonode": gn.URL, "meta_ads": ma.URL, "google_ads": ga.URL, "wordpress": wps.URL, "ghost": ghs.URL}}}
 	send.Platforms = integrations
 	tokens.Integrations = integrations
 	importer := &imports.Service{Pool: pool, Store: integrations, Log: log}
@@ -136,6 +143,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	async := &analyticsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	seo := &seosync.Syncer{Pool: pool, Store: integrations, Log: log}
 	ads := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
+	content := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
 	// Crawls reach httptest sites on 127.0.0.1 without pausing between requests.
 	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: dns, AllowPrivate: true, StepFor: 5 * time.Second,
 		Wait: func(context.Context, time.Duration) error { return nil }, Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool}, AfterAudit: seointel.AfterAudit,
@@ -148,7 +156,7 @@ func freshEnvWith(t *testing.T, change func(*api.Options)) *env {
 	}
 	srv := api.NewServer(pool, log, opts)
 	h := handler(t, srv)
-	return &env{h: h, srv: srv, crawl: crawler, ads: ads, pool: pool, mail: mail, dns: dns, send: send, sync: syncer, oauth: tokens, integrations: integrations, verify: verifier, imports: importer, platforms: plat, box: box, outbox: ob}
+	return &env{h: h, srv: srv, crawl: crawler, ads: ads, content: content, pool: pool, mail: mail, dns: dns, send: send, sync: syncer, oauth: tokens, integrations: integrations, verify: verifier, imports: importer, platforms: plat, box: box, outbox: ob}
 }
 
 // handler serves srv for one test. When the test ends it writes the

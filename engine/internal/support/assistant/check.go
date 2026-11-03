@@ -35,6 +35,9 @@ type Before struct {
 	// assistant last did.
 	AIReplies   int
 	TeamReplied bool
+	// NotHelpful is whether the customer said one of its answers in this
+	// conversation didn't help: a person takes it from there.
+	NotHelpful bool
 }
 
 // The most times the assistant answers in one conversation before it
@@ -62,6 +65,8 @@ func Stop(b Before) (reason string, handoff bool) {
 		return "empty", false
 	case b.TeamReplied:
 		return "team_handling", false
+	case b.NotHelpful:
+		return "not_helpful", true
 	case b.AIReplies >= MaxRepliesPerConversation:
 		return "too_many_replies", true
 	case humanRe.MatchString(b.Body):

@@ -359,6 +359,8 @@ function BrandPage({ ws, brand: b, canManage, canEdit, onBack, onChanged, go }: 
       <Members ws={ws} brand={b} canEdit={canEdit} onChanged={onChanged} />
       <AnalyticsSites ws={ws} brand={b} go={go} />
       <DetailsCard ws={ws} brand={b} canManage={canManage} onSaved={onChanged} go={go} />
+      <HandEditsCard ws={ws} brand={b} canManage={canManage} onSaved={onChanged} />
+      <CurrencyCard ws={ws} brand={b} canManage={canManage} onSaved={onChanged} />
     </div>
   );
 }
@@ -524,6 +526,67 @@ function AnalyticsSites({ ws, brand: b, go }: { ws: string; brand: Brand; go: (t
           ))}
         </ul>
       )}
+    </Card>
+  );
+}
+
+// CurrencyCard sets the currency the brand reports money in: transactions
+// are converted to it (docs/transactions.md).
+function CurrencyCard({ ws, brand: b, canManage, onSaved }: { ws: string; brand: Brand; canManage: boolean; onSaved: () => void }) {
+  const [currency, setCurrency] = useState(b.currency);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => setCurrency(b.currency), [b.currency]);
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws, brand: b.id } }, body: { currency: currency.trim().toUpperCase() } });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast("Saved. New transactions are converted to it.");
+    onSaved();
+  }
+  return (
+    <Card title="Currency" description="The currency this brand reports money in. Payments in other currencies are converted to it at the day's rate.">
+      <form onSubmit={save} className="flex flex-wrap items-center gap-2">
+        <input aria-label="Currency" className={cn(field, "w-24 font-mono uppercase")} maxLength={3} value={currency} readOnly={!canManage} onChange={(e) => setCurrency(e.target.value)} />
+        {canManage && <Button type="submit" disabled={busy || currency.trim().toUpperCase() === b.currency || currency.trim().length !== 3}>{busy ? "Saving…" : "Save"}</Button>}
+      </form>
+      <ErrorText>{error}</ErrorText>
+    </Card>
+  );
+}
+
+// HandEditsCard sets how long a person's edit of a record's field wins over
+// the brand's other sources (docs/customers.md, "Where a value comes from").
+function HandEditsCard({ ws, brand: b, canManage, onSaved }: { ws: string; brand: Brand; canManage: boolean; onSaved: () => void }) {
+  const [days, setDays] = useState(String(b.manual_edit_days));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setDays(String(b.manual_edit_days)), [b.manual_edit_days]);
+  async function save(next: string) {
+    setDays(next);
+    setBusy(true);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/brands/{brand}", { params: { path: { ws, brand: b.id } }, body: { manual_edit_days: Number(next) } });
+    setBusy(false);
+    if (error) {
+      setDays(String(b.manual_edit_days));
+      return toast(errorMessage(error), "error");
+    }
+    toast("Saved. New edits follow it; edits already made keep their date.");
+    onSaved();
+  }
+  const choices = ["30", "90", "180", "365", "0"];
+  return (
+    <Card title="When your team's edits give way" description="A person's edit of a customer field wins over your CRM, enrichment and other sources for this long. After it, the best other value takes over, as a change in the record's history. Pin an edit on the record to keep it for good; fields can set their own time in the catalog.">
+      <select aria-label="How long a person's edit wins" className={cn(field, "w-full sm:w-56")} value={days} disabled={!canManage || busy} onChange={(e) => save(e.target.value)}>
+        <option value="30">30 days</option>
+        <option value="90">90 days</option>
+        <option value="180">180 days (the default)</option>
+        <option value="365">1 year</option>
+        <option value="0">Forever</option>
+        {!choices.includes(days) && <option value={days}>{days} days</option>}
+      </select>
     </Card>
   );
 }

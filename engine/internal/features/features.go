@@ -36,11 +36,17 @@ type Feature struct {
 // usage, resets, renewals and spend (plans/ai-accounts).
 const AIAccounts = "ai_accounts"
 
+// SupportAutoBlocked stops the support assistant answering customers on its
+// own (Auto) in a workspace, where an extension allows Auto: a switch for
+// the operator's staff. Drafts keep working.
+const SupportAutoBlocked = "support_auto_blocked"
+
 // Catalog lists every switchable feature. Names are a promise like event
 // names: add freely, never rename. Remove one only once its code no longer
 // checks it, and leave its rows (they turn nothing on).
 var Catalog = []Feature{
 	{Name: AIAccounts, Description: "AI Accounts: every AI subscription the workspace's people pay for, with usage, resets, renewals and spend."},
+	{Name: SupportAutoBlocked, Description: "Block support Auto: the support assistant stops answering customers on its own in this workspace and only drafts."},
 }
 
 // ErrUnknown is returned for a name that isn't in the catalog.

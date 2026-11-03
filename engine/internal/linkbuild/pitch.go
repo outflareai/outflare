@@ -68,7 +68,11 @@ func StartPitch(ctx context.Context, tx pgx.Tx, ws string, p NewPitch, rec seosy
 		return "", ErrNotPitchable
 	}
 	var open bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM link_pitches WHERE prospect_id = $1 AND status IN ('writing', 'draft', 'enrolled'))`,
+	// A pitch sent before the link was won and later removed is done with:
+	// the prospect is back to win the link back.
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM link_pitches k JOIN link_prospects x ON x.id = k.prospect_id
+		WHERE k.prospect_id = $1 AND (k.status IN ('writing', 'draft')
+			OR (k.status = 'enrolled' AND k.created_at > COALESCE(x.removed_at, '-infinity'))))`,
 		p.ProspectID).Scan(&open); err != nil || open {
 		if open {
 			return "", ErrPitchOpen
@@ -144,15 +148,15 @@ func (s *Service) writeOpener(ctx context.Context, job jobs.Job) error {
 		return fmt.Errorf("%w: %v", jobs.ErrPermanent, err)
 	}
 	var ws, prospectID, seqID, status, method, page, target, siteHost, contactName string
-	var title, topic, author, kind *string
+	var title, topic, author, kind, removedAt *string
 	var broken []byte
 	err := s.Pool.QueryRow(ctx, `
 		SELECT k.workspace_id, k.prospect_id, k.sequence_id, k.status, x.method, x.page_url, x.target_url, st.host, r.name,
-			c.title, c.topic, c.author, c.page_kind, COALESCE(c.broken, '[]')
+			c.title, c.topic, c.author, c.page_kind, COALESCE(c.broken, '[]'), x.evidence->>'removed_at'
 		FROM link_pitches k JOIN link_prospects x ON x.id = k.prospect_id JOIN seo_sites st ON st.id = x.site_id
 		JOIN records r ON r.id = k.record_id LEFT JOIN link_page_checks c ON c.prospect_id = x.id
 		WHERE k.id = $1`, p.PitchID).Scan(&ws, &prospectID, &seqID, &status, &method, &page, &target, &siteHost, &contactName,
-		&title, &topic, &author, &kind, &broken)
+		&title, &topic, &author, &kind, &broken, &removedAt)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != "writing") {
 		return nil
 	}
@@ -171,6 +175,11 @@ func (s *Service) writeOpener(ctx context.Context, job jobs.Job) error {
 		prompt := fmt.Sprintf("Our site: %s\nOur page to offer: %s\nWhy we found their page: %s\nTheir page: %s\nTitle: %s\nTopic: %s\nKind: %s\n"+
 			"Written by: %s\nWriting to: %s\nBroken links on their page (url, anchor): %s\n",
 			siteHost, target, method, page, deref(title), deref(topic), deref(kind), deref(author), contactName, string(broken))
+		if removedAt != nil {
+			// A link we had: the page linked to us until it was removed.
+			prompt += "This page linked to our page before; the link was removed around " + (*removedAt)[:min(10, len(*removedAt))] +
+				". Ask, kindly, whether they'd add it back.\n"
+		}
 		resp, err := choice.Model.Chat(ctx, llm.Request{System: openerSystem, Messages: []llm.Message{{Role: "user", Text: prompt}},
 			JSONSchema: openerSchema, MaxTokens: 500})
 		_ = s.Models.Spent(ctx, ws, choice, resp.Usage, "link_pitch:"+p.PitchID, "Wrote a link pitch to "+siteHost+"'s prospect")

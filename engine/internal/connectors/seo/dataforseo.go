@@ -31,7 +31,7 @@ func (DataForSEO) Definition() c.Definition {
 }
 
 func (DataForSEO) SEOReports() []string {
-	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors}
+	return []string{c.SEOOverview, c.SEOKeywords, c.SEOBacklinks, c.SEOLinks, c.SEOCompetitors, c.SEOPages}
 }
 
 // Estimate follows DataForSEO's price list: Labs live calls are about
@@ -316,6 +316,27 @@ func (d DataForSEO) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, 
 				OrganicKeywords: num(org["count"]), OrganicTraffic: num(org["etv"]),
 			}})
 		}
+	case c.SEOPages:
+		labs["limit"] = q.Limit
+		labs["order_by"] = []string{"metrics.organic.etv,desc"}
+		if err := d.call(ctx, cl, creds, "/v3/dataforseo_labs/google/relevant_pages/live", labs, &resp, &rep.Cost); err != nil {
+			return rep, err
+		}
+		result, err := resp.first("DataForSEO")
+		if err != nil {
+			return rep, err
+		}
+		for _, it := range items(result) {
+			page := str(it["page_address"])
+			if page == "" {
+				continue
+			}
+			org := obj(obj(it["metrics"])["organic"])
+			rep.Rows = append(rep.Rows, c.SEORow{Key: page, URL: page, SEOMetrics: c.SEOMetrics{
+				OrganicTraffic: num(org["etv"]), OrganicKeywords: num(org["count"]),
+			}})
+		}
+		rep.Notes = append(rep.Notes, "Traffic is DataForSEO's estimate of each page's monthly visits from Google.")
 	default:
 		return rep, c.Errf(c.ErrInvalid, "DataForSEO has no %s report here; Ahrefs reads site audits", q.Report)
 	}

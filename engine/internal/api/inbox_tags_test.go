@@ -3,11 +3,13 @@ package api_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/track"
+	"github.com/outflareai/outflare/engine/internal/webhooks"
 )
 
 func TestInboxLabelsTagsAndViews(t *testing.T) {
@@ -210,5 +212,51 @@ func TestWebhooksForSomeLabels(t *testing.T) {
 	up := owner.must(200, "PATCH", base+"/webhooks/"+hot["id"].(string), map[string]any{"categories": []string{}})
 	if fmt.Sprint(up["categories"]) != "[]" {
 		t.Fatalf("cleared: %v", up["categories"])
+	}
+}
+
+// A webhook per rule: an endpoint with rule_ids hears about those rules
+// only; one without hears about every rule, and other events are not
+// filtered by rule.
+func TestWebhooksForSomeRules(t *testing.T) {
+	e, owner, ws, _ := webhookEnv(t)
+	base := "/v1/workspaces/" + ws
+	rule := func(name string) string {
+		return owner.must(201, "POST", base+"/rules", map[string]any{"name": name, "trigger": map[string]any{"kind": "event", "event": "signup"},
+			"emit_event": "customer." + strings.ToLower(strings.ReplaceAll(name, " ", "_"))})["id"].(string)
+	}
+	a, b := rule("Rule A"), rule("Rule B")
+	owner.must(400, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/x", "events": []string{"rule.fired"}, "rule_ids": []string{"nope"}})
+	owner.must(400, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/x", "events": []string{"rule.fired"}, "rule_ids": []string{"00000000-0000-0000-0000-000000000001"}})
+	onlyA := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/a", "events": []string{"rule.fired", "record.updated"}, "rule_ids": []string{a}})
+	if fmt.Sprint(onlyA["rule_ids"]) != "["+a+"]" {
+		t.Fatalf("rule_ids: %v", onlyA["rule_ids"])
+	}
+	all := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": "https://example.com/all", "events": []string{"rule.fired"}})
+
+	ctx := context.Background()
+	for i, id := range []string{a, b, b} {
+		rid := id
+		if err := webhooks.Enqueue(ctx, e.pool, webhooks.Envelope{ID: fmt.Sprintf("evt_rule_%d", i), Type: "rule.fired", WorkspaceID: ws, CreatedAt: time.Now(),
+			Actor: webhooks.Ref{Type: "system"}, Target: &webhooks.Ref{Type: "rule", ID: &rid}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := webhooks.Enqueue(ctx, e.pool, webhooks.Envelope{ID: "evt_record", Type: "record.updated", WorkspaceID: ws, CreatedAt: time.Now(),
+		Actor: webhooks.Ref{Type: "system"}, Target: &webhooks.Ref{Type: "record"}}); err != nil {
+		t.Fatal(err)
+	}
+	count := func(id, typ string) (n int) {
+		t.Helper()
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM webhook_deliveries WHERE endpoint_id = $1 AND event_type = $2`, id, typ).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(onlyA["id"].(string), "rule.fired") != 1 || count(all["id"].(string), "rule.fired") != 3 || count(onlyA["id"].(string), "record.updated") != 1 {
+		t.Fatalf("deliveries: only A %d, all %d, member %d", count(onlyA["id"].(string), "rule.fired"), count(all["id"].(string), "rule.fired"), count(onlyA["id"].(string), "record.updated"))
+	}
+	if up := owner.must(200, "PATCH", base+"/webhooks/"+onlyA["id"].(string), map[string]any{"rule_ids": []string{}}); fmt.Sprint(up["rule_ids"]) != "[]" {
+		t.Fatalf("cleared: %v", up["rule_ids"])
 	}
 }

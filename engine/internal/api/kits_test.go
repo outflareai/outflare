@@ -114,8 +114,9 @@ func TestPlaybookAppliesItsKit(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	start := map[string]any{"inputs": map[string]any{"brand": "Northpeak", "topics": "trail running"}, "apply_kit": true}
-	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/runs", map[string]any{"inputs": map[string]any{"brand": "Northpeak"}, "apply_kit": true})
-	m := owner.must(201, "POST", base+"/playbooks/creator-partnerships/runs", start)
+	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/agent-runs", map[string]any{"inputs": map[string]any{"brand": "Northpeak"}, "apply_kit": true})
+	connectFakeOpenAI(t, e, owner, ws)
+	m := owner.must(201, "POST", base+"/playbooks/creator-partnerships/agent-runs", start)
 	if !strings.Contains(m["instructions"].(string), "setup kit") {
 		t.Fatalf("instructions: %s", m["instructions"])
 	}

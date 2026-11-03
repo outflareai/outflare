@@ -76,6 +76,11 @@ type deprecatedOperation struct {
 // (plans/brands/README.md, decision 6). The workspace routes stay until
 // the contract step.
 var deprecatedOperations = map[string]deprecatedOperation{
+	// Missions are being retired for agent runs (ADR 13). startPlaybook
+	// already answers 410 mission_retired; the other two still work.
+	"createMission": {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"planMission":   {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"startPlaybook": {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
 	// Customer data (step 2b part 2).
 	"addRecordIdentity":       {instead: "POST /v1/brands/{brand}/records/{record}/identities"},
 	"addRecordRelationship":   {instead: "POST /v1/brands/{brand}/records/{record}/relationships"},
@@ -102,6 +107,7 @@ var deprecatedOperations = map[string]deprecatedOperation{
 	"listRecordRelationships": {instead: "GET /v1/brands/{brand}/records/{record}/relationships"},
 	"listRecords":             {instead: "GET /v1/brands/{brand}/records"},
 	"listSmartListMembers":    {instead: "GET /v1/brands/{brand}/smart-lists/{id}/members"},
+	"listSmartListChanges":    {instead: "GET /v1/brands/{brand}/smart-lists/{id}/changes"},
 	"listSmartLists":          {instead: "GET /v1/brands/{brand}/smart-lists"},
 	"mergeRecords":            {instead: "POST /v1/brands/{brand}/records/{record}/merge"},
 	"previewSmartList":        {instead: "POST /v1/brands/{brand}/smart-lists/preview"},

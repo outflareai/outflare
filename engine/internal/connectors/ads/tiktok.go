@@ -23,8 +23,8 @@ func (TikTokAds) Definition() c.Definition {
 	d := def("tiktok_ads", "TikTok Ads", "https://ads.tiktok.com",
 		"https://business-api.tiktok.com/portal/docs", "",
 		"Spend, impressions, clicks and conversions per campaign from your TikTok ad accounts.",
-		"Signs in with TikTok For Business and reads the ad accounts you grant, read-only; conversions go back to your TikTok pixel through the Events API. To add more ad accounts later, connect again and grant them.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
+		"Signs in with TikTok For Business and reads the ad accounts you grant; conversions go back to your TikTok pixel through the Events API. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget (Ad Account Management write access on the app). To add more ad accounts later, connect again and grant them.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
 	d.OAuth = &c.OAuth{
 		AuthURL:       "https://business-api.tiktok.com/portal/auth",
 		TokenURL:      tiktokBase + "/oauth2/access_token/",
@@ -182,6 +182,77 @@ func (t TikTokAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 		}
 	}
 	return out, nil
+}
+
+// ---- managing campaigns ----
+
+func (t TikTokAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	if campaignID == "" || len(campaignID) > 40 {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "a TikTok campaign id is required")
+	}
+	var data struct {
+		List []struct {
+			CampaignID      string  `json:"campaign_id"`
+			CampaignName    string  `json:"campaign_name"`
+			OperationStatus string  `json:"operation_status"`
+			SecondaryStatus string  `json:"secondary_status"`
+			ObjectiveType   string  `json:"objective_type"`
+			Budget          flexNum `json:"budget"`
+			BudgetMode      string  `json:"budget_mode"`
+		} `json:"list"`
+	}
+	err := t.get(ctx, cl, creds["access_token"], "/campaign/get/", map[string]any{
+		"advertiser_id": acct.ID, "page": 1, "page_size": 10, "filtering": map[string]any{"campaign_ids": []string{campaignID}},
+		"fields": []string{"campaign_id", "campaign_name", "operation_status", "secondary_status", "objective_type", "budget", "budget_mode"},
+	}, &data)
+	if err != nil {
+		return c.AdCampaign{}, err
+	}
+	for _, cp := range data.List {
+		if cp.CampaignID != campaignID {
+			continue
+		}
+		camp := c.AdCampaign{ID: cp.CampaignID, Name: cp.CampaignName, Status: tiktokStatus(cp.OperationStatus, cp.SecondaryStatus),
+			ProviderStatus: cp.OperationStatus, Objective: strings.ToLower(cp.ObjectiveType)}
+		if cp.BudgetMode == "BUDGET_MODE_DAY" && cp.Budget > 0 {
+			camp.DailyBudgetMicros = ptrI(c.Micros(float64(cp.Budget)))
+		}
+		return camp, nil
+	}
+	return c.AdCampaign{}, c.Errf(c.ErrInvalid, "TikTok Ads has no campaign %s in account %s", campaignID, acct.ID)
+}
+
+// post calls a v1.3 endpoint with a JSON body.
+func (t TikTokAds) post(ctx context.Context, cl *c.Client, token, path string, body any) error {
+	var env tiktokEnvelope
+	if err := newCall(cl, "TikTok Ads").set("Access-Token", token).post(ctx, t.base(cl)+path, body, &env); err != nil {
+		return err
+	}
+	return tiktokData(env, nil)
+}
+
+func (t TikTokAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	if campaignID == "" || len(campaignID) > 40 {
+		return c.Errf(c.ErrInvalid, "a TikTok campaign id is required")
+	}
+	op := "DISABLE"
+	if active {
+		op = "ENABLE"
+	}
+	return t.post(ctx, cl, creds["access_token"], "/campaign/status/update/", map[string]any{"advertiser_id": acct.ID, "campaign_ids": []string{campaignID}, "operation_status": op})
+}
+
+// SetCampaignDailyBudget sets a daily budget (BUDGET_MODE_DAY) in the
+// account's currency, to the cent.
+func (t TikTokAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, micros int64) error {
+	if campaignID == "" || len(campaignID) > 40 {
+		return c.Errf(c.ErrInvalid, "a TikTok campaign id is required")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	return t.post(ctx, cl, creds["access_token"], "/campaign/update/", map[string]any{"advertiser_id": acct.ID, "campaign_id": campaignID,
+		"budget_mode": "BUDGET_MODE_DAY", "budget": float64((micros+5_000)/10_000) / 100})
 }
 
 // tiktokStatus reads ENABLE, DISABLE and DELETE; a deleted campaign can

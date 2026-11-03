@@ -58,7 +58,10 @@ type webhookView struct {
 	Events      []string `json:"events"`
 	// Reply labels this endpoint hears about; empty for all. Events
 	// without a label are sent regardless.
-	Categories     []string   `json:"categories"`
+	Categories []string `json:"categories"`
+	// Rules this endpoint hears about; empty for all. Events about no
+	// rule are sent regardless.
+	RuleIDs        []string   `json:"rule_ids"`
 	Enabled        bool       `json:"enabled"`
 	DisabledReason *string    `json:"disabled_reason"`
 	FailingSince   *time.Time `json:"failing_since"`
@@ -73,7 +76,7 @@ type webhookView struct {
 	FailedAttempts24h int `json:"failed_attempts_24h"`
 }
 
-const webhookColumns = `id, url, description, events, categories, enabled, disabled_reason, failing_since, last_success_at, created_at, updated_at, brand_id::text,
+const webhookColumns = `id, url, description, events, categories, rule_ids::text[], enabled, disabled_reason, failing_since, last_success_at, created_at, updated_at, brand_id::text,
 	(SELECT count(*) FROM webhook_delivery_attempts a WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours')::int,
 	(SELECT count(*) FROM webhook_delivery_attempts a WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours' AND NOT a.ok)::int`
 
@@ -138,7 +141,9 @@ type webhookInput struct {
 	// Categories takes reply labels or groups (hot, later, closed,
 	// automatic); groups are stored as their labels.
 	Categories []string `json:"categories"`
-	Enabled    *bool    `json:"enabled"`
+	// RuleIDs limits rule events to these rules of the endpoint's brand.
+	RuleIDs []string `json:"rule_ids"`
+	Enabled *bool    `json:"enabled"`
 	// The brand's id or handle whose events it gets. Left out (or null)
 	// it is the route's brand, or on the workspace route the first brand.
 	Brand json.RawMessage `json:"brand"`
@@ -164,6 +169,19 @@ func (s *Server) webhookBrand(ctx context.Context, a *access, in *webhookInput) 
 		return false, nil, err
 	}
 	return true, &id, nil
+}
+
+// checkWebhookRules checks, after a write, that an endpoint's rules are
+// rules of its brand, so it can't listen to another brand's.
+func checkWebhookRules(ctx context.Context, tx pgx.Tx, ws, id string) error {
+	var bad int
+	err := tx.QueryRow(ctx, `SELECT count(*) FROM webhook_endpoints e, unnest(e.rule_ids) r
+		WHERE e.id = $1 AND e.workspace_id = $2 AND NOT EXISTS (SELECT 1 FROM rules x WHERE x.id = r AND x.workspace_id = e.workspace_id
+			AND (e.brand_id IS NULL OR x.brand_id IS NULL OR x.brand_id = e.brand_id))`, id, ws).Scan(&bad)
+	if err == nil && bad > 0 {
+		return errInvalid("rule_ids are rules of the webhook's brand")
+	}
+	return err
 }
 
 func (in *webhookInput) validate(allowPrivate bool) error {
@@ -193,6 +211,15 @@ func (in *webhookInput) validate(allowPrivate bool) error {
 			}
 		}
 		in.Events = slices.Compact(slices.Sorted(slices.Values(in.Events)))
+	}
+	if len(in.RuleIDs) > 50 {
+		return errInvalid("rule_ids lists at most 50 rules")
+	}
+	for i, id := range in.RuleIDs {
+		if !validUUID(id) {
+			return errInvalid("rule_ids are rule ids")
+		}
+		in.RuleIDs[i] = strings.ToLower(id)
 	}
 	if in.Categories != nil {
 		for i := range in.Categories {
@@ -259,12 +286,15 @@ func (s *Server) createWebhook(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO webhook_endpoints (id, workspace_id, url, description, events, secret, enabled, created_by, brand_id, categories)
-			VALUES ($1, $2, $3, $4, $5, $6, coalesce($7, true), $8, $9, coalesce($10::text[], '{}'))`,
-			id, a.WorkspaceID, *req.URL, deref(req.Description), req.Events, s.box.Seal([]byte(secret), []byte(id)), req.Enabled, a.ActorID, brand, req.Categories); err != nil {
+			INSERT INTO webhook_endpoints (id, workspace_id, url, description, events, secret, enabled, created_by, brand_id, categories, rule_ids)
+			VALUES ($1, $2, $3, $4, $5, $6, coalesce($7, true), $8, $9, coalesce($10::text[], '{}'), coalesce($11::uuid[], '{}'))`,
+			id, a.WorkspaceID, *req.URL, deref(req.Description), req.Events, s.box.Seal([]byte(secret), []byte(id)), req.Enabled, a.ActorID, brand, req.Categories, req.RuleIDs); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "webhook.created", "webhook", id, map[string]any{"url": *req.URL, "events": req.Events, "brand_id": brand, "categories": req.Categories})
+		if err := checkWebhookRules(ctx, tx, a.WorkspaceID, id); err != nil {
+			return err
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "webhook.created", "webhook", id, map[string]any{"url": *req.URL, "events": req.Events, "brand_id": brand, "categories": req.Categories, "rule_ids": req.RuleIDs})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -302,12 +332,16 @@ func (s *Server) updateWebhook(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `
 			UPDATE webhook_endpoints SET url = coalesce($3, url), description = coalesce($4, description),
 			       events = coalesce($5, events), enabled = coalesce($6, enabled), categories = coalesce($9::text[], categories),
+			       rule_ids = coalesce($10::uuid[], rule_ids),
 			       disabled_reason = CASE WHEN $6 THEN NULL WHEN $6 = false THEN coalesce(disabled_reason, 'turned off by hand') ELSE disabled_reason END,
 			       failing_since = CASE WHEN $6 AND NOT enabled THEN NULL ELSE failing_since END,
 			       brand_id = CASE WHEN $7 THEN $8::uuid ELSE brand_id END,
 			       updated_at = now()
 			 WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, req.URL, req.Description, req.Events, req.Enabled, setBrand, brand, req.Categories); err != nil {
+			cur.ID, a.WorkspaceID, req.URL, req.Description, req.Events, req.Enabled, setBrand, brand, req.Categories, req.RuleIDs); err != nil {
+			return err
+		}
+		if err := checkWebhookRules(ctx, tx, a.WorkspaceID, cur.ID); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "webhook.updated", "webhook", cur.ID, nil)

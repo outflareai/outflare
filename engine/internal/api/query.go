@@ -101,6 +101,11 @@ var queryTables = []queryTable{
 	{"spend", auth.ScopeOutcomesRead, "Money spent, by channel, category and provider, in minor units."},
 	{"rules", auth.ScopeCustomersRead, "Rules of the rules engine: each turns what happens to records into an event of its own."},
 	{"rule_firings", auth.ScopeCustomersRead, "Each time a rule fired: for which record, in which episode, and the event it emitted."},
+	{"transactions", auth.ScopeCustomersRead, "Payments, refunds, chargebacks and credits; amount_minor in currency, brand_amount_minor in the brand's currency (null until the day's rate is known)."},
+	{"smart_list_changes", auth.ScopeCustomersRead, "Who joined (enter) and left (leave) each smart or static list, and when."},
+	{"metrics", auth.ScopeCustomersRead, "The brand's live metrics: what each counts (aggregate, events, usage, property) over which window."},
+	{"metric_values", auth.ScopeCustomersRead, "Each company's and person's current value of each metric; product_id is null for the overall value."},
+	{"bulk_edits", auth.ScopeCustomersRead, "Bulk edits owners ran: where the records came from, what changed, how many, and the bulk edit that undid one (undone_by)."},
 	{"products", auth.ScopeCustomersRead, "The brand's products: key never changes; churn_mode says whether cancelling or no usage churns a customer."},
 	{"lifecycle_states", auth.ScopeCustomersRead, "Where each company (level company: billing) and person (level person: usage) stands with each product."},
 	{"lifecycle_moves", auth.ScopeCustomersRead, "Each move between lifecycle stages, with the event that caused it and the event it emitted; level overall is a company's overall status."},
@@ -114,6 +119,8 @@ var queryTables = []queryTable{
 	{"social_posts", auth.ScopeSocialRead, "Posts on the workspace's own social accounts, with their numbers."},
 	{"reviews", auth.ScopeSocialRead, "Reviews on the brands' review pages (Trustpilot, G2, Capterra, Google); rating is 1 to 5."},
 	{"review_page_days", auth.ScopeSocialRead, "Each review page's numbers by day: the platform's score and count, new reviews, stars and Outflare's review score."},
+	{"backlinks", auth.ScopeSEORead, "Links from other sites to the brands' websites: status live or lost, the linking domain's strength (source_rating, 0 to 100), traffic and spam score, and when each was found, lost or regained."},
+	{"link_prospects", auth.ScopeSEORead, "Pages that could link to a website (link building): how each was found (method), its score, and where its pitch stands (stage: prospect, excluded, pitched, replied, agreed, live, declined, removed) with when."},
 }
 
 type queryColumn struct {
@@ -266,7 +273,7 @@ func (s *Server) queryFailed(w http.ResponseWriter, r *http.Request, err error) 
 // export all run through it, with the same checks, role and limits. It
 // returns the result and the tables the SQL names; a *queryError is the
 // caller's to fix.
-func (s *Server) execQuery(ctx context.Context, a *access, sql string, limit, maxBytes int) (queryResult, []string, error) {
+func (s *Server) execQuery(ctx context.Context, a *access, sql string, limit, maxBytes int, args ...queryArg) (queryResult, []string, error) {
 	sql = strings.TrimSpace(sql)
 	for strings.HasSuffix(sql, ";") {
 		sql = strings.TrimSpace(strings.TrimSuffix(sql, ";"))
@@ -325,7 +332,7 @@ func (s *Server) execQuery(ctx context.Context, a *access, sql string, limit, ma
 	}
 	var res queryResult
 	if err == nil {
-		res, err = s.queryRun(ctx, conn, a, scopes, types, sql, limit, maxBytes)
+		res, err = s.queryRun(ctx, conn, a, scopes, types, sql, limit, maxBytes, args)
 		conn.Close(context.WithoutCancel(ctx)) //nolint:errcheck
 		s.query.slots <- struct{}{}
 	}
@@ -390,8 +397,15 @@ func (s *Server) trackQueryRan(r *http.Request, a *access, used []string, res qu
 	track.Emit(ctx, ev)
 }
 
+// queryArg is one bound parameter: its text form (nil for null) and its
+// Postgres type.
+type queryArg struct {
+	Value []byte
+	OID   uint32
+}
+
 // queryRun runs sql on a query connection with the caller's scope.
-func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, types []queryTypeTable, sql string, limit, maxBytes int) (queryResult, error) {
+func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes []string, types []queryTypeTable, sql string, limit, maxBytes int, args []queryArg) (queryResult, error) {
 	res := queryResult{Columns: []queryColumn{}, Rows: [][]any{}}
 	pid := int(conn.PgConn().PID())
 	// A query for one brand: brand keeps every customer view to that
@@ -424,7 +438,14 @@ func (s *Server) queryRun(ctx context.Context, conn *pgx.Conn, a *access, scopes
 		}
 		// The extended protocol, always: it refuses a second statement,
 		// where pgx would send a query without arguments as simple text.
-		if res := tx.Conn().PgConn().ExecParams(ctx, "DECLARE outflare_query NO SCROLL CURSOR FOR "+sql+"\n", nil, nil, nil, nil).Read(); res.Err != nil {
+		// A published endpoint's parameters are bound ($1, $2, …), never
+		// written into the SQL.
+		var values [][]byte
+		var oids []uint32
+		for _, arg := range args {
+			values, oids = append(values, arg.Value), append(oids, arg.OID)
+		}
+		if res := tx.Conn().PgConn().ExecParams(ctx, "DECLARE outflare_query NO SCROLL CURSOR FOR "+sql+"\n", values, oids, nil, nil).Read(); res.Err != nil {
 			return res.Err
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf("FETCH FORWARD %d FROM outflare_query", limit+1))

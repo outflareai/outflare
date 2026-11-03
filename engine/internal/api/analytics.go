@@ -27,7 +27,7 @@ import (
 func (s *Server) routesAnalytics(mux *http.ServeMux) {
 	read := auth.ScopeAnalyticsRead
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics", s.inWorkspace(read, s.listAnalytics))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/summary", s.inWorkspace(read, s.analyticsSummary))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/summary", s.inBrand(read, s.analyticsSummary))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/{id}/sites", s.inBrand(read, s.analyticsSites))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site", s.inWorkspace(auth.ScopeIntegrationsManage, s.setAnalyticsSite))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/analytics/{id}/sites/{site}", s.inBrand(auth.ScopeIntegrationsManage, s.updateAnalyticsSite))

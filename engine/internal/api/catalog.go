@@ -108,6 +108,9 @@ type fieldView struct {
 	Filterable  bool     `json:"filterable"`
 	Builtin     bool     `json:"builtin"`
 	Archived    bool     `json:"archived"`
+	// How long a hand edit of this field wins over other sources, in days
+	// (0: forever); null: the brand's setting.
+	ManualEditDays *int `json:"manual_edit_days"`
 }
 
 type recordTypeView struct {
@@ -362,7 +365,7 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 	c.Types = append(c.Types, custom...)
 	rows, err = q.Query(ctx, `
 		SELECT record_type, key, label, description, value_type, option_set, multiple, target_type, write_policy, precedence,
-		       sensitivity, filterable, archived_at IS NOT NULL
+		       sensitivity, filterable, archived_at IS NOT NULL, manual_edit_days
 		FROM field_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at, key`, ws, b)
 	if err != nil {
 		return nil, err
@@ -374,7 +377,7 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 	fields, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (typedField, error) {
 		var f typedField
 		err := row.Scan(&f.recordType, &f.Key, &f.Label, &f.Description, &f.ValueType, &f.OptionSet, &f.Multiple, &f.TargetType,
-			&f.WritePolicy, &f.Precedence, &f.Sensitivity, &f.Filterable, &f.Archived)
+			&f.WritePolicy, &f.Precedence, &f.Sensitivity, &f.Filterable, &f.Archived, &f.ManualEditDays)
 		return f, err
 	})
 	if err != nil {
@@ -734,11 +737,16 @@ type fieldInput struct {
 	Sensitivity *string   `json:"sensitivity"`
 	Filterable  *bool     `json:"filterable"`
 	Archived    *bool     `json:"archived"`
+	// Days a hand edit wins (0: forever), or null for the brand's.
+	ManualEditDays optional[int] `json:"manual_edit_days"`
 }
 
 // validateCommon checks the fields that both creating and updating a field
 // may set.
 func (in *fieldInput) validateCommon() error {
+	if d := in.ManualEditDays; d.Set && d.Value != nil && (*d.Value < 0 || *d.Value > 3650) {
+		return errInvalid("manual_edit_days is 0 (forever) to 3650 days, or null for the brand's setting")
+	}
 	if in.Label != nil {
 		*in.Label = strings.TrimSpace(*in.Label)
 		if *in.Label == "" || len(*in.Label) > 80 {
@@ -920,10 +928,12 @@ func (s *Server) updateField(w http.ResponseWriter, r *http.Request) {
 			UPDATE field_definitions SET label = COALESCE($4, label), description = COALESCE($5, description),
 				write_policy = COALESCE($6, write_policy), precedence = COALESCE($7, precedence), sensitivity = COALESCE($8, sensitivity),
 				filterable = COALESCE($9, filterable),
+				manual_edit_days = CASE WHEN $12 THEN $13::int ELSE manual_edit_days END,
 				archived_at = CASE WHEN $10 = 'true' THEN COALESCE(archived_at, now()) WHEN $10 = 'false' THEN NULL ELSE archived_at END,
 				updated_at = now()
 			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($11, '')::uuid AND record_type = $2 AND key = $3`,
-			a.WorkspaceID, t.Key, f.Key, req.Label, req.Description, req.WritePolicy, req.Precedence, req.Sensitivity, req.Filterable, archived, c.Brand); err != nil {
+			a.WorkspaceID, t.Key, f.Key, req.Label, req.Description, req.WritePolicy, req.Precedence, req.Sensitivity, req.Filterable, archived, c.Brand,
+			req.ManualEditDays.Set, req.ManualEditDays.Value); err != nil {
 			return err
 		}
 		action := "field.updated"

@@ -34,8 +34,40 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v24.0/act_55/campaigns":
 		out = map[string]any{"data": []any{
 			map[string]any{"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000"},
-			map[string]any{"id": "10", "name": "Old test", "effective_status": "PAUSED"},
+			map[string]any{"id": "10", "name": "Old test", "effective_status": "PAUSED", "daily_budget": "500"},
 		}}
+	case "/v24.0/9", "/v24.0/10":
+		// Managing: a POST changes the campaign's state, which a GET then
+		// shows (campaign 9 starts active at $30 a day, 10 paused).
+		id := strings.TrimPrefix(r.URL.Path, "/v24.0/")
+		metaState.Lock()
+		defer metaState.Unlock()
+		if metaState.campaigns == nil {
+			metaState.campaigns = map[string]map[string]any{
+				"9":  {"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000", "account_id": "55"},
+				"10": {"id": "10", "name": "Old test", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "500", "account_id": "55"},
+			}
+		}
+		cp := metaState.campaigns[id]
+		if r.Method == "POST" {
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			if metaState.refuse {
+				w.WriteHeader(400)
+				out = map[string]any{"error": map[string]any{"message": "Invalid parameter", "code": 100}}
+				break
+			}
+			if st := body["status"]; st != "" {
+				cp["effective_status"] = st
+			}
+			if b := body["daily_budget"]; b != "" {
+				cp["daily_budget"] = b
+			}
+			metaState.posts = append(metaState.posts, r.Method+" "+id+" "+body["status"]+body["daily_budget"])
+			out = map[string]any{"success": true}
+			break
+		}
+		out = cp
 	case "/v24.0/act_55/adsets":
 		out = map[string]any{"data": []any{map[string]any{"id": "31", "name": "Lookalike", "effective_status": "ACTIVE", "campaign_id": "9"}}}
 	case "/v24.0/act_55/ads":
@@ -102,6 +134,15 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(out)
 }
 
+// metaState is what fakeMetaAds' campaigns look like after changes, and
+// the changes it took; refuse makes it refuse the next ones.
+var metaState struct {
+	sync.Mutex
+	campaigns map[string]map[string]any
+	posts     []string
+	refuse    bool
+}
+
 // metaAudience collects what fakeMetaAds took into audience 801:
 // "METHOD SCHEMA hash".
 var metaAudience struct {
@@ -131,7 +172,7 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		q := string(b)
 		if strings.Contains(q, "FROM customer\"") {
-			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Europe/Berlin"}}}})
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Pacific/Kiritimati"}}}})
 			return
 		}
 		// One campaign, ad group, ad and keyword, with numbers on the last
@@ -406,10 +447,10 @@ func TestAdsDeveloperTokenSetup(t *testing.T) {
 	if len(g) != 1 || g[0].(map[string]any)["details"].(map[string]any)["templated"] != "true" || g[0].(map[string]any)["details"].(map[string]any)["url_tags"] == "" {
 		t.Fatalf("google ads: %v", g)
 	}
-	// The fake's numbers land on the account's own day (Europe/Berlin),
-	// which is already tomorrow in UTC late in the evening: ask for a
-	// range that covers it rather than the default (up to today, UTC).
-	window := "from=" + time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly) + "&to=" + time.Now().UTC().AddDate(0, 0, 1).Format(time.DateOnly)
+	// The fake's numbers land on the account's own day (UTC+14), which is
+	// already tomorrow in UTC for most of the day: the default range still
+	// covers it.
+	window := "connector=google_ads"
 	kw := owner.must(200, "GET", base+"/ads/keywords?"+window, nil)["data"].([]any)
 	if len(kw) != 1 || kw[0].(map[string]any)["text"] != "acme crm" || kw[0].(map[string]any)["match_type"] != "exact" || kw[0].(map[string]any)["campaign_name"] != "Brand search" ||
 		kw[0].(map[string]any)["totals"].(map[string]any)["spend_micros"] != 9_000_000.0 {

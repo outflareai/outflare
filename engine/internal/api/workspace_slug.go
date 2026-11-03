@@ -87,6 +87,8 @@ func (s *Server) updateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name *string `json:"name"`
 		Slug *string `json:"slug"`
+		// Only owners and admins change customer records.
+		RecordsEditOwnersOnly *bool `json:"records_edit_owners_only"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -111,8 +113,25 @@ func (s *Server) updateWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var oldName, oldSlug string
-		if err := tx.QueryRow(ctx, `SELECT name, slug FROM workspaces WHERE id = $1 FOR UPDATE`, a.WorkspaceID).Scan(&oldName, &oldSlug); err != nil {
+		var oldOwnersOnly bool
+		if err := tx.QueryRow(ctx, `SELECT name, slug, records_edit_owners_only FROM workspaces WHERE id = $1 FOR UPDATE`, a.WorkspaceID).Scan(&oldName, &oldSlug, &oldOwnersOnly); err != nil {
 			return err
+		}
+		if req.RecordsEditOwnersOnly != nil && *req.RecordsEditOwnersOnly != oldOwnersOnly {
+			// Taking the power to edit away from members is for owners and
+			// admins, as is giving it back.
+			if ok, err := s.ownerOrAdmin(ctx, a); err != nil {
+				return err
+			} else if !ok {
+				return errDenied("only owners and admins choose who edits records")
+			}
+			if _, err := tx.Exec(ctx, `UPDATE workspaces SET records_edit_owners_only = $2 WHERE id = $1`, a.WorkspaceID, *req.RecordsEditOwnersOnly); err != nil {
+				return err
+			}
+			if err := record(ctx, tx, &a.principal, a.WorkspaceID, "workspace.records_editing_changed", "workspace", a.WorkspaceID,
+				map[string]any{"owners_only": *req.RecordsEditOwnersOnly}); err != nil {
+				return err
+			}
 		}
 		if n, ok := changes["name"]; ok && n == oldName {
 			delete(changes, "name")
@@ -153,8 +172,7 @@ func (s *Server) updateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusConflict, "slug_taken", "slug is already taken")
 		return
 	}
-	if err != nil {
-		s.internal(w, r, err)
+	if s.allocError(w, r, err) {
 		return
 	}
 	s.writeWorkspace(w, r, a.WorkspaceID, a.Role, http.StatusOK)

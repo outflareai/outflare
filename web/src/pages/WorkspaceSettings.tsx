@@ -105,6 +105,8 @@ export function WorkspaceSettings({ ws, canManage, onSaved }: { ws: Workspace; c
         <ErrorText>{error.slug}</ErrorText>
       </Card>
 
+      <RecordEditingCard ws={ws} onSaved={onSaved} />
+
       <AIModelCard ws={ws.id} canManage={canManage} />
 
       <SemanticSearchCard ws={ws.id} canManage={canManage} />
@@ -122,6 +124,35 @@ export function WorkspaceSettings({ ws, canManage, onSaved }: { ws: Workspace; c
         </div>
       </Card>
     </div>
+  );
+}
+
+// Who changes customer records: everyone who may, or only owners and
+// admins (docs/customers.md). Owners and admins flip it.
+function RecordEditingCard({ ws, onSaved }: { ws: Workspace; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const can = ws.role === "owner" || ws.role === "admin";
+  const on = ws.records_edit_owners_only;
+  async function toggle() {
+    setBusy(true);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}", { params: { path: { ws: ws.id } }, body: { records_edit_owners_only: !on } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error));
+    toast(on ? "Everyone who can change records can edit them again." : "Only owners and admins can edit records now.");
+    onSaved();
+  }
+  return (
+    <Card
+      title="Who can edit records"
+      description={
+        on
+          ? "Only owners and admins change people, companies and other records, by hand or with their API tokens. Everyone else can still see them. Imports and syncs keep running."
+          : "Everyone whose role lets them change records can edit them."
+      }
+      action={can && <Button variant={on ? "ghost" : "primary"} disabled={busy} onClick={toggle}>{on ? "Let everyone edit" : "Only owners and admins"}</Button>}
+    >
+      {!can && <p className="text-[13px] text-muted-foreground">Only owners and admins can change this.</p>}
+    </Card>
   );
 }
 

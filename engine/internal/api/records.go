@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"math"
 	"net/http"
 	"net/mail"
@@ -49,21 +50,25 @@ func (s *Server) routesRecords(mux *http.ServeMux) {
 			mux.HandleFunc("GET "+base+"/lookup", s.inBrand(read, s.lookupRecords))
 		}
 		mux.HandleFunc("GET "+base, on(read, s.listRecords))
-		mux.HandleFunc("POST "+base, on(manage, s.createRecord))
+		mux.HandleFunc("POST "+base, on(manage, s.editsRecords(s.createRecord)))
 		mux.HandleFunc("GET "+base+"/{record}", on(read, s.getRecord))
-		mux.HandleFunc("PATCH "+base+"/{record}", on(manage, s.updateRecord))
-		mux.HandleFunc("DELETE "+base+"/{record}", on(manage, s.deleteRecord))
-		mux.HandleFunc("POST "+base+"/{record}/review", on(manage, s.reviewRecord))
+		mux.HandleFunc("PATCH "+base+"/{record}", on(manage, s.editsRecords(s.updateRecord)))
+		mux.HandleFunc("DELETE "+base+"/{record}", on(manage, s.editsRecords(s.deleteRecord)))
+		mux.HandleFunc("POST "+base+"/{record}/review", on(manage, s.editsRecords(s.reviewRecord)))
 		mux.HandleFunc("GET "+base+"/{record}/history", on(read, s.recordHistory))
 		mux.HandleFunc("GET "+base+"/{record}/identities", on(read, s.listIdentities))
-		mux.HandleFunc("POST "+base+"/{record}/identities", on(manage, s.addIdentity))
-		mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/close", on(manage, s.closeIdentity))
+		mux.HandleFunc("POST "+base+"/{record}/identities", on(manage, s.editsRecords(s.addIdentity)))
+		mux.HandleFunc("POST "+base+"/{record}/identities/{identity}/close", on(manage, s.editsRecords(s.closeIdentity)))
 		mux.HandleFunc("GET "+base+"/{record}/relationships", on(read, s.listRelationships))
-		mux.HandleFunc("POST "+base+"/{record}/relationships", on(manage, s.addRelationship))
-		mux.HandleFunc("POST "+base+"/{record}/relationships/{relationship}/end", on(manage, s.endRelationship))
+		mux.HandleFunc("POST "+base+"/{record}/relationships", on(manage, s.editsRecords(s.addRelationship)))
+		mux.HandleFunc("POST "+base+"/{record}/relationships/{relationship}/end", on(manage, s.editsRecords(s.endRelationship)))
 	}
 	// Who an email or id belongs to in one brand.
 	mux.HandleFunc("GET /v1/brands/{brand}/records/lookup", s.onBrand(read, s.lookupRecords))
+	// Every source's value of a field, and pinning a hand edit (field
+	// sources): new since the brands expand step, on a brand's path only.
+	mux.HandleFunc("GET /v1/brands/{brand}/records/{record}/field-values", s.onBrand(read, s.listFieldValues))
+	mux.HandleFunc("POST /v1/brands/{brand}/records/{record}/fields/{field}/pin", s.onBrand(manage, s.editsRecords(s.pinField)))
 }
 
 var (
@@ -505,12 +510,45 @@ func writeAttributes(ctx context.Context, tx pgx.Tx, c *catalog, t *recordTypeVi
 			return false, errInvalid("a list entry's linked record cannot change; add a new entry for the other record")
 		}
 
-		if cur := rec.AttributeSources[key]; had && cur != "" && sourceRank(f, cur) < sourceRank(f, source) {
-			rec.Skipped = append(rec.Skipped, skippedField{Field: key, KeptSource: cur})
-			continue
+		// Every source's latest value is kept, whether or not it wins.
+		if !computed {
+			if err := keepFieldValue(ctx, tx, a.WorkspaceID, rec.ID, key, source, next); err != nil {
+				return false, err
+			}
+		}
+		cur := rec.AttributeSources[key]
+		if had && cur != "" && sourceRank(f, cur) < sourceRank(f, source) {
+			// A hand edit wins only until it expires.
+			expired := false
+			if cur == "manual" {
+				var err error
+				if expired, err = handEditExpired(ctx, tx, rec.ID, key); err != nil {
+					return false, err
+				}
+			}
+			if !expired {
+				rec.Skipped = append(rec.Skipped, skippedField{Field: key, KeptSource: cur})
+				continue
+			}
 		}
 		if (next == nil && !had) || (had && sameJSON(prev, next)) {
+			if had && next != nil && source == "manual" && cur == "manual" {
+				// Typed again: it wins for another full period.
+				if err := noteHandEdit(ctx, tx, a, rec.ID, key); err != nil {
+					return false, err
+				}
+			}
 			continue
+		}
+		switch {
+		case source == "manual" && next != nil:
+			if err := noteHandEdit(ctx, tx, a, rec.ID, key); err != nil {
+				return false, err
+			}
+		case cur == "manual" || source == "manual":
+			if err := dropHandEdit(ctx, tx, rec.ID, key); err != nil {
+				return false, err
+			}
 		}
 		if next == nil {
 			delete(rec.Attributes, key)
@@ -552,6 +590,13 @@ func attributeChanged(ctx context.Context, tx pgx.Tx, a *access, id, key string,
 		return nil
 	}
 	return customers.FieldChanged(ctx, tx, a.WorkspaceID, customers.FieldChange{RecordID: id, Field: key, Old: prev, HadOld: had, Source: source})
+}
+
+// archiveChanged writes archiving (archived true) or restoring (false) a
+// record into its history as the field archived. It fires nothing: rules
+// act on fields, and archiving has its own audit action.
+func archiveChanged(ctx context.Context, tx pgx.Tx, a *access, id string, archived bool, source string) error {
+	return attributeChanged(quietly(ctx), tx, a, id, "archived", !archived, archived, true, source)
 }
 
 // syncReferences keeps a record reference field's links in
@@ -944,6 +989,9 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
+	if !s.allowQuota(w, r, a.WorkspaceID, quota.Records, 1) {
+		return
+	}
 	origin := "manual"
 	if req.Origin != nil {
 		origin = *req.Origin
@@ -1111,6 +1159,11 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 				action, at = "record.restored", "NULL"
 			}
 			if _, err := tx.Exec(ctx, `UPDATE records SET archived_at = `+at+`, version = version + 1, updated_at = now() WHERE id = $1`, rec.ID); err != nil {
+				return err
+			}
+			// In the record's own history too (AGENTS.md, "Every change is
+			// in the record's history").
+			if err := archiveChanged(ctx, tx, a, rec.ID, *req.Archived, source); err != nil {
 				return err
 			}
 			if err := record(ctx, tx, &a.principal, a.WorkspaceID, action, "record", rec.ID, data); err != nil {
@@ -1466,6 +1519,8 @@ type attributeChangeView struct {
 	ActorID   *string   `json:"actor_id"`
 	RequestID string    `json:"request_id"`
 	ChangedAt time.Time `json:"changed_at"`
+	// The bulk edit that made the change, if one did.
+	BulkEditID *string `json:"bulk_edit_id"`
 }
 
 func (s *Server) recordHistory(w http.ResponseWriter, r *http.Request) {
@@ -1491,7 +1546,7 @@ func (s *Server) recordHistory(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id, field_key, old_value, new_value, source, actor_id::text, request_id, changed_at FROM attribute_changes
+		rows, err := tx.Query(ctx, `SELECT id, field_key, old_value, new_value, source, actor_id::text, request_id, changed_at, bulk_edit_id::text FROM attribute_changes
 			WHERE record_id = $1 AND id < $2 AND ($3 = '' OR field_key = $3) ORDER BY id DESC LIMIT $4`, rec.ID, before, field, limit)
 		if err != nil {
 			return err

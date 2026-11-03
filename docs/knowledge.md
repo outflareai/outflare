@@ -42,6 +42,14 @@ Each item has:
 - **A brand**, or none to share it with every brand. A folder of a brand holds only that brand's knowledge, and an item put in one takes its brand. People and API keys limited to some brands see their brands' knowledge and the shared knowledge, and change only their brands'.
 - **An owner** (who keeps it right, by default whoever added it) and an optional **check by** date.
 
+## Import your website
+
+**Import website** on the Knowledge page (`POST .../knowledge/website-imports`) reads your website and keeps each page as an article, so answers can use what is already on your site. It reads up to `max_pages` pages (100 by default, at most 500): the ones in your sitemaps (those robots.txt names, `/sitemap.xml` and `/sitemap_index.xml`, following sitemap indexes), else the pages your home page links to. It reads politely, as OutflareBot: it follows robots.txt and its crawl delay, skips sites that opted out, and never reaches private addresses. Files, tag and paging lists, carts, accounts and `noindex` pages are left out.
+
+Each page with enough words becomes an article in a **Website** folder, with the page's address at its end. Menus, headers, footers and scripts are left out. The articles are used by AI answers to customers by default (`visibility`); with `publish: false` they wait as drafts for you to go through first. Run it again whenever your site changes: an article whose page changed is updated (a new version), the rest are left as they are, and one you moved to the bin stays there. One import runs at a time per workspace (`GET .../knowledge/website-imports` shows each one and what it did).
+
+After the first import, the site is **checked again every day** with the same settings (`scheduled: true` on those runs): changed pages are updated and new ones added. When the sitemaps list every page (none cut short by `max_pages`), an article whose page left the site is unpublished (`pages_removed`), and published again if the page comes back.
+
 ## History and the bin
 
 Every change to an item's title or text keeps the earlier version. Open **History** to see them and restore one; restoring adds a new version, so it can be undone too.
@@ -68,6 +76,7 @@ The **Ask** box on the Knowledge page asks a question the way an agent would. Pi
 
 Nothing found is used until a person approves it. Suggestions come from:
 
+- **Past replies.** **Learn from past replies** in Knowledge → Review (`POST .../knowledge/reply-imports`) reads the support conversations closed in the last 90 days (`days`, up to 400 of them): each customer's question and the first reply a person sent, never the assistant's. The workspace's own AI groups the same question asked in different words and suggests one general answer for it, leaving out anything about one customer. One run at a time per workspace; `GET .../knowledge/reply-imports` shows how many conversations each read and what it filed.
 - **Support.** When **Suggest a reply** finds no answer in a conversation and a teammate then answers it, the workspace's own AI turns the reply into a general answer, leaving out the customer's name, order and anything done just for them, and suggests it. A reply that only acted for that customer ("I've refunded you") suggests nothing. The Support inbox shows how many answers are waiting.
 - **The website and Slack.** When the [support assistant](support-inbox.md#the-support-assistant) hands a customer's question to the team because the knowledge has no answer, it reads the business's website (the brand's, else the workspace's: its sitemap's best matches and its FAQ, help, support, pricing and docs pages, politely, as OutflareBot) and then the Slack channels picked for it (a Slack (knowledge) connection), and suggests the first answer it finds with the page or message and the exact words. The words must really be in the page or message, or nothing is suggested. Each source can be switched off in Support settings.
 - **Agents.** An AI agent that finds an answer on the business's website, in Slack or elsewhere suggests it (`suggest_knowledge`, `POST .../knowledge/suggestions`) with the page or channel and the exact words. Agents can't approve.

@@ -238,6 +238,10 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 		t.Fatalf("pages: %v", pages)
 	}
 	page := pages[0].(map[string]any)
+	// A review profile found is a live review placement in coverage.
+	if kind, stage := placementOf(t, e, ws, page["url"].(string)); kind != "review" || stage != "live" {
+		t.Fatalf("coverage placement for the review page: %q %q", kind, stage)
+	}
 	pid := page["id"].(string)
 	if page["platform"] != "trustpilot" || page["score"] != 4.4 || page["review_count"] != 1284.0 || page["brand_id"] != bid || page["last_error"] != nil {
 		t.Fatalf("page: %v", page)

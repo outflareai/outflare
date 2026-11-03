@@ -401,15 +401,11 @@ func (in *automationInput) apply(ctx context.Context, tx pgx.Tx, a *access, v *a
 	case runnerBuiltin:
 		v.TokenID = nil
 	case runnerExternal:
-		if v.TokenID == nil {
-			return false, errInvalid("an external runner needs token_id: the API token of the agent that runs the missions")
-		}
-		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_tokens WHERE id::text = $1 AND workspace_id = $2 AND revoked_at IS NULL)`, *v.TokenID, a.WorkspaceID).Scan(&ok); err != nil {
-			return false, err
-		}
-		if !ok {
-			return false, errInvalid("token not found")
+		// Retired with missions: every run is an agent run of Outflare's
+		// agent. An automation set up with an external runner before is
+		// left as it is until it next comes due, when it is held.
+		if in.Runner != nil || in.TokenID.Set {
+			return false, errInvalid("the external runner is retired with missions: Outflare's agent runs every automation as an agent run on the workspace's own AI model (runner builtin, the default); your own agent can run the playbook's steps itself over the API without an automation")
 		}
 		if a.TokenID != "" && *v.TokenID != a.TokenID {
 			return false, errDenied("a token can only run automations itself; a person can choose another token")
@@ -469,12 +465,6 @@ func (s *Server) createPlaybookAutomation(w http.ResponseWriter, r *http.Request
 		if sg.Gather != "" {
 			v.Gather = sg.Gather
 		}
-	}
-	if a.TokenID != "" && in.Runner == nil && !in.TokenID.Set {
-		// An agent's automation runs its missions itself unless it asks
-		// for Outflare's agent.
-		ext := runnerExternal
-		in.Runner, in.TokenID = &ext, optional[string]{Set: true, Value: &a.TokenID}
 	}
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -614,7 +604,7 @@ func (s *Server) deletePlaybookAutomation(w http.ResponseWriter, r *http.Request
 func (s *Server) approvePlaybookAutomation(w http.ResponseWriter, r *http.Request) {
 	s.changeAutomation(w, r, func(ctx context.Context, tx pgx.Tx, a *access, v *automationView) error {
 		if a.ActorType != "human" || a.UserID == "" {
-			return errDenied("only a person can approve an automation: each run starts a mission with their approval")
+			return errDenied("only a person can approve an automation: each run starts with their approval")
 		}
 		if v.Status == "active" {
 			return errMissionState("the automation is already running")
@@ -904,7 +894,7 @@ func (s *Server) fireAutomation(ctx context.Context, tx pgx.Tx, v automationView
 		}
 	}
 	p, _ := playbooks.Get(v.PlaybookID)
-	instructions, plan := playbookBrief(p, v.Inputs, v.Runner == runnerBuiltin)
+	instructions, plan := playbookBrief(p, v.Inputs, true)
 	instructions += "\n\n" + automationBrief(v, trigger, events, total)
 	name := v.Name + ", " + time.Now().UTC().Format("2 Jan 2006")
 	if len(name) > 200 {
@@ -938,56 +928,10 @@ func (s *Server) fireAutomation(ctx context.Context, tx pgx.Tx, v automationView
 		}
 		return id, recordWithProps(ctx, tx, &a.principal, ws, "playbook_automation.ran", "playbook_automation", v.ID, data, props)
 	}
-	mi := missionInput{Name: &name, Goal: &goal, Instructions: &instructions, Plan: &plan, Mode: &v.Mode,
-		MaxSpendCents: optional[int64]{Set: runLimit != nil, Value: runLimit},
-		playbookID:    &p.ID, playbookVersion: &p.Version}
-	if v.Runner == runnerExternal {
-		mi.TokenID = optional[string]{Set: true, Value: v.TokenID}
-	}
-	if err := mi.validate(); err != nil {
-		return "", err
-	}
-	id, err := s.insertMission(ctx, tx, a, &mi)
-	if err != nil {
-		var inv errInvalid
-		if errors.As(err, &inv) {
-			return "", errHeld(string(inv))
-		}
-		return "", err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE missions SET automation_id = $2, status = 'running', approved_by = $3, approved_at = now(), started_at = now(), updated_at = now()
-		WHERE id = $1`, id, v.ID, a.ActorID); err != nil {
-		return "", err
-	}
-	switch v.Runner {
-	case runnerBuiltin:
-		if err := useBuiltinRunner(ctx, tx, a, id); err != nil {
-			return "", err
-		}
-	case runnerExternal:
-		if _, err := tx.Exec(ctx, `UPDATE missions SET runner = 'external', next_turn_at = NULL WHERE id = $1`, id); err != nil {
-			return "", err
-		}
-	}
-	body := "Started and approved by the automation " + v.Name + ", with the approval " + actorLabel(ctx, tx, a) + " gave it."
-	if err := addUpdate(ctx, tx, id, ws, "", "system", "note", body); err != nil {
-		return "", err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE playbook_automations SET last_run_at = now(), last_mission_id = $2, runs = runs + 1, updated_at = now() WHERE id = $1`, v.ID, id); err != nil {
-		return "", err
-	}
-	props := automationProps(v)
-	props["trigger"], props["events"], props["mission_id"] = trigger, total, id
-	data := map[string]any{"automation_id": v.ID, "playbook_id": p.ID, "playbook_version": p.Version, "mission_id": id, "mode": v.Mode, "trigger": trigger, "events": total}
-	if err := recordWithProps(ctx, tx, &a.principal, ws, "playbook.started", "mission", id, data, props); err != nil {
-		return "", err
-	}
-	if err := record(ctx, tx, &a.principal, ws, "mission.approved", "mission", id, map[string]any{"from": missions.StatusDraft, "to": missions.StatusRunning, "automation_id": v.ID}); err != nil {
-		return "", err
-	}
-	return id, recordWithProps(ctx, tx, &a.principal, ws, "playbook_automation.ran", "playbook_automation", v.ID, data, props)
+	// An automation of an outside agent's token, from before missions
+	// retired: nothing starts a mission any more, so it is held with the
+	// reason until a person approves it again as Outflare's agent's.
+	return "", errHeld("its runner, your own agent's token, is retired with missions; Outflare's agent runs every automation now (runner builtin): set the runner and approve it again")
 }
 
 func automationWorkspace(ctx context.Context, tx pgx.Tx, id string) (string, error) {
@@ -1142,7 +1086,8 @@ func (s *Server) dueAutomation(ctx context.Context, tx pgx.Tx, v automationView)
 	cursor := v.lastEventID
 	if v.Gather == "each" {
 		var today int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM missions WHERE automation_id = $1 AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`, v.ID).Scan(&today); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM agent_runs WHERE automation_id = $1 AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+			+ (SELECT count(*) FROM missions WHERE automation_id = $1 AND created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')`, v.ID).Scan(&today); err != nil {
 			return 0, err
 		}
 		room := min(v.DailyCap-today, automationEachPerPass)

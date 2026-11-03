@@ -21,7 +21,13 @@ import { authOption, ConnectDialog, startConnectorOAuth, type ReturnPage } from 
 // missing an include): only an approval at the provider can do that, since
 // the Cloudflare connection never changes a record.
 export type DNSRow = { type: string; name: string; value: string; priority?: number | null; change?: boolean };
-export type DNSRun = { status: "queued" | "done" | "failed"; added?: number; existing?: number; zone?: string; error?: string; provider?: string };
+export type DNSRun = { status: "queued" | "done" | "failed"; added?: number; existing?: number; zone?: string; error?: string; provider?: string; at?: string };
+
+// How long the card keeps looking for the records itself after they were
+// approved at the DNS provider, and how often. The server keeps checking
+// on its own after that.
+const watchFor = 10 * 60_000;
+const watchEvery = 10_000;
 type Approval = components["schemas"]["DNSApproval"];
 // What the records belong to, for the one-off approval at the provider.
 // dkim is the DKIM key pasted from the mail host, for a sending domain.
@@ -144,6 +150,19 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
   const [busy, setBusy] = useState(false);
   const [appr, setAppr] = useState<Approval | null>(null);
   const pending = records.length > 0 && run?.status !== "queued";
+  // Just approved at the provider: look again every few seconds until the
+  // records show up (the parent stops showing this card then).
+  const approvedAt = run?.provider && run.status === "done" && run.at ? Date.parse(run.at) : 0;
+  const [now, setNow] = useState(() => Date.now());
+  const watching = approvedAt > 0 && pending && now - approvedAt < watchFor;
+  useEffect(() => {
+    if (!watching) return;
+    const t = setInterval(() => {
+      setNow(Date.now());
+      reload();
+    }, watchEvery);
+    return () => clearInterval(t);
+  }, [watching]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/connectors", { params: { path: { ws } } }).then(({ data }) => setDef(data?.data?.find((c) => c.id === "cloudflare") ?? null));
   }, [ws]);
@@ -185,7 +204,14 @@ export function DNSOneClick({ ws, page, item, approval, connections, records, ru
     return (
       <Panel>
         <Status tone="green">Approved in {run.provider}</Status>
-        <p className="text-[12px] text-muted-foreground">{after}</p>
+        {watching ? (
+          <p className="flex items-center gap-2 text-[12px] text-muted-foreground" role="status">
+            <span className="size-3 rounded-full border-2 border-muted-foreground border-t-transparent motion-safe:animate-spin" aria-hidden />
+            Checking DNS for {these}… This usually takes under a minute.
+          </p>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">Outflare keeps checking on its own; this updates when {records.length === 1 ? "it shows" : "they show"} up.</p>
+        )}
       </Panel>
     );
   }

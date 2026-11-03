@@ -16,6 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -75,7 +76,7 @@ func (s *Server) ingestBrandEvents(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
 	env, ok := s.readEventEnvelope(w, r)
-	if !ok {
+	if !ok || !s.allowQuota(w, r, a.WorkspaceID, quota.TrackedEvents, int64(len(env.items))) {
 		return
 	}
 	// Each event as sent, with the batch's context under its own. Anything

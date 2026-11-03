@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, field, Loading, PageHeader, confirmAction, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { useBrand } from "@/lib/brand";
 import { nameItem } from "@/lib/records";
+import { MovesSheet, StagesSheet } from "./LifecycleEditor";
 
 // Products and lifecycle stages (docs/product-lifecycle.md): the products a
 // brand sells, the names its events and billing use for them (held ones
@@ -56,6 +57,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
   const [name, setName] = useState("");
   const [aliases, setAliases] = useState("");
   const [churnMode, setChurnMode] = useState<"cancellation" | "inactivity">("cancellation");
+  const [editing, setEditing] = useState<"stages" | "moves" | null>(null);
 
   const load = useCallback(async () => {
     const [p, n, l] = await Promise.all([
@@ -127,6 +129,8 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
 
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!products || !life) return <Loading />;
+  // Moves name stages by key; show the names people gave them.
+  const stageName = (level: string, key: string) => (key === "none" ? "no stage" : (life.stages.find((st) => st.level === level && st.key === key)?.name ?? key));
 
   return (
     <div className="space-y-6">
@@ -137,7 +141,15 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
             ? `On since ${stamp(life.enabled_at ?? "")}. Only events from then on move anyone.`
             : "Off. Turn them on to keep a stage per product for every company (billing) and person (usage)."
         }
-        action={canManage && <Button variant={life.enabled ? "ghost" : "primary"} disabled={busy} onClick={() => toggle(!life.enabled)}>{life.enabled ? "Turn off" : "Turn on"}</Button>}
+        action={
+          canManage && (
+            <span className="flex flex-wrap gap-2">
+              {life.stages.length > 0 && <Button variant="ghost" onClick={() => setEditing("stages")}>Edit stages</Button>}
+              {life.stages.length > 0 && <Button variant="ghost" onClick={() => setEditing("moves")}>Edit moves</Button>}
+              <Button variant={life.enabled ? "ghost" : "primary"} disabled={busy} onClick={() => toggle(!life.enabled)}>{life.enabled ? "Turn off" : "Turn on"}</Button>
+            </span>
+          )
+        }
       >
         {life.stages.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2">
@@ -154,7 +166,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
                     .filter((m) => m.level === level)
                     .map((m) => (
                       <li key={m.key}>
-                        {m.name}: {m.any_stage ? "any stage" : (m.from_stages ?? []).join(", ")} → {m.to_stage} <span className="font-mono">({m.emit_event})</span>
+                        {m.name}: {m.any_stage ? "any stage" : (m.from_stages ?? []).map((k) => stageName(level, k)).join(", ")} → {stageName(level, m.to_stage)} <span className="font-mono">({m.emit_event})</span>
                       </li>
                     ))}
                 </ul>
@@ -162,8 +174,10 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
             ))}
           </div>
         ) : (
-          <p className="text-[13px] text-muted-foreground">Turning stages on adds the default stages and moves; change them later through the API or MCP.</p>
+          <p className="text-[13px] text-muted-foreground">Turning stages on adds the default stages and moves, which you can then rename, add to and change here.</p>
         )}
+        {editing === "stages" && <StagesSheet brand={brand} life={life} onClose={() => setEditing(null)} onSaved={(l) => { setLife(l); setEditing(null); }} />}
+        {editing === "moves" && <MovesSheet brand={brand} life={life} onClose={() => setEditing(null)} onSaved={(l) => { setLife(l); setEditing(null); }} />}
       </Card>
 
       {names.length > 0 && (
@@ -260,6 +274,41 @@ export function RecordLifecycle({ brand, record }: { brand: string; record: stri
           </li>
         ))}
       </ul>
+    </Card>
+  );
+}
+
+type RecordMetricValue = Schemas["RecordMetricValue"];
+
+// RecordMetrics is a company's or person's live metrics (docs/metrics.md),
+// overall and per product. It renders nothing when they have none.
+export function RecordMetrics({ brand, record }: { brand: string; record: string }) {
+  const [list, setList] = useState<RecordMetricValue[] | null>(null);
+  useEffect(() => {
+    void api.GET("/v1/brands/{brand}/records/{record}/metrics", { params: { path: { brand, record } } }).then(({ data }) => setList(data?.data ?? null));
+  }, [brand, record]);
+  if (!list || list.length === 0) return null;
+  const show = (v: unknown) => (typeof v === "number" ? v.toLocaleString() : typeof v === "string" ? ago(v) : "–");
+  const overall = list.filter((m) => !m.product_id);
+  return (
+    <Card title="Metrics" description="Live totals over a rolling window, per product below each.">
+      <dl className="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-x-3 gap-y-1 text-[13px]">
+        {overall.map((m) => (
+          <Fragment key={m.metric_id}>
+            <dt className="font-mono text-muted-foreground">{m.key}</dt>
+            <dd className="text-right tabular-nums">
+              {show(m.value)}
+              {list
+                .filter((p) => p.metric_id === m.metric_id && p.product_id)
+                .map((p) => (
+                  <div key={p.product_id} className="text-[11px] text-muted-foreground">
+                    {p.product_key}: {show(p.value)}
+                  </div>
+                ))}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
     </Card>
   );
 }

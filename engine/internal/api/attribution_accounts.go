@@ -178,11 +178,7 @@ func (s *Server) attributionDeals(w http.ResponseWriter, r *http.Request) {
 			LEFT JOIN records dr ON dr.id = d.id
 			WHERE d.workspace_id = $1 AND d.state = 'won' AND d.closed_at >= $2::date AND d.closed_at < $3::date + 1` +
 		f.brand.sql(`dr.brand_id`, &args)
-	matched, matchedWhere := "", ""
-	if f.identified {
-		matched = ` JOIN site_sessions mq ON mq.id = cr.session_id`
-		matchedWhere = ` AND mq.record_id = c.record_id`
-	}
+	matched, matchedWhere := f.creditSQL()
 	sql := `WITH won AS (` + won + `),
 		people AS (
 			SELECT w.id AS deal_id, w.record_id AS person FROM won w WHERE w.record_id IS NOT NULL

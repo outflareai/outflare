@@ -464,3 +464,66 @@ func TestAttributionAccountsAndDeals(t *testing.T) {
 		t.Fatalf("empty period = %v", d)
 	}
 }
+
+// How a visit was identified: the person's own sign-in on the product, or a
+// click on an email link. signed_in keeps only the first.
+func TestAttributionSignedInOnly(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	exec := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := e.pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	now := time.Now()
+	visit := func(anon, channel, by string, at time.Time) string {
+		t.Helper()
+		exec(`INSERT INTO site_visitors (workspace_id, anonymous_id, record_id, identified_by, first_seen_at, last_seen_at) VALUES ($1, $2, $3, $4, $5, $5) RETURNING anonymous_id`,
+			ws, anon, rec, by, at)
+		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2, $3, $4, $5, 'google') RETURNING id::text`,
+			ws, rec, anon, at, channel)
+	}
+	laptop := visit("anon-laptop", "seo", "product", now.Add(-3*time.Hour))
+	phone := visit("anon-phone", "lifecycle_email", "email_click", now.Add(-2*time.Hour))
+	ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
+	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by) VALUES ($1, $2, $3, 'signed_up', $4, 2, 'record') RETURNING event_id::text`,
+		ev, ws, rec, now)
+	for i, s := range []struct{ session, channel string }{{laptop, "seo"}, {phone, "lifecycle_email"}} {
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight)
+			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', 0.5) RETURNING event_id::text`, ev, ws, i, s.session, s.channel)
+	}
+
+	channels := func(q string) map[string][2]float64 {
+		t.Helper()
+		out := map[string][2]float64{}
+		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q, nil)["data"].([]any) {
+			m := r.(map[string]any)
+			out[m["channel"].(string)] = [2]float64{m["visits"].(float64), m["conversions"].(float64)}
+		}
+		return out
+	}
+	if id := channels("?match=identified"); id["seo"] != [2]float64{1, 0.5} || id["lifecycle_email"] != [2]float64{1, 0.5} {
+		t.Fatalf("identified = %v", id)
+	}
+	if own := channels("?match=signed_in"); own["seo"] != [2]float64{1, 0.5} || own["lifecycle_email"] != [2]float64{0, 0} {
+		t.Fatalf("signed in = %v", own)
+	}
+	how := map[string]string{}
+	for _, c := range owner.must(200, "GET", base+"/attribution/conversions", nil)["data"].([]any)[0].(map[string]any)["credits"].([]any) {
+		m := c.(map[string]any)
+		how[m["channel"].(string)] = m["matched_by"].(string) + "/" + m["identified_by"].(string)
+	}
+	if how["seo"] != "record/product" || how["lifecycle_email"] != "record/email_click" {
+		t.Fatalf("credits = %v", how)
+	}
+	// The other reports take the level too.
+	for _, p := range []string{"campaigns", "customers", "accounts", "deals", "ads"} {
+		owner.must(200, "GET", base+"/attribution/"+p+"?match=signed_in", nil)
+	}
+}

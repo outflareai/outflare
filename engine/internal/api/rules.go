@@ -246,12 +246,17 @@ func (s *Server) applyRule(r *http.Request, a *access, f ruleFields, v *ruleView
 	}
 	if v.Trigger.Kind == rules.KindAudience {
 		var listBrand *string
-		err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM smart_lists WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.Trigger.ListID).Scan(&listBrand)
+		var listType string
+		err := s.pool.QueryRow(ctx, `SELECT brand_id::text, record_type FROM smart_lists WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.Trigger.ListID).
+			Scan(&listBrand, &listType)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!a.sees(listBrand) || listBrand == nil || *listBrand != *v.BrandID)) {
 			return errInvalid("list_id is not a smart list of the rule's brand")
 		}
 		if err != nil {
 			return err
+		}
+		if listType != v.RecordType {
+			return errInvalid("an audience rule's record_type is its list's: " + listType)
 		}
 	}
 	return nil
@@ -520,15 +525,23 @@ func (s *Server) simulateRule(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 && !decode(w, r, &in) {
 		return
 	}
+	// An event or absence rule replays the event store when there is one,
+	// over up to a year; everything else replays Postgres, over up to 90
+	// days.
+	eng := cur.engine(a.WorkspaceID)
+	most := rules.MaxSimulateDays
+	if s.eventArchive != nil && (eng.Trigger.Kind == rules.KindEvent || eng.Trigger.Kind == rules.KindAbsence) {
+		most = rules.MaxArchiveDays
+	}
 	days := 30
 	if in.Days != nil {
-		if *in.Days < 1 || *in.Days > rules.MaxSimulateDays {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "days is 1 to "+strconv.Itoa(rules.MaxSimulateDays))
+		if *in.Days < 1 || *in.Days > most {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "days is 1 to "+strconv.Itoa(most))
 			return
 		}
 		days = *in.Days
 	}
-	sim, err := rules.Simulate(r.Context(), s.pool, cur.engine(a.WorkspaceID), days)
+	sim, err := rules.Simulate(r.Context(), s.pool, eng, days, s.eventArchive)
 	if isStatementTimeout(err) {
 		writeError(w, r, http.StatusBadRequest, "query_timeout", "the simulation took over 15 seconds; try fewer days")
 		return

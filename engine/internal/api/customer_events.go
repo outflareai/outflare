@@ -18,6 +18,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/quota"
 )
 
 // Product events: what people do in the workspace's own product, sent the
@@ -333,6 +334,9 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !s.allowQuota(w, r, a.WorkspaceID, quota.TrackedEvents, int64(len(msgs))) {
+		return
+	}
 	shared, source := env.shared, env.source
 	brand, err := s.recordBrand(ctx, a, env.top.get("brand_id", "brandId"))
 	if err == nil {
@@ -577,13 +581,17 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 		}
 	}
 
+	// Usage: what the product itself did (docs/metrics.md). Anyone can send
+	// a browser event, so one never counts.
+	usage := source != siteSource && (kind == "track" || kind == "page" || kind == "screen")
+
 	var id, eventBrand string
 	err = tx.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, account_id, brand_id, kind, name, raw_name, user_id, anonymous_id,
-			properties, traits, context, source, message_id, occurred_at, request_id, product_id)
-		VALUES ($1, $2, $3, COALESCE($4, (SELECT r.brand_id FROM records r WHERE r.id = $2), outflare_first_brand($1)), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			properties, traits, context, source, message_id, occurred_at, request_id, product_id, usage)
+		VALUES ($1, $2, $3, COALESCE($4, (SELECT r.brand_id FROM records r WHERE r.id = $2), outflare_first_brand($1)), $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		RETURNING id::text, brand_id::text`,
 		a.WorkspaceID, rec, account, brand, kind, name, rawName, nullIfEmpty(userID), nullIfEmpty(anonID),
-		props, traits, ctxObj, source, nullIfEmpty(messageID), at, RequestID(ctx), product).Scan(&id, &eventBrand)
+		props, traits, ctxObj, source, nullIfEmpty(messageID), at, RequestID(ctx), product, usage).Scan(&id, &eventBrand)
 	if isUnique(err) {
 		res.Status = "duplicate"
 		return nil
@@ -601,6 +609,9 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 			if err := customers.ProductEventAdded(ctx, tx, a.WorkspaceID, eventBrand, id, true); err != nil {
 				return err
 			}
+		}
+		if err := customers.MetricEventAdded(ctx, tx, a.WorkspaceID, eventBrand, id, name, usage); err != nil {
+			return err
 		}
 	}
 	n := totals.names[name]
@@ -1235,7 +1246,7 @@ type timelineItem struct {
 	RecordID string `json:"record_id"`
 }
 
-var timelineKinds = []string{"event", "attribute_change", "identity", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey"}
+var timelineKinds = []string{"event", "attribute_change", "identity", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list"}
 
 // timelinePeople caps how many of a company's people its timeline reads.
 const timelinePeople = 5000
@@ -1250,7 +1261,7 @@ var timelineBranches = map[string]string{
 			CASE WHEN e.record_id = ANY($2) THEN e.record_id ELSE e.account_id END
 		FROM customer_events e WHERE e.workspace_id = $1 AND (e.record_id = ANY($2) OR e.account_id = ANY($2)) {brand:e.brand_id}`,
 	"attribute_change": `SELECT 'attribute_change', c.id::text, c.changed_at, c.field_key,
-			jsonb_build_object('old_value', c.old_value, 'new_value', c.new_value, 'actor_id', c.actor_id), c.source, c.record_id
+			jsonb_build_object('old_value', c.old_value, 'new_value', c.new_value, 'actor_id', c.actor_id, 'bulk_edit_id', c.bulk_edit_id), c.source, c.record_id
 		FROM attribute_changes c WHERE c.record_id = ANY($2)`,
 	"identity": `SELECT 'identity', i.id::text || ':added', i.valid_from, i.namespace,
 			jsonb_build_object('change', 'added', 'value', i.value, 'verified', i.verified), i.source, i.record_id
@@ -1307,6 +1318,11 @@ var timelineBranches = map[string]string{
 			jsonb_build_object('change', j.status, 'journey_id', j.journey_id, 'status', j.status, 'exit_reason', j.exit_reason), 'journey', j.record_id
 		FROM journey_runs j JOIN journeys y ON y.id = j.journey_id
 		WHERE j.workspace_id = $1 AND j.record_id = ANY($2) AND j.finished_at IS NOT NULL {brand:y.brand_id}`,
+	// Joining and leaving smart and static lists.
+	"list": `SELECT 'list', 'list:' || c.id::text, c.at, l.name,
+			jsonb_build_object('change', c.change, 'list_id', c.list_id, 'kind', l.kind, 'bulk_edit_id', c.bulk_edit_id), 'list', c.record_id
+		FROM smart_list_changes c JOIN smart_lists l ON l.id = c.list_id
+		WHERE c.workspace_id = $1 AND c.record_id = ANY($2) {brand:c.brand_id}`,
 }
 
 // timelineBrand is the brand condition on col: items for the chosen brand

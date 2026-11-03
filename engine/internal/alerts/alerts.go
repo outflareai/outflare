@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -52,7 +53,9 @@ type Kind struct {
 }
 
 // A View is an alert as people see it: a title, a line of detail and the
-// app page to open (under the workspace, such as "inbox/<id>").
+// app page to open: under the workspace, such as "inbox/<id>", or, starting
+// with "/", a page of its own on this server, such as an extension's
+// "/billing".
 type View struct {
 	Title string `json:"title"`
 	Text  string `json:"text"`
@@ -67,6 +70,15 @@ func Register(k Kind) {
 		panic("alerts: kind registered twice: " + k.ID)
 	}
 	kinds = append(kinds, k)
+}
+
+// URL is where an alert's view opens: publicURL/<workspace slug>/<path>, or
+// publicURL<path> for a path of its own (starting with "/").
+func URL(publicURL, slug, path string) string {
+	if strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//") {
+		return publicURL + path
+	}
+	return publicURL + "/" + slug + "/" + strings.TrimLeft(path, "/")
 }
 
 // Kinds lists every registered kind, in the order registered.

@@ -35,6 +35,7 @@ func (s *Server) routesSupport(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+base+"/conversations/{id}/assistant", s.inBrand(read, s.getConversationAssistant))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/assistant", s.inBrand(manage, s.runConversationAssistant))
 	mux.HandleFunc("POST "+base+"/assistant-runs/{id}/discard", s.inBrand(manage, s.discardAssistantRun))
+	mux.HandleFunc("POST "+base+"/assistant-runs/{id}/stop", s.inBrand(manage, s.stopAssistantRun))
 	mux.HandleFunc("GET "+base+"/assistant-settings", s.inBrand(read, s.listAssistantSettings))
 	mux.HandleFunc("PUT "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.putAssistantSetting))
 	mux.HandleFunc("DELETE "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.deleteAssistantSetting))
@@ -81,11 +82,13 @@ type supportConversationView struct {
 	Status           string         `json:"status"`
 	Assignee         *supportPerson `json:"assignee"`
 	Team             *supportPerson `json:"team"`
-	Tags             []string       `json:"tags"`
-	Unread           bool           `json:"unread"`
-	LastFrom         string         `json:"last_from"`
-	Preview          string         `json:"preview"`
-	Messages         int            `json:"messages"`
+	// Topic is the hand-off topic the assistant gave it.
+	Topic    *supportPerson `json:"topic"`
+	Tags     []string       `json:"tags"`
+	Unread   bool           `json:"unread"`
+	LastFrom string         `json:"last_from"`
+	Preview  string         `json:"preview"`
+	Messages int            `json:"messages"`
 	// When the team's next reply and the resolution are due under the
 	// SLA, and whether each was missed; all null without an SLA.
 	SLA            supportSLAView `json:"sla"`
@@ -106,21 +109,27 @@ const supportConversationSelect = `
 			WHERE sm.conversation_id = c.id AND sm.kind <> 'note' ORDER BY sm.created_at DESC LIMIT 1), ''),
 		(SELECT count(*) FROM support_messages sm WHERE sm.conversation_id = c.id AND sm.kind <> 'note')::int,
 		c.first_message_at, c.first_reply_at, c.closed_at, c.last_message_at, c.created_at,
-		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at, c.identity_verified, c.visitor_seen_at
+		c.reply_due_at, c.reply_breached_at, c.resolve_due_at, c.resolve_breached_at, c.identity_verified, c.visitor_seen_at,
+		c.topic_id::text, ht.name
 	FROM support_conversations c
 	LEFT JOIN records r ON r.id = c.record_id
 	LEFT JOIN mailboxes m ON m.id = c.mailbox_id
 	LEFT JOIN inbound_addresses ia ON ia.id = c.inbound_address_id
 	LEFT JOIN users u ON u.id = c.assignee_id
-	LEFT JOIN teams t ON t.id = c.team_id`
+	LEFT JOIN teams t ON t.id = c.team_id
+	LEFT JOIN support_handoff_topics ht ON ht.id = c.topic_id`
 
 func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConversationView, error) {
 	var v supportConversationView
-	var assigneeID, assigneeName, teamID, teamName *string
+	var assigneeID, assigneeName, teamID, teamName, topicID, topicName *string
 	err := row.Scan(&v.ID, &v.BrandID, &v.RecordID, &v.Contact.Name, &v.Contact.Email, &v.MailboxID, &v.MailboxEmail,
 		&v.Via, &v.InboundAddress, &v.ReplyFrom, &v.Channel, &v.Subject, &v.Status, &assigneeID, &assigneeName, &teamID, &teamName, &v.Tags, &v.Unread, &v.LastFrom,
 		&v.Preview, &v.Messages, &v.FirstMessageAt, &v.FirstReplyAt, &v.ClosedAt, &v.LastMessageAt, &v.CreatedAt,
-		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt, &v.IdentityVerified, &v.VisitorSeenAt)
+		&v.SLA.ReplyDueAt, &v.SLA.ReplyBreachedAt, &v.SLA.ResolveDueAt, &v.SLA.ResolveBreachedAt, &v.IdentityVerified, &v.VisitorSeenAt,
+		&topicID, &topicName)
+	if topicID != nil {
+		v.Topic = &supportPerson{ID: *topicID, Name: deref(topicName)}
+	}
 	if assigneeID != nil {
 		v.Assignee = &supportPerson{ID: *assigneeID, Name: deref(assigneeName)}
 	}
@@ -197,6 +206,14 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 		}
 		args = append(args, t)
 		where += ` AND c.team_id = $` + itoa(len(args))
+	}
+	if t := qs.Get("topic_id"); t != "" {
+		if !validUUID(t) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "topic_id is a hand-off topic's id")
+			return
+		}
+		args = append(args, t)
+		where += ` AND c.topic_id = $` + itoa(len(args))
 	}
 	if tag := strings.TrimSpace(qs.Get("tag")); tag != "" {
 		args = append(args, tag)

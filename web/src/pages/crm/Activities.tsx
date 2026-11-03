@@ -409,6 +409,7 @@ function ActivityDialog({
     value_type: "actor_reference",
     multiple: false,
     write_policy: "platform_owned",
+    manual_edit_days: null,
     builtin: false,
     archived: false,
     filterable: true,

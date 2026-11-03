@@ -168,8 +168,12 @@ func heldForBuiltin(method, path string) bool {
 			return true
 		}
 	}
-	return builtinHeld.MatchString(path)
+	return builtinHeld.MatchString(path) || builtinHeldAccountSecret.MatchString(path)
 }
+
+// An account's secret in the vault: a person sets or removes it; an agent
+// asking always waits (secrets never pass through a model).
+var builtinHeldAccountSecret = regexp.MustCompile(`^/v1/brands/[^/]+/accounts/[^/]+/secrets/[^/]+/?$`)
 
 // writePolicy is what happens to a write made in a mission.
 func writePolicy(status, mode string) string {

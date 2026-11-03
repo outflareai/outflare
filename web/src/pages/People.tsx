@@ -15,10 +15,11 @@ import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhr
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent, softDeleteRecord } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
-import { Products, RecordLifecycle } from "./Products";
+import { Products, RecordLifecycle, RecordMetrics } from "./Products";
 import { RecentlyDeleted } from "./RecentlyDeleted";
 import { Batches, RecordMerges } from "./Undo";
 import { RecordPartners } from "./Partners";
+import { RecordTransactions, Transactions } from "./Transactions";
 
 type Rec = Schemas["Record"];
 type Field = Schemas["Field"];
@@ -43,27 +44,30 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 
 
 
-export function People({ ws, canManage, open, onOpen, go }: { ws: string; canManage: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
+export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" ? open : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" || open === "transactions" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
-  if (open === "products") return <Products ws={ws} canManage={canManage} tabs={tabs} />;
+  // Products and lifecycle stages are part of the catalog: catalog.manage.
+  if (open === "products") return <Products ws={ws} canManage={canConfigure} tabs={tabs} />;
+  if (open === "transactions") return <Transactions ws={ws} tabs={tabs} onOpen={onOpen} />;
   if (open === "batches") return <Batches ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "deleted") return <RecentlyDeleted ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted" | "transactions"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" ? v : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" || v === "transactions" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
         <TabsTrigger value="duplicates" className="px-3 text-[12px]">Duplicates</TabsTrigger>
         <TabsTrigger value="events" className="px-3 text-[12px]">Events</TabsTrigger>
         <TabsTrigger value="products" className="px-3 text-[12px]">Products</TabsTrigger>
+        <TabsTrigger value="transactions" className="px-3 text-[12px]">Transactions</TabsTrigger>
         <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
         <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
       </TabsList>
@@ -278,6 +282,8 @@ function FieldValue({ f, v, cat, names, onOpen }: { f?: Field; v: unknown; cat: 
     }
     case "record_reference":
       return <button type="button" className="underline" onClick={() => onOpen(String(v))}>{names[String(v)] ?? "Open record"}</button>;
+    case "actor_reference":
+      return <>{names[String(v)] ?? "A former member"}</>;
   }
   return <span className="break-words">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>;
 }
@@ -288,6 +294,9 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   const own = useCatalog(ws, rec?.brand_id);
   const cat = rec?.brand_id ? own : picked;
   const [links, setLinks] = useState<Link[]>([]);
+  // Workspace members by user id, so owner and other member fields read
+  // as names. Without members.read the field shows a placeholder.
+  const [members, setMembers] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [section, setSection] = useState<"timeline" | "history">("timeline");
   const [empty, setEmpty] = useState(false);
@@ -296,6 +305,10 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   const [tick, setTick] = useState(0);
   const changed = () => setTick((t) => t + 1);
   const [twins, setTwins] = useState<Rec[]>([]);
+  // What every source says about each field, and the hand edits behind
+  // its values (docs/customers.md, "Where a value comes from").
+  const [sources, setSources] = useState<Schemas["FieldSourceValue"][]>([]);
+  const [handEdits, setHandEdits] = useState<Schemas["HandEdit"][]>([]);
   // A record is opened inside the brand picked: brand routes only.
   const { brand: pickedBrand, active } = useBrand(ws);
   const brand = pickedBrand?.id ?? "";
@@ -309,10 +322,20 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
       window.dispatchEvent(new CustomEvent("outflare:item-name", { detail: { id, name: displayName(data) } }));
     });
     api.GET("/v1/brands/{brand}/records/{record}/relationships", { params: { path } }).then(({ data }) => data && setLinks(data.data));
+    api.GET("/v1/brands/{brand}/records/{record}/field-values", { params: { path } }).then(({ data }) => {
+      setSources(data?.data ?? []);
+      setHandEdits(data?.hand_edits ?? []);
+    });
     api.GET("/v1/brands/{brand}/records/duplicates", { params: { path: { brand }, query: { record: id, status: "open,blocked" } } }).then(({ data }) =>
       setTwins((data?.data ?? []).flatMap((p) => p.records.filter((r) => r.id !== id))),
     );
   }, [brand, id, tick]);
+
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/members", { params: { path: { ws } } }).then(({ data }) =>
+      setMembers(Object.fromEntries((data?.data ?? []).map((m) => [m.user_id, m.name || m.email]))),
+    );
+  }, [ws]);
 
   if (!brand) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><PickBrand what="Records" brands={active.length} /></div>;
   if (error) return <div className="space-y-6"><PageHeader title="Record" back={{ label: "People", onClick: () => onOpen("") }} /><ErrorText>{error}</ErrorText></div>;
@@ -322,11 +345,12 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
   const list = rec.type === "account" ? "companies" : "";
   const fields = cat.fields(rec.type);
   // Names of the records this one points at, from its links.
-  const names: Record<string, string> = { ...Object.fromEntries(links.map((l) => [l.record.id, l.record.name || "Unnamed"])), [rec.id]: displayName(rec) };
+  const names: Record<string, string> = { ...members, ...Object.fromEntries(links.map((l) => [l.record.id, l.record.name || "Unnamed"])), [rec.id]: displayName(rec) };
   const known = new Set(fields.map((f) => f.key));
   const has = (v: unknown) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0);
   const blank = fields.filter((f) => !has(rec.attributes[f.key]));
-  const extra = Object.keys(rec.attributes).filter((k) => !known.has(k));
+  // metrics are live totals (docs/metrics.md), shown in their own card.
+  const extra = Object.keys(rec.attributes).filter((k) => !known.has(k) && k !== "metrics");
   const manage = canManage && !rec.merged_into;
 
   async function archive(archived: boolean) {
@@ -341,6 +365,21 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
     const { error } = await api.POST("/v1/brands/{brand}/records/{record}/review", { params: { path: { brand, record: rec!.id } }, body: { decision } });
     if (error) return toast(errorMessage(error), "error");
     toast(decision === "approve" ? "Approved. They can now be emailed as a prospect (cold email only, never marketing without consent)." : "Rejected.");
+    changed();
+  }
+
+  // Use this: another source's value, saved as a person's own edit.
+  async function useValue(key: string, value: unknown) {
+    const { error } = await api.PATCH("/v1/brands/{brand}/records/{record}", { params: { path: { brand, record: rec!.id } }, body: { attributes: { [key]: value as never }, version: rec!.version } });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Saved as your edit.");
+    changed();
+  }
+
+  async function pin(key: string, pinned: boolean) {
+    const { error } = await api.POST("/v1/brands/{brand}/records/{record}/fields/{field}/pin", { params: { path: { brand, record: rec!.id, field: key } }, body: { pinned } });
+    if (error) return toast(errorMessage(error), "error");
+    toast(pinned ? "Pinned: it wins over every other source for good." : "Unpinned: its time runs again from now.");
     changed();
   }
 
@@ -413,6 +452,17 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
               {fields.filter((f) => empty || has(rec.attributes[f.key])).map((f) => (
                 <FieldRow key={f.key} label={f.label} title={[f.description, rec.attribute_sources[f.key] && `Set by ${rec.attribute_sources[f.key]}`].filter(Boolean).join(" · ")}>
                   <FieldValue f={f} v={rec.attributes[f.key]} cat={cat} names={names} onOpen={onOpen} />
+                  <FieldSources
+                    f={f}
+                    others={sources.filter((v) => v.field === f.key && !v.current && !(v.source === "manual" && rec.attribute_sources[f.key] === "manual"))}
+                    edit={rec.attribute_sources[f.key] === "manual" ? handEdits.find((h) => h.field === f.key) : undefined}
+                    cat={cat}
+                    names={names}
+                    onOpen={onOpen}
+                    manage={manage}
+                    onUse={useValue}
+                    onPin={pin}
+                  />
                 </FieldRow>
               ))}
               {extra.map((k) => (
@@ -429,6 +479,8 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           {people && <Consents key={`c${tick}`} brand={brand} id={id} canManage={manage} onChange={changed} go={go} />}
           {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
           {rec.brand_id && <RecordLifecycle key={`l${tick}`} brand={rec.brand_id} record={id} />}
+          {rec.brand_id && <RecordMetrics key={`x${tick}`} brand={rec.brand_id} record={id} />}
+          {rec.brand_id && <RecordTransactions key={`t${tick}`} brand={rec.brand_id} record={id} />}
           {rec.brand_id && !rec.merged_into && <PrivacyExports key={`p${tick}`} brand={rec.brand_id} record={id} canManage={canManage} />}
           {rec.brand_id && <RecordMerges key={`m${tick}`} brand={rec.brand_id} record={id} canManage={canManage} onOpen={onOpen} onChange={changed} />}
         </div>
@@ -446,6 +498,36 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
     </div>
   );
 }
+
+// FieldSources shows, under a field's value, what the other sources say
+// (with Use this) and, for a value set by hand, how long it wins (with Pin).
+function FieldSources({ f, others, edit, cat, names, onOpen, manage, onUse, onPin }: {
+  f: Field; others: Schemas["FieldSourceValue"][]; edit?: Schemas["HandEdit"]; cat: CatalogInfo; names: Record<string, string>; onOpen: (id: string) => void;
+  manage: boolean; onUse: (key: string, value: unknown) => void; onPin: (key: string, pinned: boolean) => void;
+}) {
+  if (others.length === 0 && !edit) return null;
+  const until = edit && (edit.pinned ? "Pinned: wins for good" : edit.expired ? "Its time ran out: the next source to write it replaces it" : edit.expires_at ? `Your edit wins until ${new Date(edit.expires_at).toLocaleDateString()}` : "Your edit wins for good");
+  return (
+    <div className="mt-1 space-y-0.5 text-[12px] text-muted-foreground">
+      {until && (
+        <div className="flex flex-wrap items-center gap-x-2">
+          <span>{until}</span>
+          {manage && <button type="button" className="underline" onClick={() => onPin(f.key, !edit!.pinned)}>{edit!.pinned ? "Unpin" : "Pin"}</button>}
+        </div>
+      )}
+      {others.map((o) => (
+        <div key={o.source} className="flex flex-wrap items-center gap-x-2">
+          <span>{sourceLabel(o.source)} says</span>
+          <span className="min-w-0 text-foreground/80"><FieldValue f={f} v={o.value} cat={cat} names={names} onOpen={onOpen} /></span>
+          {manage && <button type="button" className="underline" onClick={() => onUse(f.key, o.value)}>Use this</button>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const sourceLabels: Record<string, string> = { manual: "A person", first_party: "Your product", crm_sync: "Your CRM", enrichment: "Enrichment", import: "An import" };
+const sourceLabel = (s: string) => sourceLabels[s] ?? s;
 
 function FieldRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
   return (
@@ -678,6 +760,7 @@ const kinds: Record<TimelineItem["kind"], string> = {
   visit: "Website visit",
   opt_out: "Do not contact",
   journey: "Journey",
+  list: "List",
 };
 
 function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string; rec: Rec; cat: CatalogInfo; names: Record<string, string>; onOpen: (item: string) => void; canManage: boolean }) {
@@ -763,7 +846,7 @@ const typeOf = (it: TimelineItem, rec: Rec) => (it.record_id === rec.id ? rec.ty
 function itemTitle(it: TimelineItem, type: string, cat: CatalogInfo): string {
   switch (it.kind) {
     case "attribute_change":
-      return it.title === "name" ? "Name" : (cat.fields(type).find((f) => f.key === it.title)?.label ?? it.title);
+      return it.title === "name" ? "Name" : it.title === "archived" ? "Archived" : (cat.fields(type).find((f) => f.key === it.title)?.label ?? it.title);
     case "identity":
       return namespaces[it.title] ?? it.title;
     case "message":
@@ -778,7 +861,7 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
   switch (it.kind) {
     case "attribute_change": {
       const show = (v: unknown) => fieldLabelValue(cat, type, it.title, v, names) || "empty";
-      return `${show(d.old_value)} → ${show(d.new_value)}`;
+      return `${show(d.old_value)} → ${show(d.new_value)}${d.bulk_edit_id ? " · bulk edit" : ""}`;
     }
     case "identity":
       return [text(d.value), text(d.change), d.verified ? "verified" : ""].filter(Boolean).join(" · ");
@@ -798,6 +881,8 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
       return [text(d.kind), text(d.value), text(d.method)].filter(Boolean).join(" · ");
     case "journey":
       return [text(d.change), text(d.exit_reason)].filter(Boolean).join(" · ");
+    case "list":
+      return d.change === "enter" ? "joined" : "left";
     case "event": {
       const props = (d.properties ?? {}) as Record<string, unknown>;
       return Object.entries(props).filter(([, v]) => v !== null && typeof v !== "object").slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(" · ");
@@ -838,14 +923,14 @@ function History({ brand, rec, cat, names, onOpen }: { brand: string; rec: Rec; 
           <div className="text-sm">
             <div className="font-medium">{c.field === "name" ? "Name" : (fields.find((f) => f.key === c.field)?.label ?? c.field)}</div>
             <div className="text-xs text-muted-foreground">{fieldLabelValue(cat, rec.type, c.field, c.old_value, names) || "empty"} → {fieldLabelValue(cat, rec.type, c.field, c.new_value, names) || "empty"}</div>
-            <div className="text-xs text-muted-foreground">{c.source} · {ago(c.changed_at)}</div>
+            <div className="text-xs text-muted-foreground">{c.source}{c.bulk_edit_id ? " · bulk edit" : ""} · {ago(c.changed_at)}</div>
           </div>
         )}
         columns={[
-          { id: "field", header: "Field", accessorFn: (c) => (c.field === "name" ? "Name" : (fields.find((f) => f.key === c.field)?.label ?? c.field)) },
+          { id: "field", header: "Field", accessorFn: (c) => (c.field === "name" ? "Name" : c.field === "archived" ? "Archived" : (fields.find((f) => f.key === c.field)?.label ?? c.field)) },
           { id: "old", header: "Was", enableSorting: false, cell: ({ row: { original: c } }) => <FieldValue f={fields.find((f) => f.key === c.field)} v={c.old_value} cat={cat} names={names} onOpen={onOpen} /> },
           { id: "new", header: "Now", enableSorting: false, cell: ({ row: { original: c } }) => <FieldValue f={fields.find((f) => f.key === c.field)} v={c.new_value} cat={cat} names={names} onOpen={onOpen} /> },
-          { id: "source", header: "Source", accessorFn: (c) => c.source, cell: ({ row: { original: c } }) => <span className="text-muted-foreground">{c.source}{c.actor_id ? " (a person)" : ""}</span> },
+          { id: "source", header: "Source", accessorFn: (c) => c.source, cell: ({ row: { original: c } }) => <span className="text-muted-foreground">{c.source}{c.bulk_edit_id ? " (bulk edit)" : c.actor_id ? " (a person)" : ""}</span> },
           { id: "when", header: "When", accessorFn: (c) => c.changed_at, cell: ({ row: { original: c } }) => <span className="text-muted-foreground" title={stamp(c.changed_at)}>{ago(c.changed_at)}</span> },
         ]}
       />

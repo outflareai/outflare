@@ -71,6 +71,7 @@ var (
 	smartLists       = desc("smart_lists", "lists", "Smart lists in every workspace.")
 	smartOldest      = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
 	smartFailing     = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
+	accountIncidents = desc("accounts", "incidents_open", "Open incidents on brands' external accounts (a credential refused, a session expired, MFA waiting, an account locked), by severity. A person resolves them; critical ones stop automated use.", "severity")
 	actionsHeld      = desc("actions", "held", "Agent changes held for a person in every workspace.")
 	actionsOldest    = desc("actions", "oldest_held_seconds", "How long the longest-waiting held agent change has waited for a person. People decide most within a day.")
 	actionsStuck     = desc("actions", "running_stuck", "Agent changes claimed to run more than 15 minutes ago that never recorded how they ended. Normally 0.")
@@ -81,6 +82,14 @@ var (
 	rulesOldestDue   = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
 	lifecycleDue     = desc("lifecycle", "due", "Lifecycle inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, in brands with stages on. Normally 0 or close to it: the sweep runs every minute.")
 	lifecycleOldest  = desc("lifecycle", "oldest_due_seconds", "How long the longest-waiting lifecycle inactivity check has been due. Normally under two minutes.")
+	recMetricsDue    = desc("record_metrics", "due", "Live metric values whose window moved (a new UTC day) and wait for the sweep. Normally 0 or close to it after the first minutes of a UTC day.")
+	recMetricsOld    = desc("record_metrics", "oldest_due_seconds", "How long the longest-waiting metric value has been due. Normally under a few minutes.")
+	recMetricsBusy   = desc("record_metrics", "backfilling", "Metrics being rebuilt from stored events right now.")
+	bulkPending      = desc("bulk_edits", "pending", "Bulk edits queued or running. Normally 0, or a few while an owner's edit runs.")
+	handDue          = desc("hand_edits", "due", "Hand edits whose time to win has run out and that the sweep has not handed over yet. The sweep runs every 5 minutes, so normally 0 or a few.")
+	txUnconverted    = desc("transactions", "unconverted", "Transactions more than 2 days old still without an amount in their brand's currency: no exchange rate for their currency and day. Normally 0; rates come in daily.")
+	handOldest       = desc("hand_edits", "oldest_due_seconds", "How long the oldest expired hand edit has waited for the sweep. Normally under 10 minutes.")
+	bulkOldest       = desc("bulk_edits", "oldest_pending_seconds", "How long the oldest queued or running bulk edit has waited since it was made. A large edit takes minutes; hours means it is stuck.")
 	journeysWaiting  = desc("journeys", "waiting_runs", "Journey runs on a wait_until step, waiting for an event, conditions or their timeout.")
 	journeysOverdue  = desc("journeys", "oldest_due_seconds", "How long past its time the most overdue run of an active journey is (a wait, a wait_until check or timeout, or a call that never came back). Runs move on within seconds of their time, so this stays near 0.")
 	reviewPages      = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
@@ -94,7 +103,7 @@ var (
 	scrapeDuration   = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
 	newsSearches     = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
 	newsOverdue      = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
-	allDescs         = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue}
+	allDescs         = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, recMetricsDue, recMetricsOld, recMetricsBusy, bulkPending, bulkOldest, handDue, handOldest, txUnconverted, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue, accountIncidents}
 	gauge, counter   = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -255,6 +264,17 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		return nil
 	})
+	run("account_incidents", `SELECT severity, count(*) FROM brand_account_incidents WHERE status <> 'resolved' GROUP BY severity`, func(r rowser) error {
+		for r.Next() {
+			var severity string
+			var n int64
+			if err := r.Scan(&severity, &n); err != nil {
+				return err
+			}
+			add(accountIncidents, gauge, float64(n), severity)
+		}
+		return nil
+	})
 	run("actions_held", `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0) FROM actions WHERE status = 'held' AND (expires_at IS NULL OR expires_at > now())`, func(r rowser) error {
 		for r.Next() {
 			var n int64
@@ -290,6 +310,60 @@ func (p *Postgres) query() []prometheus.Metric {
 				return err
 			}
 			add(actionsStuck, gauge, float64(n))
+		}
+		return nil
+	})
+	run("record_metrics_due", `
+		SELECT count(*), coalesce(extract(epoch FROM now() - min(due_at)), 0)::float8,
+			(SELECT count(*) FROM metric_definitions WHERE backfilling AND status = 'active')
+		FROM metric_values WHERE due_at <= now()`, func(r rowser) error {
+		for r.Next() {
+			var n, busy int64
+			var oldest float64
+			if err := r.Scan(&n, &oldest, &busy); err != nil {
+				return err
+			}
+			add(recMetricsDue, gauge, float64(n))
+			add(recMetricsOld, gauge, oldest)
+			add(recMetricsBusy, gauge, float64(busy))
+		}
+		return nil
+	})
+	run("transactions_unconverted", `SELECT count(*) FROM transactions WHERE brand_amount_minor IS NULL AND occurred_at < now() - interval '2 days'`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			if err := r.Scan(&n); err != nil {
+				return err
+			}
+			add(txUnconverted, gauge, float64(n))
+		}
+		return nil
+	})
+	run("hand_edits_due", `
+		SELECT count(*), coalesce(extract(epoch FROM now() - min(expires_at)), 0)::float8
+		FROM hand_edits WHERE expired_at IS NULL AND NOT pinned AND expires_at <= now()`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			var oldest float64
+			if err := r.Scan(&n, &oldest); err != nil {
+				return err
+			}
+			add(handDue, gauge, float64(n))
+			add(handOldest, gauge, oldest)
+		}
+		return nil
+	})
+	run("bulk_edits_pending", `
+		SELECT count(*), coalesce(extract(epoch FROM now() - min(created_at)), 0)::float8
+		FROM bulk_edits WHERE status IN ('queued', 'running')`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			var oldest float64
+			if err := r.Scan(&n, &oldest); err != nil {
+				return err
+			}
+			add(bulkPending, gauge, float64(n))
+			add(bulkOldest, gauge, oldest)
 		}
 		return nil
 	})

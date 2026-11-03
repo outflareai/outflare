@@ -16,12 +16,12 @@ func TestLinkAssetsStartThePromotePlaybook(t *testing.T) {
 	if _, err := e.pool.Exec(ctx, `INSERT INTO integrations (workspace_id, connector, name, credentials) VALUES ($1, 'dataforseo', 'DataForSEO', '\x00')`, ws); err != nil {
 		t.Fatal(err)
 	}
-	out := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Agent", "scopes": []string{"missions.read", "missions.run"}})
-	tokenID := out["api_token"].(map[string]any)["id"].(string)
+	// Outflare's agent runs each run on the workspace's own AI model.
+	connectFakeOpenAI(t, e, owner, ws)
 
 	// It suggests a run per published page, with no inputs needed.
 	auto := owner.must(201, "POST", base+"/playbook-automations", map[string]any{"playbook_id": "link-promote-an-asset",
-		"inputs": map[string]any{"site": "northpeak.example"}, "runner": "external", "token_id": tokenID})
+		"inputs": map[string]any{"site": "northpeak.example"}})
 	if auto["kind"] != "event" || auto["event_type"] != "asset.published" || auto["gather"] != "each" {
 		t.Fatalf("automation: %v", auto)
 	}
@@ -50,8 +50,12 @@ func TestLinkAssetsStartThePromotePlaybook(t *testing.T) {
 	if n, err := e.srv.RunDueAutomations(ctx); err != nil || n != 2 {
 		t.Fatalf("runs: %d, %v", n, err)
 	}
-	runs := owner.must(200, "GET", base+"/playbook-automations/"+aid+"/runs", nil)["data"].([]any)
-	if len(runs) != 2 || !strings.Contains(runs[1].(map[string]any)["instructions"].(string), "asset.published link_asset "+a["id"].(string)) {
+	runs := owner.must(200, "GET", base+"/playbook-automations/"+aid+"/runs", nil)["agent_runs"].([]any)
+	found := false
+	for _, r := range runs {
+		found = found || strings.Contains(r.(map[string]any)["instructions"].(string), "asset.published link_asset "+a["id"].(string))
+	}
+	if len(runs) != 2 || !found {
 		t.Fatalf("runs: %v", runs)
 	}
 }

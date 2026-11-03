@@ -152,4 +152,18 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	// A person's own app on a plain token instructs like a person.
 	app := agentToken(t, owner, base, "App", "missions.read", "missions.run")
 	app.must(201, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
+	// The agents scopes are the runs' own: reading lists and reads them,
+	// running starts one and writes to it; the mission scopes above stand
+	// for them while missions retire.
+	reader := agentToken(t, owner, base, "Reader", "agents.read")
+	reader.must(200, "GET", base+"/agent-runs", nil)
+	reader.must(200, "GET", base+"/playbooks/"+pb, nil)
+	reader.must(403, "POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs})
+	reader.must(403, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "x"})
+	runner := agentToken(t, owner, base, "Runner", "agents.run")
+	runner.must(200, "GET", base+"/agent-runs/"+fired["id"].(string), nil)
+	runner.must(201, "POST", base+"/agent-runs/"+fired["id"].(string)+"/updates", map[string]any{"kind": "instruction", "body": "Only fintech leads."})
+	if r := runner.must(201, "POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs}); r["status"] != "running" {
+		t.Fatalf("run on agents.run: %v", r)
+	}
 }

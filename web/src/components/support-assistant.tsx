@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useBrand } from "@/lib/brand";
 import type { Tab } from "@/lib/paths";
 import { ConnectFor } from "./connect-for";
+import { cloudCapability, useCapabilities } from "@/lib/cloud";
 import { track } from "@/lib/analytics";
 
 // The support assistant: its settings card in Support settings, and the
@@ -22,11 +23,13 @@ const handoffLabel: Record<string, string> = {
   asked_for_person: "they asked for a person",
   sensitive_topic: "it's about a dispute, legal, security or personal data",
   too_many_replies: "it already answered several times here",
+  not_helpful: "the customer said its answer didn't help",
   needs_account: "it needs their account details",
   needs_action: "it needs someone to do something, like a refund or a change",
   upset: "they sound upset",
   unclear: "it wasn't sure what they need",
   error: "the AI call failed",
+  topic: "your team always answers this topic",
   other: "it wasn't sure",
 };
 
@@ -42,12 +45,18 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
   const [email, setEmail] = useState<Mode>("off");
   const [name, setName] = useState("");
   const [website, setWebsite] = useState(true);
+  const [hold, setHold] = useState(5);
   const [slackID, setSlackID] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [slacks, setSlacks] = useState<Integration[]>([]);
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [auto, setAuto] = useState(false);
-  const [stats, setStats] = useState<{ runs: number; answered: number; handoff: number; sent: number; decided: number } | null>(null);
+  // On Outflare Cloud Auto can still be off for one workspace (staff
+  // turned it off); elsewhere it is a Cloud feature.
+  const caps = useCapabilities();
+  const onCloud = !!caps?.includes("support_auto_replies");
+  const autoWhy = onCloud ? "Outflare staff turned Auto off for this workspace; contact support to turn it back on" : "Answering without a person is part of Outflare Cloud";
+  const [stats, setStats] = useState<Report | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -66,9 +75,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
       setSlacks(((data?.data ?? []) as Integration[]).filter((i) => i.connector === "slack_knowledge" && i.status === "connected"));
     });
     api.GET("/v1/workspaces/{ws}/support/assistant/stats", { params: { path: { ws } } }).then(({ data }) => {
-      if (!data) return;
-      const d = data.drafts;
-      setStats({ runs: data.runs, answered: data.actions.answer + data.actions.clarify, handoff: data.actions.handoff, sent: d.sent, decided: d.sent + d.edited + d.discarded });
+      if (data) setStats(data as Report);
     });
   }, [ws]);
 
@@ -79,6 +86,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
     setEmail(shown?.email_mode ?? "off");
     setName(shown?.name ?? "");
     setWebsite(shown?.find_on_website ?? true);
+    setHold(shown?.email_hold_minutes ?? 5);
     setSlackID(shown?.slack_integration_id ?? "");
     setPicked(shown?.slack_channels.map((c) => c.id) ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -101,6 +109,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
       body: {
         chat_mode: chat, email_mode: email, name: name.trim(), find_on_website: website,
         slack_integration_id: slackID && picked.length ? slackID : null, slack_channels: slackID && picked.length ? picked : [],
+        email_hold_minutes: hold,
       },
     });
     setBusy(false);
@@ -136,7 +145,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
             role="radio"
             aria-checked={value === m}
             disabled={!canManage || (m === "auto" && !auto)}
-            title={m === "auto" && !auto ? "Answering without a person is part of Outflare Cloud" : m === "auto" ? "Sends checked answers on its own, signed as the assistant" : undefined}
+            title={m === "auto" && !auto ? autoWhy : m === "auto" ? "Sends checked answers on its own, signed as the assistant" : undefined}
             onClick={() => set(m)}
             className={cn(
               "rounded px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed",
@@ -180,10 +189,33 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
         {modeRow("Email", "Up to about 140 words, the answer first", email, setEmail)}
         {modeRow("Website chat", "One to three short sentences", chat, setChat)}
       </div>
+      {!auto && caps !== null && (
+        <p className="text-xs text-muted-foreground">
+          {onCloud ? (
+            <>Auto is off for this workspace: Outflare staff turned it off. Drafts keep working; contact support to turn it back on.</>
+          ) : (
+            <>
+              <span className="font-medium text-foreground">Auto</span> is part of Outflare Cloud: {cloudCapability("support_auto_replies").line}{" "}
+              <a className="underline" href="https://outflare.ai" target="_blank" rel="noopener noreferrer">outflare.ai</a>
+            </>
+          )}
+        </p>
+      )}
       {(chat === "auto" || email === "auto") && (
         <p className="rounded-md bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground">
           In Auto it sends answers that pass every check, signed as the assistant. Anything it hands off waits for your team; on chat it tells the visitor a person will reply.
         </p>
+      )}
+      {email === "auto" && (
+        <label className="flex flex-wrap items-center gap-2 text-[13px]">
+          <span className="font-medium">Wait before sending an email</span>
+          <input type="number" aria-label="Minutes to wait before sending an email" className={cn(field, "w-20")} min={0} max={60} value={hold}
+            disabled={!canManage} onChange={(e) => setHold(Math.max(0, Math.min(60, Math.round(Number(e.target.value) || 0))))} />
+          <span>minutes</span>
+          <span className="basis-full text-xs text-muted-foreground">
+            {hold === 0 ? "Email answers go at once." : "The answer waits in the conversation as a draft, so your team can stop or edit it before it goes. It never goes if someone replies first or the customer writes again."}
+          </span>
+        </label>
       )}
       <label className="block space-y-1">
         <span className="text-[13px] font-medium">Name</span>
@@ -224,12 +256,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
           )}
         </div>
       </fieldset>
-      {stats && stats.runs > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Last 30 days: answered {stats.answered}, left {stats.handoff} to your team
-          {stats.decided > 0 && `, ${Math.round((100 * stats.sent) / stats.decided)}% of drafts sent as written`}.
-        </p>
-      )}
+      {stats && stats.runs > 0 && <AssistantReport r={stats} />}
       {error && <ErrorText>{error}</ErrorText>}
       {canManage && (
         <div className="flex justify-end">
@@ -238,6 +265,71 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
       )}
       {canManage && <TryAssistant ws={ws} brand={brandID} />}
     </div>
+  );
+}
+
+type Rates = { answered: number | null; handed_off: number | null; sent_as_written: number | null; helpful: number | null };
+type Report = {
+  days: number;
+  runs: number;
+  handoff_reasons: Record<string, number>;
+  rates: Rates;
+  previous: { runs: number; rates: Rates };
+};
+
+// Hand-off reasons, short, for the report.
+const reasonShort: Record<string, string> = {
+  not_in_knowledge: "your knowledge didn't cover it",
+  not_grounded: "its answer said more than your articles",
+  style: "it couldn't keep the answer short and clean",
+  asked_for_person: "they asked for a person",
+  sensitive_topic: "disputes, legal, security or data",
+  too_many_replies: "it had already answered several times",
+  not_helpful: "they said an answer didn't help",
+  needs_account: "it needed their account",
+  needs_action: "someone had to do something",
+  upset: "they sounded upset",
+  unclear: "it wasn't clear what they needed",
+  error: "the AI call failed",
+};
+
+const pct = (v: number | null) => (v === null ? "–" : `${Math.round(v * 100)}%`);
+
+// AssistantReport shows the last 30 days against the 30 before: four
+// shares and the commonest reasons it left conversations to the team.
+function AssistantReport({ r }: { r: Report }) {
+  const tiles: { key: keyof Rates; label: string; hint: string }[] = [
+    { key: "answered", label: "Answered", hint: "of the messages it looked at" },
+    { key: "handed_off", label: "Left to your team", hint: "with the reason" },
+    { key: "sent_as_written", label: "Sent as written", hint: "of the drafts your team decided on" },
+    { key: "helpful", label: "Helpful", hint: "of the chat answers visitors rated" },
+  ];
+  const reasons = Object.entries(r.handoff_reasons).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return (
+    <section aria-label="How the assistant is doing" className="space-y-2">
+      <p className="text-[13px] font-medium">Last {r.days} days</p>
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {tiles.map((t) => {
+          const now = r.rates[t.key], before = r.previous.rates[t.key];
+          return (
+            <div key={t.key} className="rounded-md border px-3 py-2" title={t.hint}>
+              <dt className="text-[11px] text-muted-foreground">{t.label}</dt>
+              <dd className="text-lg font-semibold tabular-nums">{pct(now)}</dd>
+              {before !== null && now !== null && (
+                <dd className="text-[11px] text-muted-foreground tabular-nums">{pct(before)} the {r.days} days before</dd>
+              )}
+            </div>
+          );
+        })}
+      </dl>
+      {reasons.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Left to your team most often because {reasons.map(([k, n], i) => (
+            <span key={k}>{i > 0 && (i === reasons.length - 1 ? " and " : ", ")}{reasonShort[k] ?? "other reasons"} ({n})</span>
+          ))}.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -289,14 +381,24 @@ function TryAssistant({ ws, brand }: { ws: string; brand: string | null }) {
 
 // AssistantDraft shows what the assistant left on a conversation: a draft
 // to use or discard, or why it left it to the team.
-export function AssistantDraft({ ws, id, run, onUse, onDiscarded }: {
+export function AssistantDraft({ ws, id, run, onUse, onDiscarded, onChanged }: {
   ws: string;
   id: string;
   run: SupportAssistantRun;
   onUse: (r: SupportAssistantRun) => void;
   onDiscarded: () => void;
+  // onChanged reloads the conversation: a held reply was stopped or sent.
+  onChanged: (r?: SupportAssistantRun) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const left = useCountdown(run.send_at);
+  // When its hold ends, the reply goes: show the conversation as it is then.
+  useEffect(() => {
+    if (left !== 0) return;
+    const t = setTimeout(() => onChanged(), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [left]);
   if (run.action === "skipped" || run.conversation_id !== id) return null;
   if (run.action === "handoff") {
     return (
@@ -307,6 +409,32 @@ export function AssistantDraft({ ws, id, run, onUse, onDiscarded }: {
     );
   }
   if (run.outcome !== "drafted") return null;
+
+  const held = left !== null && left > 0;
+
+  // stop keeps a held reply from going; it stays a draft.
+  async function stop(): Promise<SupportAssistantRun | null> {
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/assistant-runs/{id}/stop", { params: { path: { ws, id: run.id } } });
+    setBusy(false);
+    if (error) {
+      toast(errorMessage(error), "error");
+      return null;
+    }
+    track("ui.support_assistant_reply_stopped", {});
+    return data as SupportAssistantRun;
+  }
+
+  // Editing a held reply stops it first, so it can't go while you edit.
+  async function use() {
+    track("ui.support_assistant_draft_used", { action: run.action });
+    if (held) {
+      const r = await stop();
+      if (!r) return;
+      return onUse(r);
+    }
+    onUse(run);
+  }
 
   async function discard() {
     setBusy(true);
@@ -320,7 +448,9 @@ export function AssistantDraft({ ws, id, run, onUse, onDiscarded }: {
     <div className="mb-2 space-y-2 rounded-md border border-violet-500/30 bg-violet-500/5 px-3 py-2.5">
       <p className="flex items-center gap-1.5 text-[11px] font-medium text-violet-700 dark:text-violet-400">
         <Icon name="ai" className="size-3.5" />
-        {run.action === "clarify" ? "The assistant would ask" : "The assistant drafted"}
+        {left !== null
+          ? left > 0 ? `The assistant sends this in ${formatLeft(left)}` : "The assistant is sending this…"
+          : run.action === "clarify" ? "The assistant would ask" : "The assistant drafted"}
       </p>
       <p className="text-[13px] whitespace-pre-wrap">{run.reply}</p>
       {run.cited.length > 0 && (
@@ -335,9 +465,27 @@ export function AssistantDraft({ ws, id, run, onUse, onDiscarded }: {
         </p>
       )}
       <div className="flex gap-2">
-        <Button onClick={() => { track("ui.support_assistant_draft_used", { action: run.action }); onUse(run); }}>Use this</Button>
+        {held && <Button disabled={busy} onClick={async () => { const r = await stop(); if (r) onChanged(r); }}>Stop</Button>}
+        <Button variant={held ? "ghost" : undefined} disabled={busy} onClick={use}>{held ? "Edit" : "Use this"}</Button>
         <Button variant="ghost" disabled={busy} onClick={discard}>Discard</Button>
       </div>
     </div>
   );
+}
+
+// useCountdown is the seconds until at, every second; null without one.
+function useCountdown(at: string | null | undefined): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!at) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [at]);
+  if (!at) return null;
+  return Math.max(0, Math.round((new Date(at).getTime() - now) / 1000));
+}
+
+function formatLeft(s: number): string {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, "0")}`;
 }

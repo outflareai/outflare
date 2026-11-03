@@ -35,8 +35,8 @@ func (MicrosoftAds) Definition() c.Definition {
 	d := def("microsoft_ads", "Microsoft Advertising", "https://ads.microsoft.com",
 		"https://learn.microsoft.com/advertising/guides/get-started", "https://developers.ads.microsoft.com/Account",
 		"Spend, clicks and conversions per campaign from your Microsoft Advertising (Bing) accounts.",
-		"Signs in with Microsoft and reads every Microsoft Advertising account the sign-in can see. Microsoft also asks for a developer token: get your own from the Microsoft Advertising developer portal (Account, Request token) and add it after signing in. It never changes your campaigns; it sends offline conversions only to the goals you choose under Paid ads.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions)
+		"Signs in with Microsoft and reads every Microsoft Advertising account the sign-in can see. Microsoft also asks for a developer token: get your own from the Microsoft Advertising developer portal (Account, Request token) and add it after signing in. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget; it sends offline conversions only to the goals you choose under Paid ads.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsManage)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 		TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -143,6 +143,82 @@ func (m MicrosoftAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Cre
 		out = append(out, x)
 	}
 	return out, nil
+}
+
+// ---- managing campaigns ----
+
+func (m MicrosoftAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	id := atoi64(campaignID)
+	if id <= 0 {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "Microsoft Advertising campaign ids are numbers")
+	}
+	var resp struct {
+		Campaigns []struct {
+			ID           flexInt `json:"Id"`
+			Name         string  `json:"Name"`
+			Status       string  `json:"Status"`
+			CampaignType string  `json:"CampaignType"`
+			DailyBudget  flexNum `json:"DailyBudget"`
+		} `json:"Campaigns"`
+	}
+	body := map[string]any{"AccountId": atoi64(acct.ID), "CampaignIds": []int64{id}, "CampaignType": "Search Shopping DynamicSearchAds Audience PerformanceMax"}
+	if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/Campaigns/QueryByIds", body, &resp); err != nil {
+		return c.AdCampaign{}, err
+	}
+	for _, cp := range resp.Campaigns {
+		if int64(cp.ID) != id {
+			continue
+		}
+		x := c.AdCampaign{ID: campaignID, Name: cp.Name, Status: status(cp.Status), ProviderStatus: cp.Status, Objective: strings.ToLower(cp.CampaignType)}
+		if cp.DailyBudget > 0 {
+			x.DailyBudgetMicros = ptrI(c.Micros(float64(cp.DailyBudget)))
+		}
+		return x, nil
+	}
+	return c.AdCampaign{}, c.Errf(c.ErrInvalid, "Microsoft Advertising has no campaign %s in account %s", campaignID, acct.ID)
+}
+
+// msUpdate sends one Campaigns/Update with the fields given, and reads
+// the partial errors Microsoft answers with HTTP 200.
+func (m MicrosoftAds) msUpdate(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaign map[string]any) error {
+	var resp struct {
+		PartialErrors []struct {
+			Message string `json:"Message"`
+		} `json:"PartialErrors"`
+	}
+	body := map[string]any{"AccountId": atoi64(acct.ID), "Campaigns": []any{campaign}}
+	if err := m.scoped(cl, creds, acct).post(ctx, cl.Base("microsoft_ads.campaign", msCampaignBase)+"/Campaigns/Update", body, &resp); err != nil {
+		return err
+	}
+	if len(resp.PartialErrors) > 0 {
+		return c.Errf(c.ErrInvalid, "Microsoft Advertising refused the change: %s", resp.PartialErrors[0].Message)
+	}
+	return nil
+}
+
+func (m MicrosoftAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	id := atoi64(campaignID)
+	if id <= 0 {
+		return c.Errf(c.ErrInvalid, "Microsoft Advertising campaign ids are numbers")
+	}
+	st := "Paused"
+	if active {
+		st = "Active"
+	}
+	return m.msUpdate(ctx, cl, creds, acct, map[string]any{"Id": id, "Status": st})
+}
+
+// SetCampaignDailyBudget sets a standard daily budget in the account's
+// currency (micros rounded to cents).
+func (m MicrosoftAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, micros int64) error {
+	id := atoi64(campaignID)
+	if id <= 0 {
+		return c.Errf(c.ErrInvalid, "Microsoft Advertising campaign ids are numbers")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	return m.msUpdate(ctx, cl, creds, acct, map[string]any{"Id": id, "DailyBudget": float64((micros+5_000)/10_000) / 100, "BudgetType": "DailyStandard"})
 }
 
 func msDate(s string) map[string]int {

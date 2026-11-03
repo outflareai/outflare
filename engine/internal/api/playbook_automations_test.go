@@ -20,13 +20,16 @@ func TestPlaybookAutomations(t *testing.T) {
 	out := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Agent", "scopes": []string{"missions.read", "missions.run", "missions.approve"}})
 	agent := &client{t: t, h: e.h, bearer: out["token"].(string)}
 	tokenID := out["api_token"].(map[string]any)["id"].(string)
+	// Every run is an agent run on the workspace's own AI model.
+	connectFakeOpenAI(t, e, owner, ws)
 
-	// The playbook suggests a monthly schedule; an agent's automation runs
-	// its missions itself, and waits for a person's approval.
+	// The playbook suggests a monthly schedule; an agent's automation is a
+	// draft like anyone's, run by Outflare's agent, and waits for a
+	// person's approval.
 	inputs := map[string]any{"site": "northpeak.example"}
 	sched := agent.must(201, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs})
-	if sched["kind"] != "schedule" || sched["cadence"] != "monthly" || sched["status"] != "draft" || sched["runner"] != "external" ||
-		sched["token_id"] != tokenID || sched["mode"] != "approve_writes" || sched["name"] != "Win back the links you lost" || sched["next_run_at"] != nil {
+	if sched["kind"] != "schedule" || sched["cadence"] != "monthly" || sched["status"] != "draft" || sched["runner"] != "builtin" ||
+		sched["token_id"] != nil || sched["mode"] != "approve_writes" || sched["name"] != "Win back the links you lost" || sched["next_run_at"] != nil {
 		t.Fatalf("schedule: %v", sched)
 	}
 	sid := sched["id"].(string)
@@ -36,10 +39,16 @@ func TestPlaybookAutomations(t *testing.T) {
 	agent.must(400, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links"})
 	agent.must(400, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs, "kind": "event", "event_type": "not.an_event"})
 	agent.must(400, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs, "kind": "schedule", "cadence": "hourly"})
+	// The external runner (an outside agent's token running each run as a
+	// mission) is retired with missions.
 	owner.must(400, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs, "runner": "external"})
+	res := agent.must(400, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs, "runner": "external", "token_id": tokenID})
+	if !strings.Contains(res["error"].(map[string]any)["message"].(string), "retired") {
+		t.Fatalf("external runner: %v", res)
+	}
 
 	// Only a person turns it on: each run carries their approval.
-	res := agent.must(403, "POST", auto+"/"+sid+"/approve", nil)
+	res = agent.must(403, "POST", auto+"/"+sid+"/approve", nil)
 	if !strings.Contains(res["error"].(map[string]any)["message"].(string), "only a person") {
 		t.Fatalf("agent approve: %v", res)
 	}
@@ -50,8 +59,8 @@ func TestPlaybookAutomations(t *testing.T) {
 	}
 	owner.must(409, "POST", auto+"/"+sid+"/approve", nil)
 
-	// Its time comes: a running mission from the playbook, with its mode
-	// and runner, approved by the automation.
+	// Its time comes: a running agent run from the playbook, with the
+	// automation's mode, approved by the automation.
 	due := func(id string) {
 		t.Helper()
 		if _, err := e.pool.Exec(ctx, `UPDATE playbook_automations SET next_run_at = now() - interval '1 minute' WHERE id = $1`, id); err != nil {
@@ -62,13 +71,13 @@ func TestPlaybookAutomations(t *testing.T) {
 	if n, err := e.srv.RunDueAutomations(ctx); err != nil || n != 1 {
 		t.Fatalf("scheduled run: %d, %v", n, err)
 	}
-	runs := owner.must(200, "GET", auto+"/"+sid+"/runs", nil)["data"].([]any)
+	runs := owner.must(200, "GET", auto+"/"+sid+"/runs", nil)["agent_runs"].([]any)
 	if len(runs) != 1 {
 		t.Fatalf("runs: %v", runs)
 	}
 	m := runs[0].(map[string]any)
-	if m["status"] != "running" || m["mode"] != "approve_writes" || m["runner"] != "external" || m["token_id"] != tokenID ||
-		m["automation_id"] != sid || m["playbook_id"] != "link-reclaim-lost-links" || m["approved_at"] == nil {
+	if m["status"] != "running" || m["mode"] != "copilot" || m["token_id"] == nil ||
+		m["automation_id"] != sid || m["playbook_id"] != "link-reclaim-lost-links" {
 		t.Fatalf("run: %v", m)
 	}
 	if ins := m["instructions"].(string); !strings.Contains(ins, "northpeak.example") || !strings.Contains(ins, "which runs monthly") {
@@ -76,7 +85,7 @@ func TestPlaybookAutomations(t *testing.T) {
 	}
 	sched = owner.must(200, "GET", auto+"/"+sid, nil)
 	next, err := time.Parse(time.RFC3339, sched["next_run_at"].(string))
-	if sched["runs"] != float64(1) || sched["last_mission_id"] != m["id"] || err != nil || !next.After(time.Now()) || next.Day() != 1 || next.Hour() != 9 || next.Minute() != 0 {
+	if sched["runs"] != float64(1) || sched["last_run_id"] != m["id"] || sched["last_mission_id"] != nil || err != nil || !next.After(time.Now()) || next.Day() != 1 || next.Hour() != 9 || next.Minute() != 0 {
 		t.Fatalf("after the run: %v", sched)
 	}
 	// Nothing is due now.
@@ -106,7 +115,7 @@ func TestPlaybookAutomations(t *testing.T) {
 
 	// An event trigger, a run per event, at most two a day.
 	ev := owner.must(201, "POST", auto, map[string]any{"playbook_id": "link-reclaim-lost-links", "inputs": inputs, "kind": "event",
-		"gather": "each", "daily_cap": 2, "runner": "external", "token_id": tokenID})
+		"gather": "each", "daily_cap": 2})
 	if ev["event_type"] != "backlink.lost" || ev["cadence"] != nil {
 		t.Fatalf("event automation: %v", ev)
 	}
@@ -132,7 +141,7 @@ func TestPlaybookAutomations(t *testing.T) {
 	if ev["runs"] != float64(2) || next.Before(time.Now()) || next.UTC().Hour() != 0 {
 		t.Fatalf("capped for today: %v", ev)
 	}
-	runs = owner.must(200, "GET", auto+"/"+eid+"/runs", nil)["data"].([]any)
+	runs = owner.must(200, "GET", auto+"/"+eid+"/runs", nil)["agent_runs"].([]any)
 	if len(runs) != 2 || !strings.Contains(runs[0].(map[string]any)["instructions"].(string), "for 1 backlink.lost event(s)") {
 		t.Fatalf("event run: %v", runs)
 	}
@@ -148,7 +157,7 @@ func TestPlaybookAutomations(t *testing.T) {
 	if n, err := e.srv.RunDueAutomations(ctx); err != nil || n != 1 {
 		t.Fatalf("gathered run: %d, %v", n, err)
 	}
-	runs = owner.must(200, "GET", auto+"/"+eid+"/runs", nil)["data"].([]any)
+	runs = owner.must(200, "GET", auto+"/"+eid+"/runs", nil)["agent_runs"].([]any)
 	if ins := runs[0].(map[string]any)["instructions"].(string); !strings.Contains(ins, "for 2 backlink.lost event(s)") {
 		t.Fatalf("gathered: %s", ins)
 	}
@@ -188,7 +197,7 @@ func TestPlaybookAutomations(t *testing.T) {
 		t.Fatalf("approver gone: %v", sched)
 	}
 
-	// Pause, list, delete; the runs stay as missions.
+	// Pause, list, delete; the runs stay.
 	owner.must(200, "POST", auto+"/"+sid+"/approve", nil)
 	if p := agent.must(200, "POST", auto+"/"+sid+"/pause", nil); p["status"] != "paused" {
 		t.Fatalf("paused: %v", p)
@@ -202,10 +211,26 @@ func TestPlaybookAutomations(t *testing.T) {
 	}
 	agent.must(204, "DELETE", auto+"/"+sid, nil)
 	agent.must(404, "GET", auto+"/"+sid, nil)
-	owner.must(200, "GET", base+"/missions/"+m["id"].(string), nil)
+	owner.must(200, "GET", base+"/agent-runs/"+m["id"].(string), nil)
+
+	// An automation of an outside agent's token from before missions
+	// retired is held when it next comes due, with the reason.
+	if _, err := e.pool.Exec(ctx, `UPDATE playbook_automations SET runner = 'external', token_id = $2 WHERE id = $1`, eid, tokenID); err != nil {
+		t.Fatal(err)
+	}
+	agent.must(200, "PATCH", auto+"/"+eid, map[string]any{"max_spend_cents_per_month": nil})
+	owner.must(200, "POST", auto+"/"+eid+"/approve", nil)
+	lost()
+	due(eid)
+	if n, err := e.srv.RunDueAutomations(ctx); err != nil || n != 0 {
+		t.Fatalf("external runner: %d, %v", n, err)
+	}
+	if ev = owner.must(200, "GET", auto+"/"+eid, nil); ev["status"] != "held" || !strings.Contains(ev["held_reason"].(string), "retired") {
+		t.Fatalf("external runner held: %v", ev)
+	}
 
 	evs := got()
-	for name, want := range map[string]int{"playbook_automation.created": 2, "playbook_automation.ran": 5, "playbook.started": 5, "playbook_automation.held": 2, "playbook_automation.deleted": 1} {
+	for name, want := range map[string]int{"playbook_automation.created": 2, "playbook_automation.ran": 5, "playbook.started": 5, "playbook_automation.held": 3, "playbook_automation.deleted": 1} {
 		if n := len(named(evs, name)); n != want {
 			t.Errorf("%s: %d events, want %d", name, n, want)
 		}

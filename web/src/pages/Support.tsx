@@ -12,6 +12,7 @@ import { SupportForwarding } from "@/components/support-forwarding";
 import { SupportSLA } from "@/components/support-sla";
 import { SupportChat } from "@/components/support-chat";
 import { AssistantDraft, SupportAssistantSettings } from "@/components/support-assistant";
+import { SupportHandoffTopics } from "@/components/support-topics";
 
 // The support inbox: customers who write to a support mailbox, as
 // conversations the team works through. Folders on the left, the list in
@@ -512,7 +513,8 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
                 <button type="button" aria-label="Dismiss" onClick={() => setAiProblem(null)} className="text-muted-foreground hover:text-foreground"><Icon name="x" className="size-3.5" /></button>
               </p>
             )}
-            {run && !closed && <AssistantDraft ws={ws} id={id} run={run} onUse={useDraft} onDiscarded={() => setRun(null)} />}
+            {run && !closed && <AssistantDraft ws={ws} id={id} run={run} onUse={useDraft} onDiscarded={() => setRun(null)}
+              onChanged={(r) => (r ? setRun(r) : load().then(onChanged))} />}
             {articles && mode === "reply" && (
               <ArticlePicker ws={ws} id={id} onPick={(a, from) => { if (a.url) insertLink(a.title, a.url, from); setArticles(false); }} onClose={() => setArticles(false)} go={go} />
             )}
@@ -767,6 +769,11 @@ function Details({
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </label>
+        {conv.topic && (
+          <p className="text-xs text-muted-foreground" title="The topic the AI assistant gave this conversation (Support settings, Hand-off topics)">
+            Topic <span className="ml-1 rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-700 dark:text-violet-400">{conv.topic.name}</span>
+          </p>
+        )}
         <div className="space-y-1">
           <span className="text-xs text-muted-foreground">Tags</span>
           <div className="flex flex-wrap gap-1">
@@ -977,6 +984,7 @@ function Settings({
       <SupportForwarding ws={ws} canSetUp={canSetUp} go={go} onChanged={onChanged} />
       <SupportChat ws={ws} canManage={canManage} />
       <SupportAssistantSettings ws={ws} canManage={canManage} go={go} />
+      <SupportHandoffTopics ws={ws} canManage={canManage} />
       {!first && <SupportSLA ws={ws} canManage={canManage} onChanged={onChanged} />}
     </div>
   );

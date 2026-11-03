@@ -310,17 +310,17 @@ function AppSettings({ ws, app: a, onClose }: { ws: string; app: AgentApp; onClo
             </div>
             <p className="flex gap-2 text-[12px] text-muted-foreground">
               <Icon name="x" className="mt-0.5 size-3.5 shrink-0" />
-              It can never invite or remove people, create API tokens, approve its own missions, or send around your suppression list and send limits.
+              It can never invite or remove people, create API tokens, approve its own changes, or send around your suppression list and send limits.
             </p>
             {writes.length === 0 && a.verified && <p className="text-[12px] text-muted-foreground">Turned something on? Start a new chat in {a.name} so it picks up the tools that make changes.</p>}
           </fieldset>
           {a.verified ? (
             <label className="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5">
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-medium">Only inside missions</span>
-                <span className="block text-[12px] text-muted-foreground">It makes changes only as part of a mission you approved, so you see its plan first. Off lets it change things directly.</span>
+                <span className="block text-[13px] font-medium">Every change waits for you</span>
+                <span className="block text-[12px] text-muted-foreground">Its changes are held on the Agents page until you approve them, so you see each one first. Off lets it change things directly.</span>
               </span>
-              <Switch checked={mission} disabled={busy} onCheckedChange={saveMission} aria-label="Only inside missions" />
+              <Switch checked={mission} disabled={busy} onCheckedChange={saveMission} aria-label="Every change waits for you" />
             </label>
           ) : (
             <p role="note" className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">

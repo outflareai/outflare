@@ -77,13 +77,34 @@ const (
 	// Managing analytics is making campaign links and the campaigns they
 	// belong to.
 	ScopeAnalyticsManage = "analytics.manage"
-	ScopeMissionsRead    = "missions.read"
+	// Paid ads: pausing and resuming campaigns and setting their daily
+	// budgets in the workspace's own ad accounts (reading them is
+	// analytics.read). Its own scope because it spends money.
+	ScopeAdsManage = "ads.manage"
+	// Content: posts and pages written for the brand's website and
+	// published through its own CMS connection. Reading is the items and
+	// their publications; managing is writing them and publishing.
+	ScopeContentRead   = "content.read"
+	ScopeContentManage = "content.manage"
+	// Accounts: the external accounts a brand's agent may act through,
+	// their attempts and incidents, and the vault's secrets (set only by a
+	// person; never returned).
+	ScopeAccountsRead   = "accounts.read"
+	ScopeAccountsManage = "accounts.manage"
+	ScopeMissionsRead   = "missions.read"
 	// Running a mission is what an agent does: create missions, plan, act
 	// inside them and report. It never includes approving its own writes.
 	ScopeMissionsRun = "missions.run"
 	// Approving is starting a mission, approving or rejecting the writes
 	// it holds, changing its limits, and resuming it.
 	ScopeMissionsApprove = "missions.approve"
+	// Agents: Outflare's agent and the playbooks it runs as agent runs on
+	// the action layer (ADR 13). Reading is runs, playbooks and what they
+	// did; running is starting runs and writing to them. These replace the
+	// mission scopes, which keep working as the same thing while missions
+	// retire (see aliases).
+	ScopeAgentsRead = "agents.read"
+	ScopeAgentsRun  = "agents.run"
 	// The action layer (ADR 13): reading what agent tokens did and what
 	// waits, approving or rejecting held changes, and setting what each
 	// agent token may do. Setting grants is a signed-in person's alone, so
@@ -119,6 +140,10 @@ const (
 	// event definitions) changes every feature that uses it, so it is for
 	// admins by default.
 	ScopeCatalogManage = "catalog.manage"
+	// Calling a brand's published query endpoints (and nothing else): what
+	// another system's API token holds. What an endpoint reads was fixed by
+	// the owner or admin who published it.
+	ScopeQueryEndpoints = "query.endpoints"
 	// Social channels such as Reddit: reading what watches found, drafting
 	// replies and other actions (social.manage), and approving an action
 	// so it runs on the brand's own account (social.post), which only a
@@ -178,9 +203,16 @@ var AllScopes = []string{
 	ScopeInfraApprove,
 	ScopeAnalyticsRead,
 	ScopeAnalyticsManage,
+	ScopeAdsManage,
+	ScopeContentRead,
+	ScopeContentManage,
+	ScopeAccountsRead,
+	ScopeAccountsManage,
 	ScopeMissionsRead,
 	ScopeMissionsRun,
 	ScopeMissionsApprove,
+	ScopeAgentsRead,
+	ScopeAgentsRun,
 	ScopeActionsRead,
 	ScopeActionsApprove,
 	ScopeActionsManage,
@@ -195,6 +227,7 @@ var AllScopes = []string{
 	ScopeCustomersRead,
 	ScopeCustomersManage,
 	ScopeCatalogManage,
+	ScopeQueryEndpoints,
 	ScopeSocialRead,
 	ScopeSocialManage,
 	ScopeSocialPost,
@@ -224,8 +257,8 @@ var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeActionsRead, ScopeActionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
-	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeActionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
+	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeAdsManage, ScopeContentRead, ScopeContentManage, ScopeAccountsRead, ScopeAccountsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeAgentsRead, ScopeAgentsRun, ScopeActionsRead, ScopeActionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeAgentsRead, ScopeActionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 
 // workspaceWide are scopes about the whole workspace: settings, people,
@@ -270,19 +303,42 @@ var narrower = map[string]string{
 	ScopeAIAccountsManage: ScopeMyAIAccountsManage,
 }
 
+// aliases are pairs of scopes that mean the same thing while one replaces
+// the other: a token or role holding either side passes a check for the
+// other. The agents scopes replace the mission scopes as missions retire;
+// the pair goes when the mission routes do.
+var aliases = [][2]string{
+	{ScopeMissionsRead, ScopeAgentsRead},
+	{ScopeMissionsRun, ScopeAgentsRun},
+}
+
 // Grants reports whether scopes allow want. Any scope in an area includes
-// reading it: leads.manage can list leads, missions.run can read missions.
-// A scope over everyone's records includes the one over the caller's own
-// (narrower).
+// reading it: leads.manage can list leads, agents.run can read runs. A
+// scope over everyone's records includes the one over the caller's own
+// (narrower), and an alias counts as the scope it stands for.
 func Grants(scopes []string, want string) bool {
 	scopes = CleanScopes(scopes)
-	if slices.Contains(scopes, want) {
+	if grants(scopes, want) {
 		return true
 	}
 	for wide, narrow := range narrower {
-		if narrow == want && Grants(scopes, wide) {
+		if narrow == want && grants(scopes, wide) {
 			return true
 		}
+	}
+	for _, pair := range aliases {
+		if (want == pair[0] && grants(scopes, pair[1])) || (want == pair[1] && grants(scopes, pair[0])) {
+			return true
+		}
+	}
+	return false
+}
+
+// grants is Grants without the aliases: the scope itself, or any scope in
+// its area for a read.
+func grants(scopes []string, want string) bool {
+	if slices.Contains(scopes, want) {
+		return true
 	}
 	area, ok := strings.CutSuffix(want, ".read")
 	if !ok {

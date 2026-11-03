@@ -157,7 +157,10 @@ export type UiEvent =
   | "ui.support_chat_saved" // a website chat's settings saved (require_email, show_articles)
   | "ui.support_sla_saved" // response times saved or turned off in Support settings (enabled, business_hours)
   | "ui.support_assistant_tried" // a made-up question asked in Support settings (channel, action)
+  | "ui.support_assistant_reply_stopped" // a held Auto email reply stopped in the conversation
+  | "ui.knowledge_reply_learning_started" // Learn from past replies started in Knowledge → Review (days)
   | "ui.support_assistant_draft_used" // the assistant's draft put in the composer (action: answer, clarify)
+  | "ui.knowledge_website_import_started" // Import website started in Knowledge (max_pages, publish)
   | "ui.support_article_linked" // a help centre article's link put in a support reply (from: suggested, search, suggestion)
   | "ui.support_address_made" // a support forwarding address made from Support settings (brand: whether it is a brand's)
   | "ui.support_address_renamed" // a support forwarding address renamed (brand)

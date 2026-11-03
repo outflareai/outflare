@@ -17,6 +17,8 @@ const choices = [
 
 // The page an alert opens: its path is "{tab}/{item}" under the workspace.
 function link(ws: string, path: string) {
+  // A page of its own on this server, such as an extension's "/billing".
+  if (path.startsWith("/") && !path.startsWith("//")) return path;
   const [tab, ...item] = path.split("/");
   return appPath(ws, tab as Tab, item.length ? item.join("/") : undefined);
 }

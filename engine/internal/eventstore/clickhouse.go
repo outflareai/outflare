@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -146,4 +147,43 @@ func (c *ClickHouse) do(ctx context.Context, sql string, params map[string]strin
 		return nil, fmt.Errorf("clickhouse: %s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return resp.Body, nil
+}
+
+// RuleEvent is one event read for a rule's dry run.
+type RuleEvent struct {
+	RecordID   string
+	Properties map[string]any
+	OccurredAt time.Time
+}
+
+// RuleEvents reads a workspace's events of one name since a time, oldest
+// first, up to limit: what a rule's dry run replays over a longer window
+// than Postgres keeps. Deleted events, events about nobody and the
+// website snippet's events are left out, as the rules engine does.
+func (c *ClickHouse) RuleEvents(ctx context.Context, ws, name string, since time.Time, limit int) ([]RuleEvent, error) {
+	// Aliases must not reuse a column's name: ClickHouse would then read
+	// the alias (a string) in WHERE and ORDER BY.
+	rows, err := c.Query(ctx, `SELECT toString(record_id) AS rec, properties, toString(occurred_at) AS at
+		FROM events FINAL
+		WHERE workspace_id = {ws:UUID} AND name = {name:String} AND occurred_at >= {since:DateTime64(6, 'UTC')}
+		  AND deleted = 0 AND record_id IS NOT NULL AND source != 'browser'
+		ORDER BY occurred_at LIMIT {limit:UInt32}`,
+		map[string]string{"ws": ws, "name": name, "since": chTime(since), "limit": strconv.Itoa(limit)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RuleEvent, 0, len(rows))
+	for _, row := range rows {
+		e := RuleEvent{RecordID: fmt.Sprint(row["rec"]), Properties: map[string]any{}}
+		if p, ok := row["properties"].(string); ok && p != "" {
+			_ = json.Unmarshal([]byte(p), &e.Properties)
+		}
+		at, err := time.Parse("2006-01-02 15:04:05.000", fmt.Sprint(row["at"]))
+		if err != nil {
+			return nil, fmt.Errorf("clickhouse: event time %v: %w", row["at"], err)
+		}
+		e.OccurredAt = at.UTC()
+		out = append(out, e)
+	}
+	return out, nil
 }

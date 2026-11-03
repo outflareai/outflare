@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural } from "../format";
+import { BulkEditSheet } from "./BulkEdit";
 
 // Smart lists: people on customer records who match rules now. They sit
 // beside lead lists on the Lists page; this file has their editor and
@@ -187,6 +188,14 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
   const [description, setDescription] = useState(list?.description ?? "");
   const [match, setMatch] = useState<SmartList["match"]>(list?.match ?? "all");
   const [rules, setRules] = useState<SmartListRule[]>(list?.rules ?? [{ attribute: "", op: "eq", value: "" }]);
+  // A list fills from its rules, or from a saved query's record_id column.
+  const [from, setFrom] = useState<"rules" | "query">(list?.kind === "query" ? "query" : "rules");
+  const [queryID, setQueryID] = useState(list?.saved_query_id ?? "");
+  const [queries, setQueries] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => {
+    if (from !== "query" || !brandID || queries) return;
+    api.GET("/v1/brands/{brand}/queries", { params: { path: { brand: brandID } } }).then(({ data }) => setQueries(data?.data ?? []));
+  }, [from, brandID, queries]);
   const [count, setCount] = useState<{ members: number; sample: SmartListPerson[] } | null>(null);
   const [counting, setCounting] = useState(false);
   const [countError, setCountError] = useState("");
@@ -195,7 +204,7 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
 
   // Count as the rules change, a moment after the last edit.
   useEffect(() => {
-    if (!ready(rules) || !brandID) return;
+    if (from !== "rules" || !ready(rules) || !brandID) return;
     setCounting(true);
     const t = setTimeout(async () => {
       const { data, error } = await api.POST("/v1/brands/{brand}/smart-lists/preview", { params: { path: { brand: brandID } }, body: { rules, match } });
@@ -204,13 +213,13 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
       if (data) setCount(data);
     }, 400);
     return () => clearTimeout(t);
-  }, [rules, match, brandID]);
+  }, [rules, match, brandID, from]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const body = { name, description, rules, match };
+    const body = from === "query" ? { name, description, saved_query_id: queryID, ...(list ? {} : { kind: "query" as const }) } : { name, description, rules, match };
     const res = list
       ? await api.PATCH("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand: brandID, id: list.id } }, body })
       : await api.POST("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandID } }, body });
@@ -227,7 +236,11 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>{list ? `Edit ${list.name}` : "New smart list"}</SheetTitle>
-          <SheetDescription>People on your customer records who match these rules. It keeps itself up to date: people join when they start matching and leave when they stop.</SheetDescription>
+          <SheetDescription>
+            {from === "query"
+              ? "The people a saved query returns, from its record_id (or id) column. It runs again every 15 minutes: people join when the query starts returning them and leave when it stops."
+              : "People on your customer records who match these rules. It keeps itself up to date: people join when they start matching and leave when they stop."}
+          </SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="space-y-6 px-4 pb-6 text-[13px]">
           <div className="space-y-3">
@@ -242,6 +255,28 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
             <p className="text-[12px] text-muted-foreground">{byId(brandID)?.name ?? "This brand"}'s people only: a list belongs to one brand.</p>
           </div>
 
+          {!list && (
+            <div className="flex flex-wrap gap-4" role="radiogroup" aria-label="Fill it from">
+              <label className="flex items-center gap-1.5"><input type="radio" checked={from === "rules"} onChange={() => setFrom("rules")} /> Rules</label>
+              <label className="flex items-center gap-1.5"><input type="radio" checked={from === "query"} onChange={() => setFrom("query")} /> A saved query</label>
+            </div>
+          )}
+
+          {from === "query" ? (
+            <div className="space-y-2">
+              <label className="block">
+                <span className="mb-1 block font-medium">Saved query</span>
+                <select className={`${field} w-full`} required value={queryID} onChange={(e) => setQueryID(e.target.value)}>
+                  <option value="">{queries === null ? "Loading…" : queries.length ? "Pick a saved query" : "No saved queries yet"}</option>
+                  {queries?.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+                  {queryID && queries && !queries.some((q) => q.id === queryID) && <option value={queryID}>The current query</option>}
+                </select>
+              </label>
+              <p className="text-[12px] text-muted-foreground">
+                Return a <span className="font-mono">record_id</span> column, for example <span className="font-mono">SELECT id AS record_id FROM people WHERE …</span>. Up to 50,000 people. If the query fails, the list keeps who it had and says why. Save queries in Query.
+              </p>
+            </div>
+          ) : (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2 font-medium">
               People who match
@@ -253,7 +288,9 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
             </div>
             <Rules rules={rules} onChange={setRules} fields={fields} events={events} leadLists={leadLists} newsSearches={newsSearches} />
           </div>
+          )}
 
+          {from === "rules" && (
           <div aria-live="polite" className="rounded-md border bg-muted/40 p-3">
             {!ready(rules) ? (
               <p className="text-muted-foreground">Finish the rules to see who matches.</p>
@@ -268,10 +305,11 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
               <p className="text-muted-foreground">Counting…</p>
             )}
           </div>
+          )}
 
           <ErrorText>{error}</ErrorText>
           <div className="flex flex-wrap gap-2 border-t pt-4">
-            <Button disabled={busy || !name.trim() || !ready(rules)}>{busy ? "Saving…" : list ? "Save" : "Create smart list"}</Button>
+            <Button disabled={busy || !name.trim() || (from === "rules" ? !ready(rules) : !queryID)}>{busy ? "Saving…" : list ? "Save" : "Create smart list"}</Button>
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           </div>
         </form>
@@ -280,6 +318,13 @@ export function SmartListSheet({ ws, list, onClose, onSaved }: { ws: string; lis
   );
 }
 
+// Why a list from a saved query kept its members (smart_lists.error_code).
+const queryListError: Record<string, string> = {
+  query_missing: "Its saved query was archived, so the list keeps who it had. Pick another query.",
+  no_record_id: "Its query has no record_id (or id) column, so the list keeps who it had. Add one, for example SELECT id AS record_id FROM people.",
+  too_many: "Its query returns more than 50,000 people, so the list keeps who it had. Narrow the query.",
+};
+
 export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, onChanged }: { ws: string; list: SmartList; canManage: boolean; onBack: () => void; onEdit: (l: SmartList) => void; onChanged: () => void }) {
   const brand = initial.brand_id ?? "";
   const { fields, leadLists, newsSearches } = useRuleChoices(ws, brand);
@@ -287,7 +332,13 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
   const [people, setPeople] = useState<SmartListPerson[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [waiting, setWaiting] = useState(!initial.refreshed_at);
+  // A static list holds who was put in it (by hand, a journey, an import
+  // or a bulk edit): no rules, nothing to refresh.
+  const isStatic = initial.kind === "static";
+  // A query list's members are its saved query's records.
+  const isQuery = initial.kind === "query";
+  const [waiting, setWaiting] = useState(!isStatic && !initial.refreshed_at);
+  const [bulk, setBulk] = useState(false);
 
   const load = useCallback(async () => {
     const [l, m] = await Promise.all([
@@ -334,6 +385,22 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
     setWaiting(true);
   }
 
+  async function takeOut(p: SmartListPerson) {
+    const { error } = await api.POST("/v1/brands/{brand}/smart-lists/{id}/members/remove", { params: { path: { brand, id: list.id } }, body: { record_ids: [p.id] } });
+    if (error) return toast(errorMessage(error));
+    toast(`Took ${p.name || p.email || "them"} out of ${list.name}.`);
+    setPeople((ps) => (ps ?? []).filter((x) => x.id !== p.id));
+    load();
+    onChanged();
+  }
+
+  async function copy() {
+    const { data, error } = await api.POST("/v1/brands/{brand}/smart-lists/{id}/copy", { params: { path: { brand, id: list.id } }, body: {} });
+    if (error) return toast(errorMessage(error));
+    if (data && "id" in data) toast(`Saved ${data.members.toLocaleString()} ${data.members === 1 ? "person" : "people"} as ${data.name}, a static list.`);
+    onChanged();
+  }
+
   async function remove() {
     if (!(await confirmAction(`Delete ${list.name}?`, "The list goes; the people in it stay on your customer records.", "Delete list"))) return;
     const { error } = await api.DELETE("/v1/brands/{brand}/smart-lists/{id}", { params: { path: { brand, id: list.id } } });
@@ -350,27 +417,47 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
     <div className="space-y-6">
       <PageHeader
         back={{ label: "Lists", onClick: onBack }}
-        title={<>{list.name} <Badge tone="blue">Smart list</Badge> <BrandBadge id={list.brand_id} /></>}
-        description={list.description || "Keeps itself up to date from its rules."}
+        title={<>{list.name} <Badge tone="blue">{isStatic ? "Static list" : isQuery ? "From a query" : "Smart list"}</Badge> <BrandBadge id={list.brand_id} /></>}
+        description={list.description || (isStatic ? "The people put in it by hand, a journey, an import or a bulk edit." : isQuery ? "Keeps itself up to date from a saved query." : "Keeps itself up to date from its rules.")}
         action={canManage && (
           <>
-            <Button variant="ghost" onClick={refresh} disabled={waiting}>{waiting ? "Updating…" : "Refresh now"}</Button>
-            <Button onClick={() => onEdit(list)}>Edit rules</Button>
-            <Menu items={[{ label: "Delete list", danger: true, onClick: remove }]} />
+            {!isStatic && <Button variant="ghost" onClick={refresh} disabled={waiting}>{waiting ? "Updating…" : "Refresh now"}</Button>}
+            {!isStatic && <Button onClick={() => onEdit(list)}>{isQuery ? "Change query" : "Edit rules"}</Button>}
+            <Menu
+              items={[
+                { label: "Bulk edit everyone in it", onClick: () => setBulk(true) },
+                ...(list.record_type === "person" ? [{ label: "Save a copy", onClick: copy }] : []),
+                { label: "Delete list", danger: true, onClick: remove },
+              ]}
+            />
           </>
         )}
       />
-      <Stats cols={3}>
-        <Stat label="People" value={list.refreshed_at ? list.members.toLocaleString() : "…"} />
-        <Stat label="Updated" value={list.refreshed_at ? ago(list.refreshed_at) : "filling"} sub="every 15 minutes" />
-        <Stat label="Rules" value={list.rules.length} sub={list.match === "any" ? "any must match" : "all must match"} />
-      </Stats>
+      {isStatic ? (
+        <Stats cols={2}>
+          <Stat label={list.record_type === "account" ? "Companies" : "People"} value={list.members.toLocaleString()} />
+          <Stat label="Changed" value={ago(list.updated_at)} sub="when people are added or taken out" />
+        </Stats>
+      ) : (
+        <Stats cols={3}>
+          <Stat label="People" value={list.refreshed_at ? list.members.toLocaleString() : "…"} />
+          <Stat label="Updated" value={list.refreshed_at ? ago(list.refreshed_at) : "filling"} sub="every 15 minutes" />
+          {isQuery ? <Stat label="Source" value="Saved query" sub="up to 50,000 people" /> : <Stat label="Rules" value={list.rules.length} sub={list.match === "any" ? "any must match" : "all must match"} />}
+        </Stats>
+      )}
       {list.error_code && (
         <p role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-800 dark:text-amber-200">
-          {list.error_code === "query_timeout" ? "The last update took too long and stopped. Narrow the rules, for example with a time window on an event." : "The last update failed. It tries again in 15 minutes."}
+          {queryListError[list.error_code] ??
+            (list.error_code === "query_timeout"
+              ? isQuery
+                ? "The query took too long and stopped. The list keeps who it had; make the query faster."
+                : "The last update took too long and stopped. Narrow the rules, for example with a time window on an event."
+              : isQuery
+                ? "The query failed, so the list keeps who it had. Fix the query in Query; it tries again in 15 minutes."
+                : "The last update failed. It tries again in 15 minutes.")}
         </p>
       )}
-      <Card title="Who's in it" description={rulesText(list, fieldLabel, listName)}>
+      <Card title="Who's in it" description={isStatic ? "People join through a bulk edit (from another list, a saved query or ids), a journey or an import." : isQuery ? "The records in its saved query's record_id (or id) column." : rulesText(list, fieldLabel, listName)}>
         <ErrorText>{error}</ErrorText>
         {people === null && !error && <Loading />}
         {people !== null && (
@@ -378,7 +465,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
             data={people}
             rowId={(p) => p.id}
             searchPlaceholder="Search people"
-            empty={waiting ? "Filling the list…" : "Nobody matches these rules right now."}
+            empty={isStatic ? "Nobody is in this list yet." : waiting ? "Filling the list…" : isQuery ? "The query returns nobody right now." : "Nobody matches these rules right now."}
             mobile={(p) => (
               <div className="space-y-0.5">
                 <div className="font-medium">{p.name || p.email || "Unnamed person"}</div>
@@ -389,11 +476,15 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
               { id: "name", header: "Name", accessorFn: (p) => p.name, cell: ({ row: { original: p } }) => <span className="font-medium">{p.name || <span className="text-muted-foreground">Unnamed</span>}</span> },
               { id: "email", header: "Email", accessorFn: (p) => p.email },
               { id: "joined", header: "Joined", accessorFn: (p) => p.entered_at ?? "", cell: ({ row: { original: p } }) => <span className="text-muted-foreground">{ago(p.entered_at)}</span> },
+              ...(isStatic && canManage
+                ? [{ id: "remove", header: "", enableSorting: false, cell: ({ row: { original: p } }: { row: { original: SmartListPerson } }) => <Button variant="ghost" onClick={() => takeOut(p)}>Remove</Button> }]
+                : []),
             ]}
           />
         )}
         {next && <div className="mt-3"><Button variant="ghost" onClick={more}>Show more</Button></div>}
       </Card>
+      {bulk && <BulkEditSheet ws={ws} brand={brand} list={list} onClose={() => setBulk(false)} onDone={load} />}
     </div>
   );
 }

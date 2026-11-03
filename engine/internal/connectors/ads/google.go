@@ -25,8 +25,8 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It never changes your campaigns; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences)
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
@@ -108,6 +108,7 @@ type gaqlRow struct {
 		Name                   string  `json:"name"`
 		Status                 string  `json:"status"`
 		AdvertisingChannelType string  `json:"advertisingChannelType"`
+		CampaignBudget         string  `json:"campaignBudget"`
 		googleTracking
 	} `json:"campaign"`
 	ConversionAction struct {
@@ -265,6 +266,73 @@ func (g GoogleAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 		out = append(out, cp)
 	}
 	return out, nil
+}
+
+// ---- managing campaigns ----
+
+// googleCampaign reads one campaign with its budget's resource name, which
+// a budget change needs.
+func (g GoogleAds) googleCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, string, error) {
+	if _, err := strconv.ParseInt(campaignID, 10, 64); err != nil {
+		return c.AdCampaign{}, "", c.Errf(c.ErrInvalid, "Google Ads campaign ids are numbers")
+	}
+	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
+		"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign.campaign_budget, campaign_budget.amount_micros FROM campaign WHERE campaign.id = "+campaignID)
+	if err != nil {
+		return c.AdCampaign{}, "", err
+	}
+	for _, r := range rows {
+		if fmt.Sprint(int64(r.Campaign.ID)) != campaignID {
+			continue
+		}
+		cp := c.AdCampaign{ID: campaignID, Name: r.Campaign.Name, Status: status(r.Campaign.Status),
+			ProviderStatus: r.Campaign.Status, Objective: strings.ToLower(r.Campaign.AdvertisingChannelType)}
+		if b := int64(r.CampaignBudget.AmountMicros); b > 0 {
+			cp.DailyBudgetMicros = ptrI(b)
+		}
+		return cp, r.Campaign.CampaignBudget, nil
+	}
+	return c.AdCampaign{}, "", c.Errf(c.ErrInvalid, "Google Ads has no campaign %s in account %s", campaignID, acct.ID)
+}
+
+func (g GoogleAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	cp, _, err := g.googleCampaign(ctx, cl, creds, acct, campaignID)
+	return cp, err
+}
+
+// SetCampaignStatus pauses or resumes a campaign (campaigns:mutate with
+// an update of its status alone).
+func (g GoogleAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	if _, err := strconv.ParseInt(campaignID, 10, 64); err != nil {
+		return c.Errf(c.ErrInvalid, "Google Ads campaign ids are numbers")
+	}
+	st := "PAUSED"
+	if active {
+		st = "ENABLED"
+	}
+	op := map[string]any{"update": map[string]any{"resourceName": "customers/" + acct.ID + "/campaigns/" + campaignID, "status": st}, "updateMask": "status"}
+	return g.call(cl, creds, acct.Meta["login_customer_id"]).post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+"/campaigns:mutate",
+		map[string]any{"operations": []any{op}}, nil)
+}
+
+// SetCampaignDailyBudget sets the campaign's budget amount
+// (campaignBudgets:mutate on the budget the campaign uses). A budget
+// shared by several campaigns changes for all of them, as it does in
+// Google Ads itself.
+func (g GoogleAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, micros int64) error {
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	_, budget, err := g.googleCampaign(ctx, cl, creds, acct, campaignID)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(budget, "customers/"+acct.ID+"/campaignBudgets/") {
+		return c.Errf(c.ErrInvalid, "Google Ads campaign %s has no budget of its own to change", campaignID)
+	}
+	op := map[string]any{"update": map[string]any{"resourceName": budget, "amountMicros": strconv.FormatInt(micros, 10)}, "updateMask": "amount_micros"}
+	return g.call(cl, creds, acct.Meta["login_customer_id"]).post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+"/campaignBudgets:mutate",
+		map[string]any{"operations": []any{op}}, nil)
 }
 
 func (g GoogleAds) AdDays(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, from, to string) ([]c.AdDay, error) {

@@ -39,6 +39,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/blobs"
+	"github.com/outflareai/outflare/engine/internal/cmspublish"
 	"github.com/outflareai/outflare/engine/internal/config"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/connectors/catalog"
@@ -80,6 +81,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/pipeline"
 	"github.com/outflareai/outflare/engine/internal/platforms"
 	"github.com/outflareai/outflare/engine/internal/ranks"
+	"github.com/outflareai/outflare/engine/internal/recmetrics"
 	"github.com/outflareai/outflare/engine/internal/research"
 	"github.com/outflareai/outflare/engine/internal/rules"
 	"github.com/outflareai/outflare/engine/internal/searchinsights"
@@ -293,6 +295,8 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	rankChecks.Register(queue)
 	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	adSync.Register(queue)
+	contentPublish := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
+	contentPublish.Register(queue)
 	adConv := &adconv.Sender{Pool: pool, Store: integrations, Log: log}
 	adConv.Register(queue)
 	// Research places unknown email domains by reading their homepage with
@@ -360,6 +364,9 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// Lifecycle stages per product: each move is an event on the timeline.
 	lifecycleStages := &productlifecycle.Service{Pool: pool, Log: log}
 	lifecycleStages.Register(queue)
+	// Live metrics per company and person, such as spend in the last 30 days.
+	recordMetrics := &recmetrics.Service{Pool: pool, Log: log}
+	recordMetrics.Register(queue)
 	// The daily or weekly digest of each workspace, emailed only through
 	// the workspace's own email provider.
 	digest := &digests.Service{Pool: pool, Emails: lifecycle, PublicURL: cfg.PublicURL, Log: log}
@@ -381,6 +388,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		}
 		log.Info("extension loaded", "name", ext.Name())
 	}
+	send.Quota = host.quota
 	// The hosted MCP server, when the build ships one (the Docker image does).
 	var mcpHost *mcphost.Host
 	var mcpUpstream *api.MCPUpstream
@@ -394,14 +402,24 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		}
 		mcpUpstream = &api.MCPUpstream{URL: mcpHost.Upstream, Secret: mcpHost.Secret}
 	}
+	// The ClickHouse event store, when set up: rule dry runs read it.
+	var archive rules.EventArchive
+	if cfg.ClickHouseURL != "" {
+		if ch, err := eventstore.Open(cfg.ClickHouseURL); err == nil {
+			archive = api.ClickHouseArchive{CH: ch}
+		}
+	}
 	apiServer := api.NewServer(pool, log, api.Options{
 		WebDir: cfg.WebDir, PublicURL: cfg.PublicURL, Mailboxes: mail, Sending: send, Inbox: syncer, OAuth: tokens, Allocation: alloc,
 		Box: box, Integrations: integrations, Verify: verifier, EmailFinder: emailFinder, DataNetwork: dataNet, InboundEmail: inboundMail, Imports: importer, Platforms: plat, Lists: lister, Outcomes: results, AnalyticsSync: analyticsSync, SEOSync: seoSync, AdSync: adSync, Crawl: crawler, Vendors: vendors, Inbound: liveUpdates, Telemetry: tel, Mailer: mailer, Webhooks: hooks, Emails: lifecycle, Research: researcher, RateLimit: cfg.RateLimit, Passkeys: cfg.PasskeysOn(), ClientIPHeader: cfg.ClientIPHeader,
-		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, EdgeSecret: cfg.EdgeSecret,
-		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain,
+		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, Quota: host.quota, EdgeSecret: cfg.EdgeSecret,
+		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain, EventArchive: archive,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
 		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools, SupportAuto: host.supportAuto,
 	})
+	// Smart lists from a saved query run it through Query's own role.
+	smart.Query = apiServer.SmartListQueryIDs
+
 	// Journey steps that change fields write through the API's checks.
 	journeyRuns.Fields = apiServer
 	journeyRuns.Deals = apiServer
@@ -557,6 +575,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			lifecycleStages.Run(ctx, time.Minute)
 		}()
+		// Metric windows move on as UTC days pass.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recordMetrics.Run(ctx, time.Minute)
+		}()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -584,6 +608,20 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			apiServer.RunSocial(ctx, time.Minute)
 		}()
+		// Hand edits whose time to win ran out hand their field to the best
+		// other source's value (docs/customers.md, field sources).
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunHandEditExpiry(ctx, 5*time.Minute)
+		}()
+		// Transactions saved before their day's exchange rate was known get
+		// their amount in the brand's currency.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunTransactionRates(ctx, time.Hour)
+		}()
 		// Running A/B tests' checks: alerts when one is ready, its split
 		// breaks or a guardrail is hurt.
 		wg.Add(1)
@@ -607,6 +645,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunSetup(ctx, time.Minute)
+		}()
+		// Websites imported into knowledge, re-checked every day.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunWebsiteRechecks(ctx, time.Hour)
 		}()
 		// Meaning-based search's vectors, kept current.
 		wg.Add(1)
@@ -869,6 +913,11 @@ func housekeeping(ctx context.Context, log *slog.Logger, s *api.Server, logReten
 			log.Error("prune oauth codes", "err", err)
 		} else if n > 0 {
 			log.Info("pruned oauth codes and unused apps", "deleted", n)
+		}
+		if n, err := s.PruneQueryEndpointCalls(ctx); err != nil && ctx.Err() == nil {
+			log.Error("prune query endpoint calls", "err", err)
+		} else if n > 0 {
+			log.Info("pruned query endpoint calls over 90 days old", "deleted", n)
 		}
 		if n, err := s.PruneKnowledgeBin(ctx); err != nil && ctx.Err() == nil {
 			log.Error("prune knowledge bin", "err", err)

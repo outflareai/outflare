@@ -58,7 +58,10 @@ type payload struct {
 }
 
 // Register adds the job handler.
-func (s *Syncer) Register(q *jobs.Queue) { q.Handle(JobSync, s.job) }
+func (s *Syncer) Register(q *jobs.Queue) {
+	q.Handle(JobSync, s.job)
+	q.Handle(JobChange, s.changeJob)
+}
 
 func (s *Syncer) now() time.Time {
 	if s.Now != nil {

@@ -527,11 +527,11 @@ func (s *Server) linkResults(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT method, count(*)::int,
 			count(*) FILTER (WHERE pitched_at IS NOT NULL)::int,
-			count(*) FILTER (WHERE stage IN ('replied', 'agreed', 'live', 'removed') OR (stage = 'declined' AND pitched_at IS NOT NULL))::int,
+			count(*) FILTER (WHERE stage IN ('replied', 'agreed', 'live', 'removed') OR (stage = 'declined' AND pitched_at IS NOT NULL) OR removed_at IS NOT NULL)::int,
 			count(*) FILTER (WHERE agreed_at IS NOT NULL)::int,
 			count(*) FILTER (WHERE live_at IS NOT NULL)::int,
 			count(*) FILTER (WHERE stage = 'declined')::int,
-			count(*) FILTER (WHERE stage = 'removed')::int
+			count(*) FILTER (WHERE stage = 'removed' OR removed_at IS NOT NULL)::int
 		FROM link_prospects p
 		WHERE p.workspace_id = $1 AND ($2 = '' OR p.site_id = NULLIF($2, '')::uuid) AND p.created_at > now() - make_interval(days => $3)
 		  AND p.stage <> 'excluded'`+sel.sql("p.brand_id", &args)+`

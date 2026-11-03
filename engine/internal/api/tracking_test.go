@@ -162,3 +162,38 @@ func TestTrackingDomainServesOnlyLinks(t *testing.T) {
 		t.Fatalf("meta on another host: %d", rec.Code)
 	}
 }
+
+// A verified domain stays verified through a lookup that misses it (a
+// caching resolver's stale "no record"), and counts as not pointing here
+// only once its lookups have failed for over an hour.
+func TestTrackingDomainRidesOutAStaleLookup(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	td := owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "links.northpeak.example"})
+	check := base + "/tracking-domains/" + td["id"].(string) + "/check"
+	e.dns.setCNAME("links.northpeak.example", "localhost")
+	if d := owner.must(200, "POST", check, nil); d["status"] != "verified" {
+		t.Fatalf("verified: %v", d)
+	}
+
+	e.dns.setCNAME("links.northpeak.example", "elsewhere.example")
+	if d := owner.must(200, "POST", check, nil); d["status"] != "verified" || d["error"] != "" || d["verified_at"] == nil {
+		t.Fatalf("one missed lookup: %v", d)
+	}
+	if _, err := e.pool.Exec(t.Context(), `UPDATE tracking_domains SET failing_since = now() - interval '61 minutes' WHERE id = $1`, td["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if d := owner.must(200, "POST", check, nil); d["status"] != "failed" || !strings.Contains(d["error"].(string), "elsewhere.example") {
+		t.Fatalf("failing for over an hour: %v", d)
+	}
+
+	e.dns.setCNAME("links.northpeak.example", "localhost")
+	if d := owner.must(200, "POST", check, nil); d["status"] != "verified" {
+		t.Fatalf("fixed: %v", d)
+	}
+	var since *time.Time
+	if err := e.pool.QueryRow(t.Context(), `SELECT failing_since FROM tracking_domains WHERE id = $1`, td["id"]).Scan(&since); err != nil || since != nil {
+		t.Fatalf("failing_since after the fix: %v %v", since, err)
+	}
+}

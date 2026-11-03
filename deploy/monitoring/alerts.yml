@@ -92,6 +92,27 @@ groups:
         labels: { severity: info }
         annotations:
           summary: "Over 80% of paid landings from {{ $labels.network }} in 6 hours carry no click id or ad ids: those ads have no tracking template, or the network strips it. Credit falls back to UTM tags. Check the Ad tracking health row; workspaces add templates under Paid ads → Tracking templates."
+      - alert: OutflareAdChangesFailing
+        expr: sum(increase(outflare_ads_changes_total{outcome=~"failed|error"}[1h])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three changes to ad campaigns (pausing, resuming, budgets) failed in an hour: a platform is refusing them (each change's error says why, GET .../ads/changes?status=failed; often a Meta token without ads_management) or the database failed. Check the Paid media (managing campaigns) row."
+      - alert: OutflareContentPublishesFailing
+        expr: sum(increase(outflare_content_publishes_total{outcome=~"failed|error"}[1h])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three publications to a brand's CMS (WordPress, Ghost) failed in an hour: a site is refusing them (each publication's error says why, on the item under GET /v1/brands/{brand}/content/{id}; often an application password without the right to publish, or a Ghost key for a deleted integration) or the database failed. Check the Content (publishing to a CMS) row."
+      - alert: OutflareAccountIncidentsCritical
+        expr: sum(outflare_accounts_incidents_open{severity="critical"}) > 0
+        for: 24h
+        labels: { severity: warning }
+        annotations:
+          summary: "A critical incident on a brand's external account (a credential refused, a wrong identity signed in, an account locked) has been open for a day: automated use of that account is stopped until a person resolves it (GET /v1/brands/{brand}/account-incidents). Check the Accounts row."
+      - alert: OutflareAdChangesUnverified
+        expr: sum(increase(outflare_ads_changes_total{outcome="unverified"}[6h])) > 5
+        labels: { severity: info }
+        annotations:
+          summary: "Over five campaign changes in six hours were applied but the platform did not show them when read back (verify_note on each change). The next sync corrects the mirror; if it keeps happening, the platform's read lags its writes or a change is being undone on their side."
       - alert: OutflareRedirectClicksFailing
         expr: sum(rate(outflare_redirect_clicks_total{outcome="error"}[5m])) / clamp_min(sum(rate(outflare_redirect_clicks_total[5m])), 1e-9) > 0.05
         for: 10m
@@ -225,6 +246,76 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "lifecycle.event jobs are failing and retrying, so companies and people move between product stages late or not at all. Find the job's error in the logs (job.failed with kind lifecycle.event)."
+
+      - alert: OutflareMetricSweepBehind
+        expr: max(outflare_record_metrics_oldest_due_seconds) > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Live metric values have waited over 30 minutes for their window to move on (normal is minutes after midnight UTC): no worker runs the metric sweep, or it keeps failing. Check metric.sweep_failed in the logs and the Metrics row."
+
+      - alert: OutflareMetricJobsFailing
+        expr: sum(increase(outflare_jobs_processed_total{kind=~"metric\\..*",outcome=~"retried|dead"}[15m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "Metric jobs (live updates or fills from history) are failing and retrying, so metrics fall behind. Find the job's error in the logs (job.failed with kind metric.event or metric.backfill)."
+
+      - alert: OutflareMetricBackfillStuck
+        expr: max(outflare_record_metrics_backfilling) > 0
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "A metric has been refilling from stored events for over an hour: a very large brand, or a fill that keeps failing. Live events for it wait until it ends. See the Metrics row and metric.backfill jobs."
+
+      - alert: OutflareBulkEditStuck
+        expr: max(outflare_bulk_edits_oldest_pending_seconds) > 7200
+        labels: { severity: warning }
+        annotations:
+          summary: "A bulk edit has been queued or running for over 2 hours: its job isn't running or keeps retrying. See the Bulk edits row and bulk_edits.run jobs (job.failed)."
+
+      - alert: OutflareBulkEditsFailing
+        expr: sum(increase(outflare_bulk_edits_total{outcome="failed"}[1h])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "A bulk edit failed part way after its retries: some records changed, the rest didn't. Its error and counts.done say where it stopped; find the cause in the logs (job.failed with kind bulk_edits.run)."
+
+      - alert: OutflareHandEditsBehind
+        expr: max(outflare_hand_edits_oldest_due_seconds) > 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "An expired hand edit has waited over an hour for the sweep, which runs every 5 minutes: it isn't running or keeps failing, so people's old edits keep winning. See the Field sources row and hand_edits.sweep_failed or hand_edit.expire_failed in the logs."
+
+      - alert: OutflareHandEditsFailing
+        expr: sum(increase(outflare_hand_edits_expired_total{outcome="error"}[1h])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "Hand edits are failing to expire (the sweep retries them every 5 minutes). Find the error in the logs (hand_edit.expire_failed) and see the Field sources row."
+
+      - alert: OutflareTransactionsFailing
+        expr: sum(increase(outflare_transactions_saved_total{outcome="error"}[1h])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Transactions failed to save (from the API or a billing sync, which retries): payments may be missing. See the Transactions row and the logs for the error."
+
+      - alert: OutflareTransactionsUnconverted
+        expr: max(outflare_transactions_unconverted) > 0
+        for: 6h
+        labels: { severity: info }
+        annotations:
+          summary: "Some transactions over 2 days old have no amount in their brand's currency: no exchange rate for their currency (exchange_rates.fetch failing, or a currency the European Central Bank doesn't publish). See the Transactions row."
+
+      - alert: OutflareQueryEndpointsFailing
+        expr: sum(increase(outflare_query_endpoints_calls_total{outcome="error"}[15m])) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "Published query endpoints are failing to answer (outcome error): Query's database role, a broken saved query or the database. See the Published query endpoints row and the logs for the request ids."
+
+      - alert: OutflareQueryEndpointsSlow
+        expr: histogram_quantile(0.95, sum by (le) (rate(outflare_query_endpoints_duration_seconds_bucket[15m]))) > 10
+        for: 15m
+        labels: { severity: info }
+        annotations:
+          summary: "Published query endpoints take over 10 seconds at p95: a heavy query is published. Find it in the endpoints' call logs (duration_ms) and narrow it or lower its row cap."
 
       - alert: OutflareEmailsCappedMany
         expr: sum(increase(outflare_emails_guarded_total{outcome="frequency_cap"}[1h])) > 5000
@@ -437,6 +528,25 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Over 500 calls an hour through {{ $labels.connector }} are being refused at a usage limit: a feature is retrying into the limit instead of stopping; check which job (engine log, usage_limit_reached)."
+
+      - alert: OutflareQuotaChecksFailing
+        # An extension's quota checker (Host.SetQuota) is failing, so the
+        # engine allows the work anyway and plan limits aren't applied.
+        expr: sum by (resource) (increase(outflare_quota_checks_total{outcome="error"}[15m])) > 0
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Quota checks for {{ $labels.resource }} keep failing, so the work is allowed without the extension's limits. See quota.check_failed in the engine log for the checker's error."
+
+      - alert: OutflareQuotaRefusalsSurge
+        # Many refusals in an hour: a feature or agent keeps retrying into a
+        # workspace's quota instead of stopping, or a checker refuses by
+        # mistake.
+        expr: sum by (resource) (increase(outflare_quota_checks_total{outcome="refused"}[1h])) > 1000
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Over 1,000 {{ $labels.resource }} quota refusals an hour: something keeps retrying past a workspace's quota, or the checker refuses by mistake. See the Quotas row."
 
       - alert: OutflareDomainConnectLookupsFailing
         # DNS providers' Domain Connect APIs not answering: the one-off
@@ -729,6 +839,37 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Most searches of websites and Slack for missing support answers fail, so nothing is suggested in Knowledge; look for knowledge.answer_searched errors in the engine log (a Slack connection that lost access, or an AI provider erroring)."
+
+      - alert: OutflareKnowledgeWebsiteImportsFailing
+        expr: sum(increase(outflare_knowledge_website_imports_total{outcome="failed"}[6h])) > 3 and sum(increase(outflare_knowledge_website_imports_total{outcome="failed"}[6h])) > sum(increase(outflare_knowledge_website_imports_total{outcome="done"}[6h]))
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Most website imports into knowledge fail; look for knowledge.website_import_failed in the engine log (sites refusing OutflareBot, or the fetcher unable to reach the internet)."
+
+      - alert: OutflareKnowledgeWebsiteRechecksBroken
+        # The daily re-check of imported websites can't queue its runs.
+        expr: sum(increase(outflare_knowledge_website_rechecks_total{outcome="error"}[3h])) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "The daily website re-check keeps failing, so knowledge from websites goes stale; look for knowledge.website_recheck_failed in the engine log."
+
+      - alert: OutflareKnowledgeReplyLearningFailing
+        # Learning answers from past support replies fails more than it works.
+        expr: sum(increase(outflare_knowledge_reply_learning_total{outcome="failed"}[6h])) > 3 and sum(increase(outflare_knowledge_reply_learning_total{outcome="failed"}[6h])) > sum(increase(outflare_knowledge_reply_learning_total{outcome="done"}[6h]))
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Most runs that learn answers from past support replies fail; look for knowledge.reply_learning_failed in the engine log (workspaces' AI keys or budgets, or the AI provider)."
+
+      - alert: OutflareSupportHeldRepliesRefused
+        # Held Auto email replies that the send refused when their hold ended.
+        expr: sum(increase(outflare_support_assistant_held_total{result="refused"}[1h])) > 5 and sum(increase(outflare_support_assistant_held_total{result="refused"}[1h])) > sum(increase(outflare_support_assistant_held_total{result="sent"}[1h]))
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Most held Auto email replies are refused when their hold ends and stay as drafts; look for 'support assistant auto send refused' in the engine log (mailbox or sending policy)."
 
       - alert: OutflareAdConversionsFailing
         # Ad platforms refusing conversions sent back: a sign-in, token or

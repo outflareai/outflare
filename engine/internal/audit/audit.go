@@ -53,6 +53,7 @@ var brandOf = map[string]string{
 	"inbound_message":      `SELECT brand_id FROM inbound_messages WHERE id = $1::uuid AND workspace_id = $2`,
 	"meeting":              `SELECT brand_id FROM meetings WHERE id = $1::uuid AND workspace_id = $2`,
 	"deal":                 `SELECT brand_id FROM deals WHERE id = $1::uuid AND workspace_id = $2`,
+	"transaction":          `SELECT brand_id FROM transactions WHERE id = $1::uuid AND workspace_id = $2`,
 	"lead":                 `SELECT brand_id FROM leads WHERE id = $1::uuid AND workspace_id = $2`,
 	"list_run":             `SELECT brand_id FROM list_runs WHERE id = $1::uuid AND workspace_id = $2`,
 	"suppression":          `SELECT brand_id FROM suppressions WHERE id = $1::uuid AND workspace_id = $2`,

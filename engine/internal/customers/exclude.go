@@ -87,15 +87,16 @@ func uniq(s []string) []string {
 // tags are at the given placeholders (uuid[] and text[]).
 func ExcludedSQL(record, lists, tags string) string {
 	return `(` + record + ` IS NOT NULL AND (
-		EXISTS (SELECT 1 FROM smart_list_members xm WHERE xm.list_id = ANY(` + lists + `) AND xm.record_id = ` + record + `)
+		EXISTS (SELECT 1 FROM smart_list_members xm WHERE xm.list_id = ANY(` + lists + `) AND (xm.record_id = ` + record + `
+			OR xm.record_id IN (SELECT xl.to_id FROM record_relationships xl WHERE xl.from_id = ` + record + ` AND xl.kind = 'companies' AND xl.valid_to IS NULL)))
 		OR EXISTS (SELECT 1 FROM static_list_members xs WHERE xs.list_id = ANY(` + lists + `) AND xs.record_id = ` + record + `)
 		OR (cardinality(` + tags + `) > 0 AND EXISTS (SELECT 1 FROM records xr WHERE xr.id IN (SELECT ` + record + `
 			UNION ALL SELECT xc.to_id FROM record_relationships xc WHERE xc.from_id = ` + record + ` AND xc.kind = 'companies' AND xc.valid_to IS NULL)
 			AND jsonb_typeof(xr.attributes->'tags') = 'array' AND xr.attributes->'tags' ?| ` + tags + `))))`
 }
 
-// Excluded is why x leaves a record out, or "": the list it is on, its
-// tag, or its company's tag.
+// Excluded is why x leaves a record out, or "": the list it (or, for a
+// list of companies, its company) is on, its tag, or its company's tag.
 func Excluded(ctx context.Context, q Querier, ws, recordID string, x Exclusion) (string, error) {
 	if x.Empty() || recordID == "" {
 		return "", nil
@@ -103,7 +104,8 @@ func Excluded(ctx context.Context, q Querier, ws, recordID string, x Exclusion) 
 	x = x.Clean()
 	var list string
 	err := q.QueryRow(ctx, `SELECT l.name FROM smart_lists l WHERE l.workspace_id = $1 AND l.id = ANY($2::uuid[]) AND (
-			EXISTS (SELECT 1 FROM smart_list_members m WHERE m.list_id = l.id AND m.record_id = $3)
+			EXISTS (SELECT 1 FROM smart_list_members m WHERE m.list_id = l.id AND (m.record_id = $3
+				OR m.record_id IN (SELECT c.to_id FROM record_relationships c WHERE c.from_id = $3 AND c.kind = 'companies' AND c.valid_to IS NULL)))
 			OR EXISTS (SELECT 1 FROM static_list_members s WHERE s.list_id = l.id AND s.record_id = $3))
 		ORDER BY l.name LIMIT 1`, ws, x.Lists, recordID).Scan(&list)
 	switch {

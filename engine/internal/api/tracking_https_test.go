@@ -95,6 +95,26 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 		t.Fatalf("links before the certificate: %s", got)
 	}
 
+	// Checking the domain while a look is on its way adds no other; when
+	// the looks stopped (here, the next one died), it starts them again.
+	httpsJobs := func() int {
+		var n int
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = 'tracking.domain_https' AND status IN ('queued', 'running') AND workspace_id = $1`, ws).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	owner.must(200, "POST", base+"/tracking-domains/"+id+"/check", nil)
+	if n := httpsJobs(); n != 1 {
+		t.Fatalf("looks after checking with one on its way: %d", n)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET status = 'dead' WHERE kind = 'tracking.domain_https' AND status = 'queued' AND workspace_id = $1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "POST", base+"/tracking-domains/"+id+"/check", nil)
+	waitUntil(t, func() bool { a, _ := certs.got(); return len(a) == 2 })
+	waitUntil(t, func() bool { return httpsJobs() == 1 })
+
 	// Issued: the next look marks it active and links move to the domain.
 	certs.set(api.CertState{Status: "active"})
 	if tag, err := e.pool.Exec(ctx, `UPDATE jobs SET run_at = now() WHERE kind = 'tracking.domain_https' AND status = 'queued' AND workspace_id = $1`, ws); err != nil || tag.RowsAffected() != 1 {

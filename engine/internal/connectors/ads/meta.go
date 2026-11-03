@@ -47,15 +47,15 @@ func (MetaAds) Definition() c.Definition {
 	d := def("meta_ads", "Meta Ads", "https://www.facebook.com/business/ads",
 		"https://developers.facebook.com/docs/marketing-api/insights", "https://www.facebook.com/business/help/755172054692222",
 		"Spend, clicks and conversions per campaign from your Facebook and Instagram ad accounts.",
-		"Reads every ad account a token can see, with read-only access. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission. Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions). To send conversions back through the Conversions API, also assign the system user to your pixel (Business Settings, Data sources, Datasets). For journeys to add people to your customer list audiences, give the token ads_management too and accept the Custom Audience terms in your ad account.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences)
+		"Reads every ad account a token can see. The simplest way: in your Meta Business Settings, Users, System users, create a system user, give it the ad accounts, and generate a token with the ads_read permission (ads_management too to let Outflare pause, resume or set the daily budget of a campaign when you, or an agent within the grants you set, ask). Conversions are Meta's standard events (purchases, leads, registrations, trials, subscriptions). To send conversions back through the Conversions API, also assign the system user to your pixel (Business Settings, Data sources, Datasets). For journeys to add people to your customer list audiences, give the token ads_management too and accept the Custom Audience terms in your ad account.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage)
 	d.Auth, d.AuthMethods = c.AuthAPIKey, []string{c.AuthAPIKey, c.AuthOAuth2}
 	d.Fields = []c.Field{{Name: "api_key", Label: "System user access token", Secret: true, Placeholder: "EAAB…",
 		Help: "Business Settings, Users, System users: generate a token with ads_read for the ad accounts you want to read."}}
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://www.facebook.com/" + metaVersion + "/dialog/oauth",
 		TokenURL: "https://graph.facebook.com/" + metaVersion + "/oauth/access_token",
-		Scopes:   []string{"ads_read", "business_management"},
+		Scopes:   []string{"ads_read", "ads_management", "business_management"},
 	}
 	return d
 }
@@ -151,6 +151,76 @@ func (m MetaAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds, a
 		return nil
 	})
 	return out, err
+}
+
+// ---- managing campaigns ----
+
+func (m MetaAds) AdCampaign(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string) (c.AdCampaign, error) {
+	if !metaID(campaignID) {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "Meta campaign ids are numbers")
+	}
+	var cp struct {
+		ID              string `json:"id"`
+		Name            string `json:"name"`
+		EffectiveStatus string `json:"effective_status"`
+		Objective       string `json:"objective"`
+		DailyBudget     string `json:"daily_budget"`
+		Account         string `json:"account_id"`
+	}
+	if err := m.call(cl, creds).get(ctx, m.base(cl)+"/"+esc(campaignID)+"?fields=id,name,effective_status,objective,daily_budget,account_id", &cp); err != nil {
+		return c.AdCampaign{}, err
+	}
+	if cp.ID != campaignID || (cp.Account != "" && cp.Account != acct.ID) {
+		return c.AdCampaign{}, c.Errf(c.ErrInvalid, "Meta has no campaign %s in account %s", campaignID, acct.ID)
+	}
+	x := c.AdCampaign{ID: cp.ID, Name: cp.Name, Status: status(cp.EffectiveStatus), ProviderStatus: cp.EffectiveStatus,
+		Objective: strings.ToLower(strings.TrimPrefix(cp.Objective, "OUTCOME_"))}
+	if b := atoi64(cp.DailyBudget); b > 0 {
+		x.DailyBudgetMicros = ptrI(b * 1e6 / minorUnits(acct.Currency))
+	}
+	return x, nil
+}
+
+// SetCampaignStatus pauses or resumes a campaign (POST /{campaign} with
+// status). Needs the ads_management permission.
+func (m MetaAds) SetCampaignStatus(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, active bool) error {
+	if !metaID(campaignID) {
+		return c.Errf(c.ErrInvalid, "Meta campaign ids are numbers")
+	}
+	st := "PAUSED"
+	if active {
+		st = "ACTIVE"
+	}
+	return m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(campaignID), map[string]any{"status": st}, nil)
+}
+
+// SetCampaignDailyBudget sets a campaign's daily budget, which Meta takes
+// in the currency's minor unit (cents), so micros are rounded to it.
+func (m MetaAds) SetCampaignDailyBudget(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, campaignID string, micros int64) error {
+	if !metaID(campaignID) {
+		return c.Errf(c.ErrInvalid, "Meta campaign ids are numbers")
+	}
+	if micros <= 0 {
+		return c.Errf(c.ErrInvalid, "the daily budget must be more than nothing")
+	}
+	minor := (micros*minorUnits(acct.Currency) + 500_000) / 1e6
+	if minor < 1 {
+		minor = 1
+	}
+	return m.call(cl, creds).post(ctx, m.base(cl)+"/"+esc(campaignID), map[string]any{"daily_budget": strconv.FormatInt(minor, 10)}, nil)
+}
+
+// metaID is a Meta object id: digits only, so it can go in a path.
+func metaID(id string) bool {
+	if id == "" || len(id) > 40 {
+		return false
+	}
+	for _, r := range id {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type metaAction struct {

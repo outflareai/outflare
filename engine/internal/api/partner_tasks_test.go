@@ -54,6 +54,11 @@ func TestPartnerTasksAndWebsiteProposals(t *testing.T) {
 	if rewards != 1 || amount != 5000 {
 		t.Fatalf("duplicate/incorrect task reward: %d / %d", rewards, amount)
 	}
+	// The approved tutorial is an appearance of the brand: an affiliate
+	// partner placement, live, with the approval as its evidence.
+	if kind, stage := placementOf(t, e, ws, "https://example.com/tutorial"); kind != "partner" || stage != "live" {
+		t.Fatalf("the approved submission's placement: %q %q", kind, stage)
+	}
 	free := newTask(map[string]any{"title": "Visit the project", "description": "Voluntary task.", "reward_kind": "free", "amount_cents": 1000})
 	f := partner.must(200, "POST", portal+"/tasks/"+free, map[string]any{"action": "apply"})
 	partner.must(200, "POST", portal+"/tasks/"+free, map[string]any{"action": "submit", "note": "Reviewed the project and shared my feedback."})

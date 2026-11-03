@@ -29,6 +29,7 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
         assignee: z.string().optional().describe("me, none or a user id."),
         tag: z.string().optional(),
         record_id: id.optional().describe("One customer's conversations."),
+        topic_id: id.optional().describe("Conversations the assistant gave this hand-off topic (list_handoff_topics)."),
         q: z.string().max(200).optional().describe("Words in the subject, address, name or messages."),
         sort: z.enum(["newest", "oldest", "due"]).optional().describe("oldest (with status open): who has waited longest first. due: what the SLA says is due first."),
         sla: z.enum(["overdue", "due_soon"]).optional().describe("overdue: past an SLA target. due_soon: a reply due within the hour."),
@@ -138,7 +139,83 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/support/stats", { params: { path: path(), query: q } })),
   );
 
+  server.registerTool(
+    "list_handoff_topics",
+    {
+      title: "Support hand-off topics",
+      description:
+        "What support conversations are about (billing, bugs, sales...): the assistant tags each conversation with one and, when it hands one to " +
+        "people, gives it to the topic's person and team. always_handoff topics are never answered by the assistant.",
+      inputSchema: {},
+      annotations: read,
+    },
+    () => call(() => gtm.GET("/v1/workspaces/{ws}/support/handoff-topics", { params: { path: path() } })),
+  );
+
   if (readOnly) return;
+
+  server.registerTool(
+    "add_handoff_topic",
+    {
+      title: "Add a support hand-off topic",
+      description:
+        "A topic support conversations can be about, with who takes it when the assistant hands one over (a member's user id and/or a team id). " +
+        "description tells the assistant what belongs in it. always_handoff: the assistant never answers it.",
+      inputSchema: {
+        name: z.string().min(1).max(60),
+        description: z.string().max(300).optional(),
+        brand: z.string().optional().describe("A brand's id or handle; every brand when left out."),
+        assignee_id: id.optional(),
+        team_id: id.optional(),
+        always_handoff: z.boolean().optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/support/handoff-topics", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
+    "update_handoff_topic",
+    {
+      title: "Change a support hand-off topic",
+      description: "Change a topic's name, description, who takes it (null clears) or whether the assistant always hands it over.",
+      inputSchema: {
+        topic_id: id,
+        name: z.string().min(1).max(60).optional(),
+        description: z.string().max(300).optional(),
+        assignee_id: id.nullable().optional(),
+        team_id: id.nullable().optional(),
+        always_handoff: z.boolean().optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ topic_id, ...body }) =>
+      call(() => gtm.PATCH("/v1/workspaces/{ws}/support/handoff-topics/{id}", { params: { path: { ws: workspace(), id: topic_id } }, body })),
+  );
+
+  server.registerTool(
+    "remove_handoff_topic",
+    {
+      title: "Remove a support hand-off topic",
+      description: "Removes a topic. Conversations tagged with it lose the tag; who has them doesn't change.",
+      inputSchema: { topic_id: id },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    ({ topic_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/support/handoff-topics/{id}", { params: { path: { ws: workspace(), id: topic_id } } })),
+  );
+
+  server.registerTool(
+    "stop_support_assistant_reply",
+    {
+      title: "Stop a held Auto reply",
+      description:
+        "An Auto email reply waits a few minutes (its send_at in the conversation's assistant run) before it goes. This stops it: it stays a draft " +
+        "the team can send, edit or discard.",
+      inputSchema: { run_id: id },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ run_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/support/assistant-runs/{id}/stop", { params: { path: { ws: workspace(), id: run_id } } })),
+  );
 
   server.registerTool(
     "draft_support_reply",

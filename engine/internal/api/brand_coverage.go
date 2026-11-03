@@ -450,7 +450,19 @@ func (s *Server) coverageWrite(w http.ResponseWriter, r *http.Request, name stri
 		if err := json.Unmarshal(output, &saved); err != nil {
 			return err
 		}
-		return coverageHistory(ctx, tx, a, name, saved.ID, action, map[string]any{"fields": keys})
+		if err := coverageHistory(ctx, tx, a, name, saved.ID, action, map[string]any{"fields": keys}); err != nil {
+			return err
+		}
+		if name == "deliverables" {
+			changed, err := coverageDeliverablePlacement(ctx, tx, a, saved.ID)
+			if err != nil {
+				return err
+			}
+			if changed {
+				return tx.QueryRow(ctx, "SELECT to_jsonb(t)-'workspace_id' FROM "+res.Table+" t WHERE workspace_id=$1 AND brand_id=$2 AND id=$3", a.WorkspaceID, a.Brand, saved.ID).Scan(&output)
+			}
+		}
+		return nil
 	})
 	if s.coverageError(w, r, err) {
 		return
@@ -460,6 +472,68 @@ func (s *Server) coverageWrite(w http.ResponseWriter, r *http.Request, name stri
 		status = 200
 	}
 	writeJSON(w, status, output)
+}
+
+// coverageDeliverablePlacement keeps a sponsorship's placement in step
+// with its deliverable (the plan's "newsletter and podcast sponsorships
+// from agreements"): a deliverable without a placement gets one on the
+// agreement's publisher at the agreed stage, due when the deliverable
+// is; one a person accepted (accepted_quantity above zero) moves its
+// placement from the pre-publication stages to live, dated today, with
+// the acceptance in its history. The acceptance is the publisher's
+// claim a person took: a page check can verify a link, it cannot prove a
+// newsletter or a podcast ran, so the placement's health is left to the
+// monitor. It reports whether the deliverable row changed.
+func coverageDeliverablePlacement(ctx context.Context, tx pgx.Tx, a *access, deliverableID string) (bool, error) {
+	var placement *string
+	var agreement, title, unit, status string
+	var accepted float64
+	var due *time.Time
+	var evidence string
+	if err := tx.QueryRow(ctx, `SELECT d.placement_id::text, d.agreement_id::text, d.title, d.unit, d.status, d.accepted_quantity, d.due_on, d.evidence
+		FROM coverage_deliverables d WHERE d.workspace_id=$1 AND d.brand_id=$2 AND d.id=$3`, a.WorkspaceID, a.Brand, deliverableID).Scan(&placement, &agreement, &title, &unit, &status, &accepted, &due, &evidence); err != nil {
+		return false, err
+	}
+	changed := false
+	if placement == nil && status != "cancelled" {
+		kind := "sponsorship"
+		switch strings.ToLower(strings.TrimSpace(unit)) {
+		case "newsletter", "newsletters", "issue", "issues", "newsletter issue":
+			kind = "newsletter"
+		case "podcast", "podcasts", "episode", "episodes":
+			kind = "podcast"
+		case "video", "videos":
+			kind = "video"
+		case "post", "posts", "article", "articles":
+			kind = "blog"
+		}
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO coverage_placements (workspace_id, brand_id, publisher_id, title, kind, arrangement, stage, agreement_id, expected_on, monitor)
+			SELECT g.workspace_id, g.brand_id, g.publisher_id, $4, $5, 'paid', 'agreed', g.id, $6, false FROM coverage_agreements g WHERE g.workspace_id=$1 AND g.brand_id=$2 AND g.id=$3 RETURNING id::text`,
+			a.WorkspaceID, a.Brand, agreement, title, kind, due).Scan(&id); err != nil {
+			return false, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE coverage_deliverables SET placement_id=$4 WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, a.WorkspaceID, a.Brand, deliverableID, id); err != nil {
+			return false, err
+		}
+		if err := coverageHistory(ctx, tx, a, "placements", id, "recorded", map[string]any{"deliverable_id": deliverableID, "source": "deliverable"}); err != nil {
+			return false, err
+		}
+		placement, changed = &id, true
+	}
+	if placement != nil && accepted > 0 {
+		tag, err := tx.Exec(ctx, `UPDATE coverage_placements SET stage='live', published_on=COALESCE(published_on, current_date), version=version+1, updated_at=now()
+			WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND stage IN ('identified','contacting','discussing','agreed','awaiting_publication')`, a.WorkspaceID, a.Brand, *placement)
+		if err != nil {
+			return false, err
+		}
+		if tag.RowsAffected() > 0 {
+			if err := coverageHistory(ctx, tx, a, "placements", *placement, "delivered", map[string]any{"deliverable_id": deliverableID, "accepted_quantity": accepted, "evidence": evidence, "source": "deliverable"}); err != nil {
+				return false, err
+			}
+		}
+	}
+	return changed, nil
 }
 
 // Lock the parent before checking totals: concurrent allocations cannot each

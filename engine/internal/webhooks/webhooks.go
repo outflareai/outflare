@@ -143,6 +143,10 @@ func Enqueue(ctx context.Context, q Querier, ev Envelope) error {
 			   -- with other labels, or none yet.
 			   AND (cardinality(e.categories) = 0 OR NOT ($4::jsonb -> 'data' ? 'category')
 			        OR ($4::jsonb -> 'data' ->> 'category') = ANY(e.categories))
+			   -- An endpoint listening to some rules skips events about
+			   -- other rules (their target is the rule).
+			   AND (cardinality(e.rule_ids) = 0 OR ($4::jsonb -> 'target' ->> 'type') IS DISTINCT FROM 'rule'
+			        OR ($4::jsonb -> 'target' ->> 'id') = ANY(e.rule_ids::text[]))
 			RETURNING id, workspace_id)
 		INSERT INTO jobs (kind, payload, workspace_id, run_at, max_attempts)
 		SELECT $5, jsonb_build_object('delivery_id', d.id), d.workspace_id, now(), $6 FROM d`,

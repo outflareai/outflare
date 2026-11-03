@@ -357,6 +357,8 @@ type Ref struct{ Table, Column string }
 // when a column points at records and is neither here nor in Owned, so a
 // new link is never left behind on a merged record.
 var Follows = []Ref{
+	// Money they paid or got back moves with them to the record kept.
+	{"transactions", "record_id"},
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
@@ -414,6 +416,18 @@ var Owned = []Ref{
 	// status stay the merged record's for the same reason: the record kept
 	// has its own, and moving them would clash or move it twice.
 	{"lifecycle_states", "record_id"}, {"lifecycle_transitions", "record_id"}, {"lifecycle_overall", "record_id"},
+	// Which lists the merged record joined and left, and when: its own
+	// history. The record kept has its own; its next refresh joins it to
+	// what it now matches.
+	{"smart_list_changes", "record_id"},
+	// Each source's latest value of a field, and the hand edit behind
+	// one, stay the merged record's: the record kept has its own sources
+	// and edits (plans/customer-data-platform, field sources).
+	{"field_values", "record_id"}, {"hand_edits", "record_id"},
+	// Live metric values and their day buckets stay the merged record's
+	// too: the record kept counts its own, and moving them would add one
+	// record's totals to another's twice.
+	{"metric_buckets", "record_id"}, {"metric_values", "record_id"},
 	// What was deleted from the record and can be restored for 7 days
 	// (the recovery window): it stays the record's. Erasing the record
 	// deletes it (ON DELETE CASCADE); a privacy export includes it.

@@ -2,7 +2,7 @@
 
 Customer records are Outflare's one model of the people and companies a workspace knows, plus any other kind of record it tracks, such as deals, subscriptions or partners. The customer data platform, the CRM and lifecycle email all read and write the same records, so a fact about someone is stored once, whichever feature or connector wrote it.
 
-This covers the customer data platform so far: records, their identities and links, each brand's catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; [smart lists](lists.md#smart-lists) group it, and [rules](rules.md) turn what happens to records into business events of their own, which journeys and webhooks act on. [Products and lifecycle stages](product-lifecycle.md) keep where each company and person stands with each product the brand sells.
+This covers the customer data platform so far: records, their identities and links, each brand's catalog, product events, duplicates and merges, each record's timeline, and consent. [Search](workspace-search.md) finds records and their history by their words, [Query](query.md) reads it with SQL; [smart lists](lists.md#smart-lists) group it, and [rules](rules.md) turn what happens to records into business events of their own, which journeys and webhooks act on. [Products and lifecycle stages](product-lifecycle.md) keep where each company and person stands with each product the brand sells. [Metrics](metrics.md) keep live totals per company and person, such as spend in the last 30 days.
 
 Everything here works the same from the REST API and the MCP server.
 
@@ -55,6 +55,18 @@ Each record also has:
 ### Which source wins
 
 Every value keeps the source that set it: `manual`, `first_party`, `crm_sync`, `enrichment` or `import` (send `source` with the write; the default is `manual`). Each field has a precedence, by default manual, then first party, then CRM sync, then enrichment. A write from a lower source leaves a higher source's value alone and lists the field in `skipped`, so enrichment never overwrites what someone typed and a CRM sync never overwrites your product's own data. A field's `write_policy` can also keep it for its source system only (`source_owned`) or for Outflare to work out (`computed`).
+
+### Where a value comes from
+
+Every source's latest value of each field is kept, whether or not it won: `GET /v1/brands/{brand}/records/{record}/field-values` (MCP `list_record_field_values`) lists them, with `current` on the one the record holds. On a record's page each field shows what the other sources say, with **Use this**: that saves the value as your own edit.
+
+A person's edit (source `manual`) doesn't win forever. It wins for the brand's `manual_edit_days` (180 by default; `PATCH /v1/workspaces/{ws}/brands/{brand}`), or the field's own (`PATCH .../catalog/types/{type}/fields/{field}`, `null` for the brand's); `0` means forever. Built-in fields follow the brand's setting.
+
+- **Pin** an edit (`POST .../records/{record}/fields/{field}/pin` with `{"pinned": true}`, MCP `pin_record_field`) to keep it for good. Unpinning starts its time again from now. Only a value set by hand can be pinned.
+- **When its time runs out**, the next source to write the field replaces it. A sweep every 5 minutes also hands the field to the best value another source already gave (by the field's precedence, then the newest), as a normal change: it is in the record's history with that source, rules hear of it, and the audit log has `record.hand_edit_expired`.
+- **A field only people write**, such as a note or an owner, keeps its value when the edit expires: there is nothing to replace it with. It is only marked expired.
+- Typing the same value again restarts its time. Edits made before this release keep winning until someone edits them again.
+- Pins and unpins are in the record's history (source `pinned` or `unpinned`) and the audit log (`record.field_pinned`, `record.field_unpinned`).
 
 ### Revenue from your payment provider
 
@@ -231,6 +243,14 @@ Bad data can be deleted and, for 7 days, brought back as it was: the recovery wi
 - **Purged after 7 days.** Then the deletion goes for good, and a deleted person or company is erased as below (with their leads, so the link job can't make them again). A restore after that answers 410 `deletion_expired`.
 - **Erasure is permanent.** For a request to erase someone's data, use Erase permanently on the record's page, `DELETE /v1/workspaces/{ws}/records/{record}` or `delete_record`: it is final at once, also for a record in Recently deleted (its deletions go with it), and `suppress=true` adds their emails to the do-not-contact list so a later import or sync can't bring them back.
 - **On record.** `record.soft_deleted`, `field_value.deleted`, `identity.deleted`, `relationship.deleted`, `customer_event.deleted`, `deletion.restored` and `deletion.purged` are in the audit log; `record.soft_deleted` and `deletion.restored` are also webhook events. A privacy export includes what is in Recently deleted, since it is still held.
+
+## Who can edit records
+
+By default everyone whose role allows changing customer records (`customers.manage`) can edit them. An owner or admin can turn on **Only owners and admins can edit records** (Settings → Workspace, or `PATCH /v1/workspaces/{ws}` with `records_edit_owners_only`). Then only owners and admins, and API tokens they made, change people, companies and other records: creating, editing, deleting, merging and undoing merges, emails and ids, and links. Everyone else can still see them and gets 403 `records_locked` when they try. A token follows its maker's role, so an admin's token stops editing when they become a member. Imports, CRM syncs, product events and other automatic writes are not affected. Turning it on or off is recorded as `workspace.records_editing_changed`.
+
+## Bulk edits
+
+Owners can change many people or companies at once, from a list, a saved query or ids picked by hand: set an owner or a field, add or remove tags, move them in or out of a static list, or archive them. They preview it first and can undo it for 7 days. Every change is in each record's own history with the bulk edit's id. See [Bulk edits](bulk-edits.md).
 
 ## Undoing a merge or a batch
 

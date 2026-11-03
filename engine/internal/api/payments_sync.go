@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -370,6 +372,10 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 			if err != nil {
 				return err
 			}
+			if err := r.transaction(ctx, tx, rec, newTransaction{Kind: "payment", AmountMinor: ch.AmountMinor, Currency: ch.Currency,
+				SourceID: ch.ID, OccurredAt: ch.Created}); err != nil {
+				return err
+			}
 			if added {
 				n.Payments++
 				touched[rec] = true
@@ -394,6 +400,10 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 				Properties: map[string]any{"amount_minor": rf.AmountMinor, "currency": rf.Currency, "provider": r.provider,
 					"refund_id": rf.ID, "payment_id": rf.ChargeID, "customer_id": rf.CustomerID}})
 			if err != nil {
+				return err
+			}
+			if err := r.transaction(ctx, tx, rec, newTransaction{Kind: "refund", AmountMinor: rf.AmountMinor, Currency: rf.Currency,
+				SourceID: rf.ID, RefundOf: rf.ChargeID, OccurredAt: rf.Created}); err != nil {
 				return err
 			}
 			if added {
@@ -430,6 +440,36 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 }
 
 func (r *paymentRun) namespace() string { return r.provider + ".customer" }
+
+// transaction saves a payment or refund the billing account reported as a
+// transaction of the payer's brand (docs/transactions.md). Only from the
+// changes after the first full read: transactions start when the brand
+// connects, with no history (the owner's decision of 2026-11-02). The same
+// charge read again is the same transaction.
+func (r *paymentRun) transaction(ctx context.Context, tx pgx.Tx, rec string, t newTransaction) error {
+	if r.st.Phase != "changes" {
+		return nil
+	}
+	var brand *string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(r.brand_id, NULLIF($3, '')::uuid, outflare_first_brand($1))::text FROM records r WHERE r.id = $2`,
+		r.ws, rec, r.brand).Scan(&brand); err != nil || brand == nil {
+		return err
+	}
+	t.RecordID, t.Status, t.Source = rec, "succeeded", r.provider
+	t.Currency = strings.ToUpper(t.Currency)
+	if !currencyCode.MatchString(t.Currency) || t.AmountMinor < 0 || t.SourceID == "" {
+		metrics.TransactionSaved("connector", "invalid", 0)
+		return nil
+	}
+	start := time.Now()
+	_, created, err := saveTransaction(ctx, tx, nil, r.ws, *brand, t)
+	outcome := map[bool]string{true: "created", false: "duplicate"}[created]
+	if err != nil {
+		outcome = "error"
+	}
+	metrics.TransactionSaved("connector", outcome, time.Since(start))
+	return err
+}
 
 // fetchMissing reads the customers a page's subscriptions, payments and
 // refunds belong to that are not stored yet, before the transaction opens,

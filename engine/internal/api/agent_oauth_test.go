@@ -424,20 +424,23 @@ func TestChangeWhatAConnectedAppMayDo(t *testing.T) {
 	if !slices.Contains(sc, any("seo.manage")) || !slices.Contains(sc, any("leads.read")) || slices.Contains(sc, any("sequences.manage")) {
 		t.Fatalf("updated scopes: %v", sc)
 	}
-	// It makes changes only inside a mission until the person says otherwise,
-	// and without Missions on it is told where to change that.
+	// Its changes wait for a person until the person says otherwise: they
+	// go through the action layer, held with no grants.
 	code, out = app.do("POST", base+"/seo-sites", map[string]any{"url": "https://example.com"})
-	if e := out["error"].(map[string]any); code != 403 || e["code"] != "mission_required" || !strings.Contains(e["message"].(string), "/w/"+ws+"/ai/") {
-		t.Fatalf("outside a mission: %d %v", code, out)
+	if code != 202 || out["approval_required"] != true || out["action"] == nil {
+		t.Fatalf("held for a person: %d %v", code, out)
+	}
+	if n := len(owner.must(200, "GET", base+"/seo-sites", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("created %d sites while held", n)
 	}
 	if a["require_mission"] != true || a["verified"] != true || a["client_id"] != clientID {
 		t.Fatalf("app view: %v", a)
 	}
 	if upd := owner.must(200, "PATCH", base+"/agent-apps/"+id, map[string]any{"require_mission": false}); upd["require_mission"] != false || !slices.Contains(upd["scopes"].([]any), any("seo.manage")) {
-		t.Fatalf("mission off: %v", upd)
+		t.Fatalf("approval off: %v", upd)
 	}
-	if code, out := app.do("POST", base+"/seo-sites", map[string]any{"url": "https://example.com"}); code == 403 {
-		t.Fatalf("still refused: %v", out)
+	if code, out := app.do("POST", base+"/seo-sites", map[string]any{"url": "https://example.com"}); code != 201 {
+		t.Fatalf("still held: %d %v", code, out)
 	}
 	// Read only takes every change away and keeps the reads.
 	sc = owner.must(200, "PATCH", base+"/agent-apps/"+id, map[string]any{"scopes": []string{}})["scopes"].([]any)
@@ -458,30 +461,32 @@ func TestChangeWhatAConnectedAppMayDo(t *testing.T) {
 	app.must(401, "GET", base+"/stats", nil)
 }
 
-func TestConnectedAppChangesThingsOnlyInMissions(t *testing.T) {
+// A connected app's changes wait for a person: they go through the action
+// layer with no grants, and nothing it does needs a mission.
+func TestConnectedAppChangesWaitForAPerson(t *testing.T) {
 	h, _, _ := agentServer(t)
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 	anon := &client{t: t, h: h}
 	const redirect = "https://claude.ai/api/mcp/auth_callback"
 	clientID := anon.must(201, "POST", "/oauth/register", map[string]any{"redirect_uris": []string{redirect}, "client_name": "Claude"})["client_id"].(string)
-	app := connectApp(t, h, owner, ws, clientID, redirect, []string{"missions.run", "sequences.manage"})
-	seq := map[string]any{"name": "Mission sequence", "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}}
+	app := connectApp(t, h, owner, ws, clientID, redirect, []string{"sequences.manage"})
+	seq := map[string]any{"name": "Held sequence", "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}}
 
-	// Outside a mission it reads, but its changes are refused with the way in.
+	// It reads; a change is held for a person, who approves it on the
+	// Agents page, and it then runs as the app.
 	app.must(200, "GET", base+"/sequences", nil)
 	code, out := app.do("POST", base+"/sequences", seq)
-	if e := out["error"].(map[string]any); code != 403 || e["code"] != "mission_required" || !strings.Contains(e["message"].(string), "create_mission") {
-		t.Fatalf("outside a mission: %d %v", code, out)
-	}
-	// Starting a mission is allowed, and inside it the change follows the
-	// mission's mode: a draft only simulates it.
-	m := app.must(201, "POST", base+"/missions", map[string]any{"name": "Fintech CFOs", "goal": "Book 10 meetings"})
-	if code, res := app.inMission(m["id"].(string), "POST", base+"/sequences", seq); code != 202 || res["dry_run"] != true {
-		t.Fatalf("in a draft mission: %d %v", code, res)
+	if code != 202 || out["approval_required"] != true || out["action"] == nil {
+		t.Fatalf("held: %d %v", code, out)
 	}
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("created %d sequences", n)
+	}
+	actionID := out["action"].(map[string]any)["id"].(string)
+	owner.must(200, "POST", base+"/actions/"+actionID+"/approve", nil)
+	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("after approval: %d sequences", n)
 	}
 }
 

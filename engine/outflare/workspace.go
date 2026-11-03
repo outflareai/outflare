@@ -79,6 +79,21 @@ type MissionDraft = api.MissionDraft
 var (
 	ErrMissionInvalid = api.ErrMissionInvalid
 	ErrMissionDenied  = api.ErrMissionDenied
+	// ErrMissionRetired is what StartMission returns now: missions are
+	// retired, and a loop starts an agent run (StartAgentRun) instead.
+	ErrMissionRetired = api.ErrMissionRetired
+)
+
+// Agent runs an extension starts for the caller (Caller.StartAgentRun): a
+// loop's brief carried out by Outflare's agent on the action layer, as a
+// playbook run is. It replaces MissionDraft for new loops.
+type AgentRunDraft = api.AgentRunDraft
+
+// ErrAgentRunInvalid and ErrAgentRunDenied sort Caller.StartAgentRun's
+// errors into 400 and 403.
+var (
+	ErrAgentRunInvalid = api.ErrAgentRunInvalid
+	ErrAgentRunDenied  = api.ErrAgentRunDenied
 )
 
 // Company records.

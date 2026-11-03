@@ -8,7 +8,10 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Tab } from "./paths";
 
-export type CloudFeature = { tab: Tab; capability: string; name: string; line: string };
+// tab is the page a feature has to itself; a feature that is one setting
+// on an open page (such as Auto in Support settings) has none, and the
+// page shows its line where the setting is.
+export type CloudFeature = { tab?: Tab; capability: string; name: string; line: string };
 
 export const cloudFeatures: CloudFeature[] = [
   {
@@ -29,9 +32,20 @@ export const cloudFeatures: CloudFeature[] = [
     name: "Reactive PR autopilot",
     line: "Each morning, your experts' comments on today's news, drafted for them to approve and pitched to the journalists covering it.",
   },
+  {
+    capability: "brand_agent",
+    name: "Brand agent",
+    line: "One agent per brand that works toward your objectives in turns on your own AI model, with a chat, objectives that read their own numbers, and every change through the action layer.",
+  },
+  {
+    capability: "support_auto_replies",
+    name: "Support assistant Auto",
+    line: "The support assistant answers customers' chats and emails on its own when every check passes, signed as an AI assistant, and hands the rest to your team.",
+  },
 ];
 
 export const cloudFeature = (tab: Tab) => cloudFeatures.find((f) => f.tab === tab);
+export const cloudCapability = (capability: string) => cloudFeatures.find((f) => f.capability === capability)!;
 
 // The server's capabilities, read once per page load.
 let capabilities: Promise<string[]> | undefined;

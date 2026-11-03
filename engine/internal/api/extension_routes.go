@@ -87,6 +87,9 @@ type MissionDraft struct {
 var (
 	ErrMissionInvalid = errors.New("invalid mission")
 	ErrMissionDenied  = errors.New("not allowed to start missions")
+	// ErrMissionRetired is every StartMission's error now: missions are
+	// retired (410 mission_retired over the API).
+	ErrMissionRetired = errors.New("missions retired")
 )
 
 // missionError keeps the API's message under the exported kinds.
@@ -98,28 +101,63 @@ type missionError struct {
 func (e missionError) Error() string { return e.msg }
 func (e missionError) Unwrap() error { return e.kind }
 
-// StartMission creates a mission draft for the caller in tx, as POST
-// /v1/workspaces/{ws}/missions does: the caller needs missions.run, it
-// records mission.created, and it waits for a person's approval. It
-// returns the mission's id.
+// StartMission is retired with missions: it always returns
+// ErrMissionRetired. Loops start agent runs with StartAgentRun instead.
+// It stays so extensions built against it keep compiling until it is
+// removed.
 func (c *Caller) StartMission(ctx context.Context, tx pgx.Tx, d MissionDraft) (string, error) {
-	if !c.Has(auth.ScopeMissionsRun) {
-		return "", missionError{ErrMissionDenied, "starting a mission needs the missions.run scope"}
+	return "", missionError{ErrMissionRetired, "missions are retired: nothing starts a new one; start an agent run instead (Caller.StartAgentRun)"}
+}
+
+// AgentRunDraft is an agent run an extension starts for the caller, such
+// as a loop's brief, as POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs
+// does for a playbook: Outflare's agent carries it out in turns as an
+// agent token of its own on the action layer, and the mode sets what it
+// may do on its own. It replaces MissionDraft for new loops.
+type AgentRunDraft struct {
+	Name, Goal, Instructions, Plan string
+	// BrandID keeps the run and its token to one brand; required for a
+	// brand-limited caller.
+	BrandID *string
+	// Mode is copilot (the default: every change waits for a person),
+	// autonomous (changes run within MaxSpendCents) or dry_run.
+	Mode          string
+	MaxSpendCents *int64
+	// Note is the run's first update; empty for "Started by …".
+	Note string
+}
+
+// ErrAgentRunInvalid is a draft the API would refuse with 400; its message
+// says why. ErrAgentRunDenied is a caller who may not start runs (403).
+var (
+	ErrAgentRunInvalid = errors.New("invalid agent run")
+	ErrAgentRunDenied  = errors.New("not allowed to start agent runs")
+)
+
+// StartAgentRun starts an agent run for the caller in tx: the caller needs
+// agents.run, the run gets a token and grants from its mode, its first turn
+// is due at once, and agent_run.created is recorded. It returns the run's
+// id.
+func (c *Caller) StartAgentRun(ctx context.Context, tx pgx.Tx, d AgentRunDraft) (string, error) {
+	if !c.Has(auth.ScopeAgentsRun) {
+		return "", missionError{ErrAgentRunDenied, "starting an agent run needs the agents.run scope"}
 	}
-	in := missionInput{Name: &d.Name, Goal: &d.Goal, Instructions: &d.Instructions, Plan: &d.Plan,
-		MaxSpendCents: optional[int64]{Set: d.MaxSpendCents != nil, Value: d.MaxSpendCents}}
-	if d.EndsAt != nil {
-		at := d.EndsAt.Format(time.RFC3339)
-		in.EndsAt = optional[string]{Set: true, Value: &at}
+	if d.Mode == "" {
+		d.Mode = runModeCopilot
 	}
-	if d.Mode != "" {
-		in.Mode = &d.Mode
+	id, err := c.s.createAgentRun(ctx, tx, c.a, runSpec{Name: d.Name, Goal: d.Goal, Instructions: d.Instructions, Plan: d.Plan,
+		BrandID: d.BrandID, Mode: d.Mode, MaxSpendCents: d.MaxSpendCents, Note: d.Note})
+	var inv errInvalid
+	var denied errDenied
+	switch {
+	case errors.As(err, &inv):
+		return "", missionError{ErrAgentRunInvalid, string(inv)}
+	case errors.As(err, &denied):
+		return "", missionError{ErrAgentRunDenied, string(denied)}
+	case errors.Is(err, ErrAgentSpec):
+		return "", missionError{ErrAgentRunInvalid, err.Error()}
 	}
-	if err := in.validate(); err != nil {
-		return "", exportMissionError(err)
-	}
-	id, err := c.s.insertMission(ctx, tx, c.a, &in)
-	return id, exportMissionError(err)
+	return id, err
 }
 
 func exportMissionError(err error) error {

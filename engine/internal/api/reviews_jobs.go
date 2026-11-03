@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/coverage"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/retry"
@@ -189,6 +190,12 @@ func (s *Server) syncReviewPages(ctx context.Context, ws string) error {
 			if inserted {
 				if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "review_page.added", TargetType: "review_page",
 					TargetID: id, Data: map[string]any{"platform": p.Platform, "brand_id": l.brand}}); err != nil {
+					return err
+				}
+				// A review profile is an appearance of the brand: coverage
+				// keeps it as a live placement of the review site.
+				if _, _, err := coverage.Record(ctx, tx, ws, l.brand, coverage.Placement{URL: p.URL, Title: p.Platform + " reviews", Kind: "review", Arrangement: "earned",
+					Source: "review_pages", SourceID: id, Evidence: map[string]any{"mention_present": true, "platform": p.Platform}}); err != nil && !errors.Is(err, coverage.ErrNoURL) {
 					return err
 				}
 			}

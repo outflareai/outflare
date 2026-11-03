@@ -14,6 +14,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/coverage"
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -777,6 +778,18 @@ func (s *Server) updateCoverage(w http.ResponseWriter, r *http.Request) {
 			action = "coverage." + req.Status
 			if req.Status == "new" {
 				action = "coverage.reopened"
+			}
+		}
+		// Confirmed press coverage is an appearance of the brand: coverage
+		// keeps it as a live placement of the publisher.
+		if moved && req.Status == "confirmed" {
+			var published *time.Time
+			_ = tx.QueryRow(ctx, `SELECT published_at FROM news_articles WHERE id = $1`, c.ArticleID).Scan(&published)
+			linked := req.Linked != nil && *req.Linked
+			if _, _, err := coverage.Record(ctx, tx, a.WorkspaceID, c.BrandID, coverage.Placement{URL: c.URL, Title: c.Title, Kind: "news", Arrangement: "earned",
+				ExpectedLink: linked, Source: "news", SourceID: c.ID, PublishedOn: published,
+				Evidence: map[string]any{"mention_present": true, "link_present": linked, "article_id": c.ArticleID}}); err != nil && !errors.Is(err, coverage.ErrNoURL) {
+				return err
 			}
 		}
 		data := map[string]any{"brand_id": c.BrandID, "record_id": c.RecordID, "status": c.Status, "linked_set": req.Linked != nil,

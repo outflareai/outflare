@@ -13,7 +13,9 @@ import (
 // Ads, Meta, Microsoft Advertising, Reddit, X and LinkedIn): which accounts
 // the sign-in can see, their campaigns, and what each campaign spent and
 // got per day. Every platform answers in the same shape, with money in
-// micros of the account's currency. They only read.
+// micros of the account's currency. Reading never changes anything; the
+// ones that also implement AdsManager can pause and resume a campaign
+// and set its daily budget, and nothing else.
 
 // CategoryAds groups ad platforms.
 const CategoryAds = "ads"
@@ -239,6 +241,25 @@ func MicrosOf(s string) int64 {
 		return Micros(*p)
 	}
 	return 0
+}
+
+// CapAdsManage marks a connector that implements AdsManager.
+const CapAdsManage = "ads.manage"
+
+// AdsManager changes a campaign on an ad platform: its status (active or
+// paused) and its daily budget. Those are the only changes Outflare makes
+// to ads; every one goes through the action layer for an agent, and is
+// read back from the platform afterwards (AdCampaign) to confirm it took.
+type AdsManager interface {
+	Connector
+	// AdCampaign reads one campaign as AdCampaigns lists it. ErrNotFound
+	// when the account has no such campaign.
+	AdCampaign(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string) (AdCampaign, error)
+	// SetCampaignStatus pauses a campaign (active false) or resumes it.
+	SetCampaignStatus(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string, active bool) error
+	// SetCampaignDailyBudget sets a campaign's daily budget, in micros of
+	// the account's currency. Platforms that round to a minor unit round.
+	SetCampaignDailyBudget(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string, micros int64) error
 }
 
 // CapAdsConversions marks a connector that implements ConversionSender.

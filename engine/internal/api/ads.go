@@ -424,7 +424,10 @@ type adFilter struct {
 // dates; e is ad_entities and a ad_accounts.
 func (s *Server) adQuery(w http.ResponseWriter, r *http.Request) (adFilter, bool) {
 	q := r.URL.Query()
-	to := time.Now().UTC()
+	// Ad accounts report by their own time zone, and the sync reads each up
+	// to its own today: the default end is the latest date anywhere
+	// (UTC+14), so an account ahead of UTC shows its today too.
+	to := time.Now().UTC().Add(14 * time.Hour)
 	if v := q.Get("to"); v != "" {
 		t, err := time.Parse(time.DateOnly, v)
 		if err != nil {

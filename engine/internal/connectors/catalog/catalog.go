@@ -12,6 +12,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors/attio"
 	"github.com/outflareai/outflare/engine/internal/connectors/calendars"
 	"github.com/outflareai/outflare/engine/internal/connectors/cheapinboxes"
+	"github.com/outflareai/outflare/engine/internal/connectors/cms"
 	"github.com/outflareai/outflare/engine/internal/connectors/data"
 	"github.com/outflareai/outflare/engine/internal/connectors/deploys"
 	"github.com/outflareai/outflare/engine/internal/connectors/dnshosts"
@@ -56,6 +57,7 @@ func Available() []c.Connector {
 	out = append(out, seo.Fetchers()...)
 	out = append(out, deploys.All()...)
 	out = append(out, ads.All()...)
+	out = append(out, cms.All()...)
 	out = append(out, reddit.All()...)
 	out = append(out, engain.All()...)
 	out = append(out, x.All()...)

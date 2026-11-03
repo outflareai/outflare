@@ -4584,6 +4584,122 @@
     },
     {
       "type": "row",
+      "title": "Paid media (managing campaigns)",
+      "collapsed": false,
+      "id": 903,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 657
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Campaign changes, by how they ended",
+      "description": "Changes Outflare made to campaigns on ad platforms per hour (pausing, resuming, setting a daily budget), by platform and outcome. Normal is applied, with the odd unverified when a platform shows the old value for a moment; failed means the platform refused a change (its reason is on the change), and error a database failure.",
+      "id": 904,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 658
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, outcome) (rate(outflare_ads_changes_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Campaign changes, by kind",
+      "description": "The same changes by kind: pause, resume or budget. A burst of pauses is usually a brand's kill switch.",
+      "id": 905,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 658
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(outflare_ads_changes_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Feature flags",
       "id": 83,
       "collapsed": false,
@@ -8298,7 +8414,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 657
+        "y": 666
       },
       "targets": [
         {
@@ -8351,7 +8467,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 657
+        "y": 666
       },
       "targets": [
         {
@@ -8404,7 +8520,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 665
+        "y": 674
       },
       "targets": [
         {
@@ -8457,7 +8573,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 665
+        "y": 674
       },
       "targets": [
         {
@@ -8905,7 +9021,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 673
+        "y": 682
       },
       "panels": []
     },
@@ -8922,7 +9038,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 674
+        "y": 683
       },
       "targets": [
         {
@@ -8984,7 +9100,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 674
+        "y": 683
       },
       "targets": [
         {
@@ -9037,7 +9153,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 682
+        "y": 691
       },
       "targets": [
         {
@@ -9099,7 +9215,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 682
+        "y": 691
       },
       "targets": [
         {
@@ -9161,7 +9277,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 690
+        "y": 699
       },
       "targets": [
         {
@@ -9218,7 +9334,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 698
+        "y": 707
       },
       "id": 195,
       "panels": []
@@ -9236,7 +9352,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 699
+        "y": 708
       },
       "targets": [
         {
@@ -9281,7 +9397,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 707
+        "y": 716
       },
       "panels": []
     },
@@ -9298,7 +9414,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 708
+        "y": 717
       },
       "targets": [
         {
@@ -9352,7 +9468,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 708
+        "y": 717
       },
       "targets": [
         {
@@ -9406,7 +9522,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 716
+        "y": 725
       },
       "targets": [
         {
@@ -9468,7 +9584,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 724
+        "y": 725
       },
       "targets": [
         {
@@ -9556,7 +9672,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 732
+        "y": 733
       },
       "targets": [
         {
@@ -9609,7 +9725,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 740
+        "y": 733
       },
       "targets": [
         {
@@ -9662,7 +9778,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 740
+        "y": 741
       },
       "targets": [
         {
@@ -9721,7 +9837,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 748
+        "y": 749
       }
     },
     {
@@ -9737,7 +9853,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 749
+        "y": 750
       },
       "targets": [
         {
@@ -9776,7 +9892,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 749
+        "y": 750
       },
       "targets": [
         {
@@ -9815,7 +9931,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 749
+        "y": 750
       },
       "targets": [
         {
@@ -9850,7 +9966,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 757
+        "y": 758
       },
       "datasource": {
         "type": "prometheus",
@@ -9873,7 +9989,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 757
+        "y": 758
       },
       "datasource": {
         "type": "prometheus",
@@ -9896,7 +10012,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 757
+        "y": 758
       },
       "datasource": {
         "type": "prometheus",
@@ -9919,7 +10035,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 765
+        "y": 766
       },
       "datasource": {
         "type": "prometheus",
@@ -9946,7 +10062,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 773
+        "y": 774
       },
       "targets": [
         {
@@ -10008,7 +10124,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 773
+        "y": 766
       },
       "targets": [
         {
@@ -10064,7 +10180,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 781,
+        "y": 782,
         "w": 12,
         "h": 8
       },
@@ -10087,7 +10203,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 781,
+        "y": 774,
         "w": 12,
         "h": 8
       },
@@ -10116,7 +10232,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 789
+        "y": 790
       },
       "targets": [
         {
@@ -10178,7 +10294,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 789
+        "y": 782
       },
       "targets": [
         {
@@ -10228,7 +10344,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 797
+        "y": 798
       }
     },
     {
@@ -10244,7 +10360,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 798
+        "y": 799
       },
       "targets": [
         {
@@ -10290,7 +10406,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 806
+        "y": 807
       }
     },
     {
@@ -10306,7 +10422,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 807
+        "y": 808
       },
       "targets": [
         {
@@ -10359,7 +10475,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 807
+        "y": 808
       },
       "targets": [
         {
@@ -10409,7 +10525,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 815
+        "y": 816
       }
     },
     {
@@ -10425,7 +10541,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 816
+        "y": 817
       },
       "targets": [
         {
@@ -10478,7 +10594,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 816
+        "y": 817
       },
       "targets": [
         {
@@ -10527,7 +10643,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 824
+        "y": 825
       },
       "targets": [
         {
@@ -10546,7 +10662,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 832
+        "y": 833
       },
       "panels": []
     },
@@ -10563,7 +10679,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 833
+        "y": 834
       },
       "targets": [
         {
@@ -10616,7 +10732,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 833
+        "y": 834
       },
       "targets": [
         {
@@ -10678,7 +10794,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 841
+        "y": 842
       },
       "targets": [
         {
@@ -10740,7 +10856,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 841
+        "y": 842
       },
       "targets": [
         {
@@ -10789,7 +10905,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 849
+        "y": 850
       },
       "panels": []
     },
@@ -10806,7 +10922,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 850
+        "y": 851
       },
       "targets": [
         {
@@ -10855,7 +10971,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 850
+        "y": 851
       },
       "targets": [
         {
@@ -10904,7 +11020,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 858
+        "y": 859
       },
       "targets": [
         {
@@ -10953,7 +11069,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 858
+        "y": 859
       },
       "targets": [
         {
@@ -11004,7 +11120,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 866
+        "y": 867
       }
     },
     {
@@ -11020,7 +11136,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 867
+        "y": 868
       },
       "targets": [
         {
@@ -11073,7 +11189,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 867
+        "y": 868
       },
       "targets": [
         {
@@ -11126,13 +11242,181 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 875
+        "y": 876
       },
       "targets": [
         {
           "refId": "A",
           "expr": "sum by (source, outcome) (rate(outflare_knowledge_answer_searches_total{job=\"$job\"}[15m])) * 3600",
           "legendFormat": "{{source}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Website pages imported into knowledge, by result",
+      "description": "Pages website imports handled per hour: added as new articles, updated because the page changed, or unchanged. Normal is bursts when someone runs an import, mostly unchanged on later runs.",
+      "id": 900,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 876
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(outflare_knowledge_website_pages_total{job=\"$job\"}[15m])) * 3600",
+          "legendFormat": "{{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Held Auto email replies, by result",
+      "description": "What became of Auto email replies that waited their hold, per hour: sent when it ended, stopped by a teammate, cancelled (the team replied, the customer wrote again or it was closed), refused by the send, or left as a draft because Auto was turned off. Normal: mostly sent, a few stopped; refused should stay near zero.",
+      "id": 901,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 884
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (increase(outflare_support_assistant_held_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Website re-checks and learning from past replies",
+      "description": "Daily website re-checks the scheduler queued, and runs that learned answers from past support replies, per hour, by outcome. Normal: re-checks spread through the day for each workspace with an imported website; learning runs only when someone starts one, nearly all done.",
+      "id": 902,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 884
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_knowledge_website_rechecks_total{job=\"$job\"}[1h]))",
+          "legendFormat": "recheck {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (outcome) (increase(outflare_knowledge_reply_learning_total{job=\"$job\"}[1h]))",
+          "legendFormat": "learning {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -11175,7 +11459,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 883
+        "y": 892
       },
       "panels": []
     },
@@ -11192,7 +11476,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 884
+        "y": 893
       },
       "targets": [
         {
@@ -11241,7 +11525,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 884
+        "y": 893
       },
       "targets": [
         {
@@ -11286,7 +11570,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 892
+        "y": 901
       },
       "panels": []
     },
@@ -11303,7 +11587,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 893
+        "y": 902
       },
       "targets": [
         {
@@ -11349,7 +11633,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 893
+        "y": 902
       },
       "targets": [
         {
@@ -11397,6 +11681,1152 @@
         },
         "tooltip": {
           "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Quotas (an extension's plan limits)",
+      "id": 515,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 910
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Quota refusals",
+      "description": "Work an extension's quota refused, per hour, by resource: new brands, mailboxes, tracking domains or records answered 402 quota_exceeded, and emails held back to try again in an hour. Normal: none on a self-hosted server (no quota); on a hosted one, a few from workspaces past their plan.",
+      "id": 516,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 911
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (resource) (increase(outflare_quota_checks_total{job=\"$job\",outcome=\"refused\"}[1h]))",
+          "legendFormat": "{{resource}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Quota checks failing",
+      "description": "Quota checks where the extension's checker failed, per hour, by resource. The work was allowed anyway. Normal: none; any means the checker (its database or service) is broken and plan limits aren't being applied.",
+      "id": 517,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 911
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (resource) (increase(outflare_quota_checks_total{job=\"$job\",outcome=\"error\"}[1h]))",
+          "legendFormat": "{{resource}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Metrics (live totals per company and person)",
+      "id": 518,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 919
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Metric updates by outcome",
+      "description": "Events added to live metrics per minute. updated is normal; backfilled (counted by a fill) and too_old (before the window) are expected in small numbers; a steady no_value means a metric's property isn't a number in the events.",
+      "id": 519,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 920
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_record_metrics_updates_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Metric jobs",
+      "description": "metric.event and metric.backfill jobs per minute by outcome, and their queue wait (p95). Normal: no dead jobs, waits of seconds.",
+      "id": 520,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 920
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (rate(outflare_jobs_processed_total{job=\"$job\",kind=~\"metric\\\\..*\"}[5m])) * 60",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_jobs_wait_seconds_bucket{job=\"$job\",kind=~\"metric\\\\..*\"}[5m])))",
+          "legendFormat": "wait p95 (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Metric windows waiting",
+      "description": "Values whose window moved (a new UTC day) and wait for the sweep, how long the oldest has waited, and metrics refilling now. Normal: a burst just after midnight UTC that clears in minutes.",
+      "id": 521,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 928
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_record_metrics_due{job=\"$job\"})",
+          "legendFormat": "due",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_record_metrics_oldest_due_seconds{job=\"$job\"})",
+          "legendFormat": "oldest (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "max(outflare_record_metrics_backfilling{job=\"$job\"})",
+          "legendFormat": "refilling",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Metric fill and sweep duration",
+      "description": "How long a metric's fill from stored events (p95, by outcome) and one window sweep (p95) take. Fills of large brands can take minutes; sweeps should stay under a few seconds.",
+      "id": 522,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 928
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(outflare_record_metrics_backfill_seconds_bucket{job=\"$job\"}[1h])))",
+          "legendFormat": "fill {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_record_metrics_sweep_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "sweep",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Bulk edits",
+      "id": 523,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 936
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Bulk edits finished",
+      "description": "Bulk edits and undos owners ran, by outcome, per hour. Normal: a few done a day, none failed.",
+      "id": 524,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 937
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (increase(outflare_bulk_edits_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Records bulk edited",
+      "description": "Records bulk edits went through per hour: changed, unchanged (already so) and skipped (deleted or merged since). A spike is an owner's large edit.",
+      "id": 525,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 937
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, result) (increase(outflare_bulk_edits_records_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} {{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Bulk edits waiting",
+      "description": "Bulk edits queued or running, and how long the oldest has waited, with p95 run time. Normal: 0, or one for a few minutes while an edit runs.",
+      "id": 526,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 946
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_bulk_edits_pending{job=\"$job\"})",
+          "legendFormat": "pending",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_bulk_edits_oldest_pending_seconds{job=\"$job\"})",
+          "legendFormat": "oldest (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_bulk_edits_duration_seconds_bucket{job=\"$job\"}[1h])))",
+          "legendFormat": "p95 run (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Published query endpoints",
+      "id": 527,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 945
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Query endpoint calls",
+      "description": "Calls to published query endpoints per minute by outcome and error code. Normal: mostly success; some rate_limited or invalid_request is a caller's mistake; error means Outflare failed to answer.",
+      "id": 528,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 954
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome, code) (rate(outflare_query_endpoints_calls_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}} {{code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Query endpoint time and rows",
+      "description": "How long calls take (p95, seconds) and rows returned per minute. Normal: well under the 30-second query limit.",
+      "id": 529,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 946
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_query_endpoints_duration_seconds_bucket{job=\"$job\"}[5m])))",
+          "legendFormat": "p95 (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(outflare_query_endpoints_rows_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "rows/min",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Content (publishing to a CMS)",
+      "collapsed": false,
+      "id": 906,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 962
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Publications to CMSs, by how they ended",
+      "description": "Posts and pages Outflare published to brands' own CMSs per hour (WordPress, Ghost), by connector and outcome. Normal is applied, with the odd unverified when the CMS shows a different status for a moment; failed means the CMS refused it (its reason is on the publication), and error a database failure.",
+      "id": 907,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 963
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, outcome) (rate(outflare_content_publishes_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Publications to CMSs, by kind",
+      "description": "The same publications by kind: create (a new post on the CMS) or update (the post the item already is). Normal: a handful a day per brand that publishes.",
+      "id": 908,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 963
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(outflare_content_publishes_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Field sources",
+      "id": 909,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 971
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Hand edits expired",
+      "description": "Hand edits whose time to win ran out, per hour: switched (another source's value took over, as a change in the record's history), kept (no other source had a value; the next one to write replaces it) and error. Normal: a steady trickle 180 days after people's edits; any error is worth a look in the logs (hand_edit.expire_failed).",
+      "id": 910,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 972
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_hand_edits_expired_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Hand edits waiting for the sweep",
+      "description": "Expired hand edits the sweep hasn't handed over yet, and how long the oldest has waited. The sweep runs every 5 minutes, so normal is 0 and under 10 minutes; a growing wait means the sweep isn't running or keeps failing.",
+      "id": 911,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 972
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_hand_edits_due{job=\"$job\"})",
+          "legendFormat": "due",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_hand_edits_oldest_due_seconds{job=\"$job\"})",
+          "legendFormat": "oldest (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Transactions",
+      "id": 912,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 980
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactions saved",
+      "description": "Payments, refunds, chargebacks and credits sent to Outflare per hour, from the API and billing connectors, by outcome. Normal: created, with some duplicate (the same source id again, such as a retry or a sync reading it twice). invalid is a caller's mistake; any error is worth a look in the logs.",
+      "id": 913,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 981
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (from, outcome) (increase(outflare_transactions_saved_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{from}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactions without a converted amount",
+      "description": "Transactions over 2 days old still without an amount in their brand's currency, and p95 time to save one. Normal: 0 unconverted (exchange rates come in daily) and well under a second.",
+      "id": 914,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 981
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_transactions_unconverted{job=\"$job\"})",
+          "legendFormat": "unconverted",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outflare_transactions_save_seconds_bucket{job=\"$job\"}[1h])))",
+          "legendFormat": "p95 save (s)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Accounts (the brand's external accounts)",
+      "collapsed": false,
+      "id": 915,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 989
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Account uses an hour, by outcome",
+      "description": "Managed sign-ins, verifications and session uses of brands' external accounts, by outcome. Normal is authenticated with the odd verification pending or MFA waiting; credential failures, wrong identities and locked accounts open incidents a person resolves.",
+      "id": 916,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 990
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_accounts_attempts_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open account incidents, by severity",
+      "description": "Incidents open on brands' external accounts right now, by severity. Normal: a handful of info and warning; critical ones (a credential refused, a wrong identity, a locked account) stop automated use until a person acts.",
+      "id": 917,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 990
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (severity) (outflare_accounts_incidents_open{job=\"$job\"})",
+          "legendFormat": "{{severity}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     }

@@ -2,11 +2,11 @@ import { SearchDashboard } from "./pages/SearchDashboard";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@outflare/sdk";
-import { api } from "./api";
+import { api, errorMessage } from "./api";
 import { identify, page, resetAnalytics, track } from "./lib/analytics";
 import { github, openFeedback } from "@/components/build-with-us";
 import { appPath, isID, isItemSlug, itemKinds, itemOrPage, parsePath, rememberWorkspaces, type Tab } from "./lib/paths";
-import { DialogHost, Loading, toast, ToastHost } from "./ui";
+import { ask, DialogHost, Loading, toast, ToastHost } from "./ui";
 import { Icon, type IconName } from "./icons";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiPanel, canOpen, CommandPalette, everyday, isSettings, modules, resetNav, SettingsFrame, settingsGroups, shortcuts, Sidebar, startNav, tabNames, TopBar, useTheme, type Command, type MenuLink } from "./shell";
@@ -223,7 +223,7 @@ export function App() {
   }
 }
 
-function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onReload: () => void }) {
+function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onReload: () => Promise<void> | void }) {
   // Something a link named that could not be opened, such as a workspace
   // this person is not in.
   const [lost, setLost] = useState("");
@@ -310,6 +310,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   const scopes: string[] = ws?.scopes ?? [];
   const can = (scope: string) => scopes.includes(scope);
   const isAdmin = can("workspace.manage");
+  // Owners and admins only, when the workspace says so (records_edit_owners_only).
+  const canEditRecords = can("customers.manage") && (!ws?.records_edit_owners_only || ws?.role === "owner" || ws?.role === "admin");
   const writer = scopes.some((sc) => !sc.endsWith(".read"));
 
   useEffect(() => {
@@ -450,6 +452,26 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
 
   const go = useCallback((t: Tab) => setTab(t), [setTab]);
 
+  // A new workspace of this person's own, from the sidebar switcher or the
+  // palette. The server makes them its owner; the app then reloads the
+  // workspace list and opens it.
+  async function createWorkspace() {
+    const r = await ask({
+      title: "New workspace",
+      body: <p>A workspace has its own brands, connections, team and data. You will be its owner, and can invite people to it from Settings.</p>,
+      input: { label: "Name", placeholder: "Acme", maxLength: 100 },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Create workspace", value: "ok", variant: "primary" }],
+    });
+    const name = r?.value.trim();
+    if (!name) return;
+    const { data, error } = await api.POST("/v1/workspaces", { body: { name } });
+    if (error) return toast(errorMessage(error), "error");
+    await onReload();
+    setWsId(data.id);
+    setTab("overview");
+    toast(`${data.name} created.`);
+  }
+
   // ⌘K or Ctrl+K opens the palette; "g" then a letter opens a page.
   useEffect(() => {
     let pendingG = 0;
@@ -492,6 +514,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     ...(ws && writer ? [{ id: "new-email-template", label: "Create an email template", group: "Lifecycle", icon: "templates" as IconName, run: () => setTab("templates", "new") }] : []),
     ...(can("tokens.manage") ? [{ id: "token", label: "Create an API token", group: "Developer", icon: "tokens" as IconName, run: () => go("tokens") }] : []),
     ...me.workspaces.filter((w) => w.id !== wsId).map((w) => ({ id: `ws-${w.id}`, label: `Switch to ${w.name}`, group: "Workspaces", icon: "overview" as IconName, run: () => { setWsId(w.id); setItem(undefined); } })),
+    { id: "new-ws", label: "Create a workspace", group: "Workspaces", icon: "plus", run: createWorkspace },
     { id: "feedback", label: "Send feedback about Outflare", group: "Help", icon: "feedback", run: openFeedback },
     { id: "github", label: "Discuss Outflare on GitHub", group: "Help", icon: "discuss", run: () => { track("ui.community_link_opened", { target: "discussions", from: "palette" }); open(github.discussions, "_blank", "noopener"); } },
     { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", group: "Preferences", icon: theme === "dark" ? "sun" : "moon", run: toggleTheme },
@@ -513,6 +536,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         workspaces={me.workspaces}
         ws={ws}
         onWorkspace={(id) => { setWsId(id); setItem(undefined); }}
+        onCreateWorkspace={createWorkspace}
         tab={tab}
         onTab={go}
         unread={unread}
@@ -581,8 +605,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
-        {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} />}
-        {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("missions.run")} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "sequences" && <Sequences key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
@@ -591,7 +615,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "link-building" && <LinkBuilding key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} waiting={pitchesWaiting} onWaiting={setPitchesWaiting} />}
         {ready && ws && tab === "link-autopilot" && (
           <CloudPage feature={cloudFeature("link-autopilot")!}>
-            <LinkAutopilot key={ws.id} ws={ws.id} canManage={can("missions.run")} go={setTab} />
+            <LinkAutopilot key={ws.id} ws={ws.id} canManage={can("agents.run")} go={setTab} />
           </CloudPage>
         )}
         {ready && ws && tab === "coverage" && <Coverage key={ws.id} ws={ws.id} myId={me.user.id ?? ""} can={can} go={setTab} />}
@@ -599,15 +623,15 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "stories" && <Stories key={ws.id} ws={ws.id} canManage={can("seo.manage")} go={setTab} />}
         {ready && ws && tab === "pr-autopilot" && (
           <CloudPage feature={cloudFeature("pr-autopilot")!}>
-            <PRAutopilot key={ws.id} ws={ws.id} canManage={can("missions.run")} go={setTab} />
+            <PRAutopilot key={ws.id} ws={ws.id} canManage={can("agents.run")} go={setTab} />
           </CloudPage>
         )}
         {ready && ws && tab === "allocation" && <Allocation key={ws.id} ws={ws.id} canManage={writer} canSetMode={isAdmin} go={setTab} />}
         {ready && ws && tab === "senders" && <Senders key={ws.id} ws={ws.id} canManage={writer} canManageTeams={isAdmin} />}
         {ready && ws && tab === "servers" && <Servers key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
-        {ready && ws && tab === "crm" && <Suspense fallback={<Loading />}><CRMWorkspace canManageMailPolicy={can("members.manage")} ws={ws.id} canManage={can("customers.manage")} canConfigure={can("catalog.manage")} myId={me.user.id} open={item} setOpen={setItem} go={setTab} /></Suspense>}
-        {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
-        {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
+        {ready && ws && tab === "crm" && <Suspense fallback={<Loading />}><CRMWorkspace canManageMailPolicy={can("members.manage")} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} myId={me.user.id} open={item} setOpen={setItem} go={setTab} /></Suspense>}
+        {ready && ws && tab === "people" && <People key={ws.id} ws={ws.id} canManage={canEditRecords} canConfigure={can("catalog.manage")} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
+        {ready && ws && tab === "query" && <Query key={ws.id} ws={ws.id} canManage={can("customers.manage")} canPublish={ws.role === "owner" || ws.role === "admin"} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "leads" && <Leads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "lists" && <Lists key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "lead-finder" && (

@@ -146,6 +146,38 @@ export function registerKnowledgeTools(
   );
 
   server.registerTool(
+    "get_reply_learning",
+    {
+      title: "Learning from past replies",
+      description: "The latest runs that learned answers from past support replies, or one by id: queued, running, done or failed, with conversations read and suggestions filed.",
+      inputSchema: { id: z.string().optional() },
+      annotations: read,
+    },
+    ({ id }) =>
+      call(() =>
+        id
+          ? gtm.GET("/v1/workspaces/{ws}/knowledge/reply-imports/{id}", { params: { path: { ...path(), id } } })
+          : gtm.GET("/v1/workspaces/{ws}/knowledge/reply-imports", { params: { path: path() } }),
+      ),
+  );
+
+  server.registerTool(
+    "get_website_import",
+    {
+      title: "Website imports into knowledge",
+      description: "The latest imports of the business's website into knowledge, or one by id: queued, running, done or failed, with pages added, updated and left out.",
+      inputSchema: { id: z.string().optional() },
+      annotations: read,
+    },
+    ({ id }) =>
+      call(() =>
+        id
+          ? gtm.GET("/v1/workspaces/{ws}/knowledge/website-imports/{id}", { params: { path: { ...path(), id } } })
+          : gtm.GET("/v1/workspaces/{ws}/knowledge/website-imports", { params: { path: path() } }),
+      ),
+  );
+
+  server.registerTool(
     "list_knowledge_suggestions",
     {
       title: "Knowledge waiting for review",
@@ -199,6 +231,42 @@ export function registerKnowledgeTools(
   );
 
   if (readOnly) return;
+
+  server.registerTool(
+    "import_website_to_knowledge",
+    {
+      title: "Import the website into knowledge",
+      description:
+        "Reads up to max_pages pages of the business's website (url, else the brand's or company's website) and keeps each page with enough words as an " +
+        "article in a Website folder that AI answers use. It reads the sitemaps (also those robots.txt names), and after the first import the site is " +
+        "re-checked every day: changed pages update, new ones are added, removed ones unpublished. It runs in the background: get_website_import says when it's done.",
+      inputSchema: {
+        url: z.string().max(2000).optional(),
+        brand: z.string().optional().describe("A brand's id or handle."),
+        max_pages: z.number().int().min(1).max(500).optional(),
+        publish: z.boolean().optional().describe("False keeps the articles as drafts for a person to go through first."),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/website-imports", { params: { path: path() }, body })),
+  );
+
+  server.registerTool(
+    "learn_knowledge_from_replies",
+    {
+      title: "Learn answers from past support replies",
+      description:
+        "Reads the support conversations closed in the last days (90 by default) and files the general answers the team gave as suggestions in " +
+        "Knowledge → Review, one per question, with the workspace's own AI. Nothing is published until a person approves it. It runs in the " +
+        "background: get_reply_learning says when it's done.",
+      inputSchema: {
+        brand: z.string().optional().describe("A brand's id or handle; every conversation when left out."),
+        days: z.number().int().min(1).max(365).optional(),
+      },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/knowledge/reply-imports", { params: { path: path() }, body })),
+  );
 
   server.registerTool(
     "suggest_knowledge",

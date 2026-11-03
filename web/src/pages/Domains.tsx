@@ -366,15 +366,11 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                 )}
               </div>
               <TrackingSteps t={t} fallback={fallback} />
-              {t.status !== "verified" && (
+              {t.status !== "verified" && !justApproved(t) && (
                 <>
                   <div className="flex flex-wrap items-center gap-2 rounded bg-muted/50 px-2 py-1.5 font-mono text-xs">
                     <span className="text-muted-foreground">CNAME</span> <span>{t.domain}</span> <span className="text-muted-foreground">→</span> <span>{t.target}</span> <Copy text={t.target} />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    On Cloudflare, set Proxy status to DNS only (the grey cloud), or the record can't be seen. After changing it, wait 5 minutes before you check again.{" "}
-                    <a className="underline" href="https://outflare.ai/docs/guides/tracking-domains/#common-mistakes" target="_blank" rel="noreferrer" onClick={() => track("ui.docs_opened", { tab: "domains", from: "tracking_cname" })}>Common mistakes</a>
-                  </p>
                   <TrackingDNS ws={ws} t={t} canManage={canManage} reload={load} />
                 </>
               )}
@@ -647,12 +643,24 @@ function SendingDNSWays({ ws, d, canManage, reload, records, dkim }: { ws: strin
 
 type TrackingStep = { label: string; detail: ReactNode; state: "done" | "now" | "waiting" | "failed" | "todo" };
 
+// justApproved: the record was approved at the DNS provider in the last 15
+// minutes and Outflare hasn't seen it yet. The card shows it being looked
+// for, not the record and the ways to add it again, nor a lookup's error
+// from before the record was there.
+function justApproved(t: TrackingDomain) {
+  const run = t.dns_install;
+  return t.status !== "verified" && !!run?.provider && run.status === "done" && Date.now() - Date.parse(run.at) < 15 * 60_000;
+}
+
 // Where a tracking domain is on its way to being used, step by step, and
 // whether the next move is the person's or Outflare's.
 function trackingSteps(t: TrackingDomain, fallback: string): TrackingStep[] {
   const found = t.status === "verified";
   const https = t.https_status;
-  const steps: TrackingStep[] = [
+  const steps: TrackingStep[] = justApproved(t) ? [
+    { label: "Add the DNS record", detail: <>Added in {t.dns_install?.provider}.</>, state: "done" },
+    { label: "Outflare finds it", detail: "Checking DNS now. This usually takes under a minute, and this page updates on its own.", state: "waiting" },
+  ] : [
     found
       ? { label: "Add the DNS record", detail: <>{t.domain} points to {t.target}.</>, state: "done" }
       : t.status === "failed"
@@ -667,7 +675,7 @@ function trackingSteps(t: TrackingDomain, fallback: string): TrackingStep[] {
       ? { label: "HTTPS certificate", detail: "Issued.", state: "done" }
       : https === "failed"
         ? { label: "HTTPS certificate", detail: <>{t.https_error || "It couldn't be issued."} Press Check now to try again.</>, state: "failed" }
-        : { label: "HTTPS certificate", detail: "Nothing to do: it's being issued, usually within a few minutes. This page updates on its own.", state: "waiting" });
+        : { label: "HTTPS certificate", detail: "Nothing to do: it's being issued, usually within a few minutes. Outflare checks every 2 minutes and this page updates on its own.", state: "waiting" });
   }
   steps.push(trackingReady(t)
     ? { label: "In use", detail: <>New emails' links use {t.domain}.</>, state: "done" }
@@ -706,7 +714,10 @@ function TrackingDNS({ ws, t, canManage, reload }: { ws: string; t: TrackingDoma
     <DNSWays ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id }} connections={t.dns_connections} canManage={canManage} reload={reload}
       records={records} run={t.dns_install} {...dnsHelp(t.domain, records, "so links in our emails use our own domain")}
       used={(way, how) => track("ui.dns_one_click_used", { where: "tracking_domain", way, how })}
-      manual={<>Add the CNAME above where {t.domain}'s DNS is managed, DNS only (not proxied), then press Check now.</>}
+      manual={<>
+        Add the CNAME above where {t.domain}'s DNS is managed, then press Check now. On Cloudflare, set Proxy status to DNS only (the grey cloud), or the record can't be seen; after changing it, wait 5 minutes before you check again.{" "}
+        <a className="underline" href="https://outflare.ai/docs/guides/tracking-domains/#common-mistakes" target="_blank" rel="noreferrer" onClick={() => track("ui.docs_opened", { tab: "domains", from: "tracking_cname" })}>Common mistakes</a>
+      </>}
       intro={<>Connect the Cloudflare account {t.domain} is on.</>}
       after="Then Outflare looks for it on its own over the next hour."
       onAdd={async (integration) => {

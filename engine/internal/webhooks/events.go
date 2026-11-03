@@ -105,6 +105,11 @@ var Catalog = []Event{
 	{"ai_budget.reached", "ai", "AI calls this month reached the workspace's monthly AI limit, or one tool's limit, so Outflare makes no more of those calls until next month or a higher limit. data has task, level (100), limit_cents, spent_cents and month."},
 	{"connection_limit.warned", "connectors", "A paid connection (SEO data, lead data, email verification, page reads) used 80% of its daily or monthly usage limit. data has integration_id, connector, period (day or month), period_start, level (80), unit (USD, credit, API unit, token), limit, used and hard_stop; GET .../integrations/{id}/usage has the detail."},
 	{"connection_limit.reached", "connectors", "A paid connection reached its daily or monthly usage limit, so with hard_stop Outflare makes no more calls through it until the next day or month, or a higher limit. data has the same fields as connection_limit.warned, with level 100."},
+	// Paid ads management
+	{"ad_campaign.paused", "ads", "A person, or an agent within its grants, asked to pause a campaign on the workspace's own ad account; the job that does it is queued. data has change_id, campaign_id, external_id, connector, brand_id, before and after."},
+	{"ad_campaign.resumed", "ads", "A paused campaign was asked to run again. data as ad_campaign.paused."},
+	{"ad_campaign.budget_changed", "ads", "A campaign's daily budget was asked to change. data as ad_campaign.paused, with after.daily_budget_micros."},
+	{"ads.paused_all", "ads", "Every active campaign of a brand was asked to pause at once (the kill switch). data has batch_id, brand_id, campaigns (how many) and skipped_platforms (connectors that can't be changed yet)."},
 	// Experiments
 	{"experiment.started", "experiments", "An SEO experiment started measuring: its site deployed, or a person said when the change went live. data has site_id, by (deploy or person), deploy_id and changed_at."},
 	{"experiment.concluded", "experiments", "An SEO experiment ended with a result. data has site_id, design, metric, verdict (better, worse, no_clear_change or too_early), lift, p_value, days_measured and treatment_pages."},
@@ -199,6 +204,8 @@ var Catalog = []Event{
 	{"rule.archived", "rules", "A rule was archived for good. Its firings stay."},
 	{"rule.fired", "rules", "A rule fired for a record and emitted its event on the record's timeline. data has record_id, event (the emitted event's name), event_id, trigger, depth and rule_version. Fires once per record and episode."},
 	{"lifecycle.moved", "rules", "A company or person moved to another lifecycle stage for a product (docs/product-lifecycle.md). The target is the record; data has product_id, level (company or person), move, kind (event, usage or inactivity), from_stage, to_stage, event (the emitted event's name) and event_id. Fires once per cause."},
+	{"transaction.created", "customers", "A payment, refund, chargeback or credit was recorded for a brand, from a billing connector or POST .../transactions (docs/transactions.md). The target is the transaction; data has kind, status, amount_minor, currency, brand_amount_minor (null until the day's rate is known), brand_currency, source, source_id, record_id, product_id, refund_of and brand_id. Fires once per transaction."},
+	{"transaction.updated", "customers", "A transaction's status changed, such as a pending payment that succeeded. data is as for transaction.created, with from_status."},
 	// Setup and install health
 	{"brand_setup.installed", "setup", "A one-click install on a brand's setup checklist finished: the website script through Tag Manager, or a DNS record through the DNS host. data has brand_id, step, method and integration_id."},
 	{"brand_setup.install_failed", "setup", "A one-click install on a brand's setup checklist failed. data has brand_id, step, method and integration_id; GET .../brands/{brand}/setup says why."},

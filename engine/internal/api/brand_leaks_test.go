@@ -425,6 +425,8 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, "https://bravo.example/"
 	case "emit_event":
 		return cast, "bravo.emitted"
+	case "currency", "brand_currency":
+		return cast, "USD"
 	}
 	if tbl == "support_chat_widgets" && c.name == "key" {
 		return cast, "ofw_bravobravobravobravobrav"

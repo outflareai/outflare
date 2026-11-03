@@ -112,8 +112,7 @@ func (s *Service) email(ctx context.Context, job jobs.Job, d delivery, r Row) er
 		return skip("daily_cap")
 	}
 	v := Describe(ctx, s.Pool, r)
-	base := s.PublicURL + "/" + d.slug + "/"
-	if err := s.Send(ctx, Message(email, d.workspace, base+v.Path, base+"alerts", v)); err != nil {
+	if err := s.Send(ctx, Message(email, d.workspace, URL(s.PublicURL, d.slug, v.Path), URL(s.PublicURL, d.slug, "alerts"), v)); err != nil {
 		track.Fail(ctx, s.Log, ev, "email_failed", err)
 		if job.Attempt >= job.MaxAttempts {
 			_ = s.finish(ctx, d, "failed", "email_failed")
@@ -155,7 +154,7 @@ func (s *Service) post(ctx context.Context, job jobs.Job, d delivery, r Row) err
 		return fail("connector_needed", errors.New("the connection can't post alerts"))
 	}
 	v := Describe(ctx, s.Pool, r)
-	notice := connectors.Notice{Title: v.Title, Text: v.Text, URL: s.PublicURL + "/" + d.slug + "/" + v.Path}
+	notice := connectors.Notice{Title: v.Title, Text: v.Text, URL: URL(s.PublicURL, d.slug, v.Path)}
 	err = n.Post(ctx, o.Client, o.Creds, d.target, notice)
 	_ = s.Store.Checked(ctx, s.Pool, d.ws, o.ID, nil, err)
 	if err != nil {

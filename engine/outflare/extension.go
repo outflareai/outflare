@@ -16,6 +16,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/pipeline"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/telemetry"
@@ -57,6 +58,7 @@ type Host struct {
 	menuLinks       []api.MenuLinks
 	aiTools         []api.AITool
 	trackingCerts   api.TrackingCerts
+	quota           quota.Checker
 	store           *connectors.Store
 	server          *api.Server
 	emailFinder     *emailfind.Service
@@ -174,6 +176,37 @@ func (h *Host) AddAITool(t AITool) {
 // certificate is active.
 func (h *Host) SetTrackingCerts(certs TrackingCerts) {
 	h.trackingCerts = certs
+}
+
+// Quota decides whether a workspace may have more of something before the
+// engine adds it: a brand, a mailbox, a tracking domain, customer records,
+// or another email sent. Allow returns nil to allow, a *QuotaError to
+// refuse (the API answers 402 quota_exceeded with its Message; a refused
+// email waits an hour and tries again; a CRM import ends with the
+// reason), or any other error, which is logged and allowed. It is asked
+// often, so answer from memory or one quick query.
+type Quota = quota.Checker
+
+// QuotaError is a refusal: Resource is the resource asked about, Message
+// what stopped and what to do about it, shown to the person.
+type QuotaError = quota.Error
+
+// The resources a Quota is asked about. n is how many would be added: for
+// records and mailboxes the most an import could add, since some may
+// already be there.
+const (
+	QuotaBrands          = quota.Brands
+	QuotaMailboxes       = quota.Mailboxes
+	QuotaTrackingDomains = quota.TrackingDomains
+	QuotaRecords         = quota.Records
+	QuotaEmailsSent      = quota.EmailsSent
+	QuotaTrackedEvents   = quota.TrackedEvents
+)
+
+// SetQuota lets q refuse work a workspace isn't allowed more of. Without
+// one, as on a self-hosted server, everything is allowed.
+func (h *Host) SetQuota(q Quota) {
+	h.quota = q
 }
 
 // DisableTelemetry stops the daily anonymous usage report and update check

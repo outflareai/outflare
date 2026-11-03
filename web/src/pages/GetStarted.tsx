@@ -143,7 +143,7 @@ export function GetStarted({ ws, wsName, from, go }: { ws: string; wsName: strin
                     {step.id === "website" && <WebsiteStep ws={ws} brand={o.brand ?? null} onChange={load} onBack={() => setAt("brand")} />}
                     {step.id === "connect" && <ToolsStep ws={ws} goal={o.goal} onChange={load} go={go} />}
                     {step.id === "community" && <CommunityLinks step onClicked={load} />}
-                    {step.id === "mission" && <MissionStep ws={ws} goal={o.goal} aiDone={!!o.steps.find((s) => s.id === "ai")?.done} onBack={() => setAt("ai")} onChange={load} go={finish} />}
+                    {step.id === "mission" && <MissionStep ws={ws} goal={o.goal} aiDone={!!o.steps.find((s) => s.id === "ai")?.done} onBack={() => setAt("ai")} go={finish} />}
                     <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                       <button onClick={() => setAt(index > 0 ? steps[index - 1].id : at)} disabled={index === 0} className="text-[13px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:invisible">Back</button>
                       <div className="flex items-center gap-4">
@@ -172,11 +172,11 @@ const headings: Partial<Record<StepId, string>> = {
   website: "Connect your website",
   connect: "Connect what it needs",
   community: "Star and follow Outflare",
-  mission: "Give it a goal",
+  mission: "Start your first run",
 };
 
 // The goals a workspace can start with: the tools each needs and the
-// first mission suggested for it.
+// first goal suggested for it, in plain words.
 const goals: { id: Goal; title: string; detail: string; icon: IconName; categories: ConnectorCategory[]; first: string[]; mission: string }[] = [
   { id: "outreach", title: "Find and email new customers", detail: "Build a list of people who fit, then reach them from your own mailboxes.", icon: "sequences", categories: ["crm", "data", "email_verification", "sequencer"], first: ["hubspot", "apollo"], mission: "Find 50 companies that look like our best customers and draft a three-email sequence to reach them" },
   { id: "search", title: "Grow search traffic", detail: "See which pages win and lose in search, and what to fix.", icon: "seo", categories: ["analytics", "seo"], first: ["google_search_console", "google_analytics"], mission: "Find the pages losing search traffic over the last 90 days and suggest a fix for each" },
@@ -347,64 +347,34 @@ function ToolsStep({ ws, goal, onChange, go }: { ws: string; goal: Goal | null; 
 const toolCategories: ConnectorCategory[] = ["analytics", "crm", "data", "email_verification", "sequencer", "calendar", "seo", "notification"];
 const rank = (c: Connector) => (toolCategories.indexOf(c.category) + 1 || 99);
 
-// The first mission: a goal in plain words, already written for the goal
-// picked, that the workspace's AI turns into a plan to approve. With no AI
-// key but an AI app connected, the app is asked instead.
-function MissionStep({ ws, goal, aiDone, onBack, onChange, go }: { ws: string; goal: Goal | null; aiDone: boolean; onBack: () => void; onChange: () => void; go: (t: Tab) => void }) {
-  const [text, setText] = useState(goals.find((x) => x.id === goal)?.mission ?? goals[0].mission);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  // Without an AI key it says so before anything is typed or pressed.
-  const [needsKey, setNeedsKey] = useState(!aiDone);
-  const [planned, setPlanned] = useState(false);
+// The first run: the goal picked, in plain words, and the way to start on
+// it: a playbook run by Outflare's agent on the workspace's AI key, or the
+// goal handed to an AI app that is already connected.
+function MissionStep({ ws, goal, aiDone, onBack, go }: { ws: string; goal: Goal | null; aiDone: boolean; onBack: () => void; go: (t: Tab) => void }) {
+  const text = goals.find((x) => x.id === goal)?.mission ?? goals[0].mission;
   const apps = useAgentApps(ws);
   const app = apps?.[0];
-
-  async function plan(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    const { data, error, response } = await api.POST("/v1/workspaces/{ws}/missions/plan", { params: { path: { ws } }, body: { goal: text.trim() } });
-    setBusy(false);
-    const code = (error as { error?: { code?: string } } | undefined)?.error?.code;
-    if (response.status === 409 && code === "connector_needed") return setNeedsKey(true);
-    if (error || !data) return setError(errorMessage(error));
-    setPlanned(true);
-    onChange();
-  }
-
-  if (planned) {
-    return (
-      <div className="space-y-4 rounded-lg border bg-card p-4 shadow-xs">
-        <p className="flex items-center gap-2 font-medium"><Icon name="check" className="size-4 text-green-600 dark:text-green-400" />The plan is drafted.</p>
-        <p className="text-[13px] text-muted-foreground">Review its steps, limits and the tools it asks for. Nothing runs until you approve it.</p>
-        <Button onClick={() => go("missions")}>Review the plan</Button>
-      </div>
-    );
-  }
-
   return (
-    <form onSubmit={plan} className="space-y-3">
-      <textarea className={`${field} min-h-24 w-full text-[15px]`} value={text} onChange={(e) => setText(e.target.value)} maxLength={2000} aria-label="Goal" disabled={busy} />
-      {busy && <p className="text-[13px] text-muted-foreground">Your AI is drafting the plan. This takes up to a minute.</p>}
-      {needsKey && (
+    <div className="space-y-3">
+      <blockquote className="rounded-md border bg-card px-3 py-2.5 text-[15px]">{text}</blockquote>
+      <p className="text-[13px] text-muted-foreground">Pick the playbook for it. Outflare's agent carries it out in turns on your AI model, and every change it makes waits for you unless you say otherwise. It is done once a run has started.</p>
+      {!aiDone && (
         <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px]">
           {app ? (
             <>
-              <p>Outflare's own agent needs your AI key to plan this. Or ask {app.name || appLabels[app.app]}, which is already connected:</p>
+              <p>Outflare's own agent needs your AI key to run it. Or ask {app.name || appLabels[app.app]}, which is already connected:</p>
               <CopyGoal text={text} />
             </>
           ) : (
-            <p>Outflare's own agent needs your AI key to plan this. <button type="button" className="underline underline-offset-2" onClick={onBack}>Connect your AI</button> first.</p>
+            <p>Outflare's own agent needs your AI key to run it. <button type="button" className="underline underline-offset-2" onClick={onBack}>Connect your AI</button> first.</p>
           )}
         </div>
       )}
-      <ErrorText>{error}</ErrorText>
       <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={busy || !text.trim() || (!aiDone && needsKey)}>{busy ? "Planning…" : "Draft the plan"}</Button>
+        <Button type="button" onClick={() => go("playbooks")}>Choose a playbook</Button>
         <span className="text-[12px] text-muted-foreground">Nothing is sent until you approve it.</span>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -414,7 +384,7 @@ function CopyGoal({ text }: { text: string }) {
     <Button
       type="button"
       onClick={async () => {
-        await navigator.clipboard?.writeText(`Using Outflare, plan a mission for this goal and show me the plan before anything runs: ${text}`);
+        await navigator.clipboard?.writeText(`Using Outflare, work toward this goal and show me each change before it runs: ${text}`);
         track("ui.copied");
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);

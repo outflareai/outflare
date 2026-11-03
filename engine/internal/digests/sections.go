@@ -80,6 +80,7 @@ func init() {
 	Register(Builder{ID: "sites", Title: "Site health", Build: sites})
 	Register(Builder{ID: "outreach", Title: "Outreach", Build: outreach})
 	Register(Builder{ID: "lifecycle", Title: "Lifecycle email", Build: lifecycle})
+	Register(Builder{ID: "support", Title: "Support", Build: supportSection})
 	Register(Builder{ID: "missions", Title: "Missions", Build: missions})
 }
 
@@ -327,6 +328,33 @@ func lifecycle(ctx context.Context, q Querier, ws string, p Period) (Section, er
 		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND NOT test AND status IN ('bounced', 'complained') AND sent_at >= $2 AND sent_at < $3)::float8`,
 		[][2]string{{"lifecycle_sent", "Sent"}, {"lifecycle_opened", "Opened"}, {"lifecycle_bounced", "Bounced or marked spam"}})
 	return s, err
+}
+
+// supportSection is the support inbox and its assistant: conversations,
+// what the assistant answered or left to the team, and answers it found
+// that wait for a person to approve them.
+func supportSection(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+	var s Section
+	var err error
+	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
+		(SELECT count(*) FROM support_conversations WHERE workspace_id = $1 AND first_message_at >= $2 AND first_message_at < $3)::float8,
+		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND action IN ('answer', 'clarify') AND created_at >= $2 AND created_at < $3)::float8,
+		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND action = 'handoff' AND created_at >= $2 AND created_at < $3)::float8`,
+		[][2]string{{"support_conversations", "Conversations"}, {"support_assistant_answered", "Answered by the assistant"},
+			{"support_assistant_handed_off", "Left to your team by the assistant"}})
+	if err != nil {
+		return s, err
+	}
+	var waiting float64
+	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM knowledge_suggestions WHERE workspace_id = $1 AND status = 'pending'`, ws).Scan(&waiting); err != nil {
+		return s, err
+	}
+	s.Metrics = append(s.Metrics, Metric{Key: "knowledge_suggestions_waiting", Label: "Answers waiting for review", Value: waiting})
+	if waiting > 0 {
+		s.Items = append(s.Items, Item{Text: plural(int(waiting), "suggested answer is", "suggested answers are") +
+			" waiting for review in Knowledge. Approve them and the assistant answers those questions next time.", Tab: "knowledge", Tone: "neutral"})
+	}
+	return s, nil
 }
 
 func missions(ctx context.Context, q Querier, ws string, p Period) (Section, error) {

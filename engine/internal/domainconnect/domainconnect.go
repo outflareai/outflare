@@ -182,11 +182,17 @@ func (c *Client) discover(ctx context.Context, name string) (Zone, error) {
 	if err != nil {
 		return Zone{}, unavailable(ReasonNoProvider, err)
 	}
+	// failed is the first lookup that errored. Some hosting resolvers
+	// answer "server misbehaving" instead of "no such name" for a level
+	// below the zone that has no record, so the walk goes on: a record
+	// higher up still names the provider. Only when none does is the
+	// error the answer, so an outage isn't taken for no provider.
+	var failed error
 	for cand := name; ; {
 		txts, err := c.Resolver.LookupTXT(ctx, "_domainconnect."+cand)
 		var dnsErr *net.DNSError
-		if err != nil && !(errors.As(err, &dnsErr) && dnsErr.IsNotFound) {
-			return Zone{}, unavailable(ReasonLookupFailed, err)
+		if err != nil && !(errors.As(err, &dnsErr) && dnsErr.IsNotFound) && failed == nil {
+			failed = err
 		}
 		if len(txts) > 0 {
 			s, err := c.settings(ctx, strings.TrimSpace(txts[0]), cand)
@@ -196,6 +202,9 @@ func (c *Client) discover(ctx context.Context, name string) (Zone, error) {
 			return Zone{Domain: cand, Host: strings.TrimSuffix(strings.TrimSuffix(name, cand), "."), Settings: s}, nil
 		}
 		if cand == top {
+			if failed != nil {
+				return Zone{}, unavailable(ReasonLookupFailed, failed)
+			}
 			return Zone{}, unavailable(ReasonNoProvider, nil)
 		}
 		cand = cand[strings.IndexByte(cand, '.')+1:]

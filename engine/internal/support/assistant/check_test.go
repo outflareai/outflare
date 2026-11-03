@@ -17,6 +17,7 @@ func TestStop(t *testing.T) {
 		{"no-reply sender", Before{Body: "Your invoice", From: "no-reply@billing.example"}, "no_reply_sender", false},
 		{"a teammate is on it", Before{Body: "Thanks!", TeamReplied: true}, "team_handling", false},
 		{"enough AI replies", Before{Body: "Still broken", AIReplies: 3}, "too_many_replies", true},
+		{"said an answer didn't help", Before{Body: "Thanks", NotHelpful: true}, "not_helpful", true},
 		{"asks for a person", Before{Body: "Can I talk to a real person please"}, "asked_for_person", true},
 		{"a chargeback", Before{Body: "I'll file a chargeback if this isn't fixed"}, "sensitive_topic", true},
 		{"data deletion", Before{Body: "Please delete my data under GDPR"}, "sensitive_topic", true},

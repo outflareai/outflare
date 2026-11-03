@@ -32,6 +32,10 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `customer_events`, `consents`, `subscriptions` | `customers.read` | Product events, the consent log, payment subscriptions (`monthly_minor` is MRR in minor units) |
 | `rules`, `rule_firings` | `customers.read` | The brand's [rules](rules.md), and each time one fired for a record |
 | `products`, `lifecycle_states`, `lifecycle_moves`, `lifecycle_overall` | `customers.read` | The brand's [products](product-lifecycle.md), where each company and person stands with each, every move between stages, and each company's overall status |
+| `transactions` | `customers.read` | [Payments, refunds, chargebacks and credits](transactions.md), in their currency and the brand's |
+| `smart_list_changes` | `customers.read` | Who joined and left each [smart or static list](lists.md#history), and when |
+| `metrics`, `metric_values` | `customers.read` | The brand's [live metrics](metrics.md), and each company's and person's value, overall and per product |
+| `bulk_edits` | `customers.read` | [Bulk edits](bulk-edits.md) owners ran, what they changed and how many records |
 | `journeys`, `journey_runs` | `customers.read` | The brand's journeys (`steps` counts the live version's steps), and each person's way through one |
 | `brands` | `workspace.read` | The brand itself |
 | `leads` | `leads.read` | The brand's leads for outreach |
@@ -42,6 +46,7 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `visits` | `analytics.read` | Website visits from the Outflare site snippet |
 | `social_posts` | `social.read` | Posts on the workspace's own social accounts |
 | `reviews`, `review_page_days` | `social.read` | [Reviews](reviews.md) of the brands on Trustpilot, G2, Capterra and Google, and each review page's numbers day by day |
+| `backlinks`, `link_prospects` | `seo.read` | [Link building](seo.md): links from other sites to the brands' websites, live or lost, with each linking domain's strength, traffic and spam score; and the pages that could link, with how each was found (`method`), its score and where its pitch stands (`stage`), such as `select method, count(*) filter (where live_at is not null) from link_prospects group by 1` |
 
 jsonb columns such as `attributes` are read with `->>`: `select attributes->>'plan' as plan, count(*) from people group by 1`.
 
@@ -94,6 +99,10 @@ Saving needs `customers.manage`; reading and running them `customers.read`, the 
 | `POST .../queries/{saved_query}/run` | Run the current version, or `version`; `limit` as for Query. It only reads, so an agent kept to missions may run it outside one |
 
 Agents use the MCP tools `list_saved_queries`, `get_saved_query`, `run_saved_query` and `save_query`.
+
+### Published endpoints
+
+Owners and admins can publish a saved query as an endpoint that another system calls with a brand API token holding only `query.endpoints`, with parameters bound as `$1`, `$2`, …, a row cap, a rate limit per token and every call logged. See [Published query endpoints](query-endpoints.md).
 
 ### CSV downloads
 

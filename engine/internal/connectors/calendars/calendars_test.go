@@ -15,7 +15,7 @@ func fake(t *testing.T, fn http.HandlerFunc) *c.Client {
 	t.Helper()
 	srv := httptest.NewServer(fn)
 	t.Cleanup(srv.Close)
-	return &c.Client{BaseURLs: map[string]string{"google_calendar": srv.URL, "outlook_calendar": srv.URL, "calendly": srv.URL, "cal_com": srv.URL}}
+	return &c.Client{BaseURLs: map[string]string{"google_calendar": srv.URL, "google.userinfo": srv.URL, "outlook_calendar": srv.URL, "calendly": srv.URL, "cal_com": srv.URL}}
 }
 
 func TestGooglePagesThenKeepsSyncToken(t *testing.T) {
@@ -54,6 +54,28 @@ func TestGooglePagesThenKeepsSyncToken(t *testing.T) {
 	}
 	if _, err := (Google{}).Test(context.Background(), cl, c.Creds{"access_token": "bad"}); c.KindOf(err) != c.ErrAuth {
 		t.Fatalf("bad token: %v", err)
+	}
+}
+
+// The sign-in only grants calendar.events.readonly, under which Google
+// refuses GET /calendars/primary, so Test must not call it.
+func TestGoogleTestUsesOnlyEventsScope(t *testing.T) {
+	cl := fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/userinfo":
+			json.NewEncoder(w).Encode(map[string]string{"sub": "1", "email": "ana@acme.example"})
+		case "/calendars/primary/events":
+			json.NewEncoder(w).Encode(map[string]any{"summary": "ana@acme.example", "timeZone": "Europe/Berlin", "items": []any{}})
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	})
+	acct, err := Google{}.Test(context.Background(), cl, c.Creds{"access_token": "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.ID != "ana@acme.example" || acct.Email != "ana@acme.example" || acct.Details["time_zone"] != "Europe/Berlin" {
+		t.Fatalf("account: %+v", acct)
 	}
 }
 

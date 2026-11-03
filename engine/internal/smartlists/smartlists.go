@@ -55,6 +55,14 @@ const (
 //     field), compared like attribute: such as a journalist's outlet tier,
 //     outlet_tier. neq and not_exists hold when none of their companies
 //     matches.
+//   - product_stage: their lifecycle stage for product (a product's key or
+//     id) is (eq) or isn't (neq) this stage (docs/product-lifecycle.md).
+//     level is company (billing) or person (usage); by default the list's
+//     own kind of record: billing stages for a company list, usage stages
+//     for a people list.
+//
+// A list of companies (record_type account) tests the company: attribute,
+// event (the company's own events and its people's) and product_stage.
 type Rule struct {
 	Attribute        string `json:"attribute,omitempty"`
 	CompanyAttribute string `json:"company_attribute,omitempty"`
@@ -62,9 +70,18 @@ type Rule struct {
 	WithinDays       int    `json:"within_days,omitempty"`
 	InList           string `json:"in_list,omitempty"`
 	NewsSearch       string `json:"news_search,omitempty"`
+	ProductStage     string `json:"product_stage,omitempty"`
+	Product          string `json:"product,omitempty"`
+	Level            string `json:"level,omitempty"`
 	Op               string `json:"op"`
 	Value            any    `json:"value,omitempty"`
 }
+
+// Record types a list can hold.
+const (
+	People    = "person"
+	Companies = "account"
+)
 
 var (
 	fieldRE   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}(\.[a-z0-9_]{1,62})*$`)
@@ -74,8 +91,15 @@ var (
 	numericRE = `'^\s*-?[0-9]+(\.[0-9]+)?\s*$'`
 )
 
-// Check reports what is wrong with a list's rules, or "".
-func Check(rules []Rule, match string) string {
+// Check reports what is wrong with a people list's rules, or "".
+func Check(rules []Rule, match string) string { return CheckFor(People, rules, match) }
+
+// CheckFor reports what is wrong with the rules of a list of recordType,
+// or "".
+func CheckFor(recordType string, rules []Rule, match string) string {
+	if recordType != People && recordType != Companies {
+		return "record_type is person or account"
+	}
 	if match != "all" && match != "any" {
 		return "match is all or any"
 	}
@@ -83,7 +107,11 @@ func Check(rules []Rule, match string) string {
 		return fmt.Sprintf("a smart list has at most %d rules", MaxRules)
 	}
 	for i, r := range rules {
-		if msg := checkRule(r); msg != "" {
+		msg := checkRule(r)
+		if msg == "" && recordType == Companies && (r.CompanyAttribute != "" || r.InList != "" || r.NewsSearch != "") {
+			msg = "a company list tests attribute, event or product_stage"
+		}
+		if msg != "" {
 			return fmt.Sprintf("rule %d: %s", i+1, msg)
 		}
 	}
@@ -92,13 +120,31 @@ func Check(rules []Rule, match string) string {
 
 func checkRule(r Rule) string {
 	set := 0
-	for _, v := range []string{r.Attribute, r.CompanyAttribute, r.Event, r.InList, r.NewsSearch} {
+	for _, v := range []string{r.Attribute, r.CompanyAttribute, r.Event, r.InList, r.NewsSearch, r.ProductStage} {
 		if v != "" {
 			set++
 		}
 	}
 	if set != 1 {
-		return "each rule tests one of attribute, company_attribute, event, in_list or news_search"
+		return "each rule tests one of attribute, company_attribute, event, in_list, news_search or product_stage"
+	}
+	if r.ProductStage != "" {
+		switch {
+		case r.Product == "" || len(r.Product) > 200:
+			return "a product_stage rule names its product: a product's key or id"
+		case len(r.ProductStage) > 40:
+			return "product_stage is a stage's key, such as churned"
+		case r.Op != "eq" && r.Op != "neq":
+			return "a product_stage rule uses eq (is in the stage) or neq (isn't)"
+		case r.Level != "" && r.Level != "company" && r.Level != "person":
+			return "level is company or person"
+		case r.Value != nil || r.WithinDays != 0:
+			return "a product_stage rule takes no value or within_days"
+		}
+		return ""
+	}
+	if r.Product != "" || r.Level != "" {
+		return "product and level are only for product_stage rules"
 	}
 	if !ops[r.Op] {
 		return "op is eq, neq, gt, lt, contains, exists or not_exists"
@@ -195,7 +241,10 @@ func number(v any) (string, bool) {
 }
 
 // builder collects a statement's arguments.
-type builder struct{ args []any }
+type builder struct {
+	args       []any
+	recordType string
+}
 
 func (b *builder) arg(v any) string {
 	b.args = append(b.args, v)
@@ -207,8 +256,13 @@ func (b *builder) arg(v any) string {
 // in the list's brand or shared by every brand, who pass the rules. No
 // rules picks everyone. args is extended with the values it uses.
 func Where(rules []Rule, match string, brandID *string, args []any) (string, []any) {
-	b := &builder{args: args}
-	where := `r.workspace_id = $1 AND r.record_type = 'person' AND r.merged_into IS NULL AND r.archived_at IS NULL`
+	return WhereFor(People, rules, match, brandID, args)
+}
+
+// WhereFor is Where for a list of recordType (People or Companies).
+func WhereFor(recordType string, rules []Rule, match string, brandID *string, args []any) (string, []any) {
+	b := &builder{args: args, recordType: recordType}
+	where := `r.workspace_id = $1 AND r.record_type = ` + b.arg(recordType) + ` AND r.merged_into IS NULL AND r.archived_at IS NULL`
 	return b.where(where, rules, match, brandID)
 }
 
@@ -245,10 +299,31 @@ func (b *builder) where(where string, rules []Rule, match string, brandID *strin
 
 func (b *builder) rule(r Rule, eventBrand string) string {
 	switch {
+	case r.ProductStage != "":
+		level := r.Level
+		if level == "" {
+			level = "person"
+			if b.recordType == Companies {
+				level = "company"
+			}
+		}
+		sql := `EXISTS (SELECT 1 FROM lifecycle_states ls JOIN products p ON p.id = ls.product_id AND p.archived_at IS NULL
+			WHERE ls.workspace_id = $1 AND ls.record_id = r.id AND ls.level = ` + b.arg(level) + ` AND ls.stage = ` + b.arg(r.ProductStage) +
+			` AND (p.key = ` + b.arg(strings.ToLower(r.Product)) + ` OR p.id::text = ` + b.arg(strings.ToLower(r.Product)) + `))`
+		if r.Op == "neq" {
+			return `NOT ` + sql
+		}
+		return sql
 	case r.Event != "":
 		// Browser events can be sent by anyone with the site key, so
-		// they never put someone in a list, as in journeys.
-		sql := `EXISTS (SELECT 1 FROM customer_events e WHERE e.workspace_id = $1 AND e.record_id = r.id AND e.name = ` + b.arg(r.Event) +
+		// they never put someone in a list, as in journeys. A company
+		// counts its own events and its people's.
+		who := `e.record_id = r.id`
+		if b.recordType == Companies {
+			who = `(e.record_id = r.id OR e.account_id = r.id OR e.record_id IN (SELECT rr.from_id FROM record_relationships rr
+				WHERE rr.workspace_id = $1 AND rr.to_id = r.id AND rr.kind = 'companies' AND rr.valid_to IS NULL))`
+		}
+		sql := `EXISTS (SELECT 1 FROM customer_events e WHERE e.workspace_id = $1 AND ` + who + ` AND e.name = ` + b.arg(r.Event) +
 			` AND e.source <> 'browser'` + eventBrand
 		if r.WithinDays > 0 {
 			sql += ` AND e.occurred_at >= now() - make_interval(days => ` + b.arg(r.WithinDays) + `::int)`
@@ -359,7 +434,9 @@ type Person struct {
 }
 
 // personCols is a person's name and first verified email, from records r.
-const personCols = `r.id, r.name, COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = r.id AND i.namespace = 'email'
+// For a company it is the main domain.
+const personCols = `r.id, r.name, COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = r.id
+	AND i.namespace = CASE WHEN r.record_type = 'account' THEN 'domain' ELSE 'email' END
 	AND i.valid_to IS NULL ORDER BY i.verified DESC, i.valid_from, i.id LIMIT 1), '')`
 
 // Preview counts who the rules pick now and returns up to limit of them,
@@ -367,7 +444,12 @@ const personCols = `r.id, r.name, COALESCE((SELECT i.value FROM record_identitie
 //
 // seen limits it to some brands' people (Seen); nil counts everyone.
 func Preview(ctx context.Context, q Querier, ws string, rules []Rule, match string, brandID *string, seen []string, limit int) (int, []Person, error) {
-	where, args := Where(rules, match, brandID, []any{ws})
+	return PreviewFor(ctx, q, ws, People, rules, match, brandID, seen, limit)
+}
+
+// PreviewFor is Preview for a list of recordType.
+func PreviewFor(ctx context.Context, q Querier, ws, recordType string, rules []Rule, match string, brandID *string, seen []string, limit int) (int, []Person, error) {
+	where, args := WhereFor(recordType, rules, match, brandID, []any{ws})
 	more, args := Seen(seen, args)
 	where += more
 	var n int
@@ -436,12 +518,26 @@ var ErrGone = errors.New("smart list not found")
 // counts: they keep their place, hidden, so restoring them doesn't fire
 // the list's enter rules again.
 func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) {
+	return RefreshWith(ctx, tx, ws, listID, nil)
+}
+
+// ErrNeedsQuery means a query list was refreshed without its query's
+// records: the Service fetches them first (QueryIDs).
+var ErrNeedsQuery = errors.New("smart lists: a query list needs its query's records")
+
+// MaxQueryMembers is the most records a query list holds.
+const MaxQueryMembers = 50000
+
+// RefreshWith is Refresh for a list of any kind; ids are a query list's
+// records, from its saved query (nil for other kinds). Records that are
+// not the list's kind, brand, or live are left out.
+func RefreshWith(ctx context.Context, tx pgx.Tx, ws, listID string, ids []string) (Result, error) {
 	var res Result
 	var raw []byte
-	var match, kind string
+	var match, kind, recordType string
 	var brandID *string
-	err := tx.QueryRow(ctx, `SELECT rules, match, brand_id, kind FROM smart_lists WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws, listID).
-		Scan(&raw, &match, &brandID, &kind)
+	err := tx.QueryRow(ctx, `SELECT rules, match, brand_id, kind, record_type FROM smart_lists WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, ws, listID).
+		Scan(&raw, &match, &brandID, &kind, &recordType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return res, ErrGone
 	}
@@ -453,6 +549,9 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 		err := tx.QueryRow(ctx, `UPDATE smart_lists SET members = (SELECT count(*) FROM static_list_members WHERE list_id = $2), error_code = NULL
 			WHERE workspace_id = $1 AND id = $2 RETURNING members`, ws, listID).Scan(&res.Members)
 		return res, err
+	}
+	if kind == KindQuery && ids == nil {
+		return res, ErrNeedsQuery
 	}
 	var rules []Rule
 	if err := json.Unmarshal(raw, &rules); err != nil {
@@ -471,7 +570,13 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 	if watched {
 		who = `(SELECT COALESCE(array_agg(record_id::text), '{}') FROM added), (SELECT COALESCE(array_agg(record_id::text), '{}') FROM gone)`
 	}
-	where, args := Where(rules, match, brandID, []any{ws})
+	where, args := WhereFor(recordType, rules, match, brandID, []any{ws})
+	if kind == KindQuery {
+		// The query's records, kept to the list's kind and brand, live.
+		args = []any{ws, ids, recordType, brandID}
+		where = `r.workspace_id = $1 AND r.id = ANY ($2::uuid[]) AND r.record_type = $3 AND r.merged_into IS NULL AND r.archived_at IS NULL
+			AND r.deleted_at IS NULL AND ($4::uuid IS NULL OR r.brand_id IS NULL OR r.brand_id = $4)`
+	}
 	args = append(args, listID)
 	l := "$" + strconv.Itoa(len(args))
 	var joined, left []string
@@ -480,7 +585,10 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 			AND NOT EXISTS (SELECT 1 FROM want w WHERE w.id = m.record_id)
 			AND NOT EXISTS (SELECT 1 FROM records d WHERE d.id = m.record_id AND d.deleted_at IS NOT NULL) RETURNING m.record_id),
 		added AS (INSERT INTO smart_list_members (workspace_id, list_id, record_id) SELECT $1, `+l+`, id FROM want
-			ON CONFLICT (list_id, record_id) DO NOTHING RETURNING record_id)
+			ON CONFLICT (list_id, record_id) DO NOTHING RETURNING record_id),
+		history AS (INSERT INTO smart_list_changes (workspace_id, brand_id, list_id, record_id, change)
+			SELECT $1, COALESCE((SELECT sl.brand_id FROM smart_lists sl WHERE sl.id = `+l+`), outflare_first_brand($1)), `+l+`, x.record_id, x.change
+			FROM (SELECT record_id, 'enter' AS change FROM added UNION ALL SELECT record_id, 'leave' FROM gone) x)
 		SELECT (SELECT count(*) FROM added)::int, (SELECT count(*) FROM gone)::int, (SELECT count(*) FROM want)::int, `+who, args...).
 		Scan(&res.Joined, &res.Left, &res.Members, &joined, &left)
 	if err != nil {
@@ -499,6 +607,16 @@ func Refresh(ctx context.Context, tx pgx.Tx, ws, listID string) (Result, error) 
 		ws, listID, res.Members)
 	return res, err
 }
+
+// QueryFailed is a query list's query that could not give its records:
+// the list keeps its members and shows Code. It is final, not retried.
+type QueryFailed struct{ Code, Message string }
+
+func (e QueryFailed) Error() string { return "smart lists: query: " + e.Code + ": " + e.Message }
+
+// QueryIDs fetches a query list's records: its saved query's record_id
+// (or id) column. The API sets it, since only the API runs saved queries.
+type QueryIDs func(ctx context.Context, ws, listID string) ([]string, error)
 
 type payload struct {
 	List   string `json:"list_id"`
@@ -521,6 +639,8 @@ func Enqueue(ctx context.Context, q jobs.Querier, ws, listID string, manual bool
 type Service struct {
 	Pool *pgxpool.Pool
 	Log  *slog.Logger
+	// Query fetches query lists' records; without it they don't refresh.
+	Query QueryIDs
 }
 
 // Register adds the job handler.
@@ -534,11 +654,32 @@ func (s *Service) job(ctx context.Context, job jobs.Job) error {
 	ws := *job.WorkspaceID
 	start := time.Now()
 	var res Result
-	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		var err error
-		res, err = Refresh(ctx, tx, ws, p.List)
+	// A query list runs its query first, outside the transaction: the query
+	// has its own read-only connection. A failed query leaves the members
+	// as they were, with the list's error_code saying why.
+	var ids []string
+	var kind string
+	if err := s.Pool.QueryRow(ctx, `SELECT kind FROM smart_lists WHERE workspace_id = $1 AND id = $2`, ws, p.List).Scan(&kind); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
 		return err
-	})
+	}
+	var queryErr error
+	if kind == KindQuery {
+		if s.Query == nil {
+			queryErr = ErrNeedsQuery
+		} else if ids, queryErr = s.Query(ctx, ws, p.List); queryErr == nil && ids == nil {
+			ids = []string{}
+		}
+	}
+	err := queryErr
+	if err == nil {
+		err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+			var err error
+			res, err = RefreshWith(ctx, tx, ws, p.List, ids)
+			return err
+		})
+	}
 	if errors.Is(err, ErrGone) {
 		return nil
 	}
@@ -548,12 +689,21 @@ func (s *Service) job(ctx context.Context, job jobs.Job) error {
 	if err != nil {
 		code := "internal"
 		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "57014" {
+		var qf QueryFailed
+		switch {
+		case errors.As(err, &pg) && pg.Code == "57014":
 			code = "query_timeout"
+		case errors.As(err, &qf):
+			code = qf.Code
 		}
 		track.Fail(ctx, s.Log, ev, code, err)
 		if _, uerr := s.Pool.Exec(ctx, `UPDATE smart_lists SET error_code = $3 WHERE workspace_id = $1 AND id = $2`, ws, p.List, code); uerr != nil {
 			s.Log.Error("smart lists: record refresh error", "err", uerr)
+		}
+		if errors.As(err, &qf) {
+			// Running it again now gives the same answer; the next sweep
+			// tries again.
+			return fmt.Errorf("%w: %w", jobs.ErrPermanent, err)
 		}
 		return err
 	}
@@ -583,7 +733,7 @@ func (s *Service) Run(ctx context.Context, tick time.Duration) {
 // Sweep enqueues a refresh for every list that is due.
 func (s *Service) Sweep(ctx context.Context) error {
 	rows, err := s.Pool.Query(ctx, `SELECT workspace_id::text, id::text FROM smart_lists
-		WHERE kind = 'smart' AND (refreshed_at IS NULL OR refreshed_at < now() - $1::interval) ORDER BY refreshed_at NULLS FIRST LIMIT 1000`,
+		WHERE kind IN ('smart', 'query') AND (refreshed_at IS NULL OR refreshed_at < now() - $1::interval) ORDER BY refreshed_at NULLS FIRST LIMIT 1000`,
 		fmt.Sprintf("%d seconds", int(Every.Seconds())))
 	if err != nil {
 		return err

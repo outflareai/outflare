@@ -92,6 +92,39 @@ export function registerQueryTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   server.registerTool(
+    "list_query_endpoints",
+    {
+      title: "List published query endpoints",
+      description:
+        "A brand's published query endpoints: saved queries owners and admins published for other systems to call with a brand API token, " +
+        "with their slug, parameters, row cap, rate limit and calls in the last 24 hours.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/query-endpoints", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "run_query_endpoint",
+    {
+      title: "Call a published query endpoint",
+      description:
+        "Runs a published query endpoint by slug or id with its parameters and answers its rows (up to its row cap). Needs a token holding " +
+        "query.endpoints made for this brand only; each call is logged and rate limited.",
+      inputSchema: {
+        brand: brandRef,
+        endpoint: z.string().describe("The endpoint's slug or id, from list_query_endpoints."),
+        params: z.record(z.string(), z.unknown()).optional().describe("The endpoint's parameters by name."),
+      },
+      annotations: read,
+    },
+    ({ brand, endpoint, params }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/query-endpoints/{endpoint}/run", { params: { path: { brand: b, endpoint } }, body: { params } })),
+      ),
+  );
+
+  server.registerTool(
     "run_saved_query",
     {
       title: "Run a saved query",

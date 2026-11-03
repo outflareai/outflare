@@ -6,8 +6,8 @@
 -- meaning every brand: hard bounces, complaints and what an admin applies
 -- to every brand (decision 5).
 --
--- Production holds only test and staff workspaces (decision 7), so every
--- row that was "for every brand" goes to its workspace's first brand.
+-- Every row that was "for every brand" goes to its workspace's first
+-- brand (decision 7): a workspace from before brands has exactly one.
 -- Expand only (docs/migrations.md): columns, indexes, triggers, backfills
 -- and views that only gain columns.
 --

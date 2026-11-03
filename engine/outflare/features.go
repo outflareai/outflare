@@ -24,6 +24,11 @@ import (
 // Feature is a switchable part of Outflare: its name and one line.
 type Feature = features.Feature
 
+// FeatureSupportAutoBlocked, switched on for a workspace, stops the
+// support assistant answering on its own there (SetSupportAutoReplies
+// should read it); drafts keep working.
+const FeatureSupportAutoBlocked = features.SupportAutoBlocked
+
 // ErrUnknownFeature is returned for a name that isn't in Features.
 var ErrUnknownFeature = features.ErrUnknown
 

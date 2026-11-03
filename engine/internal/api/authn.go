@@ -310,6 +310,17 @@ func (s *Server) workspaceRoute(scope string, brandAware bool, next http.Handler
 
 // workspaceAccess resolves the caller's access in the {ws} workspace and
 // runs next with it; workspaceRoute and onBrand note the route's access.
+// isAgentAppRoute is a change to what a connected app may do. Only a
+// person makes it, so it is never held for one: the handler refuses it.
+func isAgentAppRoute(r *http.Request) bool {
+	_, rest, ok := strings.Cut(r.URL.Path, "/v1/workspaces/")
+	if !ok {
+		return false
+	}
+	_, rest, _ = strings.Cut(rest, "/")
+	return strings.HasPrefix(rest, "agent-apps")
+}
+
 func (s *Server) workspaceAccess(scope string, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.authenticated(w, r)
@@ -382,24 +393,15 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 		noteAccessScope(r, a)
 		r = r.WithContext(context.WithValue(r.Context(), ctxAccessKey{}, a))
 		m := r.Header.Get(missions.Header)
-		if p.TokenRequiresMission && !p.TokenActionGate && m == "" && r.Method != http.MethodGet && r.Method != http.MethodHead && !isMissionRoute(r) && !readsOnly(r) {
-			// Its changes wait for a mission a person approved, where they
-			// follow the mission's mode: dry run, approvals or running.
-			msg := "this app makes changes only inside a mission: start one (POST /v1/workspaces/{ws}/missions, or create_mission), and once a person approves it send its id in the " + missions.Header + " header"
-			if !a.has(auth.ScopeMissionsRun) {
-				msg = "this app makes changes only inside a mission, and it may not run missions; the person who connected it can turn on Missions, or turn off Only inside missions, under Connect your AI"
-				if a.TokenGrantID != "" {
-					msg += ", " + s.publicURL + "/w/" + a.WorkspaceID + "/ai/" + a.TokenGrantID
-				}
-			}
-			writeError(w, r, http.StatusForbidden, "mission_required", msg)
-			return
-		}
 		// An agent token's changes go through the action layer, whatever
 		// headers it sends, except a held change a person approved, which
-		// is replaying now.
+		// is replaying now. A token that required a mission for its changes
+		// (an AI app connected with OAuth, unless a person turned it off)
+		// goes through it too, now that missions are retired: with no
+		// grants, every change waits for a person, as a mission's
+		// approvals did.
 		_, replaying := r.Context().Value(ctxActionReplayKey{}).(string)
-		if p.TokenActionGate && !replaying && r.Method != http.MethodGet && r.Method != http.MethodHead && !isActionRoute(r) && !isAgentRunRoute(r) && !readsOnly(r) {
+		if (p.TokenActionGate || (p.TokenRequiresMission && m == "")) && !replaying && r.Method != http.MethodGet && r.Method != http.MethodHead && !isActionRoute(r) && !isAgentRunRoute(r) && !isAgentAppRoute(r) && !readsOnly(r) {
 			s.idempotent(w, r, a, func(w http.ResponseWriter, r *http.Request) { s.actionGate(w, r, a, next) })
 			return
 		}

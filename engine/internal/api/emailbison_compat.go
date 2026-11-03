@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"io"
 	"math"
 	"net/http"
@@ -42,6 +43,16 @@ func (s *Server) routesEmailBisonCompat(mux *http.ServeMux) {
 }
 
 // ebError answers like EmailBison (Laravel): {"message", "errors"}.
+// ebImportFailed answers an import that failed: 402 when the workspace may
+// add no more mailboxes (package quota), 500 otherwise.
+func (s *Server) ebImportFailed(w http.ResponseWriter, r *http.Request, err error) {
+	if qe, ok := quota.Refusal(err); ok {
+		ebError(w, http.StatusPaymentRequired, qe.Message, "")
+		return
+	}
+	s.internal(w, r, err)
+}
+
 func ebError(w http.ResponseWriter, status int, msg string, field string) {
 	body := map[string]any{"message": msg}
 	if field != "" {
@@ -416,6 +427,9 @@ func (s *Server) ebImport(ctx context.Context, a *access, rows []mailbox.Row) ([
 	if len(good) == 0 {
 		return out, bad, nil
 	}
+	if err := quota.Check(ctx, s.quota, s.log, a.WorkspaceID, quota.Mailboxes, int64(len(good))); err != nil {
+		return nil, bad, err
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		res, err := s.mail.Import(ctx, tx, a.WorkspaceID, compatSource, good)
 		if err != nil {
@@ -448,7 +462,7 @@ func (s *Server) ebCreate(w http.ResponseWriter, r *http.Request, a *access, bod
 	out, bad, err := s.ebImport(r.Context(), a, []mailbox.Row{row})
 	switch {
 	case err != nil:
-		s.internal(w, r, err)
+		s.ebImportFailed(w, r, err)
 	case len(bad) > 0:
 		ebError(w, http.StatusUnprocessableEntity, bad[0].Error, "email")
 	case len(out) == 0:
@@ -480,7 +494,7 @@ func (s *Server) ebBulk(w http.ResponseWriter, r *http.Request, a *access, body 
 	}
 	out, prepBad, err := s.ebImport(r.Context(), a, rows)
 	if err != nil {
-		s.internal(w, r, err)
+		s.ebImportFailed(w, r, err)
 		return
 	}
 	if out == nil {
@@ -527,7 +541,7 @@ func (s *Server) ebUpdate(w http.ResponseWriter, r *http.Request, a *access, key
 		out, bad, err := s.ebImport(ctx, a, []mailbox.Row{row})
 		switch {
 		case err != nil:
-			s.internal(w, r, err)
+			s.ebImportFailed(w, r, err)
 		case len(bad) > 0:
 			ebError(w, http.StatusUnprocessableEntity, bad[0].Error, "password")
 		case len(out) == 0:

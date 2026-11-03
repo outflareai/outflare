@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,18 @@ func answerSupportAssistant(w http.ResponseWriter, body string) {
 		}
 	}
 	rewrite := strings.Contains(body, "It broke these rules")
+	if strings.Contains(body, "Topics (set topic") {
+		topic := ""
+		if strings.Contains(msg, "invoice") {
+			topic = "Billing"
+		}
+		if strings.Contains(msg, "export") {
+			answerJSON(w, map[string]any{"action": "answer", "reply": "Open the chart, then More, Export CSV.", "cited": []int{1}, "reason": "", "topic": topic})
+			return
+		}
+		answerJSON(w, map[string]any{"action": "handoff", "reply": "", "cited": []int{}, "reason": "needs_account", "topic": topic})
+		return
+	}
 	switch {
 	case strings.Contains(msg, "price"):
 		answerJSON(w, map[string]any{"action": "answer", "reply": "Exports are included, and the plan costs $99 a month.", "cited": []int{1}, "reason": ""})
@@ -194,6 +207,7 @@ func answerFindAnswer(w http.ResponseWriter, body string) {
 	for _, f := range []struct{ asked, quote, title, answer string }{
 		{"bank transfer", "Annual plans can be paid by bank transfer.", "Can I pay by bank transfer?", "Yes, annual plans can be paid by bank transfer. Ask for an invoice from the billing page."},
 		{"two factor", "Settings, Security, Reset two factor.", "How do I reset two-factor sign-in?", "Go to Settings, Security, Reset two factor. You get an email to set it up again."},
+		{"per seat", "Starter is 49 a month and Pro is 149 a month, for the whole team.", "How much does Northpeak cost?", "Starter is 49 a month and Pro is 149 a month, for the whole team."},
 	} {
 		q := strings.Index(body, "Sources:")
 		i := strings.Index(body, f.quote)
@@ -229,8 +243,14 @@ func fakeSlackAPI(joined *[]string) http.Handler {
 			io.WriteString(w, `{"ok":true}`)
 		case "/conversations.history":
 			io.WriteString(w, `{"ok":true,"messages":[{"ts":"1790000000.000100","user":"U1","text":"A customer can't sign in, how do we reset two factor?","reply_count":1},`+
-				`{"ts":"1790000100.000100","user":"U2","text":"Lunch is here"}]}`)
+				`{"ts":"1790000100.000100","user":"U2","text":"Lunch is here"},`+
+				`{"ts":"1790000300.000100","user":"U4","text":"What do we say about our plans for a small budget?","reply_count":1}]}`)
 		case "/conversations.replies":
+			if r.URL.Query().Get("ts") == "1790000300.000100" {
+				io.WriteString(w, `{"ok":true,"messages":[{"ts":"1790000300.000100","user":"U4","text":"What do we say about our plans for a small budget?"},`+
+					`{"ts":"1790000400.000100","user":"U5","text":"Starter is 49 a month and Pro is 149 a month, for the whole team."}]}`)
+				return
+			}
 			io.WriteString(w, `{"ok":true,"messages":[{"ts":"1790000000.000100","user":"U1","text":"A customer can't sign in, how do we reset two factor?"},`+
 				`{"ts":"1790000200.000100","user":"U3","text":"Settings, Security, Reset two factor. They get an email to set it up again."}]}`)
 		case "/chat.getPermalink":
@@ -343,8 +363,70 @@ func TestSupportAssistantSourcesAndAuto(t *testing.T) {
 	if s["title"] != "How do I reset two-factor sign-in?" || s["source_ref"] != "https://northpeak.slack.test/archives/C1/p1790000000000100" {
 		t.Fatalf("slack suggestion: %v", s)
 	}
+	// The team hears once a day that answers wait for review, and the
+	// digest says how many.
+	var waiting []any
+	for _, a := range owner.must(200, "GET", base+"/alerts", nil)["data"].([]any) {
+		if a.(map[string]any)["kind"] == "knowledge.review_waiting" {
+			waiting = append(waiting, a)
+		}
+	}
+	if len(waiting) != 1 || waiting[0].(map[string]any)["path"] != "knowledge" || waiting[0].(map[string]any)["title"] != "Answers are waiting for review" {
+		t.Fatalf("review alert: %v", waiting)
+	}
+	var supportSection map[string]any
+	for _, sec := range owner.must(200, "GET", base+"/digests/preview?frequency=daily", nil)["sections"].([]any) {
+		if sec.(map[string]any)["id"] == "support" {
+			supportSection = sec.(map[string]any)
+		}
+	}
+	if supportSection == nil || len(supportSection["items"].([]any)) != 1 {
+		t.Fatalf("digest support section: %v", supportSection)
+	}
+	for _, m := range supportSection["metrics"].([]any) {
+		if m := m.(map[string]any); m["key"] == "knowledge_suggestions_waiting" && m["value"] != 2.0 {
+			t.Fatalf("waiting in digest: %v", m)
+		}
+	}
+
 	// Approved, it answers the next customer.
 	owner.must(200, "POST", base+"/knowledge/suggestions/"+s["id"].(string)+"/approve", map[string]any{})
+
+	// With an embedding model on the workspace's own key, Slack threads that
+	// answer in other words are found too: this one shares no word with the
+	// question, only its meaning (both are about price).
+	write("Hello", "How much does it cost per seat?")
+	time.Sleep(time.Second)
+	for _, sg := range owner.must(200, "GET", base+"/knowledge/suggestions", nil)["data"].([]any) {
+		if sg.(map[string]any)["title"] == "How much does Northpeak cost?" {
+			t.Fatalf("found by words alone: %v", sg)
+		}
+	}
+	var mu sync.Mutex
+	var calls int
+	var dims []any
+	oa := httptest.NewServer(fakeEmbeddings{&mu, &calls, &dims})
+	defer oa.Close()
+	e.integrations.Client.BaseURLs["openai"] = oa.URL
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "openai", "credentials": map[string]any{"api_key": openAIKey}})
+	write("Hello again", "What would it cost per seat?")
+	deadline := time.Now().Add(15 * time.Second)
+	for found := false; !found; {
+		for _, sg := range owner.must(200, "GET", base+"/knowledge/suggestions", nil)["data"].([]any) {
+			if sg := sg.(map[string]any); sg["title"] == "How much does Northpeak cost?" && sg["source"] == "slack" {
+				found = true
+			}
+		}
+		if !found && time.Now().After(deadline) {
+			t.Fatal("the Slack thread that answers by meaning wasn't found")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	mu.Lock()
+	if calls == 0 {
+		t.Fatal("no embeddings were made")
+	}
+	mu.Unlock()
 
 	// Auto is an extension's to allow; then answers go out on their own.
 	if l := owner.must(200, "GET", sb+"/assistant-settings", nil); l["auto_available"] != false {
@@ -355,7 +437,7 @@ func TestSupportAssistantSourcesAndAuto(t *testing.T) {
 		t.Fatalf("auto after: %v", l)
 	}
 	owner.must(200, "PUT", sb+"/assistant-settings/default", map[string]any{"email_mode": "auto", "chat_mode": "auto", "name": "Northpeak help",
-		"find_on_website": false})
+		"find_on_website": false, "email_hold_minutes": 0})
 	conv = write("Exporting", "How do I export a chart?")
 	r := latest(conv)
 	waitFor(t, owner, sb+"/conversations/"+conv+"/assistant", func(m map[string]any) bool { return m["run"].(map[string]any)["outcome"] == "sent" })
@@ -407,6 +489,84 @@ func TestSupportAssistantSourcesAndAuto(t *testing.T) {
 		t.Fatalf("told twice: %v", l)
 	}
 
+	// The visitor says whether an answer helped: once, and only in their own
+	// chat. "No" hands the chat to the team, and the assistant stops there.
+	ask := func(body string) (string, func(int) []any) {
+		_, sess := chatCall(t, e.h, "POST", cb+"/session", "", map[string]any{})
+		tok := sess["token"].(string)
+		chatCall(t, e.h, "POST", cb+"/messages", tok, map[string]any{"body": body})
+		return tok, func(n int) []any {
+			t.Helper()
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				_, p := chatCall(t, e.h, "GET", cb+"/messages", tok, nil)
+				if l := p["messages"].([]any); len(l) >= n || time.Now().After(deadline) {
+					return l
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+	}
+	tokA, pollA := ask("how do I export a chart please?")
+	l = pollA(2)
+	answer := l[1].(map[string]any)
+	if answer["assistant"] != true || answer["feedback"] != nil || l[0].(map[string]any)["assistant"] != false {
+		t.Fatalf("assistant answer: %v", l)
+	}
+	rate := func(tok, id string, helpful any) (int, map[string]any) {
+		return chatCall(t, e.h, "POST", cb+"/messages/"+id+"/feedback", tok, map[string]any{"helpful": helpful})
+	}
+	tokB, pollB := ask("and how do I export to CSV?")
+	if code, _ := rate(tokB, answer["id"].(string), true); code != 404 {
+		t.Fatalf("someone else's answer rated: %d", code)
+	}
+	if code, _ := rate(tokA, answer["id"].(string), "yes"); code != 400 {
+		t.Fatalf("bad body: %d", code)
+	}
+	if code, out := rate(tokA, answer["id"].(string), true); code != 200 || out["feedback"] != "helpful" {
+		t.Fatalf("helpful: %d %v", code, out)
+	}
+	if code, _ := rate(tokA, answer["id"].(string), false); code != 404 {
+		t.Fatalf("rated twice: %d", code)
+	}
+	if l := pollA(2); l[1].(map[string]any)["feedback"] != "helpful" {
+		t.Fatalf("feedback shown: %v", l)
+	}
+	l = pollB(2)
+	if code, _ := rate(tokB, l[1].(map[string]any)["id"].(string), false); code != 200 {
+		t.Fatalf("not helpful: %d", code)
+	}
+	if l = pollB(3); len(l) != 3 || !strings.HasPrefix(l[2].(map[string]any)["body"].(string), handoffNoteTest) {
+		t.Fatalf("handed to the team: %v", l)
+	}
+	chatCall(t, e.h, "POST", cb+"/messages", tokB, map[string]any{"body": "how do I export a chart then?"})
+	time.Sleep(500 * time.Millisecond)
+	if l = pollB(4); len(l) != 4 {
+		t.Fatalf("answered after not helpful: %v", l)
+	}
+	var convB string
+	if err := e.pool.QueryRow(context.Background(), `SELECT r.conversation_id::text FROM support_assistant_runs r WHERE r.feedback = 'not_helpful'`).Scan(&convB); err != nil {
+		t.Fatal(err)
+	}
+	if r := owner.must(200, "GET", sb+"/conversations/"+convB+"/assistant", nil)["run"].(map[string]any); r["action"] != "handoff" || r["reason"] != "not_helpful" {
+		t.Fatalf("after not helpful: %v", r)
+	}
+	// While a reply is on its way in Auto, the chat shows it typing.
+	if _, p := chatCall(t, e.h, "GET", cb+"/messages", tokA, nil); p["typing"] != false {
+		t.Fatalf("typing when idle: %v", p)
+	}
+	var convA string
+	if err := e.pool.QueryRow(context.Background(), `SELECT r.conversation_id::text FROM support_assistant_runs r WHERE r.feedback = 'helpful'`).Scan(&convA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO jobs (workspace_id, kind, payload, run_at) VALUES ($1, 'support.assistant', $2, now() + interval '1 hour')`,
+		ws, map[string]any{"conversation_id": convA, "message_id": "00000000-0000-0000-0000-000000000000"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, p := chatCall(t, e.h, "GET", cb+"/messages", tokA, nil); p["typing"] != true {
+		t.Fatalf("not typing with a reply on its way: %v", p)
+	}
+
 	// Trying it on a made-up question stores and sends nothing.
 	owner.must(400, "POST", sb+"/assistant/test", map[string]any{"question": ""})
 	owner.must(400, "POST", sb+"/assistant/test", map[string]any{"question": "Hi", "channel": "sms"})
@@ -419,6 +579,22 @@ func TestSupportAssistantSourcesAndAuto(t *testing.T) {
 		res["reason"] != "sensitive_topic" {
 		t.Fatalf("test handoff: %v", res)
 	}
+	// The report: rates against the period before, feedback and a line a day.
+	st := owner.must(200, "GET", sb+"/assistant/stats?days=7", nil)
+	fb, rates := st["feedback"].(map[string]any), st["rates"].(map[string]any)
+	if fb["helpful"] != 1.0 || fb["not_helpful"] != 1.0 || rates["helpful"] != 0.5 || rates["answered"] == nil ||
+		len(st["daily"].([]any)) != 7 || st["previous"].(map[string]any)["runs"] != 0.0 ||
+		st["previous"].(map[string]any)["rates"].(map[string]any)["answered"] != nil || st["handoff_reasons"].(map[string]any)["not_helpful"] == nil {
+		t.Fatalf("report: %v", st)
+	}
+	var answeredToday float64
+	for _, d := range st["daily"].([]any) {
+		answeredToday += d.(map[string]any)["answered"].(float64)
+	}
+	if answeredToday != st["actions"].(map[string]any)["answer"].(float64)+st["actions"].(map[string]any)["clarify"].(float64) {
+		t.Fatalf("daily doesn't add up: %v", st)
+	}
+
 	if len(named(got(), "support.assistant_sent")) < 2 || len(named(got(), "knowledge.answer_searched")) < 2 || len(named(got(), "support.assistant_tested")) != 2 {
 		t.Fatalf("events: sent %d searched %d tested %d", len(named(got(), "support.assistant_sent")), len(named(got(), "knowledge.answer_searched")),
 			len(named(got(), "support.assistant_tested")))

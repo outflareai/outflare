@@ -5,6 +5,7 @@ Some parts of Outflare are switched on for a few workspaces before everyone gets
 | Feature | What it is |
 | --- | --- |
 | `ai_accounts` | AI Accounts: every AI subscription the workspace's people pay for, with usage, resets, renewals and spend. Being built. |
+| `support_auto_blocked` | Block support Auto: where an extension allows the [support assistant](support-inbox.md#the-support-assistant) to answer on its own, it stops doing so in this workspace and only drafts. A switch for the operator's staff. |
 
 ## Switching one on
 

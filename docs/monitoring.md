@@ -72,6 +72,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_ai_calls_total`, `outflare_ai_cost_cents_total` | `provider`, `task` | AI model calls made with workspaces' own keys, and what they cost on the workspaces' own provider bills in US cents, by provider (connector id) and tool (`plan`, `reply_labelling`...). Never by workspace. |
 | `outflare_ai_tokens_total` | `provider`, `task`, `kind` (`input`, `output`, `cache_read`, `cache_write`) | Tokens those calls used. |
 | `outflare_ai_budget_alerts_total` | `level` (`80`, `100`), `scope` (`workspace`, `tool`) | Workspaces warned that their AI spend reached 80% or all of a monthly limit. |
+| `outflare_quota_checks_total` | `resource` (`brands`, `mailboxes`, `tracking_domains`, `records`, `emails_sent`), `outcome` (`allowed`, `refused`, `error`) | Checks an extension's quota answered before adding something or sending ([quotas](quotas.md)). |
 | `outflare_connection_limits_alerts_total` | `level` (`80`, `100`), `period` (`day`, `month`) | Workspaces warned that a paid connection used 80% of a usage limit, or reached it ([connection limits](usage-limits.md)). |
 | `outflare_connection_limits_stops_total` | `connector`, `period` | Paid calls Outflare didn't make because the connection had reached a limit that stops calls. |
 | `outflare_hooks_deliveries_total` | `connector`, `outcome` (`accepted`, `duplicate`, `bad_signature`, `not_found`, `invalid`, `error`) | Webhooks connectors sent to a connection's live updates address (`/v1/hooks/...`). |
@@ -84,6 +85,8 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_smart_lists_lists`, `outflare_smart_lists_oldest_refresh_seconds`, `outflare_smart_lists_failing` | | [Smart lists](lists.md#smart-lists): how many there are, how long since the least recently refreshed one was brought up to date (normal is under 20 minutes), and how many failed their last refresh. |
 | `outflare_rules_evaluations_total` | `trigger`, `outcome` | [Rules](rules.md) evaluated for a record: `fired`, or why not (`no_match`, `duplicate`, `cooldown`, `late`, `before_live`, `too_deep`, `manual`), and absence clocks `started` and `stopped`. |
 | `outflare_lifecycle_evaluations_total` | `level`, `outcome` | [Lifecycle stages](product-lifecycle.md) checked for a record at a level (`company`, `person`, `any`): `moved`, or why not (`no_move`, `duplicate`, `late`, `stale`, `before_live`, `not_approved`, `off`). |
+| `outflare_record_metrics_updates_total` | `outcome` | Events added to a live [metric](metrics.md): `updated`, or why not (`backfilled`, `too_old`, `no_value`). |
+| `outflare_record_metrics_backfill_seconds`, `outflare_record_metrics_sweep_seconds` | `outcome` (backfill) | How long a metric's fill from stored events, and one window sweep, took. |
 | `outflare_lifecycle_sweep_seconds` | | How long one lifecycle inactivity sweep took. |
 | `outflare_emails_guarded_total` | `trigger`, `outcome` | Marketing emails from journeys and broadcasts that a workspace's guardrails stopped (`frequency_cap`) or held until morning (`quiet_hours`). |
 | `outflare_journeys_calls_total` | `kind`, `outcome` | Calls made by journeys' webhook, Slack, `push_to_sequencer`, `push_to_crm`, `sync_audience` and `ai` steps: `done`, `skipped` (nothing to do), `retried` (a try that will be tried again) or `failed`. |
@@ -98,6 +101,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_automations_excluded_total` | `where` | People an exclusion left out: `journey` (refused entry), `broadcast` (skipped), `sequence` (not enrolled). |
 | `outflare_rules_active`, `outflare_rules_timers_due`, `outflare_rules_oldest_due_seconds` | `trigger` (active) | Active rules by trigger kind, and absence timers that ran out and wait to be handled, with how long the oldest has waited (normal is near 0 and under two minutes). |
 | `outflare_lifecycle_due`, `outflare_lifecycle_oldest_due_seconds` | | Lifecycle inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, with how long the oldest has waited (normal is near 0 and under two minutes). |
+| `outflare_record_metrics_due`, `outflare_record_metrics_oldest_due_seconds`, `outflare_record_metrics_backfilling` | | Metric values whose window moved and wait for the sweep, how long the oldest waited (normal: near 0, minutes at most), and metrics being refilled now. |
 | `outflare_ad_conversions_total` | `connector`, `outcome` (`sent`, `skipped`, `failed`) | Conversions sent back to ad platforms ([paid-media.md](paid-media.md#sending-conversions-back)). |
 | `outflare_ad_conversions_oldest_queued_seconds` | | How long the oldest conversion waiting to be sent has waited. |
 | `outflare_meeting_events_total` | `status` (`booked`, `held`, `no_show`, `canceled`) | Meeting events recorded on people's timelines ([customers.md](customers.md#meetings-as-events)). |
@@ -190,6 +194,11 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_undo_batches_total` | `mode` (`untouched`, `everything`), `outcome` (`undone`, `queued`, `failed`) | Import and ingest batches undone; queued ones run in a job. |
 | `outflare_undo_rows_reverted_total` | `kind` (`unmerge`, `batch`) | Rows moved back, removed or put back by undos. |
 | `outflare_undo_batch_seconds` | | Time to undo one batch. |
+| `outflare_hand_edits_expired_total` | `outcome` (`switched`, `kept`, `error`) | Hand edits whose time to win ran out: another source's value took over, none had one (the next to write replaces it), or it failed ([customers.md](customers.md#where-a-value-comes-from)). |
+| `outflare_hand_edits_due`, `outflare_hand_edits_oldest_due_seconds` | | Expired hand edits the 5-minute sweep hasn't handed over yet, and how long the oldest has waited. |
+| `outflare_transactions_saved_total` | `from` (`api`, `connector`), `outcome` (`created`, `duplicate`, `invalid`, `error`) | Payments, refunds, chargebacks and credits sent to Outflare ([transactions.md](transactions.md)). |
+| `outflare_transactions_save_seconds` | | Time to save one transaction. |
+| `outflare_transactions_unconverted` | | Transactions over 2 days old still without an amount in their brand's currency. |
 | `go_*`, `process_*` | | Go runtime and process: CPU seconds, resident memory, heap, goroutines, garbage collection, open files. |
 
 The database numbers are read when Prometheus scrapes, at most once every 10 seconds whatever the number of scrapers, with a 5-second limit, using the partial indexes on queued and running jobs.
@@ -212,6 +221,10 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareActionsWaiting`: an agent's change has waited over two days for a person.
 - `OutflareActionsStuckRunning`: an agent change started running and never recorded how it ended.
 - `OutflareActionsFailing`: over 50 agent changes an hour ran and got an error answer.
+- `OutflareAdChangesFailing`: more than three changes to ad campaigns (pausing, resuming, budgets) failed in an hour.
+- `OutflareContentPublishesFailing` (warning): over three publications to brands' CMSs failed in an hour; each publication's error on its item says why.
+- `OutflareAccountIncidentsCritical` (warning): a critical incident on a brand's external account has been open for a day; automated use of it is stopped until a person resolves it.
+- `OutflareAdChangesUnverified`: over five campaign changes in six hours were applied but the platform did not show them when read back.
 - `OutflareAgentRunsOverdue`: a running agent run's next turn is over 15 minutes overdue.
 - `OutflareAgentRunTurnsFailing`: more agent run turns fail than finish.
 
@@ -236,6 +249,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over 20 AI spend limits reached in an hour
 - a paid connection reaching its daily or monthly usage limit (info: its workspace's admins are emailed)
 - over 500 calls an hour through one connector refused at a usage limit for 30 minutes (a feature retrying into the limit)
+- an extension's quota checks failing for 15 minutes, so its limits aren't applied (warning; `OutflareQuotaChecksFailing`)
+- over 1,000 quota refusals an hour for one resource for 30 minutes (info; `OutflareQuotaRefusalsSurge`)
 - over 20 webhook deliveries with a bad signature for one connector in 15 minutes
 - over 5 webhook events failing in 30 minutes
 - webhook events waiting over 5 minutes to be handled
@@ -250,6 +265,11 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - smart lists whose last refresh failed (info)
 - an absence rule's timer due for over 15 minutes, over 10,000 rule timers waiting, or rule jobs failing and retrying
 - a lifecycle inactivity check due for over 15 minutes (`OutflareLifecycleSweepBehind`), over 10,000 waiting (`OutflareLifecycleDuePiling`), or lifecycle jobs failing and retrying (`OutflareLifecycleJobsFailing`)
+- metric windows not moved on for over 30 minutes (`OutflareMetricSweepBehind`), metric jobs failing and retrying (`OutflareMetricJobsFailing`), or a metric refilling for over an hour (`OutflareMetricBackfillStuck`)
+- a bulk edit queued or running for over 2 hours (`OutflareBulkEditStuck`), or one failing part way (`OutflareBulkEditsFailing`)
+- an expired hand edit waiting over an hour for the sweep (`OutflareHandEditsBehind`), or hand edits failing to expire (`OutflareHandEditsFailing`)
+- transactions failing to save (`OutflareTransactionsFailing`), or old ones still without an amount in the brand's currency (`OutflareTransactionsUnconverted`)
+- published query endpoints failing to answer (`OutflareQueryEndpointsFailing`) or slow at p95 (`OutflareQueryEndpointsSlow`)
 - over 5,000 marketing emails stopped by frequency caps in an hour (info)
 - a journey run due for over 15 minutes
 - over half of journey webhook, Slack, sequencer or CRM calls failing (info), or taking over 10 seconds at the 95th percentile (info)
@@ -311,6 +331,10 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over 5% of website chat requests failing, or many chat requests rate limited (info)
 - over 20% of support assistant runs failing (`OutflareSupportAssistantFailing`), or the assistant taking over 45 seconds to decide at the 95th percentile (`OutflareSupportAssistantSlow`, info)
 - searches of the website and Slack for missing answers failing most of the time (`OutflareKnowledgeAnswerSearchFailing`)
+- most website imports into knowledge failing (`OutflareKnowledgeWebsiteImportsFailing`, info)
+- the daily re-check of imported websites failing (`OutflareKnowledgeWebsiteRechecksBroken`, warning)
+- most runs that learn answers from past support replies failing (`OutflareKnowledgeReplyLearningFailing`, info)
+- most held Auto email replies refused when their hold ends (`OutflareSupportHeldRepliesRefused`, warning)
 - over 5% of public help centre pages failing
 - help centre views not being counted (info)
 - help centre pages taking over a second to build at the 95th percentile (info)

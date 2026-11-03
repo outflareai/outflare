@@ -28,6 +28,7 @@ func (s *Server) registerKnowledgeJobs(q *jobs.Queue) {
 	q.Handle(jobKnowledgeFromReply, s.knowledgeFromReplyJob)
 	q.Handle(support.JobAssistant, s.assistantJob)
 	q.Handle(jobFindAnswer, s.findAnswerJob)
+	q.Handle(jobAssistantSend, s.assistantSendJob)
 }
 
 // captureKnowledgeReply queues the reply to become a suggested answer when

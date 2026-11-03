@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"io"
 	"mime"
 	"net/http"
@@ -394,6 +395,11 @@ func (s *Server) createMailbox(w http.ResponseWriter, r *http.Request) {
 func (s *Server) addMailboxes(w http.ResponseWriter, r *http.Request, a *access, source string, rows []mailbox.Row, bad []mailbox.RowError, respond func(mailbox.ImportResult)) {
 	if s.mail == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "unavailable", "mailboxes are not configured on this server")
+		return
+	}
+	// Rows may update mailboxes already here; the checker is told the most
+	// this could add.
+	if len(rows) > 0 && !s.allowQuota(w, r, a.WorkspaceID, quota.Mailboxes, int64(len(rows))) {
 		return
 	}
 	res, err := s.importRows(r.Context(), a, source, rows, bad)

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"net/http"
 	"slices"
 	"time"
@@ -173,6 +174,9 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		}
 		program = &id
 	}
+	if !s.allowQuota(w, r, a.WorkspaceID, quota.TrackingDomains, 1) {
+		return
+	}
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `INSERT INTO tracking_domains (workspace_id, domain) VALUES ($1, $2) ON CONFLICT (domain) DO NOTHING RETURNING id`,
@@ -232,30 +236,60 @@ func (s *Server) verifyTrackingDomain(w http.ResponseWriter, r *http.Request, ws
 	writeJSON(w, status, d)
 }
 
+// trackingFailAfter is how long a verified domain's lookups must keep
+// failing before it counts as no longer pointing here: longer than the
+// negative cache time DNS hosts set (Cloudflare's is 30 minutes).
+const trackingFailAfter = time.Hour
+
 // checkTracking looks for the domain's CNAME now and saves the outcome.
 func (s *Server) checkTracking(ctx context.Context, ws, id string) (trackingDomainView, error) {
 	d, err := s.trackingDomain(ctx, ws, id)
 	if err != nil {
 		return d, err
 	}
+	var failingSince *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT failing_since FROM tracking_domains WHERE id = $1 AND workspace_id = $2`, id, ws).Scan(&failingSince); err != nil {
+		return d, err
+	}
 	state, reason := "verified", ""
+	var since *time.Time
 	if err := tracking.Verify(ctx, s.cname, d.Domain.Domain, d.Target); err != nil {
 		state, reason = "failed", err.Error()
-		if d.Status == "pending" {
+		switch d.Status {
+		case "pending":
 			state = "pending" // not set up yet, rather than broken
+		case "verified":
+			// A caching resolver can answer "no record" for a while after
+			// the record was added, or between two lookups that found it,
+			// so a verified domain stays verified until its lookups have
+			// failed for longer than any negative cache keeps an answer.
+			now := time.Now()
+			if since = failingSince; since == nil {
+				since = &now
+			}
+			if now.Sub(*since) < trackingFailAfter {
+				state, reason = "verified", ""
+			} else {
+				since = nil
+			}
 		}
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
-			UPDATE tracking_domains SET status = $2, error = $3, last_checked_at = now(),
+			UPDATE tracking_domains SET status = $2, error = $3, last_checked_at = now(), failing_since = $4,
 				verified_at = CASE WHEN $2 = 'verified' THEN COALESCE(verified_at, now()) ELSE NULL END
-			WHERE id = $1`, id, state, reason); err != nil {
+			WHERE id = $1`, id, state, reason, since); err != nil {
 			return err
 		}
 		// Only a domain that points here gets a certificate, so nobody
 		// can ask for them for domains they don't control.
 		if state == "verified" && (d.HTTPSStatus == nil || *d.HTTPSStatus == "failed") {
 			return s.queueTrackingHTTPS(ctx, tx, ws, id)
+		}
+		// Checking a domain whose certificate is still pending looks at
+		// the certificate again too, unless a look is already on its way.
+		if state == "verified" && *d.HTTPSStatus == "pending" {
+			return s.resumeTrackingHTTPS(ctx, tx, ws, id)
 		}
 		return nil
 	})

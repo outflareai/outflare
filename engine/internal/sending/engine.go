@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"log/slog"
 	"strings"
 	"time"
@@ -31,6 +32,10 @@ import (
 // JobSend sends the next step of one enrollment.
 const JobSend = "sequence.send"
 
+// QuotaExceeded is the status reason of an enrollment whose next send
+// waits because the workspace may send no more for now (package quota).
+const QuotaExceeded = "quota_exceeded"
+
 // maxAttempts is how many times one step is tried before the enrollment is
 // marked failed.
 const maxAttempts = 5
@@ -51,6 +56,9 @@ type Engine struct {
 	// sent or an enrollment ends blocked, failed or bounced, so a feature
 	// that enrolled someone can follow its email.
 	OnStep []func(ctx context.Context, tx pgx.Tx, ev StepEvent) error
+	// Quota may hold sends back (package quota): a refused send waits an
+	// hour and tries again. nil allows every send.
+	Quota quota.Checker
 }
 
 // StepEvent is what became of one step of an enrollment.
@@ -411,6 +419,12 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	}
 	if !v.Allow && !skipWait {
 		return defer_(v.DeferUntil, v.Reason)
+	}
+
+	// 2a. The workspace may send more (package quota). A refused send
+	// waits an hour, so it goes once the workspace may send again.
+	if err := quota.Check(ctx, e.Quota, e.Log, en.WorkspaceID, quota.EmailsSent, 1); err != nil {
+		return defer_(now.Add(time.Hour), QuotaExceeded)
 	}
 
 	// 3. New leads per day.

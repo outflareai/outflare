@@ -686,7 +686,8 @@ func (r *partnerImportRun) warn(kind, external, reason string) {
 }
 
 // warnWhy is warn with a message: ids, counts, statuses and field names,
-// never values from the platform's answer.
+// never values from the platform's answer, except a flow's own settings
+// (numbers and code-like words, never anyone's data).
 func (r *partnerImportRun) warnWhy(kind, external, reason, message string) {
 	if len(r.sum.Issues) >= partnerImportIssues {
 		r.sum.MoreIssues++
@@ -800,9 +801,15 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 			return err
 		})
 		var reason importSkip
+		var why importSkipWhy
 		switch {
 		case errors.As(err, &reason):
 			r.issue(kind, external, string(reason))
+			return nil
+		case errors.As(err, &why):
+			r.sum.count(kind).Skipped++
+			metrics.PartnerImportObjects(kind, "skipped", 1)
+			r.warnWhy(kind, external, why.reason, why.message)
 			return nil
 		case err != nil:
 			return err
@@ -892,6 +899,11 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 type importSkip string
 
 func (e importSkip) Error() string { return string(e) }
+
+// importSkipWhy is importSkip with a message for the issue.
+type importSkipWhy struct{ reason, message string }
+
+func (e importSkipWhy) Error() string { return e.reason }
 
 // linkParams are the link parameters the website script reads as a ref.
 var linkParams = []string{"ref", "via"}
@@ -1489,9 +1501,17 @@ func (r *partnerImportRun) flow(ctx context.Context, tx pgx.Tx, f connectors.Imp
 	if _, ok, err := r.ref(ctx, tx, "flow", f.ID); err != nil || ok {
 		return "unchanged", err
 	}
+	if f.Paused {
+		// It pays nothing at the source, so it doesn't come over to pay here.
+		return "", importSkip("flow_paused")
+	}
 	if len(f.Unsupported) > 0 {
 		slices.Sort(f.Unsupported)
-		return "", importSkip("flow_" + slices.Compact(f.Unsupported)[0] + "_unsupported")
+		reason := "flow_" + slices.Compact(f.Unsupported)[0] + "_unsupported"
+		if f.Detail != "" {
+			return "", importSkipWhy{reason, f.Detail}
+		}
+		return "", importSkip(reason)
 	}
 	in := partnerRuleIn{Trigger: f.Trigger, Side: "partner", Kind: f.Kind, PercentBP: f.PercentBP, AmountCents: f.AmountCents,
 		Recurrence: f.Recurrence, Months: f.Months, Name: cutUTF8(f.Name, 120), Conditions: f.Conditions, Approval: f.Approval,

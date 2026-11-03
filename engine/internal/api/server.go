@@ -46,7 +46,9 @@ import (
 	"github.com/outflareai/outflare/engine/internal/oauth"
 	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/platforms"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"github.com/outflareai/outflare/engine/internal/research"
+	"github.com/outflareai/outflare/engine/internal/rules"
 	"github.com/outflareai/outflare/engine/internal/secrets"
 	"github.com/outflareai/outflare/engine/internal/sending"
 	"github.com/outflareai/outflare/engine/internal/seosync"
@@ -101,6 +103,7 @@ type Server struct {
 	trackingTarget  string
 	partnersDomain  string
 	trackingCerts   TrackingCerts
+	quota           quota.Checker
 	edgeSecret      string
 	dc              *domainconnect.Client
 	dcMu            sync.Mutex
@@ -116,10 +119,13 @@ type Server struct {
 	platforms       *platforms.Service
 	telemetry       *telemetry.Reporter
 	webhooks        *webhooks.Service
-	emails          *emails.Service
-	rateLimit       *rateLimiter
-	logs            *logWriter
-	registerLimit   *rateLimiter
+	// eventArchive reads events beyond Postgres's retention for rule dry
+	// runs; nil without the ClickHouse event store.
+	eventArchive  rules.EventArchive
+	emails        *emails.Service
+	rateLimit     *rateLimiter
+	logs          *logWriter
+	registerLimit *rateLimiter
 	// Browser events, per visitor address and per site key.
 	siteIPLimit, siteKeyLimit *rateLimiter
 	// Browser events go through site_event_inbox (RunSiteInbox stores them).
@@ -220,6 +226,9 @@ type Options struct {
 	// Webhooks sends test events and redeliveries; nil builds one that only
 	// delivers to public https URLs.
 	Webhooks *webhooks.Service
+	// EventArchive is the ClickHouse event store, when one is set up: rule
+	// dry runs replay events from it over up to a year.
+	EventArchive rules.EventArchive
 	// Sends account emails (confirmation, password reset); nil only logs
 	// them.
 	Mailer sysmail.Sender
@@ -287,6 +296,9 @@ type Options struct {
 	// TrackingCerts gets HTTPS certificates for tracking domains; nil when
 	// the operator's own proxy serves them.
 	TrackingCerts TrackingCerts
+	// Quota may refuse new brands, mailboxes, tracking domains and records
+	// (package quota); nil allows everything.
+	Quota quota.Checker
 	// EdgeSecret lets an edge in front of tracking domains pass on the
 	// domain and visitor address it saw (edge.go); empty turns that off.
 	EdgeSecret string
@@ -303,7 +315,12 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 	}
 	dc := opts.DomainConnect
 	if dc == nil {
-		dc = &domainconnect.Client{HTTP: netguard.Client(10 * time.Second), Resolver: net.DefaultResolver}
+		// The domain's own nameservers, not the system resolver: discovery
+		// walks up from the record's name, and some hosting resolvers
+		// answer "server misbehaving" instead of "no such name" for a
+		// level that has no _domainconnect record, which ended the walk
+		// as lookup_failed before it reached the zone that has one.
+		dc = &domainconnect.Client{HTTP: netguard.Client(10 * time.Second), Resolver: emails.Authoritative{}}
 	}
 	cname := opts.CNAME
 	if cname == nil {
@@ -347,10 +364,12 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		trackingTarget: opts.TrackingTarget,
 		partnersDomain: opts.PartnersDomain,
 		trackingCerts:  opts.TrackingCerts,
+		quota:          opts.Quota,
 		edgeSecret:     opts.EdgeSecret,
 		dc:             dc,
 		telemetry:      tel,
 		webhooks:       hooks,
+		eventArchive:   opts.EventArchive,
 		rateLimit:      &rateLimiter{name: "api", limit: opts.RateLimit, window: time.Minute},
 		// Apps register themselves once per install; this stops a flood.
 		registerLimit:    &rateLimiter{name: "register", limit: 30, window: time.Hour},
@@ -476,6 +495,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesRecoveryWindow(mux)
 	s.routesUnmerge(mux)
 	s.routesBatches(mux)
+	s.routesBulkEdits(mux)
+	s.routesQueryEndpoints(mux)
 	s.routesCatalog(mux)
 	s.routesRecords(mux)
 	s.routesCRM(mux)
@@ -487,6 +508,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSemanticSearch(mux)
 	s.routesAnalyticsBrands(mux)
 	s.routesAds(mux)
+	s.routesAdChanges(mux)
+	s.routesFindings(mux)
+	s.routesContent(mux)
+	s.routesAccounts(mux)
+	s.routesChannels(mux)
 	s.routesAdTracking(mux)
 	s.routesAdConversions(mux)
 	s.routesContext(mux)
@@ -503,9 +529,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLeads(mux)
 	s.routesLists(mux)
 	s.routesSmartLists(mux)
+	s.routesTransactions(mux)
 	s.routesRules(mux)
 	s.routesProducts(mux)
 	s.routesLifecycle(mux)
+	s.routesRecordMetrics(mux)
 	s.routesSequences(mux)
 	s.routesInbox(mux)
 	s.routesInboxTags(mux)
@@ -588,8 +616,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAIDesktop(mux)
 	s.routesCustomerProfiles(mux)
 	s.routesKnowledge(mux)
+	s.routesWebsiteImport(mux)
+	s.routesLearnReplies(mux)
 	s.routesKnowledgeRetrieval(mux)
 	s.routesSupport(mux)
+	s.routesSupportTopics(mux)
 	s.routesKnowledgeInsights(mux)
 	s.routesHelpCentres(mux)
 	s.routesHelpCentreSite(mux)

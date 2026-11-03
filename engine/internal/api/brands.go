@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/outflareai/outflare/engine/internal/brands"
+	"github.com/outflareai/outflare/engine/internal/quota"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -121,6 +122,12 @@ type brandRecord struct {
 	// company's; "" for the company's.
 	LogoURL string     `json:"logo_url"`
 	Colors  lookColors `json:"colors"`
+	// How long a person's edit of a field wins over other sources, in days
+	// (0: forever). Fields can set their own.
+	ManualEditDays int `json:"manual_edit_days"`
+	// The currency the brand reports money in (ISO 4217): transactions are
+	// converted to it.
+	Currency string `json:"currency"`
 	// The brand context's version; 1 until it is first saved.
 	ContextVersion int         `json:"context_version"`
 	Counts         brandCounts `json:"counts"`
@@ -133,7 +140,7 @@ type brandRecord struct {
 func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status string) ([]brandRecord, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT b.id, b.name, b.handle, b.website, b.domains, b.platforms, b.links, b.status, NULLIF(b.business_model, ''), b.revenue_models,
-		       b.logo_url, b.colors,
+		       b.logo_url, b.colors, b.manual_edit_days, b.currency,
 		       COALESCE((SELECT version FROM brand_context WHERE brand_id = b.id), 1),
 		       (SELECT count(*) FROM sending_domains WHERE brand_id = b.id)::int,
 		       (SELECT count(*) FROM mailboxes WHERE brand_id = b.id)::int,
@@ -150,7 +157,7 @@ func (s *Server) loadBrands(ctx context.Context, ws string, id *string, status s
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (brandRecord, error) {
 		var v brandRecord
-		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ContextVersion,
+		err := row.Scan(&v.ID, &v.Name, &v.Handle, &v.Website, &v.Domains, &v.Platforms, &v.Links, &v.Status, &v.BusinessModel, &v.RevenueModels, &v.LogoURL, &v.Colors, &v.ManualEditDays, &v.Currency, &v.ContextVersion,
 			&v.Counts.Domains, &v.Counts.Mailboxes, &v.Counts.LeadLists, &v.Counts.Sequences,
 			&v.Counts.ActiveSequences, &v.CreatedAt, &v.UpdatedAt)
 		return v, err
@@ -349,6 +356,10 @@ type brandInput struct {
 	// The brand's own logo and colours; "" for the company's.
 	LogoURL *string     `json:"logo_url"`
 	Colors  *lookColors `json:"colors"`
+	// Days a person's edit of a field wins (0: forever).
+	ManualEditDays *int `json:"manual_edit_days"`
+	// The currency it reports money in, such as EUR.
+	Currency *string `json:"currency"`
 }
 
 // hostOf turns "https://www.Repocket.com/pricing" into "repocket.com".
@@ -403,6 +414,15 @@ func handleFrom(name string) string {
 }
 
 func (in *brandInput) validate() error {
+	if in.Currency != nil {
+		*in.Currency = strings.ToUpper(strings.TrimSpace(*in.Currency))
+		if !currencyCode.MatchString(*in.Currency) {
+			return errInvalid("currency is a three-letter ISO 4217 code, such as EUR")
+		}
+	}
+	if in.ManualEditDays != nil && (*in.ManualEditDays < 0 || *in.ManualEditDays > 3650) {
+		return errInvalid("manual_edit_days is 0 (forever) to 3650 days")
+	}
 	if in.LogoURL != nil {
 		logo, err := cleanLogoURL(*in.LogoURL)
 		if err != nil {
@@ -557,6 +577,9 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 	}
 	domains = withWebsite(website, domains)
 	ctx := r.Context()
+	if !s.allowQuota(w, r, a.WorkspaceID, quota.Brands, 1) {
+		return
+	}
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		// A handle made from the name gets a number when it is taken.
@@ -644,11 +667,12 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 			UPDATE brands SET name = COALESCE($3, name), handle = COALESCE($4, handle), website = COALESCE($5, website),
 				domains = COALESCE($6, domains), platforms = COALESCE($7, platforms), status = COALESCE($8, status),
 				links = COALESCE($9, links), business_model = COALESCE($10, business_model), revenue_models = COALESCE($11, revenue_models),
-				logo_url = COALESCE($12, logo_url), colors = COALESCE($13, colors),
+				logo_url = COALESCE($12, logo_url), colors = COALESCE($13, colors), manual_edit_days = COALESCE($14, manual_edit_days),
+				currency = COALESCE($15, currency),
 				updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
 			b.ID, a.WorkspaceID, req.Name, req.Handle, req.Website, domains, req.Platforms, req.Status, req.Links, req.BusinessModel, req.RevenueModels,
-			req.LogoURL, req.Colors)
+			req.LogoURL, req.Colors, req.ManualEditDays, req.Currency)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -687,7 +711,7 @@ func (s *Server) updateBrand(w http.ResponseWriter, r *http.Request) {
 		for name, set := range map[string]bool{"name": req.Name != nil, "handle": req.Handle != nil, "website": req.Website != nil,
 			"domains": req.Domains != nil, "platforms": req.Platforms != nil, "links": req.Links != nil,
 			"business_model": req.BusinessModel != nil, "revenue_models": req.RevenueModels != nil,
-			"logo_url": req.LogoURL != nil, "colors": req.Colors != nil} {
+			"logo_url": req.LogoURL != nil, "colors": req.Colors != nil, "manual_edit_days": req.ManualEditDays != nil, "currency": req.Currency != nil} {
 			if set {
 				fields = append(fields, name)
 			}
@@ -742,6 +766,9 @@ type brandContextView struct {
 	Version   int         `json:"version"`
 	UpdatedAt *time.Time  `json:"updated_at"`
 	UpdatedBy *string     `json:"updated_by"`
+	// The brand's active findings, nearest review first (at most 20):
+	// what was learned about its marketing, as data for an agent.
+	Findings []findingView `json:"findings,omitempty"`
 }
 
 func (v *brandContextView) field(key string) *string {
@@ -790,6 +817,10 @@ func (s *Server) getBrandContext(w http.ResponseWriter, r *http.Request) {
 	}
 	v, err := s.loadBrandContext(r.Context(), a.WorkspaceID, b.ID)
 	if s.allocError(w, r, err) {
+		return
+	}
+	if v.Findings, err = s.loadFindings(r.Context(), a.WorkspaceID, b.ID, true, 20); err != nil {
+		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)

@@ -277,9 +277,9 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
             <div className="space-y-1">
               <div className="flex items-start justify-between gap-2">
                 <span className="flex flex-wrap items-center gap-1.5 font-medium">{name} <BrandBadge id={brand_id} /></span>
-                <span className="font-mono text-[12px] tabular-nums">{s ? plural(s.members, "person", "people") : plural(l!.leads, "lead")}</span>
+                <span className="font-mono text-[12px] tabular-nums">{s ? (s.record_type === "account" ? plural(s.members, "company", "companies") : plural(s.members, "person", "people")) : plural(l!.leads, "lead")}</span>
               </div>
-              <div className="text-[12px] text-muted-foreground">{s ? "Smart list" : l!.kind === "search" ? `${integrationName(l!.search_integration_id) ?? "Search"} search` : "Manual"}</div>
+              <div className="text-[12px] text-muted-foreground">{s ? (s.kind === "static" ? "Static list" : s.kind === "query" ? "From a query" : "Smart list") : l!.kind === "search" ? `${integrationName(l!.search_integration_id) ?? "Search"} search` : "Manual"}</div>
               {l?.last_run && <RunLine run={l.last_run} />}
               {s && <SmartLine list={s} />}
             </div>
@@ -299,10 +299,10 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
             {
               id: "source",
               header: "Source",
-              accessorFn: ({ lead: l }) => (!l ? "Smart list" : l.kind === "search" ? integrationName(l.search_integration_id) ?? "Search" : "Manual"),
-              cell: ({ row: { original: { lead: l } } }) =>
+              accessorFn: ({ lead: l, smart: sl }) => (!l ? (sl?.kind === "static" ? "Static list" : sl?.kind === "query" ? "From a query" : "Smart list") : l.kind === "search" ? integrationName(l.search_integration_id) ?? "Search" : "Manual"),
+              cell: ({ row: { original: { lead: l, smart: sl } } }) =>
                 !l ? (
-                  <Badge tone="blue">Smart list</Badge>
+                  <Badge tone="blue">{sl?.kind === "static" ? "Static list" : sl?.kind === "query" ? "From a query" : "Smart list"}</Badge>
                 ) : l.kind === "search" ? (
                   <span>{integrationName(l.search_integration_id) ?? <span className="text-amber-600 dark:text-amber-400">Provider disconnected</span>} <span className="text-muted-foreground">search</span></span>
                 ) : (
@@ -320,7 +320,7 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
               id: "refresh",
               header: "Refresh",
               accessorFn: (r) => (r.smart ? -1 : r.lead!.refresh_every_days ?? 0),
-              cell: ({ row: { original: { lead: l, smart: s } } }) => (s ? <span>Every 15 minutes</span> : l!.refresh_every_days ? <span>Every {plural(l!.refresh_every_days, "day")}</span> : <span className="text-muted-foreground">When asked</span>),
+              cell: ({ row: { original: { lead: l, smart: s } } }) => (s ? <span className={s.kind === "static" ? "text-muted-foreground" : ""}>{s.kind === "static" ? "By hand" : "Every 15 minutes"}</span> : l!.refresh_every_days ? <span>Every {plural(l!.refresh_every_days, "day")}</span> : <span className="text-muted-foreground">When asked</span>),
             },
           ]}
         />
@@ -331,6 +331,8 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
 }
 
 function SmartLine({ list }: { list: SmartList }) {
+  // A static list changes when people are added or taken out, not by rules.
+  if (list.kind === "static") return <span className="text-[12px] text-muted-foreground">Changed {ago(list.updated_at)}</span>;
   if (list.error_code) return <Status tone="amber">Couldn't update</Status>;
   if (!list.refreshed_at) return <Status tone="blue">Filling</Status>;
   return <span className="text-[12px] text-muted-foreground">Updated {ago(list.refreshed_at)}</span>;

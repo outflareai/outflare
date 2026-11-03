@@ -54,6 +54,8 @@ curl -X POST "localhost:8080/v1/workspaces/$WS/action-grants" \
 - **daily_limit** is the most changes a run grant runs in a UTC day; the rest wait for a person.
 - **daily_spend_cents**, **monthly_spend_cents** and **total_spend_cents** (for good: a budget for one job) cap what a run grant's changes spend on your own accounts (the spend ledger, `GET .../spend`): spend booked while a change runs is linked to it, each change shows it as `spend_cents`, and once the day's or month's spend plus what the next change is likely to cost (the average of the grant's recent changes) would pass the cap, the change waits for a person (`decided_by_rule: spend_limit`). A first change under a grant has no history and runs. A run grant on paid ads (`ads`, `ads/**`, or the same under `brands/*/`) gets caps of $50 a day and $500 a month when none are given, so a first autonomous grant on ad spend can't surprise anyone; set your own to change them.
 
+**Paid ads** have rules of their own on top ([paid-media.md](paid-media.md), "Managing campaigns"): raising a campaign's daily budget by more than a fifth, or setting one where there was none, always waits for a person; a raise or a resume that would put the brand's active campaigns over the grant's daily cap, or the month over its monthly cap, is held with `spend_limit`; a pause spends nothing and runs.
+
 When several grants match, the most specific decides: one naming the method beats one that doesn't, then the longest path. On a tie, the stricter mode wins. With no match, the change is held, so a new agent starts out asking for everything.
 
 `GET .../action-grants` lists them; `DELETE .../action-grants/{id}` revokes one, from the agent's next change.
@@ -90,7 +92,7 @@ Approving needs `actions.approve`, and is for people and approver tokens: an age
 
 ## Outflare's agent on the action layer: agent runs
 
-A playbook can run as an **agent run**: Outflare's own agent carries its steps out in turns on the workspace's AI model, as an agent token of its own on the action layer (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`, scope `missions.run`). The **mode** a person chooses is their approval of what the run may do on its own, set as the token's grants:
+A playbook can run as an **agent run**: Outflare's own agent carries its steps out in turns on the workspace's AI model, as an agent token of its own on the action layer (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`, scope `agents.run`; `agents.read` reads runs, and the mission scopes stand for them while missions retire). The **mode** a person chooses is their approval of what the run may do on its own, set as the token's grants:
 
 | Mode | Grants | What the agent sees |
 | --- | --- | --- |
@@ -100,7 +102,7 @@ A playbook can run as an **agent run**: Outflare's own agent carries its steps o
 
 The Agents page's **Runs** view lists runs and opens one: what each turn did, its changes (held ones to decide there), a box to write to it, and pause, resume and stop. The run (`GET .../agent-runs/{id}`) is the agent's check-in: the goal, plan and instructions, the brand's and the company's context, what its changes came to (`actions`, `held_actions`, `spend_cents`) and the latest updates. People write instructions to it (`POST .../agent-runs/{id}/updates`), which bring its next turn forward; the agent posts progress, questions and a report, and completes the run (`POST .../complete`). Pausing stops turns until a person resumes; stopping or completing revokes the run's token, so nothing more can act as it. Its held changes stay on the Agents page for a person to decide or expire. A run that can't carry on (no AI model, its token gone, three failed turns) pauses with the reason.
 
-Runs replace missions for playbooks; missions keep working until they are retired.
+Runs replace missions for playbooks; nothing starts a new mission any more, and the ones made before keep working until they end.
 
 ## Loops in extensions
 

@@ -5,7 +5,10 @@ brought in, so a person, a script or an agent can ask "what did ads cost this
 month, per brand, and what did they return?" without opening six dashboards.
 It can also send conversions back: when someone the ads brought signs up or
 pays, the platform hears about it, so its bidding learns from real results.
-Outflare never changes campaigns, budgets or ads.
+And it manages what runs: a person, or an agent within the grants a person
+set, pauses and resumes a campaign and sets its daily budget ("Managing
+campaigns" below). That is all it changes: it never creates campaigns, ads,
+audiences or creative, and never changes bids or targeting.
 
 Every connection is the workspace's own: it signs in to its own ad accounts and,
 where the platform needs one, adds its own developer token. Outflare never
@@ -252,7 +255,56 @@ personalisation; removing never needs consent. Each change records
 in the ad account. See
 [Lifecycle email](lifecycle-email.md#journeys) for the step itself.
 
+## Managing campaigns
+
+Three changes, on Google Ads, Meta, Microsoft Advertising, LinkedIn and
+TikTok (the other platforms are read but not changed yet, and say so with
+`422 connector_invalid`):
+
+| Call | What it does |
+| --- | --- |
+| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/pause` | Pause a campaign (`ads.manage`) |
+| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/resume` | Run a paused campaign again (`ads.manage`) |
+| `PATCH /v1/workspaces/{ws}/ads/campaigns/{id}` | Set its daily budget, `daily_budget_micros` in the account's currency (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/pause-all` | The kill switch: pause every active campaign of the brand at once, on every platform that can be changed, as one batch (`ads.manage`) |
+| `GET /v1/workspaces/{ws}/ads/changes` | Every change asked for, by campaign, status or brand (`analytics.read`) |
+
+Each call checks the campaign (yours, on an active account, in a state the
+change makes sense for) and answers `202` with the **change** (`ad_changes`,
+migration 0395): what the campaign was before, what was asked, who asked and,
+for an agent, its action. A job (`ads.change`) then makes the one call on the
+workspace's own account, reads the campaign back from the platform, and
+records how it ended: `applied` with `verified_at` when the platform shows
+the change, `applied` with a `verify_note` when it shows something else or
+could not be read back (the next sync corrects the mirror), or `failed` with
+the platform's reason. An unreachable platform is retried for a while first.
+The campaigns list follows the platform's answer at once. On the Paid ads
+page each campaign has Pause, Resume and a budget field, and a brand has
+**Pause all ads**.
+
+`ads.manage` is its own scope, because it spends money. Operators have it;
+give it to a token on purpose. For an agent on the action layer
+([actions.md](actions.md)):
+
+- a pause spends nothing, so it runs under the agent's grant;
+- raising a daily budget by more than a fifth, or setting one on a campaign
+  that had none, always waits for a person, whatever the grant;
+- a raise or a resume that would put the brand's active campaigns over the
+  grant's daily spend cap, or the month (what it has spent plus the daily
+  total for the rest of it) over its monthly cap, waits for a person. A run
+  grant on ads paths gets $50 a day and $500 a month unless a person sets
+  its own caps.
+
+Every change is an audit event and a webhook (`ad_campaign.paused`,
+`ad_campaign.resumed`, `ad_campaign.budget_changed`, `ads.paused_all`), and
+how it ended is a product event (`ad_change.applied`, `ad_change.failed`) and
+the metric `outflare_ads_changes_total` (the Grafana row "Paid media
+(managing campaigns)"). Meta needs the `ads_management` permission on the
+token or sign-in, LinkedIn `rw_ads`, and TikTok write access to Ad Account
+Management on the app; a connection made before that was asked for is
+reconnected to manage campaigns. Microsoft's sign-in already covers it.
+
 ## Coming next
 
-Syncing whole segments to audiences on a schedule, and letting an agent change
-budgets behind mission approval, are planned.
+Syncing whole segments to audiences on a schedule, and creating campaigns,
+ad groups, audiences and creative, are planned.

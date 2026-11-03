@@ -58,6 +58,7 @@ type linkProspectView struct {
 	LiveAt         *time.Time            `json:"live_at"`
 	OverdueAt      *time.Time            `json:"overdue_at"`
 	EndedAt        *time.Time            `json:"ended_at"`
+	RemovedAt      *time.Time            `json:"removed_at"`
 	Source         string                `json:"source"`
 	Note           string                `json:"note"`
 	CreatedAt      time.Time             `json:"created_at"`
@@ -70,7 +71,7 @@ type linkProspectView struct {
 
 const linkProspectCols = `p.id::text, p.site_id::text, p.brand_id::text, p.record_id::text, p.page_url, p.method, p.target_url, p.evidence,
 	p.domain_rating, p.traffic, p.spam_score, p.score, p.score_factors, p.stage, p.excluded_reason, p.stage_changed_at,
-	p.pitched_at, p.agreed_at, p.live_at, p.overdue_at, p.ended_at, p.source, p.note, p.created_at, p.updated_at,
+	p.pitched_at, p.agreed_at, p.live_at, p.overdue_at, p.ended_at, p.removed_at, p.source, p.note, p.created_at, p.updated_at,
 	(SELECT to_jsonb(c) - 'prospect_id' - 'workspace_id' FROM link_page_checks c WHERE c.prospect_id = p.id),
 	COALESCE((SELECT jsonb_agg(jsonb_build_object('record_id', k.record_id, 'name', r.name, 'source', k.source, 'confidence', k.confidence,
 		'email', (SELECT i.value FROM record_identities i WHERE i.record_id = k.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
@@ -82,7 +83,7 @@ func scanLinkProspect(row pgx.Row) (linkProspectView, error) {
 	var factors []byte
 	err := row.Scan(&v.ID, &v.SiteID, &v.BrandID, &v.RecordID, &v.PageURL, &v.Method, &v.TargetURL, &v.Evidence,
 		&v.DomainRating, &v.Traffic, &v.SpamScore, &v.Score, &factors, &v.Stage, &v.ExcludedReason, &v.StageChangedAt,
-		&v.PitchedAt, &v.AgreedAt, &v.LiveAt, &v.OverdueAt, &v.EndedAt, &v.Source, &v.Note, &v.CreatedAt, &v.UpdatedAt, &v.Check, &v.Contacts)
+		&v.PitchedAt, &v.AgreedAt, &v.LiveAt, &v.OverdueAt, &v.EndedAt, &v.RemovedAt, &v.Source, &v.Note, &v.CreatedAt, &v.UpdatedAt, &v.Check, &v.Contacts)
 	if v.Check == nil {
 		v.Check = json.RawMessage("null")
 	}

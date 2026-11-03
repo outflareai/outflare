@@ -93,6 +93,24 @@ A static list holds the people someone, the API or a journey puts in it, such as
 
 Only people count: not companies, merged or archived records, or, for a brand's list, another brand's people. A static list is used wherever a smart list is: [rules](rules.md) acting on people joining or leaving it hear of each change.
 
+## Lists from a saved query
+
+A list can take its members from a saved [Query](query.md) instead of rules: `POST .../smart-lists` with `"kind": "query"` and `"saved_query_id"` (in the app: New smart list, then "A saved query"). Its members are the records in the query's `record_id` column, or its `id` column when it has none, for example:
+
+```sql
+SELECT id AS record_id FROM people WHERE attributes->>'plan' = 'pro'
+```
+
+- It refreshes every 15 minutes like a smart list, running the saved query's current version, so editing the query changes the list at the next refresh. Joins and leaves are kept in its history like any list's.
+- It reads customer data only, inside the list's brand, and holds up to 50,000 records of its kind (`record_type`), live and in its brand: anything else the query returns is left out.
+- When the query fails, the list keeps the members it had and `error_code` says why: `query_missing` (the saved query was archived), `no_record_id` (no `record_id` or `id` column), `too_many` (over 50,000 rows), `query_timeout`, or the query's own error code. It tries again at the next refresh.
+- Change its query with `PATCH .../smart-lists/{id}` and `saved_query_id`: a saved query of the list's brand that you can see. It has no rules.
+- It works wherever a smart list does. A [flow kit](playbooks.md) exports it as an empty static list, since its query belongs to the workspace.
+
+## Save a copy
+
+`POST /v1/brands/{brand}/smart-lists/{id}/copy` (the list's menu, "Save a copy"; MCP `copy_smart_list`) saves who is in a list of people now as a new static list: a snapshot that never changes on its own, named after the list and today's date unless you pass `name`. Each person's history says they joined it as a copy. The audit log has `smart_list.copied`.
+
 Lists also work as exclusions: a journey, broadcast or sequence can leave out everyone on chosen lists (see Exclusions in [lifecycle-email.md](lifecycle-email.md)).
 
 ## Smart lists
@@ -106,10 +124,11 @@ Each rule tests one thing about a person:
 - **A lead list** they are in, or aren't: a fixed list can feed a smart list.
 - **A news search** they wrote an article for, or didn't, ever or in the last so many days: a media list of the [journalists](news-watch.md#journalists) who cover a topic.
 - **A company field** on a company they are on (`company_attribute`), such as a journalist's outlet tier: `{"company_attribute": "outlet_tier", "op": "eq", "value": "national"}`. It passes when any of their companies passes; is not and is not set pass when none of them has the value.
+- **A lifecycle stage** for a product (`product_stage`, [products and lifecycle stages](product-lifecycle.md)): `{"product_stage": "churned", "product": "residential", "op": "eq"}` holds people in that stage, `neq` people who aren't. `level` picks billing (`company`) or usage (`person`) stages; by default a people list reads usage stages and a company list billing stages.
 
 A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
 
-Only people count: not companies, merged records or archived ones. A list for one brand holds that brand's people and the people shared by every brand; a list for every brand holds everyone.
+A list holds people unless it is a [list of companies](#lists-of-companies); merged and archived records never count. A list for one brand holds that brand's people and the people shared by every brand; a list for every brand holds everyone.
 
 Lists fill straight away when saved, and refresh on their own every 15 minutes, which also moves people in and out of time windows such as "in the last 90 days". **Refresh now** does it at once. If a refresh takes over two minutes, it stops and the list shows `query_timeout`: narrow the rules, for example with a time window on an event.
 
@@ -131,6 +150,19 @@ curl "localhost:8080/v1/workspaces/$WS/smart-lists/$LIST/members" -H "Authorizat
 
 Reading smart lists needs `customers.read`; making, changing, refreshing and deleting them needs `customers.manage`. A token or member limited to some brands sees lists for its brands and those for every brand, but only its brands' people in them, and can only change its brands' lists. Deleting a list never deletes the people.
 
-MCP tools: `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `preview_smart_list`, `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list`.
+MCP tools: `list_smart_lists`, `get_smart_list`, `list_smart_list_members`, `list_smart_list_changes`, `preview_smart_list`, `create_smart_list`, `update_smart_list`, `refresh_smart_list`, `delete_smart_list`.
+
+### Lists of companies
+
+A smart list can hold companies instead of people: make it with `"record_type": "account"`. Its rules test the company: a company field (`attribute`), an event (the company's own events and those of its people), and a lifecycle stage per product (`product_stage`, billing stages by default). Preview it with `"record_type": "account"` too. A list of companies can't be static, and its kind of record never changes.
+
+- **Excluding a list of companies leaves out everyone at those companies.** An exclusion on a journey, broadcast or sequence that names a company list skips each person whose company is in it.
+- **Rules on joining and leaving** work for companies: an [audience rule](rules.md) with `record_type: account` on a company list fires for the company.
+- **Review requests go to people**, so they refuse a list of companies.
+- Its members list shows each company's main domain in `email`.
+
+### History
+
+Every list keeps who joined and left it, and when: each refresh of a smart list and each change to a static one. `GET /v1/brands/{brand}/smart-lists/{id}/changes` (MCP `list_smart_list_changes`) lists them newest first, `?change=enter` or `leave` narrows it, and a person's or company's [timeline](customers.md#timeline) shows the lists they joined and left (kind `list`). Query has the history as `smart_list_changes`. The history starts when this release does; it holds nothing from before. A person in Recently deleted keeps their place, so restoring them neither leaves nor joins.
 
 Coming next: sending to a smart list from email broadcasts, starting journeys when someone joins one, and switching a smart list on for each ad network.

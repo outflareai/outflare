@@ -9,8 +9,14 @@ on:
   schedule:
     - cron: "37 2 * * *"
   # For a push made with a workflow's own token, which starts no
-  # workflows: that workflow starts this run itself.
+  # workflows: that workflow starts this run itself. With race on, it is
+  # the nightly run, started by Notify Cloud when the cron didn't fire.
   workflow_dispatch:
+    inputs:
+      race:
+        description: Every part under the race detector (the nightly run)
+        type: boolean
+        default: false
 
 # A newer push to a pull request replaces its run: Actions minutes are
 # billed per job, so finishing a superseded run is money for nothing. Runs
@@ -32,13 +38,15 @@ jobs:
   #
   # - A pull request that is ready for review runs gofmt, go vet and the
   #   tests of the packages it changes and the packages that import them
-  #   (the "light" part), and the web, SDK and Python jobs only when it
-  #   changes what they build. A draft runs none of the Go tests, nor does a
-  #   change to docs, change notes or web/ alone, nor a head that only merges
-  #   main into a commit whose tests passed. A change to go.mod, go.sum or
-  #   the migrations runs every part.
+  #   (the "light" part; the API package only when api/ or the package
+  #   itself changed, in two shards then), and the web, SDK and Python jobs
+  #   only when it changes what they build. A draft runs none of the Go
+  #   tests, nor does a change to docs, change notes or web/ alone, nor a
+  #   head that only merges main into a commit whose tests passed. A change
+  #   to go.mod or go.sum runs every part. A migration runs the rollback
+  #   check on the same light set.
   # - A batch (batch/*) runs every part, the Docker image when its inputs
-  #   changed, and the migrations job when it adds a migration.
+  #   changed, and the migrations job (every part) when it adds a migration.
   # - On main, a commit whose files are exactly a commit CI already passed on
   #   (the batch the merge queue fast-forwarded main to, or a merge whose
   #   second parent is one) isn't tested again: every job is skipped and the
@@ -55,7 +63,9 @@ jobs:
     outputs:
       tested: ${{ steps.tree.outputs.tested }}
       go: ${{ steps.scope.outputs.go }}
-      parts: ${{ steps.scope.outputs.parts || '[{"name":"api 1/2","part":"api 1 2"},{"name":"api 2/2","part":"api 2 2"},{"name":"rest","part":"rest"}]' }}
+      parts: ${{ steps.scope.outputs.parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]' }}
+      # The nightly race run: on the schedule, or dispatched with race on.
+      race: ${{ github.event_name == 'schedule' || inputs.race == true }}
       migrations: ${{ steps.scope.outputs.migrations }}
       migration_parts: ${{ steps.scope.outputs.migration_parts }}
       changed: ${{ steps.scope.outputs.changed }}
@@ -115,12 +125,15 @@ jobs:
           # numbers, expand-only) on any pull request that touches them. The
           # previous version's tests on the new schema (the rollback check) run
           # when it adds a migration: on the pull request itself once it is
-          # ready, so its author finds a failure there, and again in its batch.
-          # In a batch they were what failed it, each failure costing a split
-          # and two more full runs while every other pull request waited.
+          # ready, on the light set (below), so its author finds a failure
+          # there, and every part again in its batch. On 2026-11-01 the full
+          # check on pull requests ran 55 times (about 30 billed minutes
+          # each) and caught nothing.
           if has '^(engine/internal/db/migrations/|scripts/checkmigrations/)'; then echo "migrations=true" >> "$GITHUB_OUTPUT"; fi
           if [ "$DRAFT" = true ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
             echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
+          elif [ "$batch" != true ]; then
+            echo 'migration_parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
           fi
           if [ "$batch" = true ]; then
             echo "::notice::A merge queue batch: everything runs."
@@ -157,29 +170,38 @@ jobs:
             [ "$(git merge-tree --write-tree "$p1" "$p2" 2>/dev/null | head -1)" = "$(git rev-parse "$c^{tree}")" ] || break
             c=$p1
             passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$c/check-runs?per_page=100" \
-              --jq '[.check_runs[] | select(.conclusion == "success" and (.name | test("^engine \\((light|api [12]/2|rest)\\)$"))) | .name] | unique | join(",")' || echo)
-            case ",$passed," in *,engine\ \(light\),*|*engine\ \(api\ 1/2\),engine\ \(api\ 2/2\),engine\ \(rest\)*) tested=$c; break ;; esac
+              --jq '[.check_runs[] | select(.conclusion == "success" and (.name | test("^engine \\((light( [12]/2)?|api [1-3]/3|rest)\\)$"))) | .name] | unique | join(",")' || echo)
+            case ",$passed," in *,engine\ \(light*|*engine\ \(api\ 1/3\),engine\ \(api\ 2/3\),engine\ \(api\ 3/3\),engine\ \(rest\)*) tested=$c; break ;; esac
           done
           if [ -n "$tested" ]; then
             echo "::notice::Only main merged in since ${tested::7}, where the Go tests passed; they are skipped."
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           echo "go=true" >> "$GITHUB_OUTPUT"
-          # Dependencies and the schema can break any package: every part.
-          if has '^(go\.(mod|sum)|engine/internal/db/)'; then
-            echo "::notice::go.mod, go.sum or the database package changed; every part runs."
+          # A dependency change can break any package: every part. A schema
+          # change used to as well; its batch runs every part anyway, and on
+          # the pull request it cost 65 billed minutes a push for nothing
+          # found (2026-11-01).
+          if has '^go\.(mod|sum)$'; then
+            echo "::notice::go.mod or go.sum changed; every part runs."
             exit 0
           fi
-          echo 'parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
+          # The light set runs in one job, or two when it holds the API
+          # package (the slowest by far; scripts/test-shard.sh light).
+          if has '^(api/|engine/internal/api/)'; then
+            echo 'parts=[{"name":"light 1/2","part":"light 1 2"},{"name":"light 2/2","part":"light 2 2"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
+          fi
           {
             echo "changed<<EOF_CHANGED"
             echo "$files"
             echo "EOF_CHANGED"
           } >> "$GITHUB_OUTPUT"
 
-  # The tests run in three parts side by side, each with its own database
-  # (scripts/test-shard.sh): the API package split in two, and everything
-  # else. One job took 6-8 minutes; each part takes about half that.
+  # The tests run in four parts side by side, each with its own database
+  # (scripts/test-shard.sh): the API package split in three, and everything
+  # else. One job took 6-8 minutes; a batch is as slow as its slowest part.
   engine:
     needs: same-files
     # Runs unless this exact tree already passed, or the pull request doesn't
@@ -194,9 +216,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # api 1/2, api 2/2 and rest, or only rest for a migration re-check
+        # api 1/3, api 2/3, api 3/3 and rest; light (one or two shards) on a pull request
         # (same-files above).
-        include: ${{ fromJSON(needs.same-files.outputs.parts || '[{"name":"api 1/2","part":"api 1 2"},{"name":"api 2/2","part":"api 2 2"},{"name":"rest","part":"rest"}]') }}
+        include: ${{ fromJSON(needs.same-files.outputs.parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]') }}
     services:
       # Postgres with pgvector, so meaning-based search is tested. The
       # migrations job below keeps plain Postgres, which proves the engine
@@ -264,9 +286,9 @@ jobs:
       - name: Free space after the restore
         run: df -h /
       - name: gofmt
-        if: matrix.part == 'rest' || matrix.part == 'light'
+        if: matrix.part == 'rest' || startsWith(matrix.part, 'light') && !endsWith(matrix.part, '2 2')
         run: test -z "$(gofmt -l api engine)" || (gofmt -l api engine && exit 1)
-      - if: matrix.part == 'rest' || matrix.part == 'light'
+      - if: matrix.part == 'rest' || startsWith(matrix.part, 'light') && !endsWith(matrix.part, '2 2')
         run: go vet ./...
       - name: Tests (${{ matrix.name }})
         env:
@@ -274,7 +296,7 @@ jobs:
           FLAKY_FILE: ${{ runner.temp }}/flaky.txt
           CHANGED: ${{ needs.same-files.outputs.changed }}
           # The race detector runs nightly (scripts/test-shard.sh).
-          RACE: ${{ github.event_name == 'schedule' && '-race' || '' }}
+          RACE: ${{ needs.same-files.outputs.race == 'true' && '-race' || '' }}
         run: scripts/test-shard.sh $PART
       # A test that failed and then passed on its own re-run (test-shard.sh)
       # doesn't fail the check, but gets an issue so it is fixed, not ignored.
@@ -302,40 +324,70 @@ jobs:
             done
           done <"$FLAKY_FILE"
 
+  # The web app, the TypeScript SDK and MCP server, and the Python SDK, in
+  # one job: GitHub bills every job as at least a minute, and the Python
+  # tests take 40 seconds. Each half runs only when the change touches it.
   web-and-sdk:
     needs: same-files
     # Runs unless this exact tree already passed, a pull request doesn't
     # touch what it builds, or it is the nightly race run. Runs if same-files
     # fails.
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.web != 'false' }}
+    if: ${{ !cancelled() && needs.same-files.outputs.race != 'true' && needs.same-files.outputs.tested != 'true' && (needs.same-files.outputs.web != 'false' || needs.same-files.outputs.python != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      WEB: ${{ needs.same-files.outputs.web }}
+      PYTHON: ${{ needs.same-files.outputs.python }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        if: env.WEB != 'false'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: env.WEB != 'false'
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - if: env.WEB != 'false'
+        run: pnpm install --frozen-lockfile
       - name: SDK types match api/openapi.yaml
+        if: env.WEB != 'false'
         run: pnpm --filter @outflare/sdk generate && git diff --exit-code sdk/ts/src/schema.ts
-      - run: pnpm -r build
+      - if: env.WEB != 'false'
+        run: pnpm -r build
       - name: Browser for subscription brand checks
+        if: env.WEB != 'false'
         run: pnpm --filter @outflare/web exec playwright install chromium --only-shell
       - name: Subscription brand assignment and workspace switching
+        if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:ai-account-brands
-      - run: pnpm --filter @outflare/sdk test
-      - run: pnpm --filter @outflare/mcp test
-      # The Go key scan reads TypeScript too, and runs here because a
-      # web-only pull request skips the engine job.
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - if: env.WEB != 'false'
+        run: pnpm --filter @outflare/sdk test
+      - if: env.WEB != 'false'
+        run: pnpm --filter @outflare/mcp test
+      # The bring-your-own-keys scan (engine/internal/ownkeys, which reads
+      # TypeScript too) runs in every light part and every batch, so not
+      # here again: it cost two minutes on 267 runs a day.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: env.PYTHON != 'false'
         with:
-          go-version-file: go.mod
-      - name: Workspaces bring their own keys
-        run: go test ./engine/internal/ownkeys/
+          python-version: |
+            3.9
+            3.13
+      - name: Python SDK tests on the oldest and newest supported Python
+        if: env.PYTHON != 'false'
+        working-directory: sdk/python
+        run: |
+          for py in 3.9 3.13; do
+            python$py -m venv .venv-$py
+            .venv-$py/bin/pip install -q -e '.[test]'
+            .venv-$py/bin/pytest -q
+          done
+      - name: Python SDK lint
+        if: env.PYTHON != 'false'
+        working-directory: sdk/python
+        run: pipx run ruff check . && pipx run ruff format --check .
 
   # The engine and web jobs already compile everything, so the image is
   # built only in a batch whose changes touch what goes into it, and on main
@@ -343,7 +395,7 @@ jobs:
   docker:
     needs: same-files
     # Runs unless this exact tree already passed. Runs if same-files fails.
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.image != 'false' }}
+    if: ${{ !cancelled() && needs.same-files.outputs.race != 'true' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.image != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -352,41 +404,13 @@ jobs:
           persist-credentials: false
       - run: docker build -t outflare:ci .
 
-  python-sdk:
-    needs: same-files
-    # Runs unless this exact tree already passed, or a pull request doesn't
-    # touch the Python SDK or the API it calls. Runs if same-files fails.
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.same-files.outputs.tested != 'true' && needs.same-files.outputs.python != 'false' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: sdk/python
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: |
-            3.9
-            3.13
-      - name: Tests on the oldest and newest supported Python
-        run: |
-          for py in 3.9 3.13; do
-            python$py -m venv .venv-$py
-            .venv-$py/bin/pip install -q -e '.[test]'
-            .venv-$py/bin/pytest -q
-          done
-      - name: Lint
-        run: pipx run ruff check . && pipx run ruff format --check .
-
   # Every deploy must be safe to roll back, and must not break the version
   # still serving while it starts (docs/migrations.md). The previous
-  # version's tests run in the same three parts as the engine job, each with
-  # its own database; in one job they took 16 minutes. They run on a pull
-  # request that adds a migration (once it is ready) and in its batch; any
-  # other pull request that touches migrations runs only the checks.
+  # version's tests run in the same parts as the engine job, each with its
+  # own database; in one job they took 16 minutes. They run on a pull
+  # request that adds a migration (once it is ready: the light set only) and
+  # every part in its batch; any other pull request that touches migrations
+  # runs only the checks.
   migrations-part:
     needs: same-files
     # Only pull requests that change migrations (above). Runs if same-files
@@ -398,7 +422,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.same-files.outputs.migration_parts || '[{"name":"api 1/2","part":"api 1 2"},{"name":"api 2/2","part":"api 2 2"},{"name":"rest","part":"rest"}]') }}
+        include: ${{ fromJSON(needs.same-files.outputs.migration_parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]') }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -415,6 +439,7 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/outflare_test?sslmode=disable
       OUTFLARE_SECRET_KEY: ZGV2LW9ubHktZGV2LW9ubHktZGV2LW9ubHktZGV2LTA=
       PART: ${{ matrix.part }}
+      CHANGED: ${{ needs.same-files.outputs.changed }}
       # Like the engine job, no race detector (it runs nightly on main): the
       # base commit's scripts/test-shard.sh turns it on unless RACE is set,
       # and made this job two to three times slower than the rest.
@@ -484,8 +509,8 @@ jobs:
   # issue (or comments on the open one), only in the private engine
   # repository, where the team works on them.
   nightly-failed:
-    needs: [engine]
-    if: ${{ failure() && github.event_name == 'schedule' && github.repository == 'outflareai/engine' }}
+    needs: [same-files, engine]
+    if: ${{ failure() && needs.same-files.outputs.race == 'true' && github.repository == 'outflareai/engine' }}
     runs-on: ubuntu-latest
     permissions:
       issues: write

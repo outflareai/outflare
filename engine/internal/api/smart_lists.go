@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,38 +35,46 @@ func (s *Server) routesSmartLists(mux *http.ServeMux) {
 		mux.HandleFunc("PATCH "+base+"/{id}", on(manage, s.updateSmartList))
 		mux.HandleFunc("DELETE "+base+"/{id}", on(manage, s.deleteSmartList))
 		mux.HandleFunc("GET "+base+"/{id}/members", on(read, s.listSmartListMembers))
+		mux.HandleFunc("GET "+base+"/{id}/changes", on(read, s.listSmartListChanges))
 		mux.HandleFunc("POST "+base+"/{id}/refresh", on(manage, s.refreshSmartList))
 		mux.HandleFunc("POST "+base+"/{id}/members", on(manage, s.addStaticMembers))
 		mux.HandleFunc("POST "+base+"/{id}/members/remove", on(manage, s.removeStaticMembers))
 	}
+	// New since the brands expand step: on a brand's path only.
+	mux.HandleFunc("POST /v1/brands/{brand}/smart-lists/{id}/copy", s.onBrand(manage, s.copySmartList))
 }
 
 type smartListView struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Kind        string            `json:"kind"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Kind        string `json:"kind"`
+	// person, or account for a list of companies.
+	RecordType  string            `json:"record_type"`
 	BrandID     *string           `json:"brand_id"`
 	Rules       []smartlists.Rule `json:"rules"`
 	Match       string            `json:"match"`
 	Members     int               `json:"members"`
 	RefreshedAt *time.Time        `json:"refreshed_at"`
 	ErrorCode   *string           `json:"error_code"`
+	// A query list's saved query, whose record_id (or id) column is its
+	// members.
+	SavedQueryID *string `json:"saved_query_id"`
 	// The flow kit that added it, if one did.
 	Kit       *kitRef   `json:"kit"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-const smartListSelect = `SELECT l.id, l.name, l.description, l.kind, l.brand_id, l.rules, l.match, l.members, l.refreshed_at, l.error_code,
-	l.created_at, l.updated_at, l.kit_id, l.kit_key FROM smart_lists l WHERE l.workspace_id = $1`
+const smartListSelect = `SELECT l.id, l.name, l.description, l.kind, l.record_type, l.brand_id, l.rules, l.match, l.members, l.refreshed_at, l.error_code,
+	l.created_at, l.updated_at, l.kit_id, l.kit_key, l.saved_query_id::text FROM smart_lists l WHERE l.workspace_id = $1`
 
 func scanSmartList(row pgx.Row) (smartListView, error) {
 	var v smartListView
 	var rules []byte
 	var kitID, kitKey *string
-	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Kind, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt,
-		&kitID, &kitKey)
+	err := row.Scan(&v.ID, &v.Name, &v.Description, &v.Kind, &v.RecordType, &v.BrandID, &rules, &v.Match, &v.Members, &v.RefreshedAt, &v.ErrorCode, &v.CreatedAt, &v.UpdatedAt,
+		&kitID, &kitKey, &v.SavedQueryID)
 	if err != nil {
 		return v, err
 	}
@@ -75,6 +84,9 @@ func scanSmartList(row pgx.Row) (smartListView, error) {
 		// A static list's stored rules only keep older versions from
 		// filling it; it has none.
 		v.RefreshedAt = nil
+		return v, nil
+	}
+	if v.Kind == smartlists.KindQuery {
 		return v, nil
 	}
 	_ = json.Unmarshal(rules, &v.Rules)
@@ -131,16 +143,19 @@ func (s *Server) getSmartList(w http.ResponseWriter, r *http.Request) {
 
 type smartListFields struct {
 	Kind        *string            `json:"kind"`
+	RecordType  *string            `json:"record_type"`
 	Name        *string            `json:"name"`
 	Description *string            `json:"description"`
 	BrandID     optional[string]   `json:"brand_id"`
 	Rules       *[]smartlists.Rule `json:"rules"`
 	Match       *string            `json:"match"`
+	// A query list's saved query.
+	SavedQueryID *string `json:"saved_query_id"`
 }
 
 // changesMembers reports whether f changes who is in the list.
 func (f smartListFields) changesMembers() bool {
-	return f.BrandID.Set || f.Rules != nil || f.Match != nil
+	return f.BrandID.Set || f.Rules != nil || f.Match != nil || f.SavedQueryID != nil
 }
 
 // applySmartList checks f and applies it to v.
@@ -176,10 +191,34 @@ func (s *Server) applySmartList(r *http.Request, a *access, f smartListFields, v
 		}
 	}
 	if v.Kind == smartlists.KindStatic {
-		if f.Rules != nil || f.Match != nil {
+		if f.Rules != nil || f.Match != nil || f.SavedQueryID != nil {
 			return errInvalid("a static list has no rules: add and remove people with POST .../smart-lists/{id}/members")
 		}
 		return nil
+	}
+	if v.Kind == smartlists.KindQuery {
+		if f.Rules != nil || f.Match != nil {
+			return errInvalid("a list from a saved query has no rules: change its saved_query_id, or the query")
+		}
+		if f.SavedQueryID != nil {
+			var n int
+			if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM saved_queries WHERE workspace_id = $1 AND id = $2 AND archived_at IS NULL
+				AND brand_id = COALESCE($3::uuid, brand_id) AND (visibility = 'brand' OR owner_id = $4::uuid)`,
+				a.WorkspaceID, validOrNil(*f.SavedQueryID), v.BrandID, nullIfEmpty(a.personID())).Scan(&n); err != nil {
+				return err
+			}
+			if n == 0 {
+				return errInvalid("saved_query_id is a saved query of this brand you can see, not archived")
+			}
+			v.SavedQueryID = f.SavedQueryID
+		}
+		if v.SavedQueryID == nil {
+			return errInvalid("a list from a saved query needs saved_query_id")
+		}
+		return nil
+	}
+	if f.SavedQueryID != nil {
+		return errInvalid("saved_query_id is for lists of kind query")
 	}
 	if f.Rules != nil {
 		v.Rules = *f.Rules
@@ -187,13 +226,18 @@ func (s *Server) applySmartList(r *http.Request, a *access, f smartListFields, v
 	if f.Match != nil {
 		v.Match = *f.Match
 	}
-	return s.checkSmartRules(r, a, v.Rules, v.Match)
+	return s.checkSmartRulesFor(r, a, v.RecordType, v.Rules, v.Match)
 }
 
 // checkSmartRules checks rules and that the lead lists they name are the
 // workspace's.
 func (s *Server) checkSmartRules(r *http.Request, a *access, rules []smartlists.Rule, match string) error {
-	if msg := smartlists.Check(rules, match); msg != "" {
+	return s.checkSmartRulesFor(r, a, smartlists.People, rules, match)
+}
+
+// checkSmartRulesFor is checkSmartRules for a list of recordType.
+func (s *Server) checkSmartRulesFor(r *http.Request, a *access, recordType string, rules []smartlists.Rule, match string) error {
+	if msg := smartlists.CheckFor(recordType, rules, match); msg != "" {
 		return errInvalid(msg)
 	}
 	if ids := smartlists.InLists(rules); len(ids) > 0 {
@@ -260,13 +304,24 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name is required")
 		return
 	}
-	v := smartListView{Kind: smartlists.KindSmart, Rules: []smartlists.Rule{}, Match: "all"}
+	v := smartListView{Kind: smartlists.KindSmart, RecordType: smartlists.People, Rules: []smartlists.Rule{}, Match: "all"}
 	if f.Kind != nil {
-		if *f.Kind != smartlists.KindSmart && *f.Kind != smartlists.KindStatic {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is smart or static")
+		if *f.Kind != smartlists.KindSmart && *f.Kind != smartlists.KindStatic && *f.Kind != smartlists.KindQuery {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is smart, static or query (from a saved query)")
 			return
 		}
 		v.Kind = *f.Kind
+	}
+	if f.RecordType != nil {
+		if *f.RecordType != smartlists.People && *f.RecordType != smartlists.Companies {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "record_type is person or account (a list of companies)")
+			return
+		}
+		if *f.RecordType == smartlists.Companies && v.Kind == smartlists.KindStatic {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "a list of companies is a smart list: a static list holds people")
+			return
+		}
+		v.RecordType = *f.RecordType
 	}
 	if a.Brand != "" {
 		v.BrandID = &a.Brand
@@ -283,26 +338,31 @@ func (s *Server) createSmartList(w http.ResponseWriter, r *http.Request) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rules, _ := json.Marshal(v.Rules)
 		var refreshed *time.Time
-		if v.Kind == smartlists.KindStatic {
+		switch v.Kind {
+		case smartlists.KindStatic:
 			rules, _ = json.Marshal(smartlists.NobodyRules)
 			refreshed = &smartlists.Never
+		case smartlists.KindQuery:
+			// Rules that match nobody, so a version from before query lists
+			// never fills it from rules.
+			rules, _ = json.Marshal(smartlists.NobodyRules)
 		}
 		var createdBy *string
 		if a.ActorID != "" {
 			createdBy = &a.ActorID
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO smart_lists (workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by)
-			VALUES ($1, COALESCE($2, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Kind, rules, v.Match,
-			refreshed, createdBy).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO smart_lists (workspace_id, brand_id, name, description, kind, rules, match, refreshed_at, created_by, record_type, saved_query_id)
+			VALUES ($1, COALESCE($2, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`, a.WorkspaceID, v.BrandID, v.Name, v.Description, v.Kind, rules, v.Match,
+			refreshed, createdBy, v.RecordType, v.SavedQueryID).Scan(&id); err != nil {
 			return err
 		}
-		if v.Kind == smartlists.KindSmart {
+		if v.Kind != smartlists.KindStatic {
 			if _, err := smartlists.Enqueue(ctx, tx, a.WorkspaceID, id, true); err != nil {
 				return err
 			}
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "smart_list.created", "smart_list", id,
-			map[string]any{"kind": v.Kind, "rules": len(v.Rules), "match": v.Match, "branded": v.BrandID != nil})
+			map[string]any{"kind": v.Kind, "record_type": v.RecordType, "rules": len(v.Rules), "match": v.Match, "branded": v.BrandID != nil, "saved_query_id": v.SavedQueryID})
 	})
 	if uniqueViolation(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "a list with this name already exists")
@@ -338,21 +398,21 @@ func (s *Server) updateSmartList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "you can only make smart lists for your brands: set brand_id")
 		return
 	}
-	if f.Kind != nil && *f.Kind != v.Kind {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "a list's kind can't change: make a new list")
+	if (f.Kind != nil && *f.Kind != v.Kind) || (f.RecordType != nil && *f.RecordType != v.RecordType) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "a list's kind and record_type can't change: make a new list")
 		return
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rules, _ := json.Marshal(v.Rules)
-		if v.Kind == smartlists.KindStatic {
+		if v.Kind != smartlists.KindSmart {
 			rules, _ = json.Marshal(smartlists.NobodyRules)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE smart_lists SET name = $3, description = $4, brand_id = $5, rules = $6, match = $7, updated_at = now()
-			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.ID, v.Name, v.Description, v.BrandID, rules, v.Match); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE smart_lists SET name = $3, description = $4, brand_id = $5, rules = $6, match = $7, saved_query_id = $8, updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, v.ID, v.Name, v.Description, v.BrandID, rules, v.Match, v.SavedQueryID); err != nil {
 			return err
 		}
-		if f.changesMembers() && v.Kind == smartlists.KindSmart {
+		if f.changesMembers() && v.Kind != smartlists.KindStatic {
 			if _, err := smartlists.Enqueue(ctx, tx, a.WorkspaceID, v.ID, true); err != nil {
 				return err
 			}
@@ -411,9 +471,10 @@ func (s *Server) refreshSmartList(w http.ResponseWriter, r *http.Request) {
 }
 
 type smartPreviewInput struct {
-	BrandID *string           `json:"brand_id"`
-	Rules   []smartlists.Rule `json:"rules"`
-	Match   *string           `json:"match"`
+	RecordType *string           `json:"record_type"`
+	BrandID    *string           `json:"brand_id"`
+	Rules      []smartlists.Rule `json:"rules"`
+	Match      *string           `json:"match"`
 }
 
 // previewSmartList counts who rules pick now and shows a few of them,
@@ -447,10 +508,14 @@ func (s *Server) previewSmartList(w http.ResponseWriter, r *http.Request) {
 		}
 		brand = &id
 	}
-	if !s.smartListApplied(w, r, s.checkSmartRules(r, a, in.Rules, match)) {
+	recordType := smartlists.People
+	if in.RecordType != nil {
+		recordType = *in.RecordType
+	}
+	if !s.smartListApplied(w, r, s.checkSmartRulesFor(r, a, recordType, in.Rules, match)) {
 		return
 	}
-	n, sample, err := s.smartPreview(r, a, in.Rules, match, brand)
+	n, sample, err := s.smartPreview(r, a, recordType, in.Rules, match, brand)
 	var pg *pgconn.PgError
 	if errors.As(err, &pg) && pg.Code == "57014" {
 		writeError(w, r, http.StatusBadRequest, "query_timeout", "these rules took too long to count: narrow them, for example with a recent time window on an event")
@@ -465,7 +530,7 @@ func (s *Server) previewSmartList(w http.ResponseWriter, r *http.Request) {
 
 // smartPreview runs a preview in a read-only transaction with a time
 // limit. A brand-limited caller only counts its brands' people.
-func (s *Server) smartPreview(r *http.Request, a *access, rules []smartlists.Rule, match string, brand *string) (int, []smartlists.Person, error) {
+func (s *Server) smartPreview(r *http.Request, a *access, recordType string, rules []smartlists.Rule, match string, brand *string) (int, []smartlists.Person, error) {
 	ctx := r.Context()
 	var n int
 	var sample []smartlists.Person
@@ -474,7 +539,7 @@ func (s *Server) smartPreview(r *http.Request, a *access, rules []smartlists.Rul
 			return err
 		}
 		var err error
-		n, sample, err = smartlists.Preview(ctx, tx, a.WorkspaceID, rules, match, brand, a.seenBrands(), 10)
+		n, sample, err = smartlists.PreviewFor(ctx, tx, a.WorkspaceID, recordType, rules, match, brand, a.seenBrands(), 10)
 		return err
 	})
 	return n, sample, err
@@ -574,4 +639,66 @@ func (s *Server) changeStaticMembers(w http.ResponseWriter, r *http.Request, add
 	default:
 		writeJSON(w, http.StatusOK, c)
 	}
+}
+
+type smartListChangeView struct {
+	ID       int64     `json:"id"`
+	RecordID string    `json:"record_id"`
+	Name     string    `json:"name"`
+	Change   string    `json:"change"`
+	At       time.Time `json:"at"`
+}
+
+// listSmartListChanges is who joined and left a list, newest first: its
+// membership history, kept from when lists started keeping it.
+func (s *Server) listSmartListChanges(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	v, ok := s.findSmartList(w, r, a, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	limit, ok := pageLimit(w, r, 50, 200)
+	if !ok {
+		return
+	}
+	var before int64
+	if b, ok := pageCursor(w, r, pageBefore); !ok {
+		return
+	} else if b != "" {
+		n, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || n <= 0 {
+			invalidCursor(w, r)
+			return
+		}
+		before = n
+	}
+	change := r.URL.Query().Get("change")
+	if change != "" && change != "enter" && change != "leave" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "change is enter or leave")
+		return
+	}
+	args := []any{a.WorkspaceID, v.ID, limit, before, change}
+	more, args := smartlists.Seen(a.seenBrands(), args)
+	rows, err := s.pool.Query(r.Context(), `SELECT c.id, c.record_id::text, r.name, c.change, c.at FROM smart_list_changes c
+		JOIN records r ON r.id = c.record_id
+		WHERE c.workspace_id = $1 AND c.list_id = $2 AND ($4 = 0 OR c.id < $4) AND ($5 = '' OR c.change = $5) AND r.deleted_at IS NULL`+more+`
+		ORDER BY c.id DESC LIMIT $3`, args...)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (smartListChangeView, error) {
+		var c smartListChangeView
+		return c, row.Scan(&c.ID, &c.RecordID, &c.Name, &c.Change, &c.At)
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var next *string
+	if len(list) == limit {
+		c := strconv.FormatInt(list[len(list)-1].ID, 10)
+		next = &c
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": nonNil(list), "next_cursor": nextCursor(pageBefore, next)})
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/support"
@@ -112,6 +113,7 @@ func (s *Server) routesSupportChat(mux *http.ServeMux) {
 	mux.HandleFunc("GET /chat/{key}/messages", s.chatMessages)
 	mux.HandleFunc("POST /chat/{key}/messages", s.chatSend)
 	mux.HandleFunc("GET /chat/{key}/articles", s.chatArticles)
+	mux.HandleFunc("POST /chat/{key}/messages/{id}/feedback", s.chatFeedback)
 }
 
 func (s *Server) listChatWidgets(w http.ResponseWriter, r *http.Request) {
@@ -482,36 +484,69 @@ type chatMessageView struct {
 	Name      string    `json:"name"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"created_at"`
+	// Assistant: the support assistant sent it, so the visitor can say
+	// whether it helped; Feedback is what they said (null for nothing yet).
+	Assistant bool    `json:"assistant"`
+	Feedback  *string `json:"feedback"`
 }
 
 // chatThread is what the visitor sees of their latest conversation: their
 // messages and the team's replies after a time, never notes or anything of
 // another visitor's. status is "" before they have written.
 func (s *Server) chatThread(ctx context.Context, cw *chatWidget, token []byte, after time.Time) (string, []chatMessageView, error) {
+	_, status, list, err := s.chatThreadOf(ctx, cw, token, after)
+	return status, list, err
+}
+
+// chatThreadOf is chatThread with the conversation's id ("" before any).
+func (s *Server) chatThreadOf(ctx context.Context, cw *chatWidget, token []byte, after time.Time) (string, string, []chatMessageView, error) {
 	var conv, status string
 	err := s.pool.QueryRow(ctx, `SELECT id::text, status FROM support_conversations
 		WHERE workspace_id = $1 AND chat_widget_id = $2 AND chat_token_hash = $3 ORDER BY last_message_at DESC LIMIT 1`,
 		cw.ws, cw.id, token).Scan(&conv, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", []chatMessageView{}, nil
+		return "", "", []chatMessageView{}, nil
 	}
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE support_conversations SET visitor_seen_at = now() WHERE id = $1`, conv); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.id::text, CASE m.kind WHEN 'in' THEN 'visitor' ELSE 'team' END,
-			CASE WHEN m.kind = 'out' THEN COALESCE(NULLIF(split_part(u.name, ' ', 1), ''), '') ELSE '' END, m.body, m.created_at
+			CASE WHEN m.kind = 'out' THEN COALESCE(NULLIF(split_part(u.name, ' ', 1), ''), '') ELSE '' END, m.body, m.created_at,
+			r.id IS NOT NULL, r.feedback
 		FROM support_messages m LEFT JOIN users u ON u.id = m.author_id
+		LEFT JOIN support_assistant_runs r ON r.sent_message_id = m.id
 		WHERE m.conversation_id = $1 AND m.kind IN ('in', 'out') AND m.created_at > $2
 		ORDER BY m.created_at LIMIT 200`, conv, after)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	list, err := pgx.CollectRows(rows, pgx.RowToStructByPos[chatMessageView])
-	return status, list, err
+	return conv, status, list, err
+}
+
+// chatTyping says whether the support assistant is writing a reply that
+// will reach the visitor on its own (Auto on chat), so the chat can show
+// it is typing.
+func (s *Server) chatTyping(ctx context.Context, cw *chatWidget, conv string) (bool, error) {
+	if conv == "" || !s.autoAvailable(ctx, cw.ws) {
+		return false, nil
+	}
+	var brand *string
+	if err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM support_conversations WHERE id = $1`, conv).Scan(&brand); err != nil {
+		return false, err
+	}
+	mode, err := support.AssistantMode(ctx, s.pool, cw.ws, brand, support.ChannelChat)
+	if err != nil || mode != "auto" {
+		return false, err
+	}
+	var busy bool
+	err = s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE workspace_id = $1 AND kind = $2 AND status IN ('queued', 'running')
+		AND payload->>'conversation_id' = $3)`, cw.ws, support.JobAssistant, conv).Scan(&busy)
+	return busy, err
 }
 
 // verifyIdentity checks the site's signature on a signed-in user's email.
@@ -626,14 +661,18 @@ func (s *Server) chatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		after = t
 	}
-	status, list, err := s.chatThread(r.Context(), cw, hash, after)
+	conv, status, list, err := s.chatThreadOf(r.Context(), cw, hash, after)
+	var typing bool
+	if err == nil {
+		typing, err = s.chatTyping(r.Context(), cw, conv)
+	}
 	if err != nil {
 		metrics.SupportChatRequest("poll", "error")
 		s.internal(w, r, err)
 		return
 	}
 	metrics.SupportChatRequest("poll", "ok")
-	writeJSON(w, http.StatusOK, map[string]any{"status": nilIfEmpty(status), "messages": list})
+	writeJSON(w, http.StatusOK, map[string]any{"status": nilIfEmpty(status), "messages": list, "typing": typing})
 }
 
 func (s *Server) chatSend(w http.ResponseWriter, r *http.Request) {
@@ -759,4 +798,84 @@ func (s *Server) chatArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.SupportChatRequest("articles", "ok")
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+// chatFeedback records whether the support assistant's answer helped the
+// visitor. "No" hands the conversation to the team: it reopens, the
+// assistant stops answering in it, and the visitor is told once that a
+// person will reply.
+func (s *Server) chatFeedback(w http.ResponseWriter, r *http.Request) {
+	cw, ok := s.chatWidgetFrom(w, r, "feedback")
+	if !ok {
+		return
+	}
+	_, hash := chatToken(r)
+	if hash == nil {
+		metrics.SupportChatRequest("feedback", "bad_token")
+		writeError(w, r, http.StatusUnauthorized, "unauthenticated", "start a chat first")
+		return
+	}
+	var req struct {
+		Helpful *bool `json:"helpful"`
+	}
+	if !decodeLarge(w, r, &req, 1<<10) {
+		metrics.SupportChatRequest("feedback", "invalid")
+		return
+	}
+	id := r.PathValue("id")
+	if req.Helpful == nil || !validUUID(id) {
+		metrics.SupportChatRequest("feedback", "invalid")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send helpful: true or false for one of the assistant's messages")
+		return
+	}
+	ctx := r.Context()
+	verdict := "helpful"
+	if !*req.Helpful {
+		verdict = "not_helpful"
+	}
+	var run, conv, channel string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Only a message in the visitor's own conversation, rated once.
+		err := tx.QueryRow(ctx, `
+			UPDATE support_assistant_runs r SET feedback = $4, feedback_at = now()
+			FROM support_conversations c
+			WHERE r.sent_message_id = $1 AND c.id = r.conversation_id AND c.workspace_id = $2 AND c.chat_widget_id = $5 AND c.chat_token_hash = $3
+			  AND r.feedback IS NULL
+			RETURNING r.id::text, r.conversation_id::text, r.channel`, id, cw.ws, hash, verdict, cw.id).Scan(&run, &conv, &channel)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if verdict == "not_helpful" {
+			var brand *string
+			if err := tx.QueryRow(ctx, `SELECT brand_id::text FROM support_conversations WHERE id = $1`, conv).Scan(&brand); err != nil {
+				return err
+			}
+			res := assistantResult{Action: "handoff", Reason: "not_helpful"}
+			if _, err := s.assistantSend(ctx, tx, cw.ws, brand, conv, channel, run, res); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE support_conversations SET status = 'open', updated_at = now() WHERE id = $1 AND status <> 'open'`, conv); err != nil {
+				return err
+			}
+		}
+		return audit.Record(ctx, tx, audit.Event{WorkspaceID: cw.ws, ActorType: "system", Action: "support.assistant_rated",
+			TargetType: "support_conversation", TargetID: conv,
+			Data:  map[string]any{"run_id": run, "feedback": verdict, "channel": channel},
+			Props: map[string]any{"feedback": verdict, "channel": channel}})
+	})
+	if errors.Is(err, errNotFound) {
+		metrics.SupportChatRequest("feedback", "not_found")
+		writeError(w, r, http.StatusNotFound, "not_found", "no answer from the assistant to rate here, or it was rated already")
+		return
+	}
+	if err != nil {
+		metrics.SupportChatRequest("feedback", "error")
+		s.internal(w, r, err)
+		return
+	}
+	metrics.SupportChatRequest("feedback", "ok")
+	writeJSON(w, http.StatusOK, map[string]any{"feedback": verdict})
 }

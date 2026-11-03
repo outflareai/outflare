@@ -25,7 +25,7 @@ import (
 // they are retired.
 
 func (s *Server) routesAgentRuns(mux *http.ServeMux) {
-	read, run := auth.ScopeMissionsRead, auth.ScopeMissionsRun
+	read, run := auth.ScopeAgentsRead, auth.ScopeAgentsRun
 	base := "/v1/workspaces/{ws}/agent-runs"
 	mux.HandleFunc("GET "+base, s.inBrand(read, s.listAgentRuns))
 	mux.HandleFunc("GET "+base+"/{id}", s.inBrand(read, s.getAgentRun))
@@ -560,8 +560,8 @@ func (s *Server) createAgentRun(ctx context.Context, tx pgx.Tx, a *access, spec 
 		return "", errInvalid("choose one of your brands for the run")
 	}
 	scopes := runScopes(a)
-	if !slices.Contains(scopes, auth.ScopeMissionsRun) {
-		return "", errDenied("you need the missions.run scope to start a run")
+	if !a.has(auth.ScopeAgentsRun) {
+		return "", errDenied("you need the agents.run scope to start a run")
 	}
 	name := strings.TrimSpace(spec.Name)
 	if len(name) > 200 {

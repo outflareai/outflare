@@ -42,10 +42,14 @@ func AudienceIDs(ctx context.Context, tx pgx.Tx, ws, brand string, a Audience) (
 		args = append(args, a.RecordIDs)
 		where += ` AND r.id=ANY($3::uuid[])`
 	case "list":
-		var kind, match string
+		var kind, match, recordType string
 		var raw []byte
-		if err := tx.QueryRow(ctx, `SELECT kind,rules,match FROM smart_lists WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, ws, brand, a.ListID).Scan(&kind, &raw, &match); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT kind,rules,match,record_type FROM smart_lists WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, ws, brand, a.ListID).Scan(&kind, &raw, &match, &recordType); err != nil {
 			return nil, fmt.Errorf("customer list not found: %w", err)
+		}
+		// Review requests go to people: a list of companies has none.
+		if recordType != smartlists.People {
+			return nil, fmt.Errorf("choose a list of people: review requests go to people, not companies")
 		}
 		if kind == smartlists.KindSmart {
 			var rules []smartlists.Rule
@@ -55,7 +59,11 @@ func AudienceIDs(ctx context.Context, tx pgx.Tx, ws, brand string, a Audience) (
 			return AudienceIDs(ctx, tx, ws, brand, Audience{Kind: "rules", Rules: rules, Match: match})
 		}
 		args = append(args, a.ListID)
-		where += ` AND EXISTS(SELECT 1 FROM static_list_members m WHERE m.workspace_id=$1 AND m.list_id=$3 AND m.record_id=r.id)`
+		members := "static_list_members"
+		if kind == smartlists.KindQuery {
+			members = "smart_list_members"
+		}
+		where += ` AND EXISTS(SELECT 1 FROM ` + members + ` m WHERE m.workspace_id=$1 AND m.list_id=$3 AND m.record_id=r.id)`
 	case "rules":
 		b := brand
 		rules, more := smartlists.Where(a.Rules, a.Match, &b, []any{ws})

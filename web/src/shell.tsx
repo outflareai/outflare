@@ -135,8 +135,8 @@ export const tabBlurbs: Record<Tab, string> = {
   "ai-accounts": "The Claude, ChatGPT, Cursor and Copilot plans and AI API accounts people pay for: what each costs, when it renews and who it belongs to.",
   tools: "Every tool in Outflare, what it does, and where to learn more.",
   inbox: "Replies from every mailbox in one place, with the ones that need an answer first.",
-  playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or start one as a mission.",
-  missions: "Goals your agents work toward, such as 10 meetings by a date. Approve the plan, see every call, stop it any time.",
+  playbooks: "Ready-made recipes for growth, from welcoming new sign-ups to getting named in AI answers. Copy the prompt or run one with Outflare's agent.",
+  missions: "Missions made before agent runs, until they end. Approve a plan, see every call, stop one any time.",
   agents: "What your agents changed, what waits for you, and what each may do on its own.",
   sequences: "The emails and follow-ups each lead gets, the schedule they send on, and who is in them.",
   people: "Every person and company Outflare knows: their fields, timeline, consent and duplicates.",
@@ -477,6 +477,7 @@ type SidebarProps = {
   workspaces: Workspace[];
   ws?: Workspace;
   onWorkspace: (id: string) => void;
+  onCreateWorkspace: () => void;
   tab: Tab;
   onTab: (t: Tab) => void;
   unread: number;
@@ -502,7 +503,7 @@ export function Sidebar(p: SidebarProps) {
     <UISidebar collapsible="icon">
       <SidebarHeader className="gap-2 pt-3">
         <div className="grid gap-px">
-          <WorkspaceSwitcher workspaces={p.workspaces} ws={p.ws} onChange={(id) => { p.onWorkspace(id); close(); }} />
+          <WorkspaceSwitcher workspaces={p.workspaces} ws={p.ws} onChange={(id) => { p.onWorkspace(id); close(); }} onCreate={() => { close(); p.onCreateWorkspace(); }} />
           {p.ws && <BrandSwitcher ws={p.ws} onManage={() => p.onTab("brands")} onPicked={close} />}
         </div>
         <SidebarMenu>
@@ -765,24 +766,18 @@ function BrandSwitcher({ ws, onManage, chip, onPicked }: { ws: Workspace; onMana
   );
 }
 
-function WorkspaceSwitcher({ workspaces, ws, onChange }: { workspaces: Workspace[]; ws?: Workspace; onChange: (id: string) => void }) {
+// The workspace at the top of the sidebar. Its menu lists every workspace
+// the person is in and ends with "New workspace", so someone with one
+// workspace (almost everyone) can still add another.
+function WorkspaceSwitcher({ workspaces, ws, onChange, onCreate }: { workspaces: Workspace[]; ws?: Workspace; onChange: (id: string) => void; onCreate: () => void }) {
   const inner = (
     <>
       {/* One row: the Outflare mark, then the workspace. Collapsed, only the mark shows. */}
       <Logo markOnly className="shrink-0" />
       <span aria-hidden="true" className="text-muted-foreground/40 group-data-[collapsible=icon]:hidden">/</span>
-      <span className="min-w-0 flex-1 truncate text-left font-medium group-data-[collapsible=icon]:hidden">{ws?.name}</span>
+      <span className="min-w-0 flex-1 truncate text-left font-medium group-data-[collapsible=icon]:hidden">{ws?.name ?? "No workspace"}</span>
     </>
   );
-  if (workspaces.length < 2) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton className="pointer-events-none h-9" tabIndex={-1}>{inner}</SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    );
-  }
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -802,6 +797,11 @@ function WorkspaceSwitcher({ workspaces, ws, onChange }: { workspaces: Workspace
                 {w.id === ws?.id ? <Icon name="check" className="size-3.5" /> : i < 9 && <DropdownMenuShortcut>{w.role_name}</DropdownMenuShortcut>}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-[13px]" onSelect={onCreate}>
+              <span className="flex size-5 items-center justify-center rounded border border-dashed"><Icon name="plus" className="size-3" /></span>
+              <span className="flex-1">New workspace</span>
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
@@ -963,7 +963,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "news":
       return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
     case "pr-autopilot":
-      return { title: "Reactive PR autopilots", path: "/v1/workspaces/{ws}/cloud/pr-autopilot", params: base, ask: "Set up the reactive PR autopilot for our brand, at most 3 stories a week.", scope: "missions.read" };
+      return { title: "Reactive PR autopilots", path: "/v1/workspaces/{ws}/cloud/pr-autopilot", params: base, ask: "Set up the reactive PR autopilot for our brand, at most 3 stories a week.", scope: "agents.read" };
     case "stories":
       return { title: "Your stories", path: "/v1/workspaces/{ws}/stories", params: base, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
     case "backlinks":
@@ -1004,8 +1004,8 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "Unread replies", path: "/v1/brands/{brand}/inbox", params: { brand: "BRAND_ID" }, query: { unread: true }, mcp: "list_inbox", ask: "Which replies are interested and need an answer?", scope: "inbox.read" };
     case "playbooks":
       return item
-        ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "missions.read" }
-        : { title: "Playbooks", path: "/v1/workspaces/{ws}/playbooks", params: base, mcp: "list_playbooks", ask: "Which playbooks am I ready to run, and what should I connect for the rest?", scope: "missions.read" };
+        ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "agents.read" }
+        : { title: "Playbooks", path: "/v1/workspaces/{ws}/playbooks", params: base, mcp: "list_playbooks", ask: "Which playbooks am I ready to run, and what should I connect for the rest?", scope: "agents.read" };
     case "agents":
       return { title: "Agent changes waiting for a person", path: "/v1/workspaces/{ws}/actions", params: base, query: { status: "held" }, mcp: "list_actions", ask: "What are my agents waiting on me to approve, and what did they change today?", scope: "actions.read" };
     case "missions":
@@ -1039,7 +1039,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One lead list", path: "/v1/brands/{brand}/lead-lists/{id}", params: { brand: "BRAND_ID", id: item }, mcp: "get_lead_list", ask: "How many leads did the last refresh add, and what did it skip?", scope: "leads.read" }
         : { title: "Lead lists", path: "/v1/brands/{brand}/lead-lists", params: { brand: "BRAND_ID" }, mcp: "list_lead_lists", ask: "Build a list of 200 heads of growth at 50-200 person SaaS companies.", scope: "leads.read" };
     case "link-autopilot":
-      return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "missions.read" };
+      return { title: "Link autopilots", path: "/v1/workspaces/{ws}/cloud/link-autopilot", params: base, ask: "Get us 5 new live links a month for northpeak.example, spending at most $100 a month.", scope: "agents.read" };
     case "lead-finder":
       return { title: "Lead finder runs", path: "/v1/workspaces/{ws}/cloud/lead-finder/runs", params: base, ask: "Find 25 companies that fit our ideal customer profile.", scope: "leads.read" };
     case "email-finder":

@@ -4,6 +4,8 @@ dist/
 *.local
 /engine/bin/
 coverage/
+# The coverage package (where a brand appears) is code, not a coverage report.
+!engine/internal/coverage/
 .DS_Store
 __pycache__/
 .pytest_cache/

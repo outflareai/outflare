@@ -78,10 +78,11 @@ const (
 	SEOCompetitors = "competitors" // domains that rank for the same keywords
 	SEOAudit       = "audit"       // issues a site audit found
 	SEOLinks       = "links"       // single links to it, live and recently lost
+	SEOPages       = "pages"       // its pages that get the most search traffic
 )
 
 // AllSEOReports lists every SEO report, in display order.
-var AllSEOReports = []string{SEOOverview, SEOKeywords, SEOBacklinks, SEOLinks, SEOCompetitors, SEOAudit}
+var AllSEOReports = []string{SEOOverview, SEOKeywords, SEOBacklinks, SEOLinks, SEOCompetitors, SEOPages, SEOAudit}
 
 // SEOMetrics are the numbers an SEO report can carry. A nil field means the
 // provider does not measure it.
@@ -116,12 +117,16 @@ type SEOMetrics struct {
 // SEORow is one keyword, linking domain, competitor or audit issue.
 type SEORow struct {
 	Key string `json:"key"`
-	// URL is the ranking page of a keyword.
+	// URL is the ranking page of a keyword, or the page in the pages
+	// report.
 	URL string `json:"url,omitempty"`
 	// Kind is an audit issue's importance: error, warning or notice.
 	Kind string `json:"kind,omitempty"`
 	// Link is one backlink, in the links report.
 	Link *SEOLink `json:"link,omitempty"`
+	// TopKeyword is the search that brings a page the most visits, in the
+	// pages report; Volume is then that search's monthly volume.
+	TopKeyword string `json:"top_keyword,omitempty"`
 	SEOMetrics
 }
 

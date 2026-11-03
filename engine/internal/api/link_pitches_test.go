@@ -133,8 +133,32 @@ func TestLinkPitchesFromOpenerToLive(t *testing.T) {
 	if p := recheck("https://blog.example.org/resources"); p["stage"] != "live" || p["live_at"] == nil {
 		t.Fatalf("live: %v", p)
 	}
-	if p := recheck("https://blog.example.org/links"); p["stage"] != "removed" {
-		t.Fatalf("removed: %v", p)
+	// A link won is a live placement in coverage, with the link as evidence.
+	if kind, stage := placementOf(t, e, ws, "https://blog.example.org/resources"); kind != "resource" || stage != "live" {
+		t.Fatalf("coverage placement for the live link: %q %q", kind, stage)
+	}
+	// A link removed from a page that is still up goes back on the list as
+	// a prospect to win back, and can be pitched again.
+	p = recheck("https://blog.example.org/links")
+	if ev := p["evidence"].(map[string]any); p["stage"] != "prospect" || p["removed_at"] == nil || ev["win_back"] != true || ev["live_since"] == nil {
+		t.Fatalf("removed, back to win: %v", p)
+	}
+	if r := owner.must(200, "GET", base+"/link-prospects/results", nil)["totals"].(map[string]any); r["removed"].(float64) != 1 || r["live"].(float64) != 1 {
+		t.Fatalf("results after the removal: %v", r)
+	}
+	again := owner.must(201, "POST", base+"/link-prospects/"+pid+"/pitches", map[string]any{"sequence_id": seq})
+	owner.must(200, "POST", base+"/link-pitches/"+again["id"].(string)+"/reject", map[string]any{"reason": "test"})
+	var removedEvents int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'link_prospect.removed' AND data->>'win_back' = 'true'`, ws).
+		Scan(&removedEvents); err != nil || removedEvents != 1 {
+		t.Fatalf("removed event: %d %v", removedEvents, err)
+	}
+	// Once the page itself is gone, a removed link stays removed.
+	if _, err := e.pool.Exec(ctx, `UPDATE link_prospects SET stage = 'live' WHERE id = $1`, pid); err != nil {
+		t.Fatal(err)
+	}
+	if p := recheck("https://blog.example.org/gone"); p["stage"] != "removed" {
+		t.Fatalf("removed, page gone: %v", p)
 	}
 
 	// An agreed link not live after 14 days is announced once.

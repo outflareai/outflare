@@ -260,6 +260,19 @@ var (
 		Namespace: namespace, Subsystem: "lifecycle", Name: "sweep_seconds",
 		Help: "How long one inactivity sweep took.", Buckets: jobBuckets,
 	})
+	// Live record metrics (engine/internal/recmetrics).
+	recordMetricUpdates = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "record_metrics", Name: "updates_total",
+		Help: "Events added to a live metric, by outcome: updated, or why not (backfilled: the backfill counted it; too_old: before the window; no_value: the property isn't a number).",
+	}, []string{"outcome"})
+	recordMetricBackfills = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "record_metrics", Name: "backfill_seconds",
+		Help: "How long one metric's quiet backfill from stored events took, by outcome (ok, error).", Buckets: jobBuckets,
+	}, []string{"outcome"})
+	recordMetricSweeps = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "record_metrics", Name: "sweep_seconds",
+		Help: "How long one sweep that moves metric windows on took.", Buckets: jobBuckets,
+	})
 	// Marketing email guardrails: sends the frequency cap stopped and
 	// quiet hours held.
 	emailsGuarded = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -275,6 +288,18 @@ var (
 		Namespace: namespace, Subsystem: "crm", Name: "contacts_pushed_total",
 		Help: "People journeys created or updated in a CRM, by connector (hubspot) and outcome (created, updated, error).",
 	}, []string{"connector", "outcome"})
+	accountAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "accounts", Name: "attempts_total",
+		Help: "Managed uses of brands' external accounts (sign-ins, verifications, session uses) recorded by tools, by purpose and outcome: authenticated, or the failure kind (credential_failed, session_expired, mfa_required, verification_pending, wrong_identity, locked, rate_limited, unresolved).",
+	}, []string{"purpose", "outcome"})
+	contentPublishes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "content", Name: "publishes_total",
+		Help: "Posts and pages Outflare published to a brand's own CMS, by connector (wordpress, ghost), kind (create, update) and outcome (applied, unverified when the CMS did not show the post as asked when read back, failed when the CMS refused it, error for a database failure).",
+	}, []string{"connector", "kind", "outcome"})
+	adChanges = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "changes_total",
+		Help: "Changes Outflare made to campaigns on ad platforms (pausing, resuming, setting a daily budget), by connector (google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads), kind (pause, resume, budget) and outcome (applied, unverified when the platform did not show the change afterwards, failed, error for a database failure).",
+	}, []string{"connector", "kind", "outcome"})
 	adAudienceSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "audience_syncs_total",
 		Help: "People journeys added to or removed from ad platform audiences, by connector (google_ads, meta_ads) and outcome (added, removed, skipped for consent or nothing to match on, error).",
@@ -300,6 +325,31 @@ var (
 		Namespace: namespace, Subsystem: "automations", Name: "excluded_total",
 		Help: "People an automation's exclusion left out, by where (journey: refused entry; broadcast: skipped; sequence: not enrolled).",
 	}, []string{"where"})
+	transactionsSaved = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "transactions", Name: "saved_total",
+		Help: "Transactions sent to Outflare, by where from (api, connector) and outcome (created; duplicate: the same source id again; invalid; error).",
+	}, []string{"from", "outcome"})
+	transactionSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "transactions", Name: "save_seconds",
+		Help: "How long saving one transaction took, its conversion to the brand's currency included.", Buckets: requestBuckets,
+	})
+	handEditsExpired = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "hand_edits", Name: "expired_total",
+		Help: "Hand edits whose time to win ran out, by outcome (switched: another source's value took over; kept: no other source had a value, so the next one to write replaces it; error).",
+	}, []string{"outcome"})
+	queryEndpointCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query_endpoints", Name: "calls_total",
+		Help: "Calls to published query endpoints, by outcome (success, failure: refused, error) and error code (empty on success).",
+	}, []string{"outcome", "code"})
+	queryEndpointSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "query_endpoints", Name: "duration_seconds",
+		Help:    "How long a call to a published query endpoint took, from its check to its answer.",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+	})
+	queryEndpointRows = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "query_endpoints", Name: "rows_total",
+		Help: "Rows published query endpoints returned.",
+	})
 	queryRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "query", Name: "runs_total",
 		Help: "Queries run, by outcome (success, invalid, timeout, unavailable, error).",
@@ -377,9 +427,37 @@ var (
 		Namespace: namespace, Subsystem: "knowledge", Name: "answer_search_seconds",
 		Help: "Time to search the website and Slack for one missing answer.", Buckets: []float64{.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 180},
 	})
+	knowledgeWebsiteImports = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "website_imports_total",
+		Help: "Website imports into knowledge that finished, by outcome (done, failed).",
+	}, []string{"outcome"})
+	knowledgeWebsiteImportDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "website_import_seconds",
+		Help: "Time to read a website and keep its pages as knowledge.", Buckets: []float64{5, 15, 30, 60, 120, 300, 600, 1200},
+	})
+	knowledgeWebsitePages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "website_pages_total",
+		Help: "Website pages an import handled, by result (added, updated, unchanged, removed).",
+	}, []string{"result"})
+	knowledgeWebsiteRechecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "website_rechecks_total",
+		Help: "Daily website re-checks the scheduler queued, by outcome (queued, error).",
+	}, []string{"outcome"})
+	knowledgeReplyLearning = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "reply_learning_total",
+		Help: "Runs that learned answers from past support replies, by outcome (done, failed).",
+	}, []string{"outcome"})
+	knowledgeReplyLearningDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "knowledge", Name: "reply_learning_seconds",
+		Help: "Time to read past support replies and file what they teach.", Buckets: []float64{5, 15, 30, 60, 120, 300, 600, 1200},
+	})
+	supportAssistantHeld = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "support", Name: "assistant_held_total",
+		Help: "Held Auto email replies when their hold ended or someone acted, by result (sent, stopped, cancelled, refused, auto_off).",
+	}, []string{"result"})
 	supportChatRequests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "chat_requests_total",
-		Help: "Requests from website chat widgets, by route (loader, frame, session, poll, send, articles) and outcome (ok, not_found, limited, bad_token, invalid, error).",
+		Help: "Requests from website chat widgets, by route (loader, frame, session, poll, send, articles, feedback) and outcome (ok, not_found, limited, bad_token, invalid, error).",
 	}, []string{"route", "outcome"})
 	supportSLABreaches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "support", Name: "sla_breaches_total",
@@ -702,6 +780,19 @@ var (
 		Namespace: namespace, Subsystem: "undo", Name: "unmerges_total",
 		Help: "Merges undone (undone), or refused (refused: not reversible, not the latest, already undone), by outcome.",
 	}, []string{"outcome"})
+	bulkEdits = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "bulk_edits", Name: "total",
+		Help: "Bulk edits finished, by kind (edit, undo) and outcome (done, failed).",
+	}, []string{"kind", "outcome"})
+	bulkEditRecords = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "bulk_edits", Name: "records_total",
+		Help: "Records bulk edits went through, by kind (edit, undo) and result (changed, unchanged, skipped).",
+	}, []string{"kind", "result"})
+	bulkEditSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "bulk_edits", Name: "duration_seconds",
+		Help:    "How long a bulk edit took from being queued to finishing, by kind (edit, undo).",
+		Buckets: []float64{1, 5, 15, 60, 300, 900, 1800, 3600},
+	}, []string{"kind"})
 	undoBatches = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "undo", Name: "batches_total",
 		Help: "Import and ingest batches undone, by mode (untouched, everything) and outcome (undone, queued, failed).",
@@ -733,6 +824,10 @@ var (
 		Namespace: namespace, Subsystem: "exchange_rates", Name: "receipts_converted_total",
 		Help: "AI receipts charged in another currency given their amount in US dollars once a rate arrived.",
 	})
+	quotaChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "quota", Name: "checks_total",
+		Help: "Quota checks an extension answered (package quota), by resource and outcome: allowed, refused, or error (the checker failed and the work was allowed).",
+	}, []string{"resource", "outcome"})
 
 	desktopLinks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "desktop", Name: "links_total",
@@ -779,14 +874,15 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
+	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
-	mcpClientCalls, mcpClientDuration, ruleEvaluations, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, mailSignInsMoved,
+	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
 	knowledgeSuggestions,
-	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
+	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
@@ -802,7 +898,9 @@ var own = []prometheus.Collector{
 	privacyExportsBuilt, privacyExportSeconds, privacyExportBytes, privacyExportsExpired,
 	recoveryDeleted, recoveryRestored, recoveryPurged, recoveryPurgeOverdue,
 	undoUnmerges, undoBatches, undoRowsReverted, undoBatchSeconds,
+	bulkEdits, bulkEditRecords, bulkEditSeconds,
 	ratesFetched, ratesAge, receiptsConverted,
+	quotaChecks,
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
 	buildInfo,
 }
@@ -964,6 +1062,22 @@ func LifecycleEvaluated(level, outcome string) {
 	lifecycleEvaluations.WithLabelValues(level, outcome).Inc()
 }
 
+// RecordMetricUpdated counts one event offered to a live metric, by
+// outcome.
+func RecordMetricUpdated(outcome string) { recordMetricUpdates.WithLabelValues(outcome).Inc() }
+
+// RecordMetricBackfill observes one metric backfill.
+func RecordMetricBackfill(d time.Duration, ok bool) {
+	outcome := "ok"
+	if !ok {
+		outcome = "error"
+	}
+	recordMetricBackfills.WithLabelValues(outcome).Observe(d.Seconds())
+}
+
+// RecordMetricSweep observes one metric window sweep.
+func RecordMetricSweep(d time.Duration) { recordMetricSweeps.Observe(d.Seconds()) }
+
 // LifecycleSweepDuration observes one inactivity sweep.
 func LifecycleSweepDuration(d time.Duration) { lifecycleSweepDuration.Observe(d.Seconds()) }
 
@@ -1010,6 +1124,24 @@ func CRMContactPushed(connector, outcome string) {
 	crmContactPushes.WithLabelValues(connector, outcome).Inc()
 }
 
+// AccountAttempt records one managed use of a brand's external account and
+// its outcome.
+func AccountAttempt(purpose, outcome string) {
+	accountAttempts.WithLabelValues(purpose, outcome).Inc()
+}
+
+// ContentPublished records one post or page published to a CMS and how it
+// ended (applied, unverified, failed, error).
+func ContentPublished(connector, kind, outcome string) {
+	contentPublishes.WithLabelValues(connector, kind, outcome).Inc()
+}
+
+// AdChanged records one change to a campaign on an ad platform and how it
+// ended (applied, unverified, failed, error).
+func AdChanged(connector, kind, outcome string) {
+	adChanges.WithLabelValues(connector, kind, outcome).Inc()
+}
+
 // AdAudienceSynced records one try at adding a person to an ad platform
 // audience or removing them: the connector, and what happened (added,
 // removed, skipped, error).
@@ -1045,6 +1177,25 @@ func ExcludedN(where string, n int) {
 func ABResults(outcome string, d time.Duration) {
 	abResults.WithLabelValues(outcome).Inc()
 	abResultsDuration.Observe(d.Seconds())
+}
+
+// TransactionSaved counts one transaction sent to Outflare, by where it
+// came from (api, connector) and outcome, with how long saving it took.
+func TransactionSaved(from, outcome string, d time.Duration) {
+	transactionsSaved.WithLabelValues(from, outcome).Inc()
+	transactionSeconds.Observe(d.Seconds())
+}
+
+// HandEditExpired counts a hand edit whose time ran out, by outcome
+// (switched, kept or error).
+func HandEditExpired(outcome string) { handEditsExpired.WithLabelValues(outcome).Inc() }
+
+// QueryEndpointCalled counts a call to a published query endpoint, by
+// outcome and error code, with how long it took and the rows it returned.
+func QueryEndpointCalled(outcome, code string, d time.Duration, rows int) {
+	queryEndpointCalls.WithLabelValues(outcome, code).Inc()
+	queryEndpointSeconds.Observe(d.Seconds())
+	queryEndpointRows.Add(float64(rows))
 }
 
 // QueryRan records one query: its outcome, time and rows returned.
@@ -1138,6 +1289,28 @@ func KnowledgeAnswerSearch(source, outcome string, d time.Duration) {
 		knowledgeAnswerSearchDuration.Observe(d.Seconds())
 	}
 }
+
+// KnowledgeWebsiteImport records a website import that finished.
+func KnowledgeWebsiteImport(outcome string, d time.Duration) {
+	knowledgeWebsiteImports.WithLabelValues(outcome).Inc()
+	knowledgeWebsiteImportDuration.Observe(d.Seconds())
+}
+
+// KnowledgeWebsiteRecheck records a daily website re-check the scheduler
+// queued, or failed to.
+func KnowledgeWebsiteRecheck(outcome string) { knowledgeWebsiteRechecks.WithLabelValues(outcome).Inc() }
+
+// KnowledgeReplyLearning records a run that learned from past replies.
+func KnowledgeReplyLearning(outcome string, d time.Duration) {
+	knowledgeReplyLearning.WithLabelValues(outcome).Inc()
+	knowledgeReplyLearningDuration.Observe(d.Seconds())
+}
+
+// SupportAssistantHeld records what became of a held Auto email reply.
+func SupportAssistantHeld(result string) { supportAssistantHeld.WithLabelValues(result).Inc() }
+
+// KnowledgeWebsitePage records one page a website import handled.
+func KnowledgeWebsitePage(result string) { knowledgeWebsitePages.WithLabelValues(result).Inc() }
 
 // SupportSent records one run of the support reply job.
 func SupportSent(outcome string, d time.Duration) {
@@ -1476,6 +1649,21 @@ func SetRecoveryPurgeOverdue(d time.Duration) { recoveryPurgeOverdue.Set(max(d, 
 // Unmerged counts a merge undone or refused.
 func Unmerged(outcome string) { undoUnmerges.WithLabelValues(outcome).Inc() }
 
+// BulkEditFinished counts a bulk edit (kind edit or undo) that finished
+// with outcome done or failed, the records it went through by result
+// (changed, unchanged, skipped), and how long it took since it was queued.
+func BulkEditFinished(kind, outcome string, records map[string]int, d time.Duration) {
+	bulkEdits.WithLabelValues(kind, outcome).Inc()
+	for _, result := range []string{"changed", "unchanged", "skipped"} {
+		if n := records[result]; n > 0 {
+			bulkEditRecords.WithLabelValues(kind, result).Add(float64(n))
+		}
+	}
+	if outcome == "done" {
+		bulkEditSeconds.WithLabelValues(kind).Observe(d.Seconds())
+	}
+}
+
 // BatchUndone counts a batch undo by mode and outcome (undone, queued,
 // failed), with how long it took when it ran.
 func BatchUndone(mode, outcome string, d time.Duration) {
@@ -1503,6 +1691,10 @@ func RatesFetched(outcome string, newest time.Time) {
 
 // ReceiptsConverted counts receipts given their US dollar amount late.
 func ReceiptsConverted(n int64) { receiptsConverted.Add(float64(n)) }
+
+// QuotaChecked counts one quota check: resource is one of quota.Resources,
+// outcome allowed, refused or error.
+func QuotaChecked(resource, outcome string) { quotaChecks.WithLabelValues(resource, outcome).Inc() }
 
 // DesktopLinked counts one step of linking a computer.
 func DesktopLinked(step string) { desktopLinks.WithLabelValues(step).Inc() }

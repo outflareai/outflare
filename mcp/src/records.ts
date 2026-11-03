@@ -142,6 +142,39 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   );
 
   server.registerTool(
+    "list_transactions",
+    {
+      title: "List transactions",
+      description:
+        "A brand's payments, refunds, chargebacks and credits, newest first, from billing connectors and record_transaction: all, a person's or company's " +
+        "(record_id), or some kinds. Amounts are in minor units (cents), in their currency and converted to the brand's (brand_amount_minor).",
+      inputSchema: {
+        brand: brandRef,
+        record_id: id.optional(),
+        kind: z.string().optional().describe("payment, refund, chargeback, credit, or several separated by commas."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, record_id, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/transactions", { params: { path: { brand: b }, query: { ...q, ...(record_id ? { record: record_id } : {}) } } }))),
+  );
+
+  server.registerTool(
+    "list_record_field_values",
+    {
+      title: "Every source's value of a record's fields",
+      description:
+        "What each source (a person, first-party data, a CRM sync, enrichment) last said about each field, whether or not it won, and the hand edits behind " +
+        "the record's values: when each stops winning (the brand's or field's manual_edit_days, 180 by default) and whether it is pinned. To use another " +
+        "source's value, update_record with it: that is a hand edit.",
+      inputSchema: { brand: brandRef, record_id: id },
+      annotations: read,
+    },
+    ({ brand, record_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/records/{record}/field-values", { params: { path: { brand: b, record: record_id } } }))),
+  );
+
+  server.registerTool(
     "list_record_identities",
     {
       title: "A record's identities",
@@ -395,6 +428,59 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   );
 
   server.registerTool(
+    "list_bulk_edits",
+    {
+      title: "List bulk edits",
+      description:
+        "A brand's bulk edits and their undos, newest first: who ran each, where its records came from, what it changed and how many records " +
+        "it changed. Every change is also in each record's history (get_record_history, bulk_edit_id).",
+      inputSchema: { brand: brandRef, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional() },
+      annotations: read,
+    },
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/bulk-edits", { params: { path: { brand: b }, query: q } }))),
+  );
+
+  server.registerTool(
+    "get_bulk_edit",
+    {
+      title: "Read a bulk edit",
+      description: "One bulk edit or undo: its status (queued, running, done, failed), counts and until when it can be undone.",
+      inputSchema: { brand: brandRef, bulk_edit: id.describe("The bulk edit's id, from list_bulk_edits.") },
+      annotations: read,
+    },
+    ({ brand, bulk_edit }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/bulk-edits/{bulk_edit}", { params: { path: { brand: b, bulk_edit } } }))),
+  );
+
+  server.registerTool(
+    "preview_bulk_edit",
+    {
+      title: "Preview a bulk edit",
+      description:
+        "Check a change to many people or companies at once and see what it would do, without changing anything: how many records and the " +
+        "first 20 with each change. Records come from exactly one of smart_list_id, saved_query_id (its record_id or id column) or record_ids. " +
+        "Only the workspace's owners can run it, signed in to the app: show the user the preview and ask an owner to run it there.",
+      inputSchema: {
+        brand: brandRef,
+        smart_list_id: id.optional(),
+        saved_query_id: id.optional(),
+        record_ids: z.array(id).max(10000).optional(),
+        changes: z.object({
+          set: z.record(z.string(), z.unknown()).optional().describe("Fields to set by key (owner is a field); null clears one."),
+          add_tags: z.array(z.string()).optional(),
+          remove_tags: z.array(z.string()).optional(),
+          add_to_list: id.optional().describe("A static list of the brand (people only)."),
+          remove_from_list: id.optional().describe("A static list of the brand (people only)."),
+          archive: z.boolean().optional(),
+        }),
+      },
+      annotations: read,
+    },
+    ({ brand, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/bulk-edits/preview", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
     "preview_batch_undo",
     {
       title: "Preview undoing a batch",
@@ -420,6 +506,43 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   }, ({ brand_id, ...query }) => call(() => gtm.GET("/v1/brands/{brand}/crm/views", { params: { path: { brand: brand_id }, query } })));
 
   if (readOnly) return;
+
+  server.registerTool(
+    "record_transaction",
+    {
+      title: "Record a transaction",
+      description:
+        "Records a payment, refund, chargeback or credit from the brand's own billing. source_id is its id there: sending it again never adds it twice and " +
+        "updates its status. Amounts are in the currency's minor unit (cents), always 0 or more.",
+      inputSchema: {
+        brand: brandRef,
+        kind: z.enum(["payment", "refund", "chargeback", "credit"]),
+        amount_minor: z.number().int().min(0),
+        currency: z.string().length(3),
+        source_id: z.string().min(1).max(200),
+        status: z.enum(["succeeded", "pending", "failed", "reversed"]).optional(),
+        record_id: id.optional(),
+        product: z.string().optional().describe("One of the brand's products, by id or key."),
+        refund_of: z.string().max(200).optional().describe("A refund or chargeback: the source_id of the payment it gives back."),
+        description: z.string().max(500).optional(),
+        occurred_at: z.string().optional().describe("When it happened (RFC 3339); now by default."),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "pin_record_field",
+    {
+      title: "Pin or unpin a hand edit",
+      description: "pinned true keeps a value set by hand for good, over every other source; false starts its time again from now. Only a value set by hand can be pinned.",
+      inputSchema: { brand: brandRef, record_id: id, field: z.string().min(1), pinned: z.boolean() },
+      annotations: write,
+    },
+    ({ brand, record_id, field, pinned }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/fields/{field}/pin", { params: { path: { brand: b, record: record_id, field } }, body: { pinned } }))),
+  );
 
   const activity = {
     title: z.string().min(1).max(300), body: z.string().max(20000).optional(),

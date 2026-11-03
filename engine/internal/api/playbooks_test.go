@@ -34,9 +34,16 @@ func TestPlaybooks(t *testing.T) {
 		t.Fatalf("readiness: %v", r)
 	}
 
-	// No email provider of its own, no run: never anyone else's account.
+	// Starting a playbook as a mission is retired: the route says where to
+	// go, and only a playbook that exists gets that far.
 	start := map[string]any{"inputs": map[string]any{"brand": "Northpeak"}}
-	res := owner.must(409, "POST", base+"/playbooks/welcome-new-signups/runs", start)
+	if res := owner.must(410, "POST", base+"/playbooks/welcome-new-signups/runs", start); res["error"].(map[string]any)["code"] != "mission_retired" {
+		t.Fatalf("retired: %v", res)
+	}
+	owner.must(404, "POST", base+"/playbooks/nope/runs", start)
+
+	// No email provider of its own, no run: never anyone else's account.
+	res := owner.must(409, "POST", base+"/playbooks/welcome-new-signups/agent-runs", start)
 	if res["error"].(map[string]any)["code"] != "connector_needed" {
 		t.Fatalf("no provider: %v", res)
 	}
@@ -49,14 +56,16 @@ func TestPlaybooks(t *testing.T) {
 	}
 
 	// Inputs are checked.
-	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/runs", map[string]any{})
-	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/runs", map[string]any{"inputs": map[string]any{"brand": "Northpeak", "colour": "red"}})
-	owner.must(404, "POST", base+"/playbooks/nope/runs", start)
+	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/agent-runs", map[string]any{})
+	owner.must(400, "POST", base+"/playbooks/welcome-new-signups/agent-runs", map[string]any{"inputs": map[string]any{"brand": "Northpeak", "colour": "red"}})
+	owner.must(404, "POST", base+"/playbooks/nope/agent-runs", start)
 
-	// Starting it makes a mission draft with the prompt filled in.
-	m := owner.must(201, "POST", base+"/playbooks/welcome-new-signups/runs", start)
-	if m["status"] != "draft" || m["mode"] != "dry_run" || m["playbook_id"] != "welcome-new-signups" || m["playbook_version"] != float64(1) {
-		t.Fatalf("mission: %v", m)
+	// Starting it is an agent run with the prompt filled in, on the
+	// workspace's own AI model.
+	connectFakeOpenAI(t, e, owner, ws)
+	m := owner.must(201, "POST", base+"/playbooks/welcome-new-signups/agent-runs", start)
+	if m["status"] != "running" || m["mode"] != "copilot" || m["playbook_id"] != "welcome-new-signups" || m["playbook_version"] != float64(1) {
+		t.Fatalf("run: %v", m)
 	}
 	ins := m["instructions"].(string)
 	if !strings.Contains(ins, "for Northpeak") || !strings.Contains(ins, "{{first_win}}") || !strings.Contains(ins, "Guardrails:") {

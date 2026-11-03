@@ -27,7 +27,7 @@ A rule changes while it is a draft or paused.
 | `absence` | An event doesn't happen within a time of a start event. Without a start event, each occurrence of the event starts the clock again, so it fires after a stretch with none (inactivity). | `signed_up`, then no `product_activated` within 7 days; or no `api_called` for 14 days. |
 | `audience` | Someone joins (`on: enter`) or leaves (`on: leave`) a [smart list](lists.md#smart-lists). | Joined "Paying, no login in 30 days". |
 
-Event, absence and audience rules are about people. A change rule can watch any record type, such as `deal`.
+Event and absence rules are about people. An audience rule is about its list's records: people, or companies for a [list of companies](lists.md#lists-of-companies) (`record_type: account`). A change rule can watch any record type, such as `deal`.
 
 ```sh
 curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/rules" \
@@ -79,9 +79,10 @@ The emitted event goes on the record's timeline with source `rule`, and is appro
 
 ## Trying a rule first
 
-`POST .../rules/{id}/simulate` (MCP `simulate_rule`) is a dry run. It shows what the rule would have done over the last `days` (default 30, at most 90): how many records it would have fired for, how many times, and up to 20 of them. Nothing is stored or sent.
+`POST .../rules/{id}/simulate` (MCP `simulate_rule`) is a dry run. It shows what the rule would have done over the last `days` (default 30, at most 90, or 365 for an event or absence rule when the ClickHouse event store is set up): how many records it would have fired for, how many times, and up to 20 of them. Nothing is stored or sent.
 
-- Event and absence rules replay the events Postgres keeps (see the event retention in [analytics storage](analytics-storage.md)).
+- Event and absence rules replay their events from the ClickHouse event store when one is set up (`OUTFLARE_CLICKHOUSE_URL`), which keeps every event, so a year back works whatever Postgres keeps; `source` is `clickhouse`. An absence rule counts each start event whose time ran out with no follow-up event after it (both read from the store, browser events left out). Fields are tested as they are now.
+- Without it, event and absence rules replay the events Postgres keeps (see the event retention in [analytics storage](analytics-storage.md)); `source` is `postgres`.
 - Change and audience rules look at records and list members as they are now.
 - A simulation looks at up to 50,000 events or records. `truncated` says there were more, and then the numbers are a lower bound. It stops after 15 seconds with `query_timeout`.
 
@@ -104,7 +105,7 @@ The MCP tools are `list_rules`, `get_rule`, `create_rule`, `update_rule`, `simul
 
 ## Webhooks and events
 
-Each firing is the `rule.fired` webhook event, with `record_id`, `event` (the emitted name), `event_id`, `trigger`, `depth` and `rule_version`, and the rule's `brand_id` on the event, so only that brand's webhook endpoints get it. Subscribe a [webhook](api-conventions.md) to it to act on rules from your own systems. Making and changing rules are `rule.created`, `rule.updated`, `rule.activated`, `rule.paused` and `rule.archived`.
+Each firing is the `rule.fired` webhook event, with `record_id`, `event` (the emitted name), `event_id`, `trigger`, `depth` and `rule_version`, and the rule's `brand_id` on the event, so only that brand's webhook endpoints get it. Subscribe a [webhook](api-conventions.md) to it to act on rules from your own systems. To give a rule its own webhook, pick the rule on the endpoint (Settings → Webhooks, or `rule_ids` on `POST`/`PATCH .../webhooks`): events about a rule then reach that endpoint only for the rules picked, while an endpoint with none picked hears about every rule. Each endpoint keeps its own signed, retried delivery log. Making and changing rules are `rule.created`, `rule.updated`, `rule.activated`, `rule.paused` and `rule.archived`.
 
 ## How it runs
 

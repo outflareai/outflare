@@ -41,10 +41,12 @@ const (
 )
 
 // trackingHTTPSChecks is how long to wait before each look at a pending
-// certificate: quick at first, as most are issued within minutes, then
-// for about a day.
-var trackingHTTPSChecks = []time.Duration{0, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 30 * time.Minute,
-	time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 8 * time.Hour}
+// certificate: every two minutes for the first half hour, as most are
+// issued within minutes and the page shows it as soon as it's seen, then
+// less often for about a day.
+var trackingHTTPSChecks = []time.Duration{0, time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute,
+	2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute, 2 * time.Minute,
+	10 * time.Minute, 30 * time.Minute, time.Hour, 2 * time.Hour, 4 * time.Hour, 8 * time.Hour, 8 * time.Hour}
 
 // trackingHost is what tracking domains' CNAME records point at.
 func (s *Server) trackingHost() string {
@@ -66,6 +68,21 @@ func (s *Server) queueTrackingHTTPS(ctx context.Context, tx pgx.Tx, ws, id strin
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `UPDATE tracking_domains SET https_status = 'pending', https_error = '' WHERE id = $1 AND workspace_id = $2`, id, ws); err != nil {
+		return err
+	}
+	return enqueueTrackingHTTPS(ctx, tx, ws, id, 0)
+}
+
+// resumeTrackingHTTPS looks at a pending certificate again now when
+// nothing is set to: a check that stopped (a failed job, a deploy that
+// lost it) would otherwise leave the domain setting up HTTPS for good.
+func (s *Server) resumeTrackingHTTPS(ctx context.Context, tx pgx.Tx, ws, id string) error {
+	if s.trackingCerts == nil {
+		return nil
+	}
+	var waiting bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE kind = $1 AND workspace_id = $2 AND payload->>'id' = $3
+		AND status IN ('queued', 'running'))`, jobTrackingHTTPS, ws, id).Scan(&waiting); err != nil || waiting {
 		return err
 	}
 	return enqueueTrackingHTTPS(ctx, tx, ws, id, 0)
@@ -165,8 +182,8 @@ func (s *Server) trackingHTTPSRemoveJob(ctx context.Context, job jobs.Job) error
 
 // StartTrackingHTTPS asks for certificates for verified tracking domains
 // that have none yet, such as those verified before the server had a
-// provider. Their links use the server's own address until each is
-// active.
+// provider, and checks again on pending ones nothing is checking. Their
+// links use the server's own address until each is active.
 func (s *Server) StartTrackingHTTPS(ctx context.Context) error {
 	if s.trackingCerts == nil {
 		return nil
@@ -188,6 +205,24 @@ func (s *Server) StartTrackingHTTPS(ctx context.Context) error {
 		}
 		for _, p := range list {
 			if err := enqueueTrackingHTTPS(ctx, tx, p.ws, p.id, 0); err != nil {
+				return err
+			}
+		}
+		// Pending ones whose checks stopped start again.
+		rows, err = tx.Query(ctx, `SELECT id::text, workspace_id::text FROM tracking_domains WHERE status = 'verified' AND https_status = 'pending'`)
+		if err != nil {
+			return err
+		}
+		stalled, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (pending, error) {
+			var p pending
+			err := r.Scan(&p.id, &p.ws)
+			return p, err
+		})
+		if err != nil {
+			return err
+		}
+		for _, p := range stalled {
+			if err := s.resumeTrackingHTTPS(ctx, tx, p.ws, p.id); err != nil {
 				return err
 			}
 		}

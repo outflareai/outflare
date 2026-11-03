@@ -15,6 +15,18 @@ import (
 
 const openAIKey = "sk-proj-good-0123456789abcdef"
 
+// connectFakeOpenAI connects a fake OpenAI as the workspace's AI model, for
+// tests that start agent runs and never take a turn.
+func connectFakeOpenAI(t *testing.T, e *env, owner *client, ws string) {
+	t.Helper()
+	oa := httptest.NewServer(fakeOpenAI{t, &sync.Mutex{}, new([]string)})
+	t.Cleanup(oa.Close)
+	e.integrations.Client.BaseURLs["openai"] = oa.URL
+	conn := owner.must(201, "POST", "/v1/workspaces/"+ws+"/integrations", map[string]any{"connector": "openai", "credentials": map[string]any{"api_key": openAIKey}})
+	owner.must(200, "PUT", "/v1/workspaces/"+ws+"/ai-settings", map[string]any{"integration_id": conn["id"], "model": "gpt-test",
+		"input_cents_per_million": 250, "output_cents_per_million": 1000, "monthly_limit_cents": 5000})
+}
+
 // fakeOpenAI answers OpenAI's API: the model list, the planner and the
 // built-in agent's turns. It notes which model each chat asked for.
 type fakeOpenAI struct {

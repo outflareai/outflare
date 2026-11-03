@@ -146,6 +146,10 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	if c := owner.must(200, "PATCH", base+"/coverage/"+id, map[string]any{"status": "confirmed", "linked": false}); c["status"] != "confirmed" || c["linked"] != false {
 		t.Fatalf("confirmed: %v", c)
 	}
+	// Confirmed coverage is a live news placement of the publisher.
+	if kind, stage := placementOf(t, e, ws, first["url"].(string)); kind != "news" || stage != "live" {
+		t.Fatalf("coverage placement for the confirmed article: %q %q", kind, stage)
+	}
 	other := urls["https://blog.example.net/proxies"]["id"].(string)
 	owner.must(200, "PATCH", base+"/coverage/"+other, map[string]any{"status": "dismissed"})
 	if n := owner.must(200, "GET", base+"/coverage", nil)["total"]; n != 1.0 {

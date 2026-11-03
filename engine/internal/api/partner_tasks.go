@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/coverage"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 )
 
@@ -596,10 +597,11 @@ func (s *Server) reviewPartnerTask(w http.ResponseWriter, r *http.Request) {
 
 // The assignment lock and final status make reward creation exactly once, including concurrent human and automatic checks.
 func (s *Server) approveTaskSubmission(ctx context.Context, tx pgx.Tx, actor *principal, ws, id string, cfg partnerTaskConfig, by string) error {
-	var program, member, recipient, currency, status string
+	var program, member, recipient, currency, status, evidenceURL, check, programKind string
 	var amount int64
-	var reward *string
-	err := tx.QueryRow(ctx, `SELECT x.program_id::text,x.membership_id::text,x.record_id::text,p.currency,x.status,x.amount_cents,x.reward_id::text FROM partner_task_submissions x JOIN partner_memberships m ON m.id=x.membership_id JOIN partner_programs p ON p.id=x.program_id WHERE x.workspace_id=$1 AND x.id=$2 FOR UPDATE OF x`, ws, id).Scan(&program, &member, &recipient, &currency, &status, &amount, &reward)
+	var reward, brand *string
+	var submitted time.Time
+	err := tx.QueryRow(ctx, `SELECT x.program_id::text,x.membership_id::text,x.record_id::text,p.currency,x.status,x.amount_cents,x.reward_id::text,x.evidence_url,x.check_status,p.kind,x.brand_id::text,x.updated_at FROM partner_task_submissions x JOIN partner_memberships m ON m.id=x.membership_id JOIN partner_programs p ON p.id=x.program_id WHERE x.workspace_id=$1 AND x.id=$2 FOR UPDATE OF x`, ws, id).Scan(&program, &member, &recipient, &currency, &status, &amount, &reward, &evidenceURL, &check, &programKind, &brand, &submitted)
 	if err != nil {
 		return err
 	}
@@ -633,6 +635,53 @@ func (s *Server) approveTaskSubmission(ctx context.Context, tx pgx.Tx, actor *pr
 		}
 		reward = &rid
 	}
-	_, err = tx.Exec(ctx, `UPDATE partner_task_submissions SET status='approved',reward_id=$3,updated_at=now() WHERE workspace_id=$1 AND id=$2`, ws, id, reward)
-	return err
+	if _, err = tx.Exec(ctx, `UPDATE partner_task_submissions SET status='approved',reward_id=$3,updated_at=now() WHERE workspace_id=$1 AND id=$2`, ws, id, reward); err != nil {
+		return err
+	}
+	// The partner's post or page, approved by a person who saw it (or
+	// checked for the required link), is an appearance of the brand:
+	// coverage keeps it as a live placement.
+	if brand != nil && strings.HasPrefix(evidenceURL, "http") {
+		kind, arrangement := partnerPlacementKind(cfg, programKind)
+		evidence := map[string]any{"mention_present": true, "task_submission_id": id, "asset_kind": cfg.AssetKind, "check_status": check}
+		if cfg.RequiredLink != "" {
+			evidence["link_present"] = check == "passed"
+		}
+		if _, _, err := coverage.Record(ctx, tx, ws, *brand, coverage.Placement{URL: evidenceURL, Title: cfg.Title, Kind: kind, Arrangement: arrangement,
+			TargetURL: cfg.RequiredLink, ExpectedLink: cfg.RequiredLink != "", Source: "partner_tasks", SourceID: id, PublishedOn: &submitted, Evidence: evidence}); err != nil && !errors.Is(err, coverage.ErrNoURL) {
+			return err
+		}
+	}
+	return nil
+}
+
+// partnerPlacementKind is the coverage placement kind and arrangement of
+// a partner's approved task: by where the partner published (a video, a
+// newsletter issue, a podcast, a social or community post, their own
+// site) and how the program rewards them.
+func partnerPlacementKind(cfg partnerTaskConfig, programKind string) (kind, arrangement string) {
+	switch cfg.AssetKind {
+	case "youtube", "tiktok":
+		kind = "video"
+	case "newsletter":
+		kind = "newsletter"
+	case "podcast":
+		kind = "podcast"
+	case "x", "linkedin", "instagram", "reddit", "facebook", "discord":
+		kind = "community"
+	default:
+		kind = "partner"
+		if programKind == "influencer" {
+			kind = "blog"
+		}
+	}
+	switch {
+	case programKind == "affiliate":
+		arrangement = "affiliate"
+	case cfg.RewardKind == "free":
+		arrangement = "earned"
+	default:
+		arrangement = "paid"
+	}
+	return kind, arrangement
 }

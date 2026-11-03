@@ -176,8 +176,14 @@ type ImportFlow struct {
 	ApprovalDays *int
 	Conditions   partners.Conditions
 	// Overrides name the platform's partner ids (PartnerID) or products.
-	Overrides   []partners.Override
+	Overrides []partners.Override
+	// Paused is a flow turned off on the platform: it doesn't run there.
+	Paused      bool
 	Unsupported []string
+	// Detail describes what couldn't be read, for the import's issue: the
+	// action's field names, with its numbers and short code-like values
+	// (a flow's settings, never anyone's data).
+	Detail string
 }
 
 // ImportLink is a partner's tracking link: ?param=value on the site.

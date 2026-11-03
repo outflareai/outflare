@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/outflareai/outflare/engine/internal/coverage"
 	"log/slog"
 	"net/url"
 	"regexp"
@@ -353,7 +354,9 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 		rec := seosync.SystemRecorder(pr.ws)
 		// The live check: an agreed link now on the page is live; a live
 		// one gone from a page that is up, or from a page that is gone, is
-		// removed.
+		// removed. A link removed from a page that is still up goes back on
+		// the list as a prospect to win back (nothing is sent until a person
+		// or a playbook pitches it); one whose page is gone stays removed.
 		move, live := "", ""
 		switch {
 		case pr.stage == "agreed" && c.Status == "up" && c.LinksToUs:
@@ -369,16 +372,49 @@ func (s *Service) store(ctx context.Context, id string, pr prospect, c Check) er
 			metrics.LinkLiveCheck(live)
 		}
 		if move != "" {
-			stamp := map[string]string{"live": ", live_at = now()", "removed": ""}[move]
+			winBack := move == "removed" && c.Status == "up"
+			stage, stamp := move, map[string]string{"live": ", live_at = now()", "removed": ", removed_at = now()"}[move]
+			if winBack {
+				stage = "prospect"
+				stamp += `, evidence = evidence || jsonb_build_object('win_back', true, 'removed_at', now(), 'live_since', live_at)`
+			}
 			if _, err := tx.Exec(ctx, `UPDATE link_prospects SET stage = $2, stage_changed_at = now(), updated_at = now()`+stamp+`
-				WHERE id = $1`, id, move); err != nil {
+				WHERE id = $1`, id, stage); err != nil {
 				return err
 			}
 			data := map[string]any{"site_id": pr.siteID, "brand_id": pr.brandID, "record_id": pr.recordID, "method": pr.method, "stage": move,
 				"was": pr.stage, "by": "live_check", "links": c.OurLinks}
+			if winBack {
+				data["win_back"] = true
+			}
 			if err := rec(ctx, tx, "link_prospect."+move, id, data, map[string]any{"site_id": pr.siteID, "method": pr.method, "stage": move,
 				"was": pr.stage}); err != nil {
 				return err
+			}
+			// A link won is an appearance of the brand: coverage keeps it
+			// as a live placement of the page's publisher; a link gone is
+			// an observation on it.
+			if brand := s.brandFor(ctx, tx, pr); brand != "" {
+				switch move {
+				case "live":
+					kind := "resource"
+					if strings.Contains(pr.method, "partner") || strings.Contains(pr.method, "customer") {
+						kind = "partner"
+					}
+					if _, _, err := coverage.Record(ctx, tx, pr.ws, brand, coverage.Placement{URL: pr.pageURL, Kind: kind, Arrangement: "earned",
+						TargetURL: pr.targetURL, ExpectedLink: true, Source: "link_prospects", SourceID: id,
+						Evidence: map[string]any{"link_present": true, "links": c.OurLinks, "method": pr.method}}); err != nil && !errors.Is(err, coverage.ErrNoURL) {
+						return err
+					}
+				case "removed":
+					health := "up"
+					if c.Status != "up" {
+						health = "gone"
+					}
+					if err := coverage.Observe(ctx, tx, pr.ws, brand, pr.pageURL, health, "link_prospects", map[string]any{"link_present": false, "page_up": c.Status == "up"}); err != nil {
+						return err
+					}
+				}
 			}
 		}
 		if reason != nil {
@@ -578,3 +614,19 @@ func clip(s string, n int) string {
 func utf8Start(b byte) bool { return b&0xC0 != 0x80 }
 
 func ptr[T any](v T) *T { return &v }
+
+// brandFor is the brand a prospect's appearance belongs to: the prospect's
+// own, else its site's, else the workspace's first brand (a workspace that
+// never made a second one has everything on it). Empty when there is none.
+func (s *Service) brandFor(ctx context.Context, tx pgx.Tx, pr prospect) string {
+	if pr.brandID != nil && *pr.brandID != "" {
+		return *pr.brandID
+	}
+	var brand *string
+	_ = tx.QueryRow(ctx, `SELECT COALESCE((SELECT brand_id::text FROM seo_sites WHERE id = $1),
+		(SELECT id::text FROM brands WHERE workspace_id = $2 ORDER BY created_at LIMIT 1))`, pr.siteID, pr.ws).Scan(&brand)
+	if brand == nil {
+		return ""
+	}
+	return *brand
+}

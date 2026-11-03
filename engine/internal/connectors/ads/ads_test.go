@@ -108,10 +108,12 @@ func TestGoogleAds(t *testing.T) {
 					"metrics": map[string]any{"costMicros": "12500000", "impressions": "1000", "clicks": "40", "conversions": 3.0, "conversionsValue": 450.5},
 				}}}
 			default:
-				return map[string]any{"results": []any{map[string]any{"campaign": map[string]any{"id": "7", "name": "Brand search", "status": "ENABLED", "advertisingChannelType": "SEARCH"},
+				return map[string]any{"results": []any{map[string]any{"campaign": map[string]any{"id": "7", "name": "Brand search", "status": "ENABLED", "advertisingChannelType": "SEARCH", "campaignBudget": "customers/111/campaignBudgets/70"},
 					"campaignBudget": map[string]any{"amountMicros": "50000000"}}}}
 			}
 		},
+		"POST /v23/customers/111/campaigns:mutate":       map[string]any{"results": []any{map[string]any{"resourceName": "customers/111/campaigns/7"}}},
+		"POST /v23/customers/111/campaignBudgets:mutate": map[string]any{"results": []any{map[string]any{"resourceName": "customers/111/campaignBudgets/70"}}},
 		"POST /v23/customers/900/googleAds:search": func(r *http.Request) any {
 			b, _ := io.ReadAll(r.Body)
 			if strings.Contains(string(b), "customer_client") {
@@ -149,11 +151,40 @@ func TestGoogleAds(t *testing.T) {
 	if _, err := g.AdAccounts(ctx, cl, c.Creds{"access_token": "tok"}); c.KindOf(err) != c.ErrAuth {
 		t.Fatalf("without a developer token: %v", err)
 	}
+
+	// Managing: one campaign read by id, paused, and its budget set, each
+	// as a mutate of that one field.
+	cp, err := g.AdCampaign(ctx, cl, creds, accts[0], "7")
+	if err != nil || cp.ID != "7" || cp.Status != c.AdActive || *cp.DailyBudgetMicros != 50_000_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if _, err := g.AdCampaign(ctx, cl, creds, accts[0], "8"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("missing campaign: %v", err)
+	}
+	if err := g.SetCampaignStatus(ctx, cl, creds, accts[0], "7", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "7", 60_000_000); err != nil {
+		t.Fatal(err)
+	}
+	var mutates []string
+	for _, r := range *reqs {
+		if strings.HasSuffix(r.path, ":mutate") {
+			mutates = append(mutates, r.path+" "+r.body)
+		}
+	}
+	if len(mutates) != 2 || !strings.Contains(mutates[0], `"status":"PAUSED"`) || !strings.Contains(mutates[0], `"updateMask":"status"`) ||
+		!strings.Contains(mutates[1], `"resourceName":"customers/111/campaignBudgets/70"`) || !strings.Contains(mutates[1], `"amountMicros":"60000000"`) {
+		t.Fatalf("mutates: %v", mutates)
+	}
+	if err := g.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "7", 0); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("no budget: %v", err)
+	}
 }
 
 func TestMetaAds(t *testing.T) {
 	var base string
-	cl, _, u := fake(t, map[string]any{
+	cl, reqs, u := fake(t, map[string]any{
 		"GET /v24.0/me": map[string]any{"id": "1", "name": "Ana"},
 		"GET /v24.0/me/adaccounts": func(r *http.Request) any {
 			if r.URL.Query().Get("after") == "" {
@@ -164,6 +195,8 @@ func TestMetaAds(t *testing.T) {
 				"paging": map[string]any{"next": "https://evil.example/steal"}}
 		},
 		"GET /v24.0/act_55/campaigns": map[string]any{"data": []any{map[string]any{"id": "9", "name": "Prospecting", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "2500"}}},
+		"GET /v24.0/9":                map[string]any{"id": "9", "name": "Prospecting", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "2500", "account_id": "55"},
+		"POST /v24.0/9":               map[string]any{"success": true},
 		"GET /v24.0/act_55/insights": map[string]any{"data": []any{map[string]any{
 			"campaign_id": "9", "campaign_name": "Prospecting", "date_start": "2026-10-01", "spend": "25.40", "impressions": "900", "clicks": "12",
 			"actions":       []any{map[string]any{"action_type": "lead", "value": "2"}, map[string]any{"action_type": "link_click", "value": "12"}},
@@ -188,6 +221,33 @@ func TestMetaAds(t *testing.T) {
 	if _, err := m.Test(ctx, cl, c.Creds{"api_key": "bad"}); c.KindOf(err) != c.ErrAuth {
 		t.Fatalf("bad token: %v", err)
 	}
+
+	// Managing: the campaign by id, resumed, and its budget in cents.
+	cp, err := m.AdCampaign(ctx, cl, creds, accts[0], "9")
+	if err != nil || cp.Status != c.AdPaused || *cp.DailyBudgetMicros != 25_000_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if _, err := m.AdCampaign(ctx, cl, creds, accts[1], "9"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("another account's campaign: %v", err)
+	}
+	if err := m.SetCampaignStatus(ctx, cl, creds, accts[0], "9", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "9", 30_500_000); err != nil {
+		t.Fatal(err)
+	}
+	var posts []string
+	for _, r := range *reqs {
+		if r.method == "POST" && r.path == "/v24.0/9" {
+			posts = append(posts, r.body)
+		}
+	}
+	if len(posts) != 2 || !strings.Contains(posts[0], `"status":"ACTIVE"`) || !strings.Contains(posts[1], `"daily_budget":"3050"`) {
+		t.Fatalf("posts: %v", posts)
+	}
+	if err := m.SetCampaignStatus(ctx, cl, creds, accts[0], "9x", true); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad id: %v", err)
+	}
 }
 
 func TestMicrosoftAds(t *testing.T) {
@@ -207,6 +267,8 @@ func TestMicrosoftAds(t *testing.T) {
 		"POST /User/Query":                 map[string]any{"User": map[string]any{"Id": 5}},
 		"POST /Accounts/Search":            map[string]any{"Accounts": []any{map[string]any{"Id": 77, "Name": "Northpeak", "CurrencyCode": "USD", "TimeZone": "PacificTimeUSCanadaTijuana", "ParentCustomerId": 8}}},
 		"POST /Campaigns/QueryByAccountId": map[string]any{"Campaigns": []any{map[string]any{"Id": 31, "Name": "Bing brand", "Status": "Active", "CampaignType": "Search", "DailyBudget": 20.0}}},
+		"POST /Campaigns/QueryByIds":       map[string]any{"Campaigns": []any{map[string]any{"Id": 31, "Name": "Bing brand", "Status": "Paused", "CampaignType": "Search", "DailyBudget": 20.0}}},
+		"POST /Campaigns/Update":           map[string]any{"PartialErrors": []any{}},
 		"POST /GenerateReport/Submit":      map[string]any{"ReportRequestId": "r1"},
 		"GET /download/report.zip":         zipped.Bytes(),
 		"POST /GenerateReport/Poll": func(*http.Request) any {
@@ -239,6 +301,29 @@ func TestMicrosoftAds(t *testing.T) {
 		if strings.HasPrefix(r.path, "/GenerateReport") && (r.header.Get("CustomerAccountId") != "77" || r.header.Get("CustomerId") != "8" || r.header.Get("DeveloperToken") != "dev") {
 			t.Fatalf("report call missing account headers: %v", r.header)
 		}
+	}
+	// Managing: one campaign by id, paused, and a budget to the cent.
+	cp, err := ms.AdCampaign(ctx, cl, creds, accts[0], "31")
+	if err != nil || cp.Status != c.AdPaused || *cp.DailyBudgetMicros != 20_000_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if err := ms.SetCampaignStatus(ctx, cl, creds, accts[0], "31", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ms.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "31", 25_505_000); err != nil {
+		t.Fatal(err)
+	}
+	var updates []string
+	for _, r := range *reqs {
+		if r.path == "/Campaigns/Update" {
+			updates = append(updates, r.body)
+		}
+	}
+	if len(updates) != 2 || !strings.Contains(updates[0], `"Status":"Paused"`) || !strings.Contains(updates[1], `"DailyBudget":25.51`) || !strings.Contains(updates[1], `"AccountId":77`) {
+		t.Fatalf("updates: %v", updates)
+	}
+	if err := ms.SetCampaignStatus(ctx, cl, creds, accts[0], "x", true); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad id: %v", err)
 	}
 }
 
@@ -326,9 +411,11 @@ func TestOAuth1Signature(t *testing.T) {
 
 func TestLinkedInAds(t *testing.T) {
 	cl, reqs, _ := fake(t, map[string]any{
-		"GET /adAccountUsers":             map[string]any{"elements": []any{map[string]any{"account": "urn:li:sponsoredAccount:501"}}},
-		"GET /adAccounts/501":             map[string]any{"id": 501, "name": "Northpeak", "currency": "USD", "status": "ACTIVE"},
-		"GET /adAccounts/501/adCampaigns": map[string]any{"elements": []any{map[string]any{"id": 61, "name": "ABM", "status": "ACTIVE", "objectiveType": "LEAD_GENERATION", "dailyBudget": map[string]any{"amount": "100.00"}}}},
+		"GET /adAccountUsers":                 map[string]any{"elements": []any{map[string]any{"account": "urn:li:sponsoredAccount:501"}}},
+		"GET /adAccounts/501":                 map[string]any{"id": 501, "name": "Northpeak", "currency": "USD", "status": "ACTIVE"},
+		"GET /adAccounts/501/adCampaigns":     map[string]any{"elements": []any{map[string]any{"id": 61, "name": "ABM", "status": "ACTIVE", "objectiveType": "LEAD_GENERATION", "dailyBudget": map[string]any{"amount": "100.00"}}}},
+		"GET /adAccounts/501/adCampaigns/61":  map[string]any{"id": 61, "name": "ABM", "status": "PAUSED", "objectiveType": "LEAD_GENERATION", "dailyBudget": map[string]any{"amount": "100.00"}},
+		"POST /adAccounts/501/adCampaigns/61": map[string]any{},
 		"GET /adAnalytics": map[string]any{"elements": []any{map[string]any{"pivotValues": []string{"urn:li:sponsoredCampaign:61"},
 			"dateRange": map[string]any{"start": map[string]any{"year": 2026, "month": 10, "day": 1}}, "costInLocalCurrency": "88.10", "impressions": 4000, "clicks": 31,
 			"externalWebsiteConversions": 2, "conversionValueInLocalCurrency": "0"}}},
@@ -353,6 +440,28 @@ func TestLinkedInAds(t *testing.T) {
 	}
 	if last.header.Get("LinkedIn-Version") == "" || last.header.Get("X-Restli-Protocol-Version") != "2.0.0" {
 		t.Fatal("missing LinkedIn version headers")
+	}
+	// Managing: the campaign by id, resumed, and a budget as a decimal in
+	// the account's currency, each a Rest.li partial update.
+	cp, err := l.AdCampaign(ctx, cl, creds, accts[0], "61")
+	if err != nil || cp.Status != c.AdPaused || *cp.DailyBudgetMicros != 100_000_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if err := l.SetCampaignStatus(ctx, cl, creds, accts[0], "61", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "61", 120_500_000); err != nil {
+		t.Fatal(err)
+	}
+	var patches []string
+	for _, r := range *reqs {
+		if r.method == "POST" && r.path == "/adAccounts/501/adCampaigns/61" {
+			patches = append(patches, r.header.Get("X-RestLi-Method")+" "+r.body)
+		}
+	}
+	if len(patches) != 2 || !strings.Contains(patches[0], `PARTIAL_UPDATE {"patch":{"$set":{"status":"ACTIVE"}}}`) ||
+		!strings.Contains(patches[1], `"dailyBudget":{"amount":"120.50","currencyCode":"USD"}`) {
+		t.Fatalf("patches: %v", patches)
 	}
 }
 
@@ -483,6 +592,8 @@ func TestTikTokAds(t *testing.T) {
 				"dimensions": map[string]any{"campaign_id": "c1", "stat_time_day": "2026-10-01 00:00:00"},
 				"metrics":    map[string]any{"campaign_name": "Spark", "spend": "12.34", "impressions": "1000", "clicks": "25", "conversion": "3"}}},
 			"page_info": map[string]any{"page": 1, "total_page": 1}}},
+		"POST /campaign/status/update/": map[string]any{"code": 0, "message": "OK"},
+		"POST /campaign/update/":        map[string]any{"code": 40002, "message": "budget is below the minimum"},
 	})
 	tk := TikTokAds{}
 	if _, err := tk.AdAccounts(ctx, cl, c.Creds{"access_token": "tok"}); c.KindOf(err) != c.ErrAuth {
@@ -510,6 +621,27 @@ func TestTikTokAds(t *testing.T) {
 	}
 	if got := (*reqs)[n:]; len(got) != 2 || !strings.Contains(got[0].query, "end_date=2026-09-30") || !strings.Contains(got[1].query, "start_date=2026-10-01") {
 		t.Fatalf("report windows %+v", got)
+	}
+	// Managing: the campaign by id (a filtered get), paused, and a budget
+	// the platform refuses inside an HTTP 200.
+	cp, err := tk.AdCampaign(ctx, cl, creds, accts[0], "c1")
+	if err != nil || cp.Status != c.AdActive || *cp.DailyBudgetMicros != 50_500_000 {
+		t.Fatalf("campaign %+v %v", cp, err)
+	}
+	if q := (*reqs)[len(*reqs)-1].query; !strings.Contains(q, "filtering=") || !strings.Contains(q, "c1") {
+		t.Fatalf("campaign get query %s", q)
+	}
+	if _, err := tk.AdCampaign(ctx, cl, creds, accts[0], "c9"); c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("missing campaign: %v", err)
+	}
+	if err := tk.SetCampaignStatus(ctx, cl, creds, accts[0], "c1", false); err != nil {
+		t.Fatal(err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.path != "/campaign/status/update/" || !strings.Contains(last.body, `"operation_status":"DISABLE"`) || !strings.Contains(last.body, `"campaign_ids":["c1"]`) {
+		t.Fatalf("status update %+v", last)
+	}
+	if err := tk.SetCampaignDailyBudget(ctx, cl, creds, accts[0], "c1", 1_000_000); err == nil || !strings.Contains(err.Error(), "below the minimum") {
+		t.Fatalf("refused budget: %v", err)
 	}
 }
 

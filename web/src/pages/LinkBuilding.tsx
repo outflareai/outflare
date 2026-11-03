@@ -29,7 +29,13 @@ type Stage = LinkProspect["stage"];
 type Method = LinkProspect["method"];
 type Show = "open" | "outreach" | "live" | "ended" | "excluded";
 type DeadPage = { url: string; competitor_id: string; host: string; gone_at: string; read_id: string | null; links: number | null; referring_domains: number | null; best_rating: number | null };
-type TopPage = { url: string; links: number; referring_domains: number; best_rating: number | null };
+type TopPage = { url: string; links: number | null; referring_domains: number | null; best_rating: number | null };
+// PageTraffic is a page's search traffic from the SEO connection's pages report.
+type PageTraffic = { traffic: number | null; keywords: number | null; top_keyword: string };
+type TopRow = TopPage & Partial<PageTraffic>;
+
+// pageKey matches one page across reports: no scheme, no www., no trailing slash.
+const pageKey = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
 
 const stageLabel: Record<Stage, string> = {
   prospect: "To pitch", excluded: "Excluded", pitched: "Pitched", replied: "Replied", agreed: "Agreed", live: "Live", declined: "Declined", removed: "Link removed",
@@ -159,7 +165,7 @@ export function LinkBuilding({ ws, canManage, go, waiting = 0, onWaiting }: Prop
       {section === "pitches" && <Pitches ws={ws} canManage={canManage} brand={brand} onWaiting={onWaiting} />}
       {section === "results" && <Results ws={ws} site={current} brand={brand} />}
       {section === "dead" && <DeadPages ws={ws} site={current} canManage={canManage} brand={brand} go={go} />}
-      {section === "top" && <TopPages ws={ws} site={current} canManage={canManage} />}
+      {section === "top" && <TopPages ws={ws} site={current} canManage={canManage} brand={brand} />}
       {section === "settings" && <Settings ws={ws} canManage={canManage} brand={brand} go={go} />}
     </div>
   );
@@ -836,12 +842,22 @@ function DeadPages({ ws, site, canManage, brand, go }: { ws: string; site: SEOSi
   );
 }
 
-function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManage: boolean }) {
+function TopPages({ ws, site, canManage, brand }: { ws: string; site: SEOSite; canManage: boolean; brand: { brand?: string } }) {
   const [target, setTarget] = useState("");
   const [shown, setShown] = useState("");
   const [data, setData] = useState<{ read_id: string | null; read_at: string | null; data: TopPage[] } | null>(null);
+  const [traffic, setTraffic] = useState<{ target: string; pages: Map<string, PageTraffic & { url: string }> } | null>(null);
+  const [conn, setConn] = useState<{ id: string; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/seo", { params: { path: { ws }, query: brand } }).then(({ data }) => {
+      const c = data?.data.find((x) => x.status === "ok" && x.reports.includes("pages"));
+      setConn(c ? { id: c.id, name: c.name || c.connector_name } : null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ws, brand.brand]);
 
   const load = async (domain: string) => {
     const { data, error } = await api.GET("/v1/workspaces/{ws}/link-reads/top-pages", { params: { path: { ws }, query: { target: domain, limit: 100 } } });
@@ -860,10 +876,35 @@ function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManag
     setBusy(false);
     if (r) await load(shown);
   };
+  // readTraffic asks the SEO connection for the domain's pages with the most
+  // search traffic: one paid read, only when a person asks for it.
+  const readTraffic = async () => {
+    if (!conn) return;
+    if (!(await confirmAction(`Read the search traffic of ${shown}'s pages?`, `One paid read of up to 100 pages on your own SEO connection (${conn.name}). Asking again within a day is free.`, "Read traffic"))) return;
+    setBusy(true);
+    const { data, error } = await api.GET("/v1/workspaces/{ws}/seo/{id}/reports/{report}", { params: { path: { ws, id: conn.id, report: "pages" }, query: { target: shown, limit: 100 } } });
+    setBusy(false);
+    if (error || !data) return setError(errorMessage(error));
+    setError("");
+    const pages = new Map<string, PageTraffic & { url: string }>();
+    for (const r of data.rows ?? []) {
+      const url = r.url || r.key;
+      pages.set(pageKey(url), { url, traffic: r.organic_traffic ?? null, keywords: r.organic_keywords ?? null, top_keyword: r.top_keyword ?? "" });
+    }
+    setTraffic({ target: shown, pages });
+  };
+  // rows are the most linked pages with their traffic, then the pages with
+  // traffic that no stored link points to.
+  const t = traffic && traffic.target === shown ? traffic.pages : null;
+  const rows: TopRow[] = (data?.data ?? []).map((p) => ({ ...p, ...(t?.get(pageKey(p.url)) ?? {}) }));
+  if (t) {
+    const seen = new Set(rows.map((p) => pageKey(p.url)));
+    for (const [k, v] of t) if (!seen.has(k)) rows.push({ links: null, referring_domains: null, best_rating: null, ...v });
+  }
   return (
     <div className="space-y-3">
       {error && <ErrorText>{error}</ErrorText>}
-      <p className="text-[12px] text-muted-foreground">A domain's pages ranked by the sites linking to them: the pages worth making a better version of. Counts cover the strongest 100 links of the latest read.</p>
+      <p className="text-[12px] text-muted-foreground">A domain's pages ranked by the sites linking to them: the pages worth making a better version of, or the best ones to pitch. Counts cover the strongest 100 links of the latest read; search traffic is read only when you ask.</p>
       <form onSubmit={show} className="flex flex-wrap items-center gap-2">
         <input className={`${field} w-64 max-w-full`} aria-label="Domain" placeholder="rival.example" value={target} onChange={(e) => setTarget(e.target.value)} maxLength={300} />
         <Button type="submit" disabled={!target.trim()}>Show</Button>
@@ -873,17 +914,22 @@ function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManag
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-muted-foreground">
             <span>{data.read_at ? `From the read ${ago(data.read_at)}.` : `${shown} hasn't been read yet.`}</span>
             {canManage && <Button variant="ghost" disabled={busy} onClick={read}>{data.read_at ? "Read again" : "Read its links"}</Button>}
+            {canManage && conn && <Button variant="ghost" disabled={busy} onClick={readTraffic}>{t ? "Read traffic again" : "Read search traffic"}</Button>}
+            {!conn && <span>Connect Ahrefs or DataForSEO to see each page's search traffic.</span>}
           </div>
-          {data.data.length > 0 && (
+          {rows.length > 0 && (
             <DataTable
-              data={data.data}
+              data={rows}
               rowId={(p) => p.url}
               searchPlaceholder="Search pages"
               empty="Nothing here."
               mobile={(p) => (
                 <div className="space-y-1">
                   <span className="font-mono text-[12px] break-all">{p.url}</span>
-                  <div className="text-xs text-muted-foreground">{num(p.referring_domains)} linking sites · best rating {num(p.best_rating)}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {num(p.referring_domains)} linking sites · best rating {num(p.best_rating)}
+                    {t && ` · ${num(p.traffic)} visits a month`}
+                  </div>
                 </div>
               )}
               columns={[
@@ -895,9 +941,16 @@ function TopPages({ ws, site, canManage }: { ws: string; site: SEOSite; canManag
                     <a className="max-w-96 truncate font-mono text-[12px] underline-offset-2 hover:underline" href={row.original.url} target="_blank" rel="noreferrer noopener nofollow" title={row.original.url}>{path(row.original.url)}</a>
                   ),
                 },
-                { id: "sites", header: "Linking sites", accessorFn: (p) => p.referring_domains, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.referring_domains) },
-                { id: "links", header: "Links", accessorFn: (p) => p.links, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.links) },
+                { id: "sites", header: "Linking sites", accessorFn: (p) => p.referring_domains ?? -1, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.referring_domains) },
+                { id: "links", header: "Links", accessorFn: (p) => p.links ?? -1, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.links) },
                 { id: "best", header: "Best rating", accessorFn: (p) => p.best_rating ?? -1, meta: { align: "right", mono: true }, cell: ({ row }) => num(row.original.best_rating) },
+                ...(t
+                  ? [
+                      { id: "traffic", header: "Visits a month", accessorFn: (p: TopRow) => p.traffic ?? -1, meta: { align: "right" as const, mono: true }, cell: ({ row }: { row: { original: TopRow } }) => num(row.original.traffic) },
+                      { id: "keywords", header: "Keywords", accessorFn: (p: TopRow) => p.keywords ?? -1, meta: { align: "right" as const, mono: true }, cell: ({ row }: { row: { original: TopRow } }) => num(row.original.keywords) },
+                      { id: "top", header: "Top search", accessorFn: (p: TopRow) => p.top_keyword ?? "", cell: ({ row }: { row: { original: TopRow } }) => row.original.top_keyword || "–" },
+                    ]
+                  : []),
               ]}
             />
           )}

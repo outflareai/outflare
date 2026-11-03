@@ -5,7 +5,10 @@
 // campaigns, daily numbers per campaign, money in micros of the account's
 // currency), so a person or an agent reads every platform the same way. Google, Meta,
 // Microsoft, Reddit, TikTok, Snapchat, Taboola and Pinterest also take conversions back (connectors.
-// ConversionSender); nothing here changes campaigns, budgets or ads.
+// ConversionSender). Google, Meta, Microsoft, LinkedIn and TikTok also manage campaigns (connectors.AdsManager):
+// pausing and resuming one and setting its daily budget, the only
+// changes Outflare makes to ads, each read back afterwards to confirm it
+// took. Nothing here creates campaigns, ads, audiences or creative.
 //
 // Every connection uses the workspace's own account and keys: Outflare's
 // sign-in apps only carry the person to the platform's consent screen, and

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -270,6 +271,56 @@ func toltShape(v any) string {
 		parts = append(parts[:12], "…")
 	}
 	return "keys " + strings.Join(parts, ", ")
+}
+
+// settingRE is a value that reads as a code (percentage, new_payment),
+// which a flow's settings hold rather than anyone's data.
+var settingRE = regexp.MustCompile(`^[A-Za-z0-9_.%-]{1,30}$`)
+
+// toltSettings describes a flow's settings for an import issue: field
+// names, numbers and code-like values, and the type of anything else.
+func toltSettings(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return "a " + jsonType(v)
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		val := jsonType(m[k])
+		switch x := m[k].(type) {
+		case float64:
+			val = strconv.FormatFloat(x, 'f', -1, 64)
+		case bool:
+			val = strconv.FormatBool(x)
+		case string:
+			if settingRE.MatchString(x) {
+				val = `"` + x + `"`
+			}
+		case map[string]any:
+			val = "{" + toltSettings(x) + "}"
+		case []any:
+			// A list of settings (such as conditions) is spelled out.
+			var items []string
+			for _, it := range x {
+				if im, ok := it.(map[string]any); ok {
+					items = append(items, "{"+toltSettings(im)+"}")
+				}
+			}
+			if len(items) > 0 && len(items) == len(x) {
+				val = "[" + strings.Join(items, ", ") + "]"
+			}
+		}
+		parts = append(parts, cutText(k, 40)+": "+val)
+	}
+	if len(parts) > 15 {
+		parts = append(parts[:15], "…")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func jsonType(v any) string {
@@ -701,8 +752,14 @@ var toltFields = map[string]string{
 	"partner_revenue": "partner.revenue_cents", "revenue": "partner.revenue_cents",
 	"partner_earnings": "partner.earnings_cents", "earnings": "partner.earnings_cents",
 	"customer_transactions": "customer.transactions", "customer_transactions_count": "customer.transactions",
-	"customer_total_paid": "customer.total_paid_cents", "customer_revenue": "customer.total_paid_cents",
-	"customer_conversion_date": "customer.signed_up_at", "conversion_date": "customer.signed_up_at",
+	// v2's name (docs.tolt.com, "Get a flow").
+	"customer_transaction_count": "customer.transactions",
+	"customer_total_paid":        "customer.total_paid_cents", "customer_revenue": "customer.total_paid_cents",
+	// Tolt's "Conversion date": when the customer first paid.
+	"customer_conversion_date": "customer.first_sale_at", "conversion_date": "customer.first_sale_at",
+	// Tolt's "Created date": when the customer was created (became a lead).
+	"created_at": "customer.signed_up_at", "created_date": "customer.signed_up_at", "customer_created_at": "customer.signed_up_at",
+	"customer_created_date": "customer.signed_up_at", "customer_created": "customer.signed_up_at",
 	"customer_first_transaction_date": "customer.first_sale_at", "first_transaction_date": "customer.first_sale_at",
 	"transaction_amount": "transaction.amount_cents", "amount": "transaction.amount_cents",
 	"product_id": "transaction.product_id", "plan_id": "transaction.product_id", "price_id": "transaction.product_id", "plan": "transaction.product_id",
@@ -722,35 +779,61 @@ var toltOps = map[string]string{
 
 func toltFlow(o map[string]any) c.ImportFlow {
 	f := c.ImportFlow{ID: str(o, "id"), GroupID: ref(o, "group_id", "group"), Name: str(o, "name", "title"), Recurrence: "every", Approval: "program"}
-	switch strings.ToLower(str(o, "trigger", "trigger_type", "event")) {
-	case "new_payment", "payment", "transaction", "new_transaction", "sale", "":
+	// v2 says whether a flow runs as "active"; a paused one doesn't.
+	f.Paused = o["active"] == false
+	switch strings.ToLower(str(o, "event", "trigger", "trigger_type")) {
+	case "transaction_created", "new_payment", "payment", "transaction", "new_transaction", "sale", "":
 		f.Trigger = "sale"
-	case "new_signup", "signup", "customer", "new_customer", "lead":
+	case "lead_created", "new_signup", "signup", "customer", "new_customer", "lead":
 		f.Trigger = "signup"
 	default:
 		f.Unsupported = append(f.Unsupported, "trigger")
+		f.Detail = "its event: " + toltSettings(map[string]any{"event": o["event"], "trigger": o["trigger"]})
 	}
 	action, _ := o["action"].(map[string]any)
 	if action == nil {
 		action = o
 	}
-	switch strings.ToLower(str(action, "type", "action_type", "action")) {
+	// The reward can sit one level down, as {"type": "commission",
+	// "commission": {...}}.
+	if inner, ok := action["commission"].(map[string]any); ok {
+		action = inner
+	}
+	// v2 names the action beside it: generate_commission, or a move to a
+	// group.
+	actionType := strings.ToLower(str(o, "action_type"))
+	if strings.Contains(actionType, "group") {
+		actionType = "group"
+	} else {
+		actionType = strings.ToLower(str(action, "type", "action_type", "action"))
+	}
+	switch actionType {
 	case "switch_group", "change_group", "move_to_group", "group":
 		f.Kind, f.TargetGroupID = "group", ref(action, "group_id", "target_group_id", "group")
 		if f.TargetGroupID == "" {
 			f.Unsupported = append(f.Unsupported, "action")
 		}
 	default:
-		ct := strings.ToLower(str(action, "commission_type", "reward_type", "value_type", "type_of_commission"))
-		v := cents(action, "value", "amount", "commission", "rate")
+		ct := strings.ToLower(str(action, "commission_type", "reward_type", "value_type", "type_of_commission", "calculation", "calculation_type",
+			"amount_type", "unit"))
+		if ct == "" {
+			ct = strings.ToLower(str(action, "type", "action_type"))
+		}
+		v := cents(action, "value", "amount", "commission", "rate", "fixed_amount", "amount_cents")
+		pct := num(action, "value", "amount", "commission", "rate", "percentage", "percent", "commission_percentage", "commission_rate")
 		switch {
-		case ct == "percentage" || ct == "percent" || ct == "%":
-			bp := int(math.Round(num(action, "value", "amount", "commission", "rate") * 100))
+		case strings.Contains(ct, "percent") || ct == "%":
+			bp := int(math.Round(pct * 100))
 			f.Kind, f.PercentBP = "percent", &bp
-		case ct == "fixed" || ct == "flat" || ct == "amount":
+		case ct == "fixed" || ct == "flat" || ct == "amount" || strings.HasPrefix(ct, "fixed_"):
 			f.Kind, f.AmountCents = "fixed", &v
+		case num(action, "percentage", "percent", "commission_percentage", "commission_rate") > 0:
+			// No type, but a percentage field.
+			bp := int(math.Round(num(action, "percentage", "percent", "commission_percentage", "commission_rate") * 100))
+			f.Kind, f.PercentBP = "percent", &bp
 		default:
 			f.Unsupported = append(f.Unsupported, "action")
+			f.Detail = "its action: " + toltSettings(o["action"])
 		}
 	}
 	switch strings.ToLower(str(o, "duration", "recurrence", "commission_duration")) {
@@ -768,14 +851,19 @@ func toltFlow(o map[string]any) c.ImportFlow {
 		f.Unsupported = append(f.Unsupported, "duration")
 	}
 	approval, _ := o["approval"].(map[string]any)
+	if opts, ok := o["options"].(map[string]any); ok && approval == nil {
+		// v2: options.auto_approval {type: immediate, delay or manual,
+		// delay_days}.
+		approval, _ = opts["auto_approval"].(map[string]any)
+	}
 	if approval == nil {
 		approval = map[string]any{"type": o["approval_type"], "days": o["approval_days"]}
 	}
 	switch strings.ToLower(str(approval, "type")) {
 	case "", "default":
-	case "auto", "automatic", "instant":
+	case "auto", "automatic", "instant", "immediate":
 		f.Approval = "auto"
-	case "auto_after", "automatic_after", "after_days", "delayed":
+	case "auto_after", "automatic_after", "after_days", "delayed", "delay":
 		d := int(cents(approval, "days", "delay_days"))
 		f.Approval, f.ApprovalDays = "after_days", &d
 	case "manual":
@@ -784,7 +872,22 @@ func toltFlow(o map[string]any) c.ImportFlow {
 		f.Unsupported = append(f.Unsupported, "approval")
 	}
 	f.Conditions = toltConditions(o["conditions"], &f.Unsupported)
-	for _, x := range list(o["custom_rates"], o["overrides"]) {
+	if slices.Contains(f.Unsupported, "condition") && f.Detail == "" {
+		var parts []string
+		for _, x := range list(o["conditions"]) {
+			parts = append(parts, "{"+toltSettings(x)+"}")
+		}
+		if root, ok := o["conditions"].(map[string]any); ok {
+			parts = append(parts, "{"+toltSettings(root)+"}")
+		}
+		f.Detail = "its conditions: " + strings.Join(parts, ", ")
+	}
+	if len(list(o["link_overrides"])) > 0 {
+		// A rate for one link: Outflare's overrides are per partner or
+		// product.
+		f.Unsupported = append(f.Unsupported, "custom_rate")
+	}
+	for _, x := range list(o["partner_overrides"], o["custom_rates"], o["overrides"]) {
 		r, _ := x.(map[string]any)
 		ov := partners.Override{}
 		if id := ref(r, "partner_id", "partner"); id != "" {
@@ -838,13 +941,88 @@ func toltMatch(v string) string {
 	return "all"
 }
 
-// toltConditions reads {operator, groups: [{operator, conditions: [...]}]},
-// or a flat list of conditions.
+// toltChildren turns a v2 condition group's children into groups of
+// conditions: one group when every child is a condition, else one per
+// child (a lone condition becomes a group of one). A group below that is
+// deeper than Outflare's conditions go, and isn't read.
+func toltChildren(root map[string]any, unsupported *[]string) []any {
+	children := list(root["children"])
+	isGroup := func(x any) bool {
+		m, _ := x.(map[string]any)
+		return m["children"] != nil || strings.EqualFold(str(m, "kind"), "group")
+	}
+	if !slices.ContainsFunc(children, isGroup) {
+		return []any{map[string]any{"operator": str(root, "operator"), "conditions": children}}
+	}
+	var out []any
+	for _, x := range children {
+		if !isGroup(x) {
+			out = append(out, map[string]any{"operator": "and", "conditions": []any{x}})
+			continue
+		}
+		m, _ := x.(map[string]any)
+		inner := list(m["children"])
+		if slices.ContainsFunc(inner, isGroup) {
+			*unsupported = append(*unsupported, "condition")
+			continue
+		}
+		out = append(out, map[string]any{"operator": str(m, "operator"), "conditions": inner})
+	}
+	return out
+}
+
+// toltWithin reads a date condition's span: a number with a unit beside
+// it, an {amount, unit} value, or text such as "1 year".
+func toltWithin(cm map[string]any) (map[string]any, bool) {
+	amount, unit := float64(0), strings.ToLower(str(cm, "unit", "period", "interval", "time_unit"))
+	switch v := cm["value"].(type) {
+	case map[string]any:
+		amount = num(v, "amount", "value", "count")
+		if u := strings.ToLower(str(v, "unit", "period", "interval", "time_unit")); u != "" {
+			unit = u
+		}
+	case string:
+		parts := strings.Fields(v)
+		if len(parts) == 2 && unit == "" {
+			unit = strings.ToLower(parts[1])
+		}
+		if len(parts) > 0 {
+			amount, _ = strconv.ParseFloat(parts[0], 64)
+		}
+	default:
+		amount = num(cm, "value", "amount")
+	}
+	if unit == "" {
+		// Tolt's docs give spans in days ("within 350 days").
+		unit = "days"
+	}
+	if unit == "day" || unit == "month" || unit == "year" {
+		unit += "s"
+	}
+	if amount <= 0 || amount != math.Trunc(amount) || (unit != "days" && unit != "months" && unit != "years") {
+		return nil, false
+	}
+	return map[string]any{"amount": amount, "unit": unit}, true
+}
+
+// toltConditions reads v2's {kind: group, operator, children}, or
+// {operator, groups: [{operator, conditions: [...]}]}, or a flat list of
+// conditions.
 func toltConditions(v any, unsupported *[]string) partners.Conditions {
 	var out partners.Conditions
 	root, _ := v.(map[string]any)
 	groups := list(v)
-	if root != nil {
+	if root != nil && root["children"] != nil {
+		// v2: {kind: group, operator, children: [conditions or groups]},
+		// up to three levels deep. Outflare's conditions are two levels, so
+		// a group's children are read as one group when they are all
+		// conditions, else each child as a group.
+		groups = toltChildren(root, unsupported)
+		out.Match = toltMatch(str(root, "operator"))
+		if len(groups) == 1 {
+			out.Match = "all"
+		}
+	} else if root != nil {
 		out.Match = toltMatch(str(root, "operator", "match", "logic"))
 		if g := list(root["groups"]); g != nil {
 			groups = g
@@ -860,7 +1038,8 @@ func toltConditions(v any, unsupported *[]string) partners.Conditions {
 		group := partners.ConditionGroup{Match: toltMatch(str(gm, "operator", "match", "logic"))}
 		for _, x := range list(gm["conditions"], gm["rules"]) {
 			cm, _ := x.(map[string]any)
-			field, ok := toltFields[strings.ToLower(str(cm, "attribute", "field", "property"))]
+			name := strings.ToLower(str(cm, "attribute", "field", "property", "type"))
+			field, ok := toltFields[name]
 			op, okOp := toltOps[strings.ToLower(str(cm, "operator", "op", "comparison"))]
 			if !ok || !okOp {
 				*unsupported = append(*unsupported, "condition")
@@ -868,12 +1047,27 @@ func toltConditions(v any, unsupported *[]string) partners.Conditions {
 			}
 			cond := partners.Condition{Field: field, Op: op, Value: cm["value"]}
 			if op == "within" || op == "not_within" {
-				cond.Value = map[string]any{"amount": float64(cents(cm, "value", "amount")), "unit": strings.ToLower(str(cm, "unit", "period"))}
+				w, ok := toltWithin(cm)
+				if !ok {
+					*unsupported = append(*unsupported, "condition")
+					continue
+				}
+				cond.Value = w
 			}
 			if s, isText := cond.Value.(string); isText && partners.Fields[field] == partners.FieldNumber {
 				if f, err := strconv.ParseFloat(s, 64); err == nil {
 					cond.Value = f
 				}
+			}
+			if field == "customer.transactions" {
+				// Tolt counts the payment being checked ("equals 1" is the
+				// first payment); Outflare counts the ones before it.
+				n, isNum := cond.Value.(float64)
+				if !isNum {
+					*unsupported = append(*unsupported, "condition")
+					continue
+				}
+				cond.Value = n - 1
 			}
 			group.Conditions = append(group.Conditions, cond)
 		}

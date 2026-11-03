@@ -42,7 +42,7 @@ Stages are kept on two levels:
 | `company` | The company (a person with no company carries them on their own record) | lead → trial → active → at risk → churned | Billing: sales, win-back, alerts to the account owner |
 | `person` | Each person | invited → activated → at risk → inactive | Usage: onboarding and nudges to that person only |
 
-Each stage has a **category** (`lead`, `trial`, `active`, `at_risk`, `churned`) that says what it means, and a **rank** used for the company's overall status. A brand can rename, add and remove stages (`PUT /v1/brands/{brand}/lifecycle/stages`, MCP `set_lifecycle_stages`). A stage someone is in, or a move uses, can't be removed.
+Each stage has a **category** (`lead`, `trial`, `active`, `at_risk`, `churned`) that says what it means, and a **rank** used for the company's overall status. A brand can rename, add and remove stages: in the app under People → Products → Lifecycle stages → Edit stages (people with `catalog.manage`), with `PUT /v1/brands/{brand}/lifecycle/stages` or MCP `set_lifecycle_stages`. A stage's key never changes once saved. A stage someone is in, or a move uses, can't be removed.
 
 ### Moves
 
@@ -71,7 +71,7 @@ The defaults:
 | person | no usage for `at_risk_days` | activated | at risk | `product.user_at_risk` |
 | person | no usage for `churn_days` | activated, at risk | inactive | `product.user_inactive` |
 
-Every emitted event carries `product_id`, `product_key`, `level`, `move`, `from_stage` and `to_stage`, so a journey can test which product it was. Each move is also the `lifecycle.moved` webhook event, so a CRM or warehouse can follow stages, and Query has them as `products`, `lifecycle_states`, `lifecycle_moves` and `lifecycle_overall` ([Query](query.md)). Moves are tried in order and the first that fits wins; change them with `PUT /v1/brands/{brand}/lifecycle/moves` (MCP `set_lifecycle_moves`). `from_stages` may include `none`, someone with no stage yet.
+Every emitted event carries `product_id`, `product_key`, `level`, `move`, `from_stage` and `to_stage`, so a journey can test which product it was. Each move is also the `lifecycle.moved` webhook event, so a CRM or warehouse can follow stages, and Query has them as `products`, `lifecycle_states`, `lifecycle_moves` and `lifecycle_overall` ([Query](query.md)). Moves are tried in order and the first that fits wins; change them in the app (Edit moves: the event or usage or time without usage that moves someone, where from, where to and the event it records, in order), with `PUT /v1/brands/{brand}/lifecycle/moves` or MCP `set_lifecycle_moves`. A move's property tests can be set only through the API; the app keeps them as they are. `from_stages` may include `none`, someone with no stage yet.
 
 What keeps moves safe:
 

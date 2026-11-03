@@ -23,12 +23,17 @@ var metricName = regexp.MustCompile(`\boutflare_[a-z0-9_]+`)
 // known is every outflare_ series name the engine can export.
 func known(t *testing.T) map[string]bool {
 	t.Helper()
+	// Describe writes every descriptor before anything reads, so the
+	// channel is drained as it fills: a buffer alone deadlocks once the
+	// engine exports more descriptors than it holds.
 	ch := make(chan *prometheus.Desc, 256)
-	for _, c := range own {
-		c.Describe(ch)
-	}
-	(&Postgres{}).Describe(ch)
-	close(ch)
+	go func() {
+		for _, c := range own {
+			c.Describe(ch)
+		}
+		(&Postgres{}).Describe(ch)
+		close(ch)
+	}()
 	fq := regexp.MustCompile(`fqName: "([^"]+)"`)
 	names := map[string]bool{}
 	for d := range ch {

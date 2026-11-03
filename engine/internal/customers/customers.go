@@ -269,7 +269,7 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 		product = &ev.ProductID
 	} else if ev.Product != "" {
 		var brand string
-		err := q.QueryRow(ctx, `SELECT COALESCE(brand_id, outflare_first_brand($1))::text FROM records WHERE id = $2 AND workspace_id = $1`,
+		err := q.QueryRow(ctx, `SELECT COALESCE(COALESCE(brand_id, outflare_first_brand($1))::text, '') FROM records WHERE id = $2 AND workspace_id = $1`,
 			workspaceID, ev.RecordID).Scan(&brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
@@ -288,7 +288,7 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 	var id, brand string
 	err = q.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, brand_id, kind, name, raw_name, properties, source, message_id, occurred_at, request_id, product_id)
 		SELECT $1, r.id, COALESCE(r.brand_id, outflare_first_brand($1)), 'track', $3, $3, $4, $5, $6, $7, $8, $9 FROM records r WHERE r.id = $2 AND r.workspace_id = $1
-		ON CONFLICT (workspace_id, message_id) DO NOTHING RETURNING id::text, brand_id::text`,
+		ON CONFLICT (workspace_id, message_id) DO NOTHING RETURNING id::text, COALESCE(brand_id::text, '')`,
 		workspaceID, ev.RecordID, ev.Name, string(props), ev.Source, msg, ev.OccurredAt, ev.RequestID, product).Scan(&id, &brand)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
@@ -313,11 +313,18 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 	if err := EventAdded(ctx, q, workspaceID, id, ev.Name); err != nil {
 		return "", err
 	}
+	// A workspace without a brand has no lifecycle or metric settings.
+	if brand == "" {
+		return id, nil
+	}
 	// The lifecycle engine's own events never move anyone again.
 	if product != nil && ev.Source != "lifecycle" {
 		if err := ProductEventAdded(ctx, q, workspaceID, brand, id, false); err != nil {
 			return "", err
 		}
+	}
+	if err := MetricEventAdded(ctx, q, workspaceID, brand, id, ev.Name, false); err != nil {
+		return "", err
 	}
 	return id, nil
 }

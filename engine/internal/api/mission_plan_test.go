@@ -61,6 +61,18 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answerFromReply(w, string(body))
 		return
 	}
+	if strings.Contains(string(body), "You sort a business's support conversations into its topics") {
+		topic := ""
+		if strings.Contains(string(body), "invoice") {
+			topic = "Billing"
+		}
+		answerJSON(w, map[string]any{"topic": topic})
+		return
+	}
+	if strings.Contains(string(body), "You read pairs of a customer's question to a business") {
+		answerLearnReplies(w, string(body))
+		return
+	}
 	if strings.Contains(string(body), "You answer customers for a business, by chat or email") {
 		answerSupportAssistant(w, string(body))
 		return

@@ -12,9 +12,9 @@ Everything here is Apache-2.0 (see [LICENSE](LICENSE)), so you can copy any play
 
 ## How a playbook runs
 
-A playbook is data, not code. Starting one creates a mission draft with the prompt filled in and the steps as its plan, so:
+A playbook is data, not code. Starting one creates an agent run with the prompt filled in and the steps as its plan, carried out by Outflare's agent on the workspace's own AI model, so:
 
-- nothing happens until a person approves it, and the mission's mode decides whether writes are dry runs, wait for approval or run within limits;
+- every change it makes goes through the action layer, and the run's mode decides whether changes are refused and kept (dry run), wait for a person's approval or run within limits;
 - every step uses Outflare's normal API, the same calls (and MCP tools) a person or agent would use, so the contact rules, opt-outs, spend limits and audit log all apply;
 - results land where they belong (journeys, the inbox, campaign links, the fixes list), never in a store of the playbook's own;
 - every connection is the workspace's own account. Outflare never supplies a key, so a playbook whose connection is missing doesn't start and says what to connect.

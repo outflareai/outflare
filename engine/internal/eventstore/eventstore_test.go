@@ -315,4 +315,30 @@ func TestClickHouse(t *testing.T) {
 	if len(rows) != 1 || rows[0]["name"] != "order_completed" || rows[0]["plan"] != "pro" {
 		t.Fatalf("clickhouse has %v", rows)
 	}
+
+	// A rule's dry run reads a record's events from long ago.
+	var rec string
+	if err := pool.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws).Scan(&rec); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().AddDate(0, 0, -200)
+	if _, err := pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, record_id, properties, occurred_at)
+		VALUES ($1, 'track', 'plan_upgraded', $2, '{"plan": "pro"}', $3)`, ws, rec, old); err != nil {
+		t.Fatal(err)
+	}
+	for more := true; more; {
+		if more, err = m.Step(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ch.RuleEvents(ctx, ws, "plan_upgraded", time.Now().AddDate(0, 0, -300), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].RecordID != rec || got[0].Properties["plan"] != "pro" || got[0].OccurredAt.Sub(old).Abs() > time.Second {
+		t.Fatalf("rule events: %+v", got)
+	}
+	if got, err := ch.RuleEvents(ctx, ws, "plan_upgraded", time.Now().AddDate(0, 0, -100), 10); err != nil || len(got) != 0 {
+		t.Fatalf("rule events since 100 days: %+v %v", got, err)
+	}
 }

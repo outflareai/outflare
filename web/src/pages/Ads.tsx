@@ -4,7 +4,7 @@ import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
+import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
@@ -50,6 +50,9 @@ export const money = (micros: number | null | undefined, currency: string) => {
 export const n = (v: number | null | undefined) => (v === null || v === undefined ? "—" : Math.round(v).toLocaleString());
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${(v * 100).toFixed(2)}%`);
 const roas = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v.toFixed(2)}×`);
+
+// The platforms whose campaigns Outflare can change (connectors.AdsManager).
+const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads"]);
 
 export function Ads({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
@@ -99,6 +102,44 @@ export function Ads({ ws, canManage, go }: Props) {
     setTimeout(load, 8000);
   }
 
+  // Managing campaigns: each change is queued and read back from the
+  // platform; the list follows the platform's answer at the next load.
+  async function change(c: AdCampaign, kind: "pause" | "resume" | "budget", budget?: number) {
+    setBusy(true);
+    const p = { params: { path: { ws, id: c.id } } };
+    const { error } =
+      kind === "pause" ? await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/pause", p)
+      : kind === "resume" ? await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/resume", p)
+      : await api.PATCH("/v1/workspaces/{ws}/ads/campaigns/{id}", { ...p, body: { daily_budget_micros: budget ?? 0 } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    toast(kind === "budget" ? "Budget change sent to the platform. It shows here once the platform confirms it." : `${kind === "pause" ? "Pause" : "Resume"} sent to the platform. It shows here once the platform confirms it.`);
+    setTimeout(load, 3000);
+  }
+  async function setBudget(c: AdCampaign) {
+    const current = c.daily_budget_micros ? (c.daily_budget_micros / 1e6).toFixed(2) : "";
+    const r = await ask({
+      title: `Daily budget for ${c.name}`,
+      body: `In ${c.currency}, as the platform shows it. The change is read back from the platform before it shows here.`,
+      input: { label: "Daily budget", type: "number", value: current, placeholder: "25.00" },
+      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Set the budget", value: "ok", variant: "primary" }],
+    });
+    const v = Number(r?.value);
+    if (r?.choice !== "ok" || !(v > 0)) return;
+    await change(c, "budget", Math.round(v * 1e6));
+  }
+  async function pauseAll() {
+    const b = brand.brand;
+    if (!b) return;
+    if (!(await confirmAction(`Pause every campaign of ${b.name}?`, "Every active campaign on the brand's ad accounts is paused at once, on each platform Outflare can change. You can resume them one by one.", "Pause all ads"))) return;
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/brands/{brand}/ads/pause-all", { params: { path: { brand: b.id } } });
+    setBusy(false);
+    if (error) return toast(errorMessage(error), "error");
+    const n = data && "changes" in data ? data.changes.length : 0;
+    toast(n ? `Pausing ${n} campaign${n === 1 ? "" : "s"}.` : "No active campaign to pause on a platform Outflare can change.");
+    setTimeout(load, 3000);
+  }
   async function update(a: AdAccount, body: { brand?: string; sync_on?: boolean }) {
     const { error } = await api.PATCH("/v1/workspaces/{ws}/ads/accounts/{id}", { params: { path: { ws, id: a.id } }, body });
     if (error) return toast(errorMessage(error), "error");
@@ -119,6 +160,7 @@ export function Ads({ ws, canManage, go }: Props) {
             ))}
           </div>
           {canManage && accounts.length > 0 && <Button variant="ghost" disabled={busy} onClick={syncNow}>Sync now</Button>}
+          {canManage && brand.brand && campaigns.some((c) => c.status === "active") && <Button variant="danger" disabled={busy} onClick={pauseAll}>Pause all ads</Button>}
         </div>
       }
     />
@@ -175,7 +217,7 @@ export function Ads({ ws, canManage, go }: Props) {
 
       <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card />
 
-      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its numbers by day, its ad sets and its ads (Meta and Google).`}>
+      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its numbers by day, its ad sets and its ads (Meta and Google). Pause, resume or set the daily budget of a Google Ads, Meta, Microsoft, LinkedIn or TikTok campaign; each change is read back from the platform.`}>
         <DataTable
           data={campaigns}
           rowId={(c) => c.id}
@@ -202,6 +244,18 @@ export function Ads({ ws, canManage, go }: Props) {
             { id: "budget", header: "Daily budget", accessorFn: (c) => c.daily_budget_micros ?? -1, cell: ({ row: { original: c } }) => <span className="font-mono tabular-nums">{money(c.daily_budget_micros, c.currency)}</span> },
             ...metricColumns<AdCampaign>((c) => c.totals, (c) => c.currency),
             { id: "brand", header: "Brand", accessorFn: (c) => brand.byId(c.brand_id)?.name ?? "", cell: ({ row: { original: c } }) => <BrandBadge id={c.brand_id} /> },
+            {
+              id: "manage",
+              header: "",
+              enableSorting: false,
+              cell: ({ row: { original: c } }) =>
+                canManage && manageable.has(c.connector) && c.status !== "removed" && (
+                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                    {c.status === "active" ? <Button variant="ghost" disabled={busy} onClick={() => change(c, "pause")}>Pause</Button> : <Button variant="ghost" disabled={busy} onClick={() => change(c, "resume")}>Resume</Button>}
+                    <Button variant="ghost" disabled={busy} onClick={() => setBudget(c)}>Budget</Button>
+                  </div>
+                ),
+            },
           ]}
         />
       </Card>

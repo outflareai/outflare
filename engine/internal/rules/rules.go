@@ -131,8 +131,11 @@ func Check(r Rule) string {
 		}
 		properties = properties || c.Property != ""
 	}
-	if t.Kind != KindChange && r.RecordType != "person" {
-		return "event, absence and audience rules are about people (record_type person); change rules can watch any record type"
+	if t.Kind == KindAudience && r.RecordType != "person" && r.RecordType != "account" {
+		return "audience rules are about the records of their list: record_type person, or account for a list of companies"
+	}
+	if t.Kind != KindChange && t.Kind != KindAudience && r.RecordType != "person" {
+		return "event and absence rules are about people (record_type person); change rules can watch any record type"
 	}
 	switch t.Kind {
 	case KindEvent:

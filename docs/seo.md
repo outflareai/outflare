@@ -31,6 +31,7 @@ Every tool answers the same reports in the same shape, keyed by domain.
 | `backlinks` | The referring domains linking to it, strongest first | Yes | Yes |
 | `links` | Single links to it, strongest linking domains first; `since=YYYY-MM-DD` adds links lost since then | Yes | Yes |
 | `competitors` | Domains competing for the same keywords, with keywords in common | Yes | Yes |
+| `pages` | The domain's pages that get the most search traffic: estimated visits a month, ranking keywords and (Ahrefs) the top search | Yes | Yes |
 | `audit` | Site audit health score and issues, errors first | No | Yes, for a site already set up as an Ahrefs Site Audit project |
 
 DataForSEO's domain rating is its own 0 to 100 rank, and Ahrefs' is Ahrefs
@@ -420,8 +421,13 @@ your sequences with `uses_opener`.
   person. Without AI, move the prospect yourself.
 - **Live.** Every hour, agreed links due a look are checked (each at most
   daily, live ones weekly). A link found on the page moves the prospect to
-  `live`; a live link gone from its page, or a page that's gone, to
-  `removed`. An agreed link still not there after 14 days is announced once
+  `live`. A live link gone from a page that is still up goes back on the
+  list as a prospect to win back: `removed_at` is set, and `win_back`,
+  `removed_at` and `live_since` go in its evidence. Nothing is sent until you
+  or a playbook pitches it again, and its opener says the page used to link
+  to you. A live link whose page is gone moves to `removed`. Either way,
+  `link_prospect.removed` is recorded (with `win_back` when it went back on
+  the list). An agreed link still not there after 14 days is announced once
   (`link_prospect.overdue`), a cue to nudge the site.
 - **Results.** `GET /link-prospects/results` (MCP `get_link_results`)
   counts the prospects found in the last 90 days by method: pitched,
@@ -453,6 +459,11 @@ Every read is kept, so these reports cost nothing:
 - **Top pages** (`GET /link-reads/top-pages?target=rival.example`, MCP
   `list_top_linked_pages`): a domain's pages ranked by the domains linking
   to them, from its latest read. The counts cover the links that read kept.
+  Only when you ask (**Read search traffic** on the page, or the `pages`
+  report: `GET /seo/{id}/reports/pages?target=rival.example`, MCP
+  `get_seo_report`), one paid read of your SEO connection adds each page's
+  estimated visits a month, keywords and top search, so you can pick the
+  page worth pitching. Nothing reads it on its own.
 
 **The weekly read.** The weekly SEO snapshot also reads who links to pages
 that went from tracked competitors' sitemaps in the last 8 days (at most 20

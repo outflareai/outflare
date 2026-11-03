@@ -156,6 +156,46 @@ func (m txts) LookupMX(_ context.Context, name string) ([]*net.MX, error) {
 	return out, nil
 }
 
+// misbehaving answers like a hosting resolver that fails a missing name
+// with SERVFAIL instead of "no such name", for the names in fail.
+type misbehaving struct {
+	txts
+	fail map[string]bool
+}
+
+func (m misbehaving) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	if m.fail[name] {
+		return nil, &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: true}
+	}
+	return m.txts.LookupTXT(ctx, name)
+}
+
+// A resolver failing a level below the zone doesn't stop discovery: the
+// zone's record still names the provider. With no record anywhere, the
+// failure is the answer rather than "no provider".
+func TestDiscoverPastFailedLevel(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/domainconnect","urlAPI":"https://` + r.Host + `/dc"}`))
+	}))
+	defer srv.Close()
+	ctx := context.Background()
+	res := misbehaving{
+		txts: txts{"_domainconnect.example.com": {strings.TrimPrefix(srv.URL, "https://") + "/dc"}},
+		fail: map[string]bool{"_domainconnect.click.example.com": true, "_domainconnect.click.example.org": true},
+	}
+	c := &Client{HTTP: srv.Client(), Resolver: res}
+	z, err := c.Discover(ctx, "click.example.com")
+	if err != nil || z.Domain != "example.com" || z.Host != "click" || z.Settings.Name() != "Cloudflare" {
+		t.Fatalf("discover: %+v %v", z, err)
+	}
+	if _, err := c.Discover(ctx, "click.example.org"); ReasonOf(err) != ReasonLookupFailed {
+		t.Fatalf("no record anywhere: %v", err)
+	}
+	if _, err := c.Discover(ctx, "www.example.org"); ReasonOf(err) != ReasonNoProvider {
+		t.Fatalf("plain not found: %v", err)
+	}
+}
+
 // Records Cloudflare would add beside the ones already there, instead of
 // replacing them, are left to a DNS host connection.
 func TestConflicts(t *testing.T) {
