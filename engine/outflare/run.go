@@ -39,6 +39,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/blobs"
+	"github.com/outflareai/outflare/engine/internal/browser"
 	"github.com/outflareai/outflare/engine/internal/cmspublish"
 	"github.com/outflareai/outflare/engine/internal/config"
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -297,6 +298,28 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	adSync.Register(queue)
 	contentPublish := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
 	contentPublish.Register(queue)
+	// Browser tasks run only where there is a browser: a browser-role
+	// process, or a working process with Chrome on its host. Elsewhere
+	// they wait in the queue (outflare_browser_tasks_queued says so).
+	browserSvc := &browser.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.BrowserAllowPrivate}
+	browserQueue := jobs.New(pool, log)
+	browses := false
+	if cfg.Role.Browses(cfg.Browser) {
+		path := cfg.Browser
+		if path == "auto" {
+			path = browser.FindChrome()
+		}
+		switch {
+		case path != "" && path != "off":
+			browserSvc.Opener = browser.Chrome{Path: path}
+			browserSvc.Register(browserQueue)
+			browses = true
+		case cfg.Role == config.RoleBrowser:
+			return fmt.Errorf("OUTFLARE_ROLE=browser needs Chrome or Chromium on this host: install one or set OUTFLARE_BROWSER to its path")
+		default:
+			log.Info("browser tasks: no Chrome on this host, so they wait for a browser worker (OUTFLARE_ROLE=browser)")
+		}
+	}
 	adConv := &adconv.Sender{Pool: pool, Store: integrations, Log: log}
 	adConv.Register(queue)
 	// Research places unknown email domains by reading their homepage with
@@ -427,6 +450,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	host.server = apiServer
 	researcher.Models = apiServer.AIModels()
 	labeller.Models = apiServer.AIModels()
+	browserSvc.Models = apiServer.AIModels()
 	linkChecker.Models = apiServer.AIModels()
 	visibility.Models = apiServer.AIVisibilityModels()
 	// The API server's own background work, such as CRM imports into
@@ -507,6 +531,16 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			mcpHost.Run(ctx)
+		}()
+	}
+	if browses {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Info("browser workers starting", "concurrency", cfg.BrowserWorkers, "browser", browserSvc.Opener.(browser.Chrome).Path)
+			if err := browserQueue.Run(ctx, cfg.BrowserWorkers); err != nil {
+				errc <- err
+			}
 		}()
 	}
 	// The job queue and background loops run in the "all" and "worker"

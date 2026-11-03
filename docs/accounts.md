@@ -36,13 +36,27 @@ Incidents (`GET .../account-incidents`) have a kind, a severity, an owner, a rep
 
 `PUT .../accounts/{id}/secrets/{kind}` seals a secret with the server's key (`secrets.Box`, the same sealing as connector credentials, with the account and kind as associated data so a value never opens for another account); `DELETE` removes it. A secret is never returned over the API: the account shows only which kinds it holds. An agent asking to set or remove one always waits for a person, whatever its grants (`heldForBuiltin`), so secrets never pass through a model. Workers open a secret for one authorised use of the account (`accounts.Vault.Open`) and keep it out of context, observations, screenshots, logs and reports.
 
+## Human takeover
+
+When a managed use meets MFA, a CAPTCHA, a passkey or a consent screen, the tool asks for a person: `POST .../accounts/{id}/takeovers` with a `reason` (`mfa`, `captcha`, `passkey`, `consent`, `other`), a note for the person (never a code) and the incident it is for. A takeover is:
+
+- **Short-lived.** A person starts it (`POST .../account-takeovers/{id}/start`, 15 minutes unless they ask for up to 60) and hands it back (`.../handback`); one left running expires on its own.
+- **Account-scoped and exclusive.** One takeover waiting or under way per account; a second request gets 409. Only a person starts or hands back; an agent may request or cancel a waiting one.
+- **Checked on handback.** The person says which `identity` they left signed in. The brand's own identity records an `authenticated` attempt (the account is healthy again and the incident it waited for resolves); any other records `wrong_identity` and blocks the account like any other wrong identity; none given records `unresolved`. Nothing about what the person did (codes, pages) is kept.
+
+`GET .../account-takeovers` lists the ones waiting or under way (`status=all` for the history). Audit actions `account.takeover_requested`, `.takeover_started`, `.takeover_handed_back`, `.takeover_cancelled`.
+
+## Offboarding
+
+`POST .../accounts/offboard` takes a brand's accounts out of automated use in one transaction: every account is archived, every secret leaves the vault, takeovers are cancelled, open incidents are resolved, and the brand's action grants are revoked so no agent acts for it. It always waits for a person when an agent asks. The response says what was done (`archived`, `secrets_removed`, `incidents_resolved`, `takeovers_cancelled`, `grants_revoked`) and lists `needs_owner`: for each account, the action only the owner can take at the platform (`change_password`, `remove_access`, `disconnect_integration`, `sign_out`, `reconnect_mailbox`) and why. Audit action `brand.accounts_offboarded`.
+
 ## Scopes, events, monitoring
 
 - `accounts.read` lists accounts, attempts and incidents; `accounts.manage` records, changes, blocks and archives accounts, records attempts, sets and removes secrets and handles incidents. The operator role has both.
 - Audit actions: `account.created`, `.updated`, `.blocked`, `.unblocked`, `.archived`, `.secret_set` and `.secret_removed` (the kind, never the value), `.attempt_recorded` (purpose, outcome, whether an incident followed), `.incident_updated`.
-- `outflare_accounts_attempts_total{purpose,outcome}` and `outflare_accounts_incidents_open{severity}`; the **Accounts** dashboard row; `OutflareAccountIncidentsCritical` when a critical incident stays open for a day ([monitoring.md](monitoring.md)).
-- MCP tools: `list_accounts`, `create_account`, `record_account_attempt`, `list_account_incidents`, `update_account_incident`.
+- `outflare_accounts_attempts_total{purpose,outcome}`, `outflare_accounts_incidents_open{severity}`, `outflare_accounts_takeovers_total{step}`, `outflare_accounts_takeovers_waiting` and `outflare_accounts_takeovers_oldest_seconds`; the **Accounts** dashboard row; `OutflareAccountIncidentsCritical` when a critical incident stays open for a day and `OutflareAccountTakeoverWaiting` when a takeover waits four hours for a person ([monitoring.md](monitoring.md)).
+- MCP tools: `list_accounts`, `create_account`, `record_account_attempt`, `list_account_incidents`, `update_account_incident`, `request_account_takeover`, `list_account_takeovers`, `offboard_accounts`.
 
 ## Not here yet
 
-Human takeover for MFA, CAPTCHA, passkeys and consent (short-lived, account-scoped, exclusive, with the identity checked on handback), offboarding a brand's accounts, and the browser workers that sign in through the vault are the next slices of the plan.
+An Accounts page in the web app is the next slice of the plan. The browser workers that sign in through the vault, record attempts and ask for takeovers are in [browser-workers.md](browser-workers.md).

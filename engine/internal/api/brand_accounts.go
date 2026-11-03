@@ -34,6 +34,8 @@ func (s *Server) routesAccounts(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/accounts/{id}/attempts", s.onBrand(manage, s.recordAccountAttempt))
 	mux.HandleFunc("GET /v1/brands/{brand}/account-incidents", s.onBrand(read, s.listAccountIncidents))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/account-incidents/{id}", s.onBrand(manage, s.updateAccountIncident))
+	s.routesAccountTakeovers(mux, read, manage)
+	s.routesBrowserTasks(mux)
 }
 
 var (

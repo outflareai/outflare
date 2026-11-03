@@ -24,6 +24,8 @@ func TestRoleHandler(t *testing.T) {
 		{config.RoleIngest, "/", false},
 		{config.RoleWorker, "/healthz", true},
 		{config.RoleWorker, "/v1/site/events", false},
+		{config.RoleBrowser, "/healthz", true},
+		{config.RoleBrowser, "/v1/workspaces", false},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()

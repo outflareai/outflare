@@ -449,6 +449,9 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_accounts`, `create_account` | The brand's external accounts (social profiles, community and review sites, partner platforms, sites with no API): how each signs in, whether access works, what it depends on, and which secret kinds its vault holds, never the values. Record a new one; secrets are set by a person in the app |
 | `record_account_attempt` | After a sign-in, verification or session use on an account, record the outcome and evidence; it keeps the account's health and incidents. Needs `accounts.manage` |
 | `list_account_incidents`, `update_account_incident` | What stops an account from being used, with owner, repeats and next retry; own, snooze or resolve one |
+| `request_account_takeover`, `list_account_takeovers` | Ask a person to take an account over at MFA, a CAPTCHA, a passkey or a consent screen; see when it was handed back and what the identity check found |
+| `offboard_accounts` | Archive a brand's accounts, empty their vault, revoke its grants, and list what the owner still does at each platform |
+| `run_browser_task`, `list_browser_tasks`, `get_browser_task`, `cancel_browser_task` | Bounded work in a real browser on a site with no API, within the task's hosts, account and ceilings, with every step logged ([docs/browser-workers.md](../docs/browser-workers.md)) |
 | `list_content`, `get_content` | Posts and pages written in Outflare for a brand's website, with their bodies and publications |
 | `create_content`, `update_content` | Write a post or page (Markdown), change it, approve it for going live, or archive it. Needs `content.manage` |
 | `publish_content` | Put a post or page on the brand's own CMS (WordPress, Ghost), as a draft there or live. Needs `content.manage`; an agent's publication may be held for a person |

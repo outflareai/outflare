@@ -34,77 +34,81 @@ func desc(sub, name, help string, labels ...string) *prometheus.Desc {
 }
 
 var (
-	poolAcquired     = desc("db_pool", "acquired_conns", "Pool connections in use.")
-	poolIdle         = desc("db_pool", "idle_conns", "Pool connections idle.")
-	poolTotal        = desc("db_pool", "total_conns", "Pool connections open.")
-	poolMax          = desc("db_pool", "max_conns", "Most connections the pool will open.")
-	poolAcquires     = desc("db_pool", "acquires_total", "Connections handed out by the pool.")
-	poolWaits        = desc("db_pool", "empty_acquires_total", "Acquires that had to wait because every connection was busy.")
-	poolWaitSeconds  = desc("db_pool", "empty_acquire_wait_seconds_total", "Time spent waiting for a busy pool.")
-	poolAcquireSecs  = desc("db_pool", "acquire_seconds_total", "Time spent acquiring connections.")
-	poolCanceled     = desc("db_pool", "canceled_acquires_total", "Acquires given up before a connection was free.")
-	queued           = desc("jobs", "queued", "Jobs due now and waiting for a worker, by kind.", "kind")
-	scheduled        = desc("jobs", "scheduled", "Jobs waiting for a later run_at (retries and schedules), by kind.", "kind")
-	oldestDue        = desc("jobs", "oldest_due_seconds", "How long the longest-waiting due job has waited, by kind.", "kind")
-	running          = desc("jobs", "running", "Jobs claimed by any worker, by kind.", "kind")
-	dbBackends       = desc("pg", "connections", "Connections to the database, by state.", "state")
-	dbMaxConns       = desc("pg", "max_connections", "The server's max_connections.")
-	dbLongestXact    = desc("pg", "longest_transaction_seconds", "Age of the oldest open transaction.")
-	dbLockWaits      = desc("pg", "lock_waiting_connections", "Connections waiting on a lock.")
-	dbSize           = desc("pg", "database_bytes", "Size of the database.")
-	dbCommits        = desc("pg", "commits_total", "Transactions committed.")
-	dbRollbacks      = desc("pg", "rollbacks_total", "Transactions rolled back.")
-	dbBlocksHit      = desc("pg", "blocks_hit_total", "Blocks read from the buffer cache.")
-	dbBlocksRead     = desc("pg", "blocks_read_total", "Blocks read from disk.")
-	dbDeadlocks      = desc("pg", "deadlocks_total", "Deadlocks detected.")
-	dbTempBytes      = desc("pg", "temp_bytes_total", "Bytes written to temporary files by queries too big for work_mem.")
-	tableBytes       = desc("pg", "table_bytes", "Size of a table with its indexes and TOAST, for the largest tables and the job queue.", "table")
-	tableDeadRows    = desc("pg", "table_dead_rows", "Dead rows waiting for vacuum, for the largest tables.", "table")
-	tableSeqScans    = desc("pg", "table_seq_scans_total", "Sequential scans, for the largest tables.", "table")
-	pipeItems        = desc("pipeline", "items", "Pipeline items now, by pipeline, stage and state (due, scheduled, working, held).", "pipeline", "stage", "state")
-	pipeOldest       = desc("pipeline", "oldest_due_seconds", "How long the longest-waiting due item has waited, by pipeline and stage. The highest is the bottleneck.", "pipeline", "stage")
-	pipeRuns         = desc("pipeline", "runs", "Pipeline runs that are running or paused, by pipeline and state.", "pipeline", "state")
-	pipeBreakers     = desc("pipeline", "breakers", "Outside accounts by breaker state (open, half_open) and kind of account.", "account", "state")
-	inboxPending     = desc("inbox", "pending", "Inbox rows (browser batches) waiting for a worker.")
-	inboxOldest      = desc("inbox", "oldest_seconds", "How long the oldest waiting inbox row has waited.")
-	inboxFailed      = desc("inbox", "failed", "Inbox rows set aside after failing too often.")
-	smartLists       = desc("smart_lists", "lists", "Smart lists in every workspace.")
-	smartOldest      = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
-	smartFailing     = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
-	accountIncidents = desc("accounts", "incidents_open", "Open incidents on brands' external accounts (a credential refused, a session expired, MFA waiting, an account locked), by severity. A person resolves them; critical ones stop automated use.", "severity")
-	actionsHeld      = desc("actions", "held", "Agent changes held for a person in every workspace.")
-	actionsOldest    = desc("actions", "oldest_held_seconds", "How long the longest-waiting held agent change has waited for a person. People decide most within a day.")
-	actionsStuck     = desc("actions", "running_stuck", "Agent changes claimed to run more than 15 minutes ago that never recorded how they ended. Normally 0.")
-	agentRuns        = desc("agent_runs", "live", "Agent runs by status: running (taking turns) or paused (a person, or a problem the run says, stopped it).", "status")
-	agentRunsOverdue = desc("agent_runs", "overdue_seconds", "How long past its time the most overdue running agent run's next turn is. Turns start within a minute of their time; over 15 minutes means the runner isn't running.")
-	rulesActive      = desc("rules", "active", "Active rules in every workspace, by trigger kind.", "trigger")
-	rulesTimersDue   = desc("rules", "timers_due", "Absence timers of active rules that ran out and wait to be handled. Normally 0 or close to it: they are handled every minute.")
-	rulesOldestDue   = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
-	lifecycleDue     = desc("lifecycle", "due", "Lifecycle inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, in brands with stages on. Normally 0 or close to it: the sweep runs every minute.")
-	lifecycleOldest  = desc("lifecycle", "oldest_due_seconds", "How long the longest-waiting lifecycle inactivity check has been due. Normally under two minutes.")
-	recMetricsDue    = desc("record_metrics", "due", "Live metric values whose window moved (a new UTC day) and wait for the sweep. Normally 0 or close to it after the first minutes of a UTC day.")
-	recMetricsOld    = desc("record_metrics", "oldest_due_seconds", "How long the longest-waiting metric value has been due. Normally under a few minutes.")
-	recMetricsBusy   = desc("record_metrics", "backfilling", "Metrics being rebuilt from stored events right now.")
-	bulkPending      = desc("bulk_edits", "pending", "Bulk edits queued or running. Normally 0, or a few while an owner's edit runs.")
-	handDue          = desc("hand_edits", "due", "Hand edits whose time to win has run out and that the sweep has not handed over yet. The sweep runs every 5 minutes, so normally 0 or a few.")
-	txUnconverted    = desc("transactions", "unconverted", "Transactions more than 2 days old still without an amount in their brand's currency: no exchange rate for their currency and day. Normally 0; rates come in daily.")
-	handOldest       = desc("hand_edits", "oldest_due_seconds", "How long the oldest expired hand edit has waited for the sweep. Normally under 10 minutes.")
-	bulkOldest       = desc("bulk_edits", "oldest_pending_seconds", "How long the oldest queued or running bulk edit has waited since it was made. A large edit takes minutes; hours means it is stuck.")
-	journeysWaiting  = desc("journeys", "waiting_runs", "Journey runs on a wait_until step, waiting for an event, conditions or their timeout.")
-	journeysOverdue  = desc("journeys", "oldest_due_seconds", "How long past its time the most overdue run of an active journey is (a wait, a wait_until check or timeout, or a call that never came back). Runs move on within seconds of their time, so this stays near 0.")
-	reviewPages      = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
-	reviewStuck      = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
-	socialStuck      = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
-	syncStuck        = desc("sync", "stuck", "Scheduled reads (connections' syncs, SEO site reads, news searches, competitor looks) whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
-	reviewOldest     = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
-	socialScheduled  = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
-	socialOverdue    = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
-	scrapeErrors     = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
-	scrapeDuration   = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
-	newsSearches     = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
-	newsOverdue      = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
-	allDescs         = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, recMetricsDue, recMetricsOld, recMetricsBusy, bulkPending, bulkOldest, handDue, handOldest, txUnconverted, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue, accountIncidents}
-	gauge, counter   = prometheus.GaugeValue, prometheus.CounterValue
+	poolAcquired            = desc("db_pool", "acquired_conns", "Pool connections in use.")
+	poolIdle                = desc("db_pool", "idle_conns", "Pool connections idle.")
+	poolTotal               = desc("db_pool", "total_conns", "Pool connections open.")
+	poolMax                 = desc("db_pool", "max_conns", "Most connections the pool will open.")
+	poolAcquires            = desc("db_pool", "acquires_total", "Connections handed out by the pool.")
+	poolWaits               = desc("db_pool", "empty_acquires_total", "Acquires that had to wait because every connection was busy.")
+	poolWaitSeconds         = desc("db_pool", "empty_acquire_wait_seconds_total", "Time spent waiting for a busy pool.")
+	poolAcquireSecs         = desc("db_pool", "acquire_seconds_total", "Time spent acquiring connections.")
+	poolCanceled            = desc("db_pool", "canceled_acquires_total", "Acquires given up before a connection was free.")
+	queued                  = desc("jobs", "queued", "Jobs due now and waiting for a worker, by kind.", "kind")
+	scheduled               = desc("jobs", "scheduled", "Jobs waiting for a later run_at (retries and schedules), by kind.", "kind")
+	oldestDue               = desc("jobs", "oldest_due_seconds", "How long the longest-waiting due job has waited, by kind.", "kind")
+	running                 = desc("jobs", "running", "Jobs claimed by any worker, by kind.", "kind")
+	dbBackends              = desc("pg", "connections", "Connections to the database, by state.", "state")
+	dbMaxConns              = desc("pg", "max_connections", "The server's max_connections.")
+	dbLongestXact           = desc("pg", "longest_transaction_seconds", "Age of the oldest open transaction.")
+	dbLockWaits             = desc("pg", "lock_waiting_connections", "Connections waiting on a lock.")
+	dbSize                  = desc("pg", "database_bytes", "Size of the database.")
+	dbCommits               = desc("pg", "commits_total", "Transactions committed.")
+	dbRollbacks             = desc("pg", "rollbacks_total", "Transactions rolled back.")
+	dbBlocksHit             = desc("pg", "blocks_hit_total", "Blocks read from the buffer cache.")
+	dbBlocksRead            = desc("pg", "blocks_read_total", "Blocks read from disk.")
+	dbDeadlocks             = desc("pg", "deadlocks_total", "Deadlocks detected.")
+	dbTempBytes             = desc("pg", "temp_bytes_total", "Bytes written to temporary files by queries too big for work_mem.")
+	tableBytes              = desc("pg", "table_bytes", "Size of a table with its indexes and TOAST, for the largest tables and the job queue.", "table")
+	tableDeadRows           = desc("pg", "table_dead_rows", "Dead rows waiting for vacuum, for the largest tables.", "table")
+	tableSeqScans           = desc("pg", "table_seq_scans_total", "Sequential scans, for the largest tables.", "table")
+	pipeItems               = desc("pipeline", "items", "Pipeline items now, by pipeline, stage and state (due, scheduled, working, held).", "pipeline", "stage", "state")
+	pipeOldest              = desc("pipeline", "oldest_due_seconds", "How long the longest-waiting due item has waited, by pipeline and stage. The highest is the bottleneck.", "pipeline", "stage")
+	pipeRuns                = desc("pipeline", "runs", "Pipeline runs that are running or paused, by pipeline and state.", "pipeline", "state")
+	pipeBreakers            = desc("pipeline", "breakers", "Outside accounts by breaker state (open, half_open) and kind of account.", "account", "state")
+	inboxPending            = desc("inbox", "pending", "Inbox rows (browser batches) waiting for a worker.")
+	inboxOldest             = desc("inbox", "oldest_seconds", "How long the oldest waiting inbox row has waited.")
+	inboxFailed             = desc("inbox", "failed", "Inbox rows set aside after failing too often.")
+	smartLists              = desc("smart_lists", "lists", "Smart lists in every workspace.")
+	smartOldest             = desc("smart_lists", "oldest_refresh_seconds", "How long since the least recently refreshed smart list was brought up to date (since it was made, if never). Lists refresh every 15 minutes.")
+	smartFailing            = desc("smart_lists", "failing", "Smart lists whose last refresh failed.")
+	accountTakeoversWaiting = desc("accounts", "takeovers_waiting", "Takeovers of brands' external accounts waiting for a person to start them (MFA, a CAPTCHA, a passkey or a consent screen met a managed use). Normal is zero most of the time.")
+	accountTakeoversOldest  = desc("accounts", "takeovers_oldest_seconds", "How long the oldest waiting takeover request has waited, in seconds.")
+	browserQueued           = desc("browser", "tasks_queued", "Browser tasks waiting for a worker with a browser (queued), by status: queued, running or waiting_person. Queued tasks that stay means no process with Chrome is running (OUTFLARE_ROLE=browser, docs/browser-workers.md).", "status")
+	browserOldest           = desc("browser", "tasks_oldest_seconds", "How long the oldest queued browser task has waited for a worker, in seconds.")
+	accountIncidents        = desc("accounts", "incidents_open", "Open incidents on brands' external accounts (a credential refused, a session expired, MFA waiting, an account locked), by severity. A person resolves them; critical ones stop automated use.", "severity")
+	actionsHeld             = desc("actions", "held", "Agent changes held for a person in every workspace.")
+	actionsOldest           = desc("actions", "oldest_held_seconds", "How long the longest-waiting held agent change has waited for a person. People decide most within a day.")
+	actionsStuck            = desc("actions", "running_stuck", "Agent changes claimed to run more than 15 minutes ago that never recorded how they ended. Normally 0.")
+	agentRuns               = desc("agent_runs", "live", "Agent runs by status: running (taking turns) or paused (a person, or a problem the run says, stopped it).", "status")
+	agentRunsOverdue        = desc("agent_runs", "overdue_seconds", "How long past its time the most overdue running agent run's next turn is. Turns start within a minute of their time; over 15 minutes means the runner isn't running.")
+	rulesActive             = desc("rules", "active", "Active rules in every workspace, by trigger kind.", "trigger")
+	rulesTimersDue          = desc("rules", "timers_due", "Absence timers of active rules that ran out and wait to be handled. Normally 0 or close to it: they are handled every minute.")
+	rulesOldestDue          = desc("rules", "oldest_due_seconds", "How long the longest-waiting absence timer of an active rule has been due. Normally under two minutes.")
+	lifecycleDue            = desc("lifecycle", "due", "Lifecycle inactivity checks (at risk, churned for no usage) that fell due and wait for the sweep, in brands with stages on. Normally 0 or close to it: the sweep runs every minute.")
+	lifecycleOldest         = desc("lifecycle", "oldest_due_seconds", "How long the longest-waiting lifecycle inactivity check has been due. Normally under two minutes.")
+	recMetricsDue           = desc("record_metrics", "due", "Live metric values whose window moved (a new UTC day) and wait for the sweep. Normally 0 or close to it after the first minutes of a UTC day.")
+	recMetricsOld           = desc("record_metrics", "oldest_due_seconds", "How long the longest-waiting metric value has been due. Normally under a few minutes.")
+	recMetricsBusy          = desc("record_metrics", "backfilling", "Metrics being rebuilt from stored events right now.")
+	bulkPending             = desc("bulk_edits", "pending", "Bulk edits queued or running. Normally 0, or a few while an owner's edit runs.")
+	handDue                 = desc("hand_edits", "due", "Hand edits whose time to win has run out and that the sweep has not handed over yet. The sweep runs every 5 minutes, so normally 0 or a few.")
+	txUnconverted           = desc("transactions", "unconverted", "Transactions more than 2 days old still without an amount in their brand's currency: no exchange rate for their currency and day. Normally 0; rates come in daily.")
+	handOldest              = desc("hand_edits", "oldest_due_seconds", "How long the oldest expired hand edit has waited for the sweep. Normally under 10 minutes.")
+	bulkOldest              = desc("bulk_edits", "oldest_pending_seconds", "How long the oldest queued or running bulk edit has waited since it was made. A large edit takes minutes; hours means it is stuck.")
+	journeysWaiting         = desc("journeys", "waiting_runs", "Journey runs on a wait_until step, waiting for an event, conditions or their timeout.")
+	journeysOverdue         = desc("journeys", "oldest_due_seconds", "How long past its time the most overdue run of an active journey is (a wait, a wait_until check or timeout, or a call that never came back). Runs move on within seconds of their time, so this stays near 0.")
+	reviewPages             = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
+	reviewStuck             = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
+	socialStuck             = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
+	syncStuck               = desc("sync", "stuck", "Scheduled reads (connections' syncs, SEO site reads, news searches, competitor looks) whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
+	reviewOldest            = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
+	socialScheduled         = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
+	socialOverdue           = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
+	scrapeErrors            = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
+	scrapeDuration          = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
+	newsSearches            = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
+	newsOverdue             = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
+	allDescs                = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, recMetricsDue, recMetricsOld, recMetricsBusy, bulkPending, bulkOldest, handDue, handOldest, txUnconverted, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue, accountIncidents, accountTakeoversWaiting, accountTakeoversOldest, browserQueued, browserOldest}
+	gauge, counter          = prometheus.GaugeValue, prometheus.CounterValue
 )
 
 // rowser is the part of pgx.Rows the scrapes read.
@@ -273,6 +277,35 @@ func (p *Postgres) query() []prometheus.Metric {
 			}
 			add(accountIncidents, gauge, float64(n), severity)
 		}
+		return nil
+	})
+	run("account_takeovers", `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(requested_at)), 0) FROM brand_account_takeovers WHERE status = 'requested'`, func(r rowser) error {
+		for r.Next() {
+			var n int64
+			var oldest float64
+			if err := r.Scan(&n, &oldest); err != nil {
+				return err
+			}
+			add(accountTakeoversWaiting, gauge, float64(n))
+			add(accountTakeoversOldest, gauge, oldest)
+		}
+		return nil
+	})
+	run("browser_tasks", `SELECT status, count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(updated_at) FILTER (WHERE status = 'queued')), 0) FROM browser_tasks WHERE status IN ('queued', 'running', 'waiting_person') GROUP BY status`, func(r rowser) error {
+		var oldest float64
+		for r.Next() {
+			var status string
+			var n int64
+			var o float64
+			if err := r.Scan(&status, &n, &o); err != nil {
+				return err
+			}
+			add(browserQueued, gauge, float64(n), status)
+			if status == "queued" {
+				oldest = o
+			}
+		}
+		add(browserOldest, gauge, oldest)
 		return nil
 	})
 	run("actions_held", `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0) FROM actions WHERE status = 'held' AND (expires_at IS NULL OR expires_at > now())`, func(r rowser) error {

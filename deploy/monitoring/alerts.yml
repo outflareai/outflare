@@ -108,6 +108,21 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "A critical incident on a brand's external account (a credential refused, a wrong identity signed in, an account locked) has been open for a day: automated use of that account is stopped until a person resolves it (GET /v1/brands/{brand}/account-incidents). Check the Accounts row."
+      - alert: OutflareAccountTakeoverWaiting
+        expr: max(outflare_accounts_takeovers_oldest_seconds) > 4 * 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "A takeover of a brand's external account has waited more than four hours for a person: a managed use met MFA, a CAPTCHA, a passkey or a consent screen and the brand's work on that account is stuck until someone starts the takeover (GET /v1/brands/{brand}/account-takeovers). Check the Accounts row."
+      - alert: OutflareBrowserTasksWaiting
+        expr: max(outflare_browser_tasks_oldest_seconds) > 1800
+        labels: { severity: warning }
+        annotations:
+          summary: "A browser task has waited more than 30 minutes for a worker with a browser: no process with Chrome is running (start one with OUTFLARE_ROLE=browser, docs/browser-workers.md) or they are all busy. Check the Browser workers row."
+      - alert: OutflareBrowserTasksFailing
+        expr: sum(increase(outflare_browser_tasks_total{status="failed"}[6h])) > 3 and sum(increase(outflare_browser_tasks_total{status="failed"}[6h])) / sum(increase(outflare_browser_tasks_total[6h])) > 0.5
+        labels: { severity: warning }
+        annotations:
+          summary: "More than half of browser task runs in six hours failed. Each task's log (GET /v1/brands/{brand}/browser-tasks/{id}) says where it stopped: a site that changed, a sign-in refused, no AI connected, or no Chrome on the worker. Check the Browser workers row."
       - alert: OutflareAdChangesUnverified
         expr: sum(increase(outflare_ads_changes_total{outcome="unverified"}[6h])) > 5
         labels: { severity: info }

@@ -168,12 +168,16 @@ func heldForBuiltin(method, path string) bool {
 			return true
 		}
 	}
-	return builtinHeld.MatchString(path) || builtinHeldAccountSecret.MatchString(path)
+	return builtinHeld.MatchString(path) || builtinHeldAccountSecret.MatchString(path) || builtinHeldOffboard.MatchString(path)
 }
 
 // An account's secret in the vault: a person sets or removes it; an agent
 // asking always waits (secrets never pass through a model).
 var builtinHeldAccountSecret = regexp.MustCompile(`^/v1/brands/[^/]+/accounts/[^/]+/secrets/[^/]+/?$`)
+
+// Offboarding a brand's accounts is a person's decision: it archives
+// them all, empties their vault and revokes the brand's grants.
+var builtinHeldOffboard = regexp.MustCompile(`^/v1/brands/[^/]+/accounts/offboard/?$`)
 
 // writePolicy is what happens to a write made in a mission.
 func writePolicy(status, mode string) string {

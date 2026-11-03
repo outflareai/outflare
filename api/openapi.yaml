@@ -10251,6 +10251,332 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/accounts/offboard:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    post:
+      operationId: offboardAccounts
+      x-outflare-access: { scope: accounts.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Take a brand's accounts out of automated use
+      description: |
+        Scope: accounts.manage. In one transaction: every account is
+        archived, every secret leaves the vault, takeovers are cancelled,
+        open incidents are resolved and the brand's action grants are
+        revoked, so no agent acts for it. Always waits for a person when
+        an agent asks. The response says what was done and lists
+        `needs_owner`: for each account, the action only the owner can
+        take at the platform, and why.
+      tags: [accounts]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: What was done, and what the owner still has to do.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [archived, secrets_removed, incidents_resolved, takeovers_cancelled, grants_revoked, needs_owner]
+                properties:
+                  archived: { type: integer }
+                  secrets_removed: { type: integer }
+                  incidents_resolved: { type: integer }
+                  takeovers_cancelled: { type: integer }
+                  grants_revoked: { type: integer }
+                  needs_owner:
+                    type: array
+                    items:
+                      type: object
+                      required: [account_id, platform, label, sign_in, action, why]
+                      properties:
+                        account_id: { type: string, format: uuid }
+                        platform: { type: string }
+                        label: { type: string }
+                        sign_in: { type: string }
+                        action: { type: string, enum: [change_password, remove_access, disconnect_integration, sign_out, reconnect_mailbox] }
+                        why: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/accounts/{id}/takeovers:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: requestAccountTakeover
+      x-outflare-access: { scope: accounts.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Ask a person to take an account over
+      description: |
+        Scope: accounts.manage. What a tool calls when a managed use of
+        the account meets MFA, a CAPTCHA, a passkey or a consent screen.
+        One takeover waits or runs per account at a time (409 otherwise).
+        The note is for the person: never a code.
+      tags: [accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, enum: [mfa, captcha, passkey, consent, other] }
+                note: { type: string, maxLength: 1000 }
+                incident_id: { type: string, format: uuid, description: The incident it is for. }
+      responses:
+        "201":
+          description: The takeover, waiting for a person.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountTakeover" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/account-takeovers:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listAccountTakeovers
+      x-outflare-access: { scope: accounts.read, brand: true }
+      summary: Takeovers waiting for a person or under way
+      description: "Scope: accounts.read. The ones waiting or under way unless `status` says otherwise (`all` for the history); the newest 200, requests first."
+      tags: [accounts]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [requested, active, handed_back, cancelled, expired, all] } }
+        - { name: account_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Takeovers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AccountTakeover" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/account-takeovers/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getAccountTakeover
+      x-outflare-access: { scope: accounts.read, brand: true }
+      summary: One takeover
+      description: "Scope: accounts.read."
+      tags: [accounts]
+      responses:
+        "200":
+          description: The takeover.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountTakeover" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/account-takeovers/{id}/start:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startAccountTakeover
+      x-outflare-access: { scope: accounts.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Take the account over
+      description: |
+        Scope: accounts.manage, and a signed-in person. From now, for
+        `minutes` (15 unless given, at most 60), the person holds the
+        account exclusively; a takeover left running expires on its own.
+      tags: [accounts]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                minutes: { type: integer, minimum: 1, maximum: 60 }
+      responses:
+        "200":
+          description: The takeover, under way.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountTakeover" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/account-takeovers/{id}/handback:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: handBackAccountTakeover
+      x-outflare-access: { scope: accounts.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Hand the account back
+      description: |
+        Scope: accounts.manage; the person holding it, or an owner. The
+        `identity` left signed in is checked against the account's and
+        recorded as an attempt: the brand's own identity makes the account
+        healthy and resolves what it waited for; any other blocks it;
+        none given records an unresolved check.
+      tags: [accounts]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                identity: { type: string, maxLength: 320, description: The username or address signed in when the person left. }
+                note: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: The takeover, handed back.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountTakeover" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/account-takeovers/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelAccountTakeover
+      x-outflare-access: { scope: accounts.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Withdraw or end a takeover
+      description: "Scope: accounts.manage. Withdraws a request, or ends a takeover under way without a handback check (only a person ends one under way); the account is left as it was."
+      tags: [accounts]
+      responses:
+        "200":
+          description: The takeover, cancelled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountTakeover" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/browser-tasks:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+    get:
+      operationId: listBrowserTasks
+      x-outflare-access: { scope: browser.read, brand: true }
+      summary: The brand's browser tasks
+      description: "Scope: browser.read. The newest 200; `status` picks one state, or `open` for queued, running and waiting for a person."
+      tags: [browser]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [queued, running, waiting_person, done, failed, cancelled, open] } }
+      responses:
+        "200":
+          description: Tasks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/BrowserTask" } }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrowserTask
+      x-outflare-access: { scope: browser.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Queue a browser task
+      description: |
+        Scope: browser.manage. Bounded work a browser worker does on sites
+        with no API: the goal, the hosts it may reach (the account's own
+        site and the sites it signs in through are added), what it may do
+        (`read`; `act` to click, type approved content and submit;
+        `sign_in` as `account_id` from the vault), the approved texts it
+        may type by name, and ceilings on steps, minutes and AI spend. The
+        worker enforces all of it; secrets never reach the model. An
+        agent's task is a change like any other: it runs within its
+        grants or waits for a person.
+      tags: [browser]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal]
+              properties:
+                goal: { type: string, minLength: 1, maxLength: 4000 }
+                account_id: { type: string, format: uuid, description: The brand's account to sign in as. }
+                hosts: { type: array, items: { type: string }, maxItems: 20, description: Host names the browser may reach, with their subdomains. }
+                operations: { type: array, items: { type: string, enum: [read, act, sign_in] }, description: "Default: read and act, plus sign_in when account_id is given." }
+                content: { type: object, additionalProperties: { type: string }, description: Approved texts by name, typed exactly as given. }
+                max_steps: { type: integer, minimum: 1, maximum: 200, default: 40 }
+                max_minutes: { type: integer, minimum: 1, maximum: 60, default: 10 }
+                max_cents: { type: integer, minimum: 1, maximum: 10000, default: 100, description: Most the task's AI calls may cost, in cents. }
+      responses:
+        "201":
+          description: The task, queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserTask" }
+        "400": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/browser-tasks/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrowserTask
+      x-outflare-access: { scope: browser.read, brand: true }
+      summary: One browser task with its log
+      description: "Scope: browser.read. The task and every step of every run: the tool, what it was given (a secret's kind, never its value) and what came back, cut short."
+      tags: [browser]
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserTask" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/browser-tasks/{id}/cancel:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelBrowserTask
+      x-outflare-access: { scope: browser.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Cancel a browser task
+      description: "Scope: browser.manage. A task waiting (queued, or for a person) is cancelled at once; one running stops at its next step."
+      tags: [browser]
+      responses:
+        "200":
+          description: The task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserTask" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/workspaces/{ws}/ads/conversion-targets:
     parameters:
       - { $ref: "#/components/parameters/Workspace" }
@@ -55924,7 +56250,7 @@ components:
         invites: { type: integer, description: Pending invites for this role. }
     Scope:
       type: string
-      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, content.read, content.manage, accounts.read, accounts.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, profiles.read, profiles.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, ads.manage, missions.read, missions.run, missions.approve, agents.read, agents.run, actions.read, actions.approve, actions.manage, coverage.read, coverage.manage, coverage.finance.read, coverage.finance.manage, coverage.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, my_ai_accounts.read, my_ai_accounts.manage, ai_accounts.read, ai_accounts.manage, ai_spend.read, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage, query.endpoints]
+      enum: [workspace.read, workspace.manage, context.manage, members.read, members.manage, members.remove, roles.manage, tokens.manage, audit.read, mailboxes.read, mailboxes.manage, leads.read, leads.manage, content.read, content.manage, accounts.read, accounts.manage, browser.read, browser.manage, suppressions.manage, sequences.read, sequences.manage, inbox.read, inbox.manage, integrations.read, integrations.manage, outcomes.read, outcomes.manage, profiles.read, profiles.manage, infrastructure.read, infrastructure.manage, infrastructure.approve, analytics.read, analytics.manage, ads.manage, missions.read, missions.run, missions.approve, agents.read, agents.run, actions.read, actions.approve, actions.manage, coverage.read, coverage.manage, coverage.finance.read, coverage.finance.manage, coverage.approve, seo.read, seo.manage, social.read, social.manage, social.post, partners.read, partners.manage, partners.conversions, my_ai_accounts.read, my_ai_accounts.manage, ai_accounts.read, ai_accounts.manage, ai_spend.read, webhooks.read, webhooks.manage, emails.read, emails.send, emails.manage, customers.read, customers.manage, catalog.manage, query.endpoints]
     Workspace:
       type: object
       required: [id, name, slug, test, records_edit_owners_only]
@@ -57537,6 +57863,64 @@ components:
         opened_at: { type: string, format: date-time }
         resolved_at: { type: [string, "null"], format: date-time }
         resolution: { type: string }
+    AccountTakeover:
+      type: object
+      required: [id, account_id, incident_id, reason, note, status, requested_by, requested_at, holder_id, started_at, expires_at, ended_at, handback_outcome, handback_note]
+      properties:
+        id: { type: string, format: uuid }
+        account_id: { type: string, format: uuid }
+        incident_id: { type: [string, "null"], format: uuid }
+        reason: { type: string, enum: [mfa, captcha, passkey, consent, other] }
+        note: { type: string }
+        status: { type: string, enum: [requested, active, handed_back, cancelled, expired] }
+        requested_by: { type: [string, "null"], format: uuid, description: The actor that asked. }
+        requested_at: { type: string, format: date-time }
+        holder_id: { type: [string, "null"], format: uuid, description: The person holding or who held it. }
+        started_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
+        ended_at: { type: [string, "null"], format: date-time }
+        handback_outcome: { type: string, enum: ["", authenticated, wrong_identity, unresolved], description: What the handback check found. }
+        handback_note: { type: string }
+    BrowserTask:
+      type: object
+      required: [id, brand_id, account_id, goal, hosts, operations, content, max_steps, max_minutes, max_cents, status, summary, final_url, evidence, takeover_id, runs, steps, ai_cents, created_by, created_at, started_at, finished_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        account_id: { type: [string, "null"], format: uuid }
+        goal: { type: string }
+        hosts: { type: array, items: { type: string } }
+        operations: { type: array, items: { type: string, enum: [read, act, sign_in] } }
+        content: { type: object, additionalProperties: { type: string } }
+        max_steps: { type: integer }
+        max_minutes: { type: integer }
+        max_cents: { type: integer }
+        status: { type: string, enum: [queued, running, waiting_person, done, failed, cancelled] }
+        summary: { type: string, description: What the worker reported when the run ended. }
+        final_url: { type: string, description: The page the browser was on when the run ended. }
+        evidence: { type: object, additionalProperties: true, description: "What the worker saw, for a person to check: a URL, a confirmation text, the sign-in outcome." }
+        takeover_id: { type: [string, "null"], format: uuid, description: The takeover the task waits for, while waiting_person. }
+        runs: { type: integer }
+        steps: { type: integer }
+        ai_cents: { type: integer }
+        created_by: { type: [string, "null"], format: uuid }
+        created_at: { type: string, format: date-time }
+        started_at: { type: [string, "null"], format: date-time }
+        finished_at: { type: [string, "null"], format: date-time }
+        updated_at: { type: string, format: date-time }
+        log:
+          type: array
+          description: Every step of every run, on one task.
+          items:
+            type: object
+            required: [run, n, tool, input, result, at]
+            properties:
+              run: { type: integer }
+              n: { type: integer }
+              tool: { type: string }
+              input: { type: object, additionalProperties: true }
+              result: { type: string }
+              at: { type: string, format: date-time }
     KnowledgeCollection:
       type: object
       required: [id, name, description, icon, parent_id, brand_id, position, item_count, created_at, updated_at]

@@ -7350,6 +7350,270 @@ export interface paths {
         patch: operations["updateAccountIncident"];
         trace?: never;
     };
+    "/v1/brands/{brand}/accounts/offboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a brand's accounts out of automated use
+         * @description Scope: accounts.manage. In one transaction: every account is
+         *     archived, every secret leaves the vault, takeovers are cancelled,
+         *     open incidents are resolved and the brand's action grants are
+         *     revoked, so no agent acts for it. Always waits for a person when
+         *     an agent asks. The response says what was done and lists
+         *     `needs_owner`: for each account, the action only the owner can
+         *     take at the platform, and why.
+         */
+        post: operations["offboardAccounts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/accounts/{id}/takeovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a person to take an account over
+         * @description Scope: accounts.manage. What a tool calls when a managed use of
+         *     the account meets MFA, a CAPTCHA, a passkey or a consent screen.
+         *     One takeover waits or runs per account at a time (409 otherwise).
+         *     The note is for the person: never a code.
+         */
+        post: operations["requestAccountTakeover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/account-takeovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Takeovers waiting for a person or under way
+         * @description Scope: accounts.read. The ones waiting or under way unless `status` says otherwise (`all` for the history); the newest 200, requests first.
+         */
+        get: operations["listAccountTakeovers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/account-takeovers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One takeover
+         * @description Scope: accounts.read.
+         */
+        get: operations["getAccountTakeover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/account-takeovers/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take the account over
+         * @description Scope: accounts.manage, and a signed-in person. From now, for
+         *     `minutes` (15 unless given, at most 60), the person holds the
+         *     account exclusively; a takeover left running expires on its own.
+         */
+        post: operations["startAccountTakeover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/account-takeovers/{id}/handback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand the account back
+         * @description Scope: accounts.manage; the person holding it, or an owner. The
+         *     `identity` left signed in is checked against the account's and
+         *     recorded as an attempt: the brand's own identity makes the account
+         *     healthy and resolves what it waited for; any other blocks it;
+         *     none given records an unresolved check.
+         */
+        post: operations["handBackAccountTakeover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/account-takeovers/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw or end a takeover
+         * @description Scope: accounts.manage. Withdraws a request, or ends a takeover under way without a handback check (only a person ends one under way); the account is left as it was.
+         */
+        post: operations["cancelAccountTakeover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/browser-tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The brand's browser tasks
+         * @description Scope: browser.read. The newest 200; `status` picks one state, or `open` for queued, running and waiting for a person.
+         */
+        get: operations["listBrowserTasks"];
+        put?: never;
+        /**
+         * Queue a browser task
+         * @description Scope: browser.manage. Bounded work a browser worker does on sites
+         *     with no API: the goal, the hosts it may reach (the account's own
+         *     site and the sites it signs in through are added), what it may do
+         *     (`read`; `act` to click, type approved content and submit;
+         *     `sign_in` as `account_id` from the vault), the approved texts it
+         *     may type by name, and ceilings on steps, minutes and AI spend. The
+         *     worker enforces all of it; secrets never reach the model. An
+         *     agent's task is a change like any other: it runs within its
+         *     grants or waits for a person.
+         */
+        post: operations["createBrowserTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/browser-tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One browser task with its log
+         * @description Scope: browser.read. The task and every step of every run: the tool, what it was given (a secret's kind, never its value) and what came back, cut short.
+         */
+        get: operations["getBrowserTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/browser-tasks/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a browser task
+         * @description Scope: browser.manage. A task waiting (queued, or for a person) is cancelled at once; one running stops at its next step.
+         */
+        post: operations["cancelBrowserTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ads/conversion-targets": {
         parameters: {
             query?: never;
@@ -45391,7 +45655,7 @@ export interface components {
             invites: number;
         };
         /** @enum {string} */
-        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "content.read" | "content.manage" | "accounts.read" | "accounts.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "ads.manage" | "missions.read" | "missions.run" | "missions.approve" | "agents.read" | "agents.run" | "actions.read" | "actions.approve" | "actions.manage" | "coverage.read" | "coverage.manage" | "coverage.finance.read" | "coverage.finance.manage" | "coverage.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage" | "query.endpoints";
+        Scope: "workspace.read" | "workspace.manage" | "context.manage" | "members.read" | "members.manage" | "members.remove" | "roles.manage" | "tokens.manage" | "audit.read" | "mailboxes.read" | "mailboxes.manage" | "leads.read" | "leads.manage" | "content.read" | "content.manage" | "accounts.read" | "accounts.manage" | "browser.read" | "browser.manage" | "suppressions.manage" | "sequences.read" | "sequences.manage" | "inbox.read" | "inbox.manage" | "integrations.read" | "integrations.manage" | "outcomes.read" | "outcomes.manage" | "profiles.read" | "profiles.manage" | "infrastructure.read" | "infrastructure.manage" | "infrastructure.approve" | "analytics.read" | "analytics.manage" | "ads.manage" | "missions.read" | "missions.run" | "missions.approve" | "agents.read" | "agents.run" | "actions.read" | "actions.approve" | "actions.manage" | "coverage.read" | "coverage.manage" | "coverage.finance.read" | "coverage.finance.manage" | "coverage.approve" | "seo.read" | "seo.manage" | "social.read" | "social.manage" | "social.post" | "partners.read" | "partners.manage" | "partners.conversions" | "my_ai_accounts.read" | "my_ai_accounts.manage" | "ai_accounts.read" | "ai_accounts.manage" | "ai_spend.read" | "webhooks.read" | "webhooks.manage" | "emails.read" | "emails.send" | "emails.manage" | "customers.read" | "customers.manage" | "catalog.manage" | "query.endpoints";
         Workspace: {
             /** Format: uuid */
             id: string;
@@ -47482,6 +47746,100 @@ export interface components {
             /** Format: date-time */
             resolved_at: string | null;
             resolution: string;
+        };
+        AccountTakeover: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            account_id: string;
+            /** Format: uuid */
+            incident_id: string | null;
+            /** @enum {string} */
+            reason: "mfa" | "captcha" | "passkey" | "consent" | "other";
+            note: string;
+            /** @enum {string} */
+            status: "requested" | "active" | "handed_back" | "cancelled" | "expired";
+            /**
+             * Format: uuid
+             * @description The actor that asked.
+             */
+            requested_by: string | null;
+            /** Format: date-time */
+            requested_at: string;
+            /**
+             * Format: uuid
+             * @description The person holding or who held it.
+             */
+            holder_id: string | null;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            /**
+             * @description What the handback check found.
+             * @enum {string}
+             */
+            handback_outcome: "" | "authenticated" | "wrong_identity" | "unresolved";
+            handback_note: string;
+        };
+        BrowserTask: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            account_id: string | null;
+            goal: string;
+            hosts: string[];
+            operations: ("read" | "act" | "sign_in")[];
+            content: {
+                [key: string]: string;
+            };
+            max_steps: number;
+            max_minutes: number;
+            max_cents: number;
+            /** @enum {string} */
+            status: "queued" | "running" | "waiting_person" | "done" | "failed" | "cancelled";
+            /** @description What the worker reported when the run ended. */
+            summary: string;
+            /** @description The page the browser was on when the run ended. */
+            final_url: string;
+            /** @description What the worker saw, for a person to check: a URL, a confirmation text, the sign-in outcome. */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: uuid
+             * @description The takeover the task waits for
+             */
+            takeover_id: string | null;
+            runs: number;
+            steps: number;
+            ai_cents: number;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description Every step of every run, on one task. */
+            log?: {
+                run: number;
+                n: number;
+                tool: string;
+                input: {
+                    [key: string]: unknown;
+                };
+                result: string;
+                /** Format: date-time */
+                at: string;
+            }[];
         };
         KnowledgeCollection: {
             /** Format: uuid */
@@ -66996,6 +67354,448 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountIncident"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    offboardAccounts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What was done, and what the owner still has to do. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        archived: number;
+                        secrets_removed: number;
+                        incidents_resolved: number;
+                        takeovers_cancelled: number;
+                        grants_revoked: number;
+                        needs_owner: {
+                            /** Format: uuid */
+                            account_id: string;
+                            platform: string;
+                            label: string;
+                            sign_in: string;
+                            /** @enum {string} */
+                            action: "change_password" | "remove_access" | "disconnect_integration" | "sign_out" | "reconnect_mailbox";
+                            why: string;
+                        }[];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    requestAccountTakeover: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    reason: "mfa" | "captcha" | "passkey" | "consent" | "other";
+                    note?: string;
+                    /**
+                     * Format: uuid
+                     * @description The incident it is for.
+                     */
+                    incident_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The takeover, waiting for a person. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTakeover"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAccountTakeovers: {
+        parameters: {
+            query?: {
+                status?: "requested" | "active" | "handed_back" | "cancelled" | "expired" | "all";
+                account_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Takeovers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AccountTakeover"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAccountTakeover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The takeover. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTakeover"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startAccountTakeover: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    minutes?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The takeover, under way. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTakeover"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    handBackAccountTakeover: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The username or address signed in when the person left. */
+                    identity?: string;
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The takeover, handed back. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTakeover"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelAccountTakeover: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The takeover, cancelled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountTakeover"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrowserTasks: {
+        parameters: {
+            query?: {
+                status?: "queued" | "running" | "waiting_person" | "done" | "failed" | "cancelled" | "open";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tasks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BrowserTask"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrowserTask: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    goal: string;
+                    /**
+                     * Format: uuid
+                     * @description The brand's account to sign in as.
+                     */
+                    account_id?: string;
+                    /** @description Host names the browser may reach */
+                    hosts?: string[];
+                    /** @description Default: read and act, plus sign_in when account_id is given. */
+                    operations?: ("read" | "act" | "sign_in")[];
+                    /** @description Approved texts by name */
+                    content?: {
+                        [key: string]: string;
+                    };
+                    /** @default 40 */
+                    max_steps?: number;
+                    /** @default 10 */
+                    max_minutes?: number;
+                    /**
+                     * @description Most the task's AI calls may cost
+                     * @default 100
+                     */
+                    max_cents?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The task, queued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserTask"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserTask"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelBrowserTask: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The task. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserTask"];
                 };
             };
             202: components["responses"]["MissionHeld"];

@@ -288,6 +288,18 @@ var (
 		Namespace: namespace, Subsystem: "crm", Name: "contacts_pushed_total",
 		Help: "People journeys created or updated in a CRM, by connector (hubspot) and outcome (created, updated, error).",
 	}, []string{"connector", "outcome"})
+	browserTasks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "browser", Name: "tasks_total",
+		Help: "Runs of browser tasks (bounded work in a browser on sites with no API) by how they ended: done, failed, or waiting_person (MFA, a CAPTCHA, a passkey or a consent screen asked for a person).",
+	}, []string{"status"})
+	browserSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "browser", Name: "steps_total",
+		Help: "Tool calls made by browser tasks, by tool (navigate, read_page, click, type, type_content, fill_secret, report_sign_in, need_person, finish).",
+	}, []string{"tool"})
+	accountTakeovers = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "accounts", Name: "takeovers_total",
+		Help: "Steps of human takeovers of brands' external accounts (a person asked for at MFA, a CAPTCHA, a passkey or a consent screen): requested, started, handed_back, cancelled.",
+	}, []string{"step"})
 	accountAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "accounts", Name: "attempts_total",
 		Help: "Managed uses of brands' external accounts (sign-ins, verifications, session uses) recorded by tools, by purpose and outcome: authenticated, or the failure kind (credential_failed, session_expired, mfa_required, verification_pending, wrong_identity, locked, rate_limited, unresolved).",
@@ -876,7 +888,7 @@ var own = []prometheus.Collector{
 	domainConnectLookups, domainConnectDuration,
 	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
-	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, mailSignInsMoved,
+	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
@@ -1128,6 +1140,23 @@ func CRMContactPushed(connector, outcome string) {
 // its outcome.
 func AccountAttempt(purpose, outcome string) {
 	accountAttempts.WithLabelValues(purpose, outcome).Inc()
+}
+
+// BrowserTask records how a browser task's run ended: done, failed or
+// waiting_person.
+func BrowserTask(status string) {
+	browserTasks.WithLabelValues(status).Inc()
+}
+
+// BrowserStep records one tool call of a browser task, by tool.
+func BrowserStep(tool string) {
+	browserSteps.WithLabelValues(tool).Inc()
+}
+
+// AccountTakeover records a step of a human takeover of a brand's
+// external account: requested, started, handed_back or cancelled.
+func AccountTakeover(step string) {
+	accountTakeovers.WithLabelValues(step).Inc()
 }
 
 // ContentPublished records one post or page published to a CMS and how it

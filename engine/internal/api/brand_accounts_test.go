@@ -154,3 +154,115 @@ func TestBrandAccountSecretsAlwaysNeedAPerson(t *testing.T) {
 		t.Fatalf("the held secret must not be in the vault: %v", got["secrets"])
 	}
 }
+
+// Human takeover: short-lived, exclusive, started and handed back by a
+// person, with the identity checked on handback; and offboarding, which
+// a person does once and that leaves the owner a list.
+func TestBrandAccountTakeoversAndOffboarding(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	brand := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	path := "/v1/brands/" + brand + "/accounts"
+	acc := owner.must(201, "POST", path, map[string]any{"platform": "producthunt", "label": "Product Hunt", "identity": "ops@acme.example", "sign_in": "local_password"})
+	id := acc["id"].(string)
+	owner.must(200, "PUT", path+"/"+id+"/secrets/password", map[string]any{"value": "correct horse battery staple"})
+	agent, agentID := gatedAgent(t, owner, base, "Accounts agent", "accounts.manage", "accounts.read")
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "brands/*/accounts/**", "mode": "run"})
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "brands/*/account-takeovers/**", "mode": "run"})
+
+	// The tool meets MFA: an incident, then a request for a person.
+	r := agent.must(201, "POST", path+"/"+id+"/attempts", map[string]any{"purpose": "sign_in", "outcome": "mfa_required"})
+	inc := r["incident_id"].(string)
+	st, res := agent.do("POST", path+"/"+id+"/takeovers", map[string]any{"reason": "mfa", "note": "Approve the sign-in on the phone", "incident_id": inc})
+	if st != 201 || res["status"] != "requested" {
+		t.Fatalf("request: %d %v", st, res)
+	}
+	tk := res["id"].(string)
+	tpath := "/v1/brands/" + brand + "/account-takeovers/"
+	if st, _ := agent.do("POST", path+"/"+id+"/takeovers", map[string]any{"reason": "captcha"}); st != 409 {
+		t.Fatalf("exclusive: a second request is %d", st)
+	}
+	if st, _ := agent.do("POST", tpath+tk+"/start", nil); st != 403 {
+		t.Fatalf("only a person starts a takeover: %d", st)
+	}
+	if st, _ := owner.do("POST", tpath+tk+"/start", map[string]any{"minutes": 120}); st != 400 {
+		t.Fatalf("a takeover is short: %d", st)
+	}
+	started := owner.must(200, "POST", tpath+tk+"/start", nil)
+	if started["status"] != "active" || started["holder_id"] == nil || started["expires_at"] == nil {
+		t.Fatalf("started: %v", started)
+	}
+	if l := agent.must(200, "GET", tpath[:len(tpath)-1], nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["status"] != "active" {
+		t.Fatalf("under way: %v", l)
+	}
+	// Handing back with the brand's identity: the account is healthy and
+	// the MFA incident is resolved.
+	hb := owner.must(200, "POST", tpath+tk+"/handback", map[string]any{"identity": "Ops@acme.example", "note": "Approved on the phone"})
+	if hb["status"] != "handed_back" || hb["handback_outcome"] != "authenticated" {
+		t.Fatalf("handback: %v", hb)
+	}
+	if got := owner.must(200, "GET", path+"/"+id, nil); got["status"] != "healthy" || got["open_incidents"] != 0.0 {
+		t.Fatalf("after handback: %v", got)
+	}
+	if st, _ := owner.do("POST", tpath+tk+"/handback", nil); st != 409 {
+		t.Fatalf("handing back twice: %d", st)
+	}
+	// A takeover left running expires on its own; a wrong identity on
+	// handback blocks the account.
+	tk2 := agent.must(201, "POST", path+"/"+id+"/takeovers", map[string]any{"reason": "captcha"})["id"].(string)
+	owner.must(200, "POST", tpath+tk2+"/start", map[string]any{"minutes": 1})
+	if _, err := e.pool.Exec(ctx, `UPDATE brand_account_takeovers SET expires_at = now() - interval '1 minute' WHERE id = $1`, tk2); err != nil {
+		t.Fatal(err)
+	}
+	if got := owner.must(200, "GET", tpath+tk2, nil); got["status"] != "expired" {
+		t.Fatalf("expired: %v", got)
+	}
+	tk3 := agent.must(201, "POST", path+"/"+id+"/takeovers", map[string]any{"reason": "consent"})["id"].(string)
+	owner.must(200, "POST", tpath+tk3+"/start", nil)
+	hb = owner.must(200, "POST", tpath+tk3+"/handback", map[string]any{"identity": "someone@example.com"})
+	if hb["handback_outcome"] != "wrong_identity" {
+		t.Fatalf("wrong identity on handback: %v", hb)
+	}
+	if got := owner.must(200, "GET", path+"/"+id, nil); got["status"] != "blocked" {
+		t.Fatalf("a wrong identity blocks: %v", got)
+	}
+	// An agent may withdraw its own waiting request.
+	tk4 := agent.must(201, "POST", path+"/"+id+"/takeovers", map[string]any{"reason": "other"})["id"].(string)
+	if c := agent.must(200, "POST", tpath+tk4+"/cancel", nil); c["status"] != "cancelled" {
+		t.Fatalf("cancel: %v", c)
+	}
+	if l := owner.must(200, "GET", tpath[:len(tpath)-1]+"?status=all", nil)["data"].([]any); len(l) != 4 {
+		t.Fatalf("history: %d", len(l))
+	}
+
+	// Offboarding: an agent's ask waits for a person; a person's archives
+	// everything, empties the vault, revokes the brand's grants and lists
+	// the owner's work.
+	bound := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Brand-bound agent", "scopes": []string{"accounts.manage"}, "brand": brand, "action_gate": true})["api_token"].(map[string]any)["id"].(string)
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": bound, "path": "brands/**", "mode": "run", "brand": brand})
+	agent.must(201, "POST", path+"/"+id+"/takeovers", map[string]any{"reason": "mfa"})
+	st, res = agent.do("POST", path+"/offboard", map[string]any{"note": "Brand sold"})
+	if st != 202 || res["queued"] == true {
+		t.Fatalf("offboarding always waits for a person: %d %v", st, res)
+	}
+	rep := owner.must(200, "POST", path+"/offboard", map[string]any{"note": "Brand sold"})
+	if rep["archived"] != 1.0 || rep["secrets_removed"] != 1.0 || rep["takeovers_cancelled"] != 1.0 || rep["incidents_resolved"] != 1.0 || rep["grants_revoked"] != 1.0 {
+		t.Fatalf("report: %v", rep)
+	}
+	needs := rep["needs_owner"].([]any)
+	if len(needs) != 1 || needs[0].(map[string]any)["action"] != "change_password" {
+		t.Fatalf("needs owner: %v", needs)
+	}
+	if got := owner.must(200, "GET", path+"/"+id, nil); got["status"] != "archived" || len(got["secrets"].([]any)) != 0 {
+		t.Fatalf("after offboarding: %v", got)
+	}
+	var open int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM action_grants WHERE workspace_id = $1 AND revoked_at IS NULL`, ws).Scan(&open); err != nil || open != 2 {
+		t.Fatalf("the brand's grant is revoked, the workspace-wide ones stay: %d %v", open, err)
+	}
+	if st, _ := agent.do("POST", path+"/"+id+"/takeovers", map[string]any{"reason": "mfa"}); st != 409 {
+		t.Fatalf("an archived account takes no takeover: %d", st)
+	}
+}

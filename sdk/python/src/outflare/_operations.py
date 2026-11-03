@@ -2601,6 +2601,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def cancel_account_takeover(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Withdraw or end a takeover.
+
+        Scope: accounts.manage. Withdraws a request, or ends a takeover under way without a handback check (only a person ends one under way); the account is left as it was.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/account-takeovers/{id}/cancel
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/account-takeovers/{id}/cancel",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def cancel_brand_email(
         self,
         brand: str,
@@ -2661,6 +2682,27 @@ class Operations(_Mixin):
             "POST",
             "/v1/brands/{brand}/list-runs/{run}/cancel",
             path={"brand": brand, "run": run},
+            idempotency_key=idempotency_key,
+        )
+
+    def cancel_browser_task(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Cancel a browser task.
+
+        Scope: browser.manage. A task waiting (queued, or for a person) is cancelled at once; one running stops at its next step.
+
+        Needs: the browser.manage scope.
+        POST /v1/brands/{brand}/browser-tasks/{id}/cancel
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/browser-tasks/{id}/cancel",
+            path={"brand": brand, "id": id},
             idempotency_key=idempotency_key,
         )
 
@@ -4907,6 +4949,52 @@ class Operations(_Mixin):
                 "events": events,
                 "rule_ids": rule_ids,
                 "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_browser_task(
+        self,
+        brand: str,
+        *,
+        account_id: str | None = None,
+        goal: str,
+        hosts: list[str] | None = None,
+        max_cents: int | None = None,
+        max_minutes: int | None = None,
+        max_steps: int | None = None,
+        operations: list[Literal["read", "act", "sign_in"]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Queue a browser task.
+
+        Scope: browser.manage. Bounded work a browser worker does on sites
+        with no API: the goal, the hosts it may reach (the account's own
+        site and the sites it signs in through are added), what it may do
+        (`read`; `act` to click, type approved content and submit;
+        `sign_in` as `account_id` from the vault), the approved texts it
+        may type by name, and ceilings on steps, minutes and AI spend. The
+        worker enforces all of it; secrets never reach the model. An
+        agent's task is a change like any other: it runs within its
+        grants or waits for a person.
+
+        Needs: the browser.manage scope.
+        POST /v1/brands/{brand}/browser-tasks
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/browser-tasks",
+            path={"brand": brand},
+            body={
+                "account_id": account_id,
+                "goal": goal,
+                "hosts": hosts,
+                "max_cents": max_cents,
+                "max_minutes": max_minutes,
+                "max_steps": max_steps,
+                "operations": operations,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -11879,6 +11967,24 @@ class Operations(_Mixin):
             path={"brand": brand, "id": id},
         )
 
+    def get_account_takeover(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """One takeover.
+
+        Scope: accounts.read.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/account-takeovers/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/account-takeovers/{id}",
+            path={"brand": brand, "id": id},
+        )
+
     def get_action(
         self,
         id: str,
@@ -13567,6 +13673,24 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/webhooks/{id}/secret",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_browser_task(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """One browser task with its log.
+
+        Scope: browser.read. The task and every step of every run: the tool, what it was given (a secret's kind, never its value) and what came back, cut short.
+
+        Needs: the browser.read scope.
+        GET /v1/brands/{brand}/browser-tasks/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/browser-tasks/{id}",
             path={"brand": brand, "id": id},
         )
 
@@ -17959,6 +18083,36 @@ class Operations(_Mixin):
             "/v1/auth/google/callback",
         )
 
+    def hand_back_account_takeover(
+        self,
+        brand: str,
+        id: str,
+        *,
+        identity: str | None = None,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Hand the account back.
+
+        Scope: accounts.manage; the person holding it, or an owner. The
+        `identity` left signed in is checked against the account's and
+        recorded as an attempt: the brand's own identity makes the account
+        healthy and resolves what it waited for; any other blocks it;
+        none given records an unresolved check.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/account-takeovers/{id}/handback
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/account-takeovers/{id}/handback",
+            path={"brand": brand, "id": id},
+            body={"identity": identity, "note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def ignore_ai_receipt(
         self,
         id: str,
@@ -18593,6 +18747,27 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/account-incidents",
             path={"brand": brand},
             query={"status": status},
+        )
+
+    def list_account_takeovers(
+        self,
+        brand: str,
+        *,
+        status: Literal["requested", "active", "handed_back", "cancelled", "expired", "all"] | None = None,
+        account_id: str | None = None,
+    ) -> Any:
+        """Takeovers waiting for a person or under way.
+
+        Scope: accounts.read. The ones waiting or under way unless `status` says otherwise (`all` for the history); the newest 200, requests first.
+
+        Needs: the accounts.read scope.
+        GET /v1/brands/{brand}/account-takeovers
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/account-takeovers",
+            path={"brand": brand},
+            query={"status": status, "account_id": account_id},
         )
 
     def list_accounts(
@@ -21065,6 +21240,26 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/brands",
             path={"ws": ws},
+            query={"status": status},
+        )
+
+    def list_browser_tasks(
+        self,
+        brand: str,
+        *,
+        status: Literal["queued", "running", "waiting_person", "done", "failed", "cancelled", "open"] | None = None,
+    ) -> Any:
+        """The brand's browser tasks.
+
+        Scope: browser.read. The newest 200; `status` picks one state, or `open` for queued, running and waiting for a person.
+
+        Needs: the browser.read scope.
+        GET /v1/brands/{brand}/browser-tasks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/browser-tasks",
+            path={"brand": brand},
             query={"status": status},
         )
 
@@ -27428,6 +27623,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def offboard_accounts(
+        self,
+        brand: str,
+        *,
+        note: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take a brand's accounts out of automated use.
+
+        Scope: accounts.manage. In one transaction: every account is
+        archived, every secret leaves the vault, takeovers are cancelled,
+        open incidents are resolved and the brand's action grants are
+        revoked, so no agent acts for it. Always waits for a person when
+        an agent asks. The response says what was done and lists
+        `needs_owner`: for each account, the action only the owner can
+        take at the platform, and why.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/accounts/offboard
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/accounts/offboard",
+            path={"brand": brand},
+            body={"note": note},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def outcomes_report(
         self,
         *,
@@ -30455,6 +30680,36 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def request_account_takeover(
+        self,
+        brand: str,
+        id: str,
+        *,
+        incident_id: str | None = None,
+        note: str | None = None,
+        reason: Literal["mfa", "captcha", "passkey", "consent", "other"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ask a person to take an account over.
+
+        Scope: accounts.manage. What a tool calls when a managed use of
+        the account meets MFA, a CAPTCHA, a passkey or a consent screen.
+        One takeover waits or runs per account at a time (409 otherwise).
+        The note is for the person: never a code.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/accounts/{id}/takeovers
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/accounts/{id}/takeovers",
+            path={"brand": brand, "id": id},
+            body={"incident_id": incident_id, "note": note, "reason": reason},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def request_password_reset(
         self,
         *,
@@ -33173,6 +33428,33 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/start",
             path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def start_account_takeover(
+        self,
+        brand: str,
+        id: str,
+        *,
+        minutes: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Take the account over.
+
+        Scope: accounts.manage, and a signed-in person. From now, for
+        `minutes` (15 unless given, at most 60), the person holds the
+        account exclusively; a takeover left running expires on its own.
+
+        Needs: the accounts.manage scope.
+        POST /v1/brands/{brand}/account-takeovers/{id}/start
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/account-takeovers/{id}/start",
+            path={"brand": brand, "id": id},
+            body={"minutes": minutes},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 

@@ -25,6 +25,7 @@ export const areas: Area[] = [
   { id: "ads", label: "Paid ads", help: "Pause or resume campaigns and set their daily budgets on your own ad accounts. Reading them is Analytics; this spends money.", read: ["analytics.read"], write: ["ads.manage"] },
   { id: "content", label: "Content", help: "Write posts and pages for the brand's website and publish them through its own CMS connection, as drafts or live.", read: ["content.read"], write: ["content.manage"] },
   { id: "accounts", label: "Accounts", help: "The external accounts a brand's agent may act through, their attempts and incidents. Secrets go in the vault and are never read back; an agent asking to set one waits for a person.", read: ["accounts.read"], write: ["accounts.manage"] },
+  { id: "browser", label: "Browser tasks", help: "Bounded work a browser worker does for a brand on sites with no API: within the task's hosts, account and ceilings, with every step logged.", read: ["browser.read"], write: ["browser.manage"] },
   { id: "my_ai_accounts", label: "Your AI accounts", help: "The AI subscriptions you use: their usage, resets and renewals.", read: ["my_ai_accounts.read"], write: ["my_ai_accounts.manage"] },
   { id: "ai_accounts", label: "Everyone's AI accounts", help: "Every AI subscription people in the workspace use.", read: ["ai_accounts.read"], write: ["ai_accounts.manage"] },
   { id: "webhooks", label: "Webhooks", help: "Endpoints that hear about changes, and their signing secrets.", read: ["webhooks.read"], write: ["webhooks.manage"] },

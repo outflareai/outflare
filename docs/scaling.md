@@ -8,6 +8,7 @@ One process runs all of Outflare: the app, the API, website event collection, th
 | `api` | The app, API, MCP and website events | No | The service people and agents use. Run two or more for deploys without downtime. |
 | `ingest` | `POST /v1/site/events`, `/site.js` and health checks | No | Collecting website events on their own address (for example `t.example.com`), so a busy or deploying app never drops a visit. |
 | `worker` | Health checks only | Yes | Sending, syncs, crawls, analytics copies and every other job. |
+| `browser` | Health checks only | Browser tasks only | Running browser tasks ([browser-workers.md](browser-workers.md)) on hosts with Chrome, apart from everything else. An `all` or `worker` process with Chrome on its host runs them too; `OUTFLARE_BROWSER=off` keeps it from doing so. |
 
 Every role:
 

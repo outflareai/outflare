@@ -91,7 +91,11 @@ const (
 	// person; never returned).
 	ScopeAccountsRead   = "accounts.read"
 	ScopeAccountsManage = "accounts.manage"
-	ScopeMissionsRead   = "missions.read"
+	// Browser tasks: bounded work a browser worker does for a brand on
+	// sites with no API, within the task's hosts, account and ceilings.
+	ScopeBrowserRead   = "browser.read"
+	ScopeBrowserManage = "browser.manage"
+	ScopeMissionsRead  = "missions.read"
 	// Running a mission is what an agent does: create missions, plan, act
 	// inside them and report. It never includes approving its own writes.
 	ScopeMissionsRun = "missions.run"
@@ -208,6 +212,8 @@ var AllScopes = []string{
 	ScopeContentManage,
 	ScopeAccountsRead,
 	ScopeAccountsManage,
+	ScopeBrowserRead,
+	ScopeBrowserManage,
 	ScopeMissionsRead,
 	ScopeMissionsRun,
 	ScopeMissionsApprove,
@@ -257,7 +263,7 @@ var roleScopes = map[string][]string{
 	RoleOwner: AllScopes,
 	// Admins do everything except take people's access away.
 	RoleAdmin:    slices.DeleteFunc(slices.Clone(AllScopes), func(s string) bool { return s == ScopeMembersRemove }),
-	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeAdsManage, ScopeContentRead, ScopeContentManage, ScopeAccountsRead, ScopeAccountsManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeAgentsRead, ScopeAgentsRun, ScopeActionsRead, ScopeActionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
+	RoleOperator: {ScopeCoverageRead, ScopeCoverageManage, ScopeWorkspaceRead, ScopeContextManage, ScopeMembersRead, ScopeMailboxesRead, ScopeMailboxesManage, ScopeLeadsRead, ScopeLeadsManage, ScopeSequencesRead, ScopeSequencesManage, ScopeInboxRead, ScopeInboxManage, ScopeIntegrationsRead, ScopeIntegrationsManage, ScopeOutcomesRead, ScopeOutcomesManage, ScopeProfilesRead, ScopeProfilesManage, ScopeInfraRead, ScopeInfraManage, ScopeAnalyticsRead, ScopeAnalyticsManage, ScopeAdsManage, ScopeContentRead, ScopeContentManage, ScopeAccountsRead, ScopeAccountsManage, ScopeBrowserRead, ScopeBrowserManage, ScopeMissionsRead, ScopeMissionsRun, ScopeMissionsApprove, ScopeAgentsRead, ScopeAgentsRun, ScopeActionsRead, ScopeActionsApprove, ScopeSEORead, ScopeSEOManage, ScopeWebhooksRead, ScopeEmailsRead, ScopeEmailsSend, ScopeEmailsManage, ScopeCustomersRead, ScopeCustomersManage, ScopeSocialRead, ScopeSocialManage, ScopeSocialPost, ScopePartnersRead, ScopePartnersManage, ScopePartnersConversions, ScopeMyAIAccountsManage},
 	RoleViewer:   {ScopeCoverageRead, ScopeWorkspaceRead, ScopeMembersRead, ScopeMailboxesRead, ScopeLeadsRead, ScopeSequencesRead, ScopeInboxRead, ScopeIntegrationsRead, ScopeOutcomesRead, ScopeProfilesRead, ScopeInfraRead, ScopeAnalyticsRead, ScopeMissionsRead, ScopeAgentsRead, ScopeActionsRead, ScopeSEORead, ScopeWebhooksRead, ScopeEmailsRead, ScopeCustomersRead, ScopeSocialRead, ScopePartnersRead, ScopeMyAIAccountsManage},
 }
 

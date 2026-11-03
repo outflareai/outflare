@@ -26,6 +26,7 @@ export const roleGroups: RoleGroup[] = [
       { label: "Paid ads", help: "Pause, resume and budget campaigns on your own ad accounts", read: "analytics.read", manage: "ads.manage" },
       { label: "Content", help: "Posts and pages for the website, published through its CMS", read: "content.read", manage: "content.manage" },
       { label: "Accounts", help: "The brand's external accounts, their health, incidents and vault", read: "accounts.read", manage: "accounts.manage" },
+      { label: "Browser tasks", help: "Bounded work in a browser on sites with no API, with every step logged", read: "browser.read", manage: "browser.manage" },
       { label: "Outcomes", help: "Meetings, deals and spend", read: "outcomes.read", manage: "outcomes.manage" },
       { label: "Customer profiles", help: "Ideal customer profiles, and moving records between brands", read: "profiles.read", manage: "profiles.manage" },
       { label: "Agent runs", help: "Run playbooks with Outflare's agent and write to its runs", read: "agents.read", manage: "agents.run" },

@@ -224,6 +224,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareAdChangesFailing`: more than three changes to ad campaigns (pausing, resuming, budgets) failed in an hour.
 - `OutflareContentPublishesFailing` (warning): over three publications to brands' CMSs failed in an hour; each publication's error on its item says why.
 - `OutflareAccountIncidentsCritical` (warning): a critical incident on a brand's external account has been open for a day; automated use of it is stopped until a person resolves it.
+- `OutflareAccountTakeoverWaiting` (warning): a takeover of a brand's external account (MFA, a CAPTCHA, a passkey or a consent screen) has waited more than four hours for a person to start it.
+- `OutflareBrowserTasksWaiting` (warning): a browser task has waited more than 30 minutes for a worker with a browser; none is running (`OUTFLARE_ROLE=browser`), or they are all busy.
+- `OutflareBrowserTasksFailing` (warning): more than half of browser task runs in six hours failed; the tasks' logs say where (a site that changed, no AI, no Chrome).
 - `OutflareAdChangesUnverified`: over five campaign changes in six hours were applied but the platform did not show them when read back.
 - `OutflareAgentRunsOverdue`: a running agent run's next turn is over 15 minutes overdue.
 - `OutflareAgentRunTurnsFailing`: more agent run turns fail than finish.

@@ -61,6 +61,15 @@ type Config struct {
 	// same network. Off, they only reach the public internet, so nobody can
 	// point one at your internal network.
 	ConnectorsAllowPrivate bool
+	// Browser is OUTFLARE_BROWSER: the Chrome or Chromium executable
+	// browser tasks run in; "auto" (the default) finds one on PATH, "off"
+	// runs no browser tasks in this process. BrowserWorkers is
+	// OUTFLARE_BROWSER_WORKERS, how many tasks run at once (default 2).
+	// BrowserAllowPrivate is OUTFLARE_BROWSER_ALLOW_PRIVATE=true, for
+	// local development only: tasks may reach private addresses and http.
+	Browser             string
+	BrowserWorkers      int
+	BrowserAllowPrivate bool
 	// RateLimit is API_RATE_LIMIT: requests per minute each API token may
 	// make, default 600; 0 turns the limit off.
 	RateLimit int
@@ -179,6 +188,9 @@ func Load() (Config, error) {
 		WebhooksAllowPrivate:   os.Getenv("WEBHOOKS_ALLOW_PRIVATE") == "true",
 		CrawlAllowPrivate:      os.Getenv("OUTFLARE_CRAWL_ALLOW_PRIVATE") == "true",
 		ConnectorsAllowPrivate: os.Getenv("OUTFLARE_CONNECTORS_ALLOW_PRIVATE") == "true",
+		Browser:                "auto",
+		BrowserWorkers:         2,
+		BrowserAllowPrivate:    os.Getenv("OUTFLARE_BROWSER_ALLOW_PRIVATE") == "true",
 
 		GoogleClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -289,11 +301,21 @@ func Load() (Config, error) {
 	c.Role = RoleAll
 	if v := strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_ROLE"))); v != "" {
 		switch Role(v) {
-		case RoleAll, RoleAPI, RoleIngest, RoleWorker:
+		case RoleAll, RoleAPI, RoleIngest, RoleWorker, RoleBrowser:
 			c.Role = Role(v)
 		default:
-			return c, fmt.Errorf("OUTFLARE_ROLE must be all, api, ingest or worker, got %q", v)
+			return c, fmt.Errorf("OUTFLARE_ROLE must be all, api, ingest, worker or browser, got %q", v)
 		}
+	}
+	if v := strings.TrimSpace(os.Getenv("OUTFLARE_BROWSER")); v != "" {
+		c.Browser = v
+	}
+	if v := os.Getenv("OUTFLARE_BROWSER_WORKERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 64 {
+			return c, fmt.Errorf("OUTFLARE_BROWSER_WORKERS must be a number from 1 to 64, got %q", v)
+		}
+		c.BrowserWorkers = n
 	}
 	if err := checkMetricsAddr(c.MetricsAddr, c.HTTPAddr); err != nil {
 		return c, err
@@ -384,7 +406,15 @@ const (
 	RoleAPI    Role = "api"
 	RoleIngest Role = "ingest"
 	RoleWorker Role = "worker"
+	// RoleBrowser runs only browser tasks, on a host with Chrome.
+	RoleBrowser Role = "browser"
 )
 
 // Works says whether the process runs the job queue and background loops.
 func (r Role) Works() bool { return r == RoleAll || r == RoleWorker }
+
+// Browses says whether the process runs browser tasks: the browser role
+// always, a working role when it has a browser (OUTFLARE_BROWSER).
+func (r Role) Browses(browser string) bool {
+	return r == RoleBrowser || (r.Works() && browser != "off")
+}

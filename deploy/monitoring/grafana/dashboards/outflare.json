@@ -3504,7 +3504,7 @@
         {
           "refId": "A",
           "expr": "sum by (level, period) (increase(outflare_connection_limits_alerts_total{job=\"$job\"}[1h]))",
-          "legendFormat": "{{level}}% · {{period}}",
+          "legendFormat": "{{level}}% \u00b7 {{period}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -7449,7 +7449,7 @@
     {
       "type": "timeseries",
       "title": "Paid ad landings, by how they were tracked",
-      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads → Tracking templates).",
+      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads \u2192 Tracking templates).",
       "id": 144,
       "datasource": {
         "type": "prometheus",
@@ -10238,7 +10238,7 @@
         {
           "refId": "A",
           "expr": "sum by (outcome) (increase(outflare_query_saved_runs_total{job=\"$job\"}[1h]))",
-          "legendFormat": "saved · {{outcome}}",
+          "legendFormat": "saved \u00b7 {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -10247,7 +10247,7 @@
         {
           "refId": "B",
           "expr": "sum by (outcome) (increase(outflare_query_exports_total{job=\"$job\"}[1h]))",
-          "legendFormat": "csv · {{outcome}}",
+          "legendFormat": "csv \u00b7 {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12810,6 +12810,339 @@
             "fillOpacity": 10,
             "stacking": {
               "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Account takeovers waiting for a person",
+      "description": "Takeover requests (a managed use met MFA, a CAPTCHA, a passkey or a consent screen) that no person has started yet, and how long the oldest has waited. Normal is zero most of the time; a request that waits hours means the brand's work on that account is stuck.",
+      "id": 918,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 998
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(outflare_accounts_takeovers_waiting{job=\"$job\"})",
+          "legendFormat": "waiting",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "max(outflare_accounts_takeovers_oldest_seconds{job=\"$job\"}) / 60",
+          "legendFormat": "oldest (minutes)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Account takeovers a day, by step",
+      "description": "Human takeovers of brands' external accounts: requested, started by a person, handed back (with the identity checked), cancelled. Normal is a few a day; many requests with few handbacks means people are not answering them.",
+      "id": 919,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 998
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (step) (increase(outflare_accounts_takeovers_total{job=\"$job\"}[1d]))",
+          "legendFormat": "{{step}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Browser workers (tasks in a browser on sites with no API)",
+      "collapsed": false,
+      "id": 920,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1006
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Browser tasks waiting, running and waiting for a person",
+      "description": "Browser tasks by state. Queued tasks that stay mean no worker with Chrome is running (OUTFLARE_ROLE=browser) or they are all busy; waiting_person tasks resume when a person hands the account back. Normal is a few in each state that move within minutes.",
+      "id": 921,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1007
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (outflare_browser_tasks_queued{job=\"$job\"})",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest queued browser task",
+      "description": "How long the oldest queued browser task has waited for a worker. Normal is under a minute with a browser worker running; it grows without one.",
+      "id": 922,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1007
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_browser_tasks_oldest_seconds{job=\"$job\"})",
+          "legendFormat": "oldest",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Browser task runs a day, by how they ended",
+      "description": "Runs of browser tasks: done, failed, or waiting_person (MFA, a CAPTCHA, a passkey or a consent screen asked for a person). Normal is mostly done; many failed means sites changed, sign-ins are refused or the worker has no AI or Chrome.",
+      "id": 923,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1007
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (increase(outflare_browser_tasks_total{job=\"$job\"}[1d]))",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Browser task steps an hour, by tool",
+      "description": "Tool calls browser tasks make: navigate, read_page, click, type, type_content, fill_secret, report_sign_in, need_person, finish. The mix says what the tasks do; fill_secret and need_person are the sign-ins.",
+      "id": 924,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1015
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tool) (rate(outflare_browser_steps_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{tool}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
             }
           }
         },

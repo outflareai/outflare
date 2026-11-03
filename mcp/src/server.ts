@@ -3147,6 +3147,113 @@ export function createServer({ client: gtm, workspace, readOnly = false, mission
   );
 
   server.registerTool(
+    "request_account_takeover",
+    {
+      title: "Ask a person to take an account over",
+      description:
+        "When a managed use of a brand's account meets MFA, a CAPTCHA, a passkey or a consent screen: opens a takeover request a person starts, holds for a few minutes and hands back with the identity checked. " +
+        "One per account at a time. The note is what the person will read; never put a code in it. Then wait: list_account_takeovers shows when it was handed back and what the check found.",
+      inputSchema: {
+        brand: z.string().min(1).describe("The brand's handle or id from list_brands."),
+        account_id: z.string().uuid(),
+        reason: z.enum(["mfa", "captcha", "passkey", "consent", "other"]),
+        note: z.string().max(1000).optional(),
+        incident_id: z.string().uuid().optional().describe("The incident it is for."),
+      },
+      annotations: write,
+    },
+    ({ brand, account_id, ...body }) => call(() => gtm.POST("/v1/brands/{brand}/accounts/{id}/takeovers", { params: { path: { brand, id: account_id } }, body })),
+  );
+
+  server.registerTool(
+    "list_account_takeovers",
+    {
+      title: "Takeovers waiting for a person or under way",
+      description: "The takeovers of a brand's accounts: waiting for a person, under way (with holder and expiry), or, with status, handed back (handback_outcome says what the identity check found), cancelled or expired.",
+      inputSchema: {
+        brand: z.string().min(1).describe("The brand's handle or id from list_brands."),
+        status: z.enum(["requested", "active", "handed_back", "cancelled", "expired", "all"]).optional(),
+        account_id: z.string().uuid().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => callCompact(() => gtm.GET("/v1/brands/{brand}/account-takeovers", { params: { path: { brand }, query } })),
+  );
+
+  server.registerTool(
+    "offboard_accounts",
+    {
+      title: "Take a brand's accounts out of automated use",
+      description:
+        "Archives every account of the brand, empties their vault, cancels takeovers, resolves incidents and revokes the brand's action grants, in one go; always waits for a person when an agent asks. " +
+        "The answer lists needs_owner: what only the owner can do at each platform (change a password, remove an app's access, disconnect an integration, sign out) and why.",
+      inputSchema: { brand: z.string().min(1).describe("The brand's handle or id from list_brands."), note: z.string().max(1000).optional() },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand, ...body }) => call(() => gtm.POST("/v1/brands/{brand}/accounts/offboard", { params: { path: { brand } }, body })),
+  );
+
+  server.registerTool(
+    "run_browser_task",
+    {
+      title: "Queue a browser task",
+      description:
+        "For a site with no API: bounded work in a real browser on a worker. Give the goal, the hosts it may use (the account's own site and the sites it signs in through are added), what it may do (read; act to click, type approved content and submit; sign_in as account_id from the vault), " +
+        "approved texts by name (typed exactly as given; you never compose content to publish here), and ceilings. The worker enforces the boundary and never shows the model a secret. " +
+        "Then poll get_browser_task: done or failed with a summary and evidence, or waiting_person when a person must handle MFA, a CAPTCHA, a passkey or a consent screen (it resumes when they hand the account back). Prefer an API, a feed or a connector whenever the site offers one.",
+      inputSchema: {
+        brand: z.string().min(1).describe("The brand's handle or id from list_brands."),
+        goal: z.string().min(1).max(4000),
+        account_id: z.string().uuid().optional().describe("The brand's account to sign in as (list_accounts)."),
+        hosts: z.array(z.string()).max(20).optional().describe("Host names the browser may reach, such as community.example.com."),
+        operations: z.array(z.enum(["read", "act", "sign_in"])).optional(),
+        content: z.record(z.string(), z.string()).optional().describe("Approved texts by name."),
+        max_steps: z.number().int().min(1).max(200).optional(),
+        max_minutes: z.number().int().min(1).max(60).optional(),
+        max_cents: z.number().int().min(1).max(10000).optional(),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ brand, ...body }) => call(() => gtm.POST("/v1/brands/{brand}/browser-tasks", { params: { path: { brand } }, body })),
+  );
+
+  server.registerTool(
+    "list_browser_tasks",
+    {
+      title: "The brand's browser tasks",
+      description: "Browser tasks newest first, with status (queued, running, waiting_person, done, failed, cancelled), summary and evidence; status=open for the ones not finished.",
+      inputSchema: {
+        brand: z.string().min(1).describe("The brand's handle or id from list_brands."),
+        status: z.enum(["queued", "running", "waiting_person", "done", "failed", "cancelled", "open"]).optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => callCompact(() => gtm.GET("/v1/brands/{brand}/browser-tasks", { params: { path: { brand }, query } })),
+  );
+
+  server.registerTool(
+    "get_browser_task",
+    {
+      title: "One browser task with its log",
+      description: "The task's state, summary, final page and evidence, and every step of every run: the tool, what it was given (never a secret's value) and what came back.",
+      inputSchema: { brand: z.string().min(1).describe("The brand's handle or id from list_brands."), task_id: z.string().uuid() },
+      annotations: read,
+    },
+    ({ brand, task_id }) => call(() => gtm.GET("/v1/brands/{brand}/browser-tasks/{id}", { params: { path: { brand, id: task_id } } })),
+  );
+
+  server.registerTool(
+    "cancel_browser_task",
+    {
+      title: "Cancel a browser task",
+      description: "A task waiting (queued, or for a person) is cancelled at once; one running stops at its next step.",
+      inputSchema: { brand: z.string().min(1).describe("The brand's handle or id from list_brands."), task_id: z.string().uuid() },
+      annotations: write,
+    },
+    ({ brand, task_id }) => call(() => gtm.POST("/v1/brands/{brand}/browser-tasks/{id}/cancel", { params: { path: { brand, id: task_id } } })),
+  );
+
+  server.registerTool(
     "list_ad_changes",
     {
       title: "Changes made to campaigns",

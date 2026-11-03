@@ -75,6 +75,20 @@ func TestRole(t *testing.T) {
 	if c, err = Load(); err != nil || !c.Role.Works() {
 		t.Fatalf("worker: %q %v", c.Role, err)
 	}
+	t.Setenv("OUTFLARE_ROLE", "browser")
+	if c, err = Load(); err != nil || c.Role.Works() || !c.Role.Browses("auto") || c.Browser != "auto" || c.BrowserWorkers != 2 {
+		t.Fatalf("browser: %q %v", c.Role, err)
+	}
+	t.Setenv("OUTFLARE_ROLE", "api")
+	if c, err = Load(); err != nil || c.Role.Browses("auto") {
+		t.Fatalf("an api process runs no browser tasks: %q %v", c.Role, err)
+	}
+	t.Setenv("OUTFLARE_ROLE", "worker")
+	t.Setenv("OUTFLARE_BROWSER", "off")
+	if c, err = Load(); err != nil || c.Role.Browses(c.Browser) {
+		t.Fatalf("OUTFLARE_BROWSER=off: %q %v", c.Role, err)
+	}
+	t.Setenv("OUTFLARE_BROWSER", "")
 	t.Setenv("OUTFLARE_ROLE", "web")
 	if _, err := Load(); err == nil {
 		t.Fatal("an unknown role was taken")
