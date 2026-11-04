@@ -585,7 +585,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <button aria-label="Dismiss" className="-m-2 p-2" onClick={() => setLost("")}><Icon name="x" className="size-3.5" /></button>
           </div>
         )}
-        {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={ws.id} ws={ws.id} onFix={() => setTab("connectors")} />}
+        {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={`unassigned:${ws.id}`} ws={ws.id} onFix={() => setTab("connectors")} />}
         {!ready && <Loading />}
         {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}

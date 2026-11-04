@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test:ai-account-brands": "node tests/ai-account-brands.mjs"
+    "test:ai-account-brands": "node tests/ai-account-brands.mjs",
+    "test:unassigned-notice": "node tests/unassigned-notice.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",
