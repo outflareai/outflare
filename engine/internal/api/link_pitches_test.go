@@ -200,6 +200,53 @@ func TestLinkPitchesFromOpenerToLive(t *testing.T) {
 	auto := owner.must(201, "POST", base+"/link-prospects/"+q["id"].(string)+"/pitches", map[string]any{"sequence_id": seq})
 	waitFor(t, owner, base+"/link-pitches/"+auto["id"].(string), func(m map[string]any) bool { return m["status"] == "enrolled" })
 
+	// Without approval, at most auto_send_per_day go out in 24 hours; the
+	// rest wait (daily_cap) and go out later. Pitches the AI is unsure
+	// about, or to spammy sites, wait for a person.
+	owner.must(400, "PATCH", base+"/link-building/sequences/"+seq, map[string]any{})
+	owner.must(400, "PATCH", base+"/link-building/sequences/"+seq, map[string]any{"auto_send_per_day": 0})
+	if u := owner.must(200, "PATCH", base+"/link-building/sequences/"+seq, map[string]any{"auto_send_per_day": 1}); u["approve_pitches"] != false || u["auto_send_per_day"] != 1.0 {
+		t.Fatalf("update: %v", u)
+	}
+	if s := owner.must(200, "GET", base+"/link-building/sequences", nil)["data"].([]any)[0].(map[string]any); s["auto_send_per_day"] != 1.0 || s["sent_today"] != 1.0 {
+		t.Fatalf("sequence: %v", s)
+	}
+	pitchAt := func(page string, spam int) map[string]any {
+		t.Helper()
+		x := owner.must(200, "POST", base+"/link-prospects", map[string]any{"site_id": siteID, "prospects": []any{
+			map[string]any{"page_url": page, "method": "resource_page", "spam_score": spam}}})["data"].([]any)[0].(map[string]any)
+		owner.must(202, "POST", base+"/link-prospects/"+x["id"].(string)+"/check", nil)
+		waitFor(t, owner, base+"/link-prospects/"+x["id"].(string), func(m map[string]any) bool { return len(m["contacts"].([]any)) > 0 })
+		k := owner.must(201, "POST", base+"/link-prospects/"+x["id"].(string)+"/pitches", map[string]any{"sequence_id": seq})
+		return waitFor(t, owner, base+"/link-pitches/"+k["id"].(string), func(m map[string]any) bool { return m["status"] != "writing" })
+	}
+	if k := pitchAt("https://unsure.example.net/links", 0); k["status"] != "draft" || !strings.HasPrefix(k["reason"].(string), "unsure: ") {
+		t.Fatalf("unsure: %v", k)
+	}
+	if k := pitchAt("https://spam.example.net/links", 45); k["status"] != "draft" || k["reason"] != "spammy_site" {
+		t.Fatalf("spammy: %v", k)
+	}
+	held := pitchAt("https://third.example.net/links", 0)
+	if held["status"] != "draft" || held["reason"] != "daily_cap" {
+		t.Fatalf("held: %v", held)
+	}
+	// Still within the day, it waits; a day later it goes out.
+	if err := svc.SendHeld(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if k := owner.must(200, "GET", base+"/link-pitches/"+held["id"].(string), nil); k["status"] != "draft" {
+		t.Fatalf("sent early: %v", k)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE link_pitches SET approved_at = now() - interval '25 hours' WHERE id = $1`, auto["id"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SendHeld(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if k := owner.must(200, "GET", base+"/link-pitches/"+held["id"].(string), nil); k["status"] != "enrolled" || k["reason"] != "" {
+		t.Fatalf("held pitch: %v", k)
+	}
+
 	got := map[string]bool{}
 	for _, ev := range events() {
 		got[ev.Name] = true

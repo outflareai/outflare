@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { Schemas } from "@outflare/sdk";
 import {
   Plus,
@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { api, errorMessage } from "@/api";
 import { Button, ErrorText, field, toast } from "@/ui";
-import { type CatalogInfo } from "@/lib/records";
+import { type CatalogInfo, useCatalogWrite } from "@/lib/records";
 import {
   Dialog,
   DialogContent,
@@ -37,6 +37,9 @@ export function CRMSettings({
     null,
   );
   const [adding, setAdding] = useState<"object" | "field" | null>(null);
+  const [editingEvent, setEditingEvent] = useState<
+    Schemas["EventDefinition"] | null
+  >(null);
   const obj = cat.catalog?.types.find((t) => t.key === type);
   return (
     <div className="space-y-5">
@@ -133,9 +136,9 @@ export function CRMSettings({
                         Edit choices
                       </Button>
                     )}
-                  {canManage && !f.builtin && (
+                  {canManage && (
                     <Button variant="ghost" onClick={() => setEditingField(f)}>
-                      Edit attribute
+                      {f.builtin ? "Edit labels" : "Edit attribute"}
                     </Button>
                   )}
                   <span className="text-xs text-muted-foreground">
@@ -150,6 +153,64 @@ export function CRMSettings({
           </div>
         </section>
       </div>
+      <section className="rounded-xl border">
+        <div className="border-b px-4 py-3">
+          <h3 className="font-medium">Product events</h3>
+          <p className="text-sm text-muted-foreground">
+            The events this brand's product sends. Set how sensitive each one
+            is, who owns it, how long it's kept and where it may go.
+          </p>
+        </div>
+        <div className="divide-y">
+          {(cat.catalog?.events ?? []).filter(
+            (ev) => ev.status !== "deprecated",
+          ).length === 0 && (
+            <p className="px-4 py-3 text-sm text-muted-foreground">
+              No product events yet. They appear here once your product sends
+              them.
+            </p>
+          )}
+          {(cat.catalog?.events ?? [])
+            .filter((ev) => ev.status !== "deprecated")
+            .map((ev) => (
+              <div key={ev.name} className="flex items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    {ev.label || ev.name}{" "}
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {ev.name}
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {ev.status === "quarantined"
+                      ? "Waiting for approval · "
+                      : ""}
+                    {ev.sensitivity}
+                    {ev.retention_days !== null
+                      ? ` · kept ${ev.retention_days} days`
+                      : ""}
+                  </p>
+                </div>
+                {canManage && (
+                  <Button variant="ghost" onClick={() => setEditingEvent(ev)}>
+                    Edit labels
+                  </Button>
+                )}
+              </div>
+            ))}
+        </div>
+      </section>
+      {editingEvent && (
+        <EventEditor
+          ws={ws}
+          event={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onSaved={() => {
+            setEditingEvent(null);
+            reload();
+          }}
+        />
+      )}
       {editingOptions &&
         cat.catalog?.option_sets.find((o) => o.key === editingOptions) && (
           <OptionEditor
@@ -208,6 +269,7 @@ function SchemaDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const write = useCatalogWrite(ws);
   const [name, setName] = useState("");
   const [plural, setPlural] = useState("");
   const [valueType, setValueType] =
@@ -233,16 +295,10 @@ function SchemaDialog({
     setError("");
     try {
       if (mode === "object") {
-        const { data, error } = await api.POST(
-          "/v1/workspaces/{ws}/catalog/types",
-          {
-            params: { path: { ws } },
-            body: {
-              name: name.trim(),
-              ...(plural.trim() ? { plural: plural.trim() } : {}),
-            },
-          },
-        );
+        const { data, error } = await write.createType({
+          name: name.trim(),
+          ...(plural.trim() ? { plural: plural.trim() } : {}),
+        });
         if (error) {
           setError(errorMessage(error));
           return;
@@ -264,13 +320,10 @@ function SchemaDialog({
             setError("Add at least one option with a unique name.");
             return;
           }
-          const { data, error } = await api.POST(
-            "/v1/workspaces/{ws}/catalog/option-sets",
-            {
-              params: { path: { ws } },
-              body: { name: `${name.trim()} choices`, options: choices },
-            },
-          );
+          const { data, error } = await write.createOptionSet({
+            name: `${name.trim()} choices`,
+            options: choices,
+          });
           if (error) {
             setError(errorMessage(error));
             return;
@@ -289,22 +342,14 @@ function SchemaDialog({
             "record_reference",
             "actor_reference",
           ].includes(valueType) && multiple;
-        const { data, error } = await api.POST(
-          "/v1/workspaces/{ws}/catalog/types/{type}/fields",
-          {
-            params: { path: { ws, type } },
-            body: {
-              label: name.trim(),
-              value_type: valueType,
-              multiple: multi,
-              filterable: true,
-              ...(choice ? { option_set: set! } : {}),
-              ...(valueType === "record_reference"
-                ? { target_type: target }
-                : {}),
-            },
-          },
-        );
+        const { data, error } = await write.createField(type, {
+          label: name.trim(),
+          value_type: valueType,
+          multiple: multi,
+          filterable: true,
+          ...(choice ? { option_set: set! } : {}),
+          ...(valueType === "record_reference" ? { target_type: target } : {}),
+        });
         if (error) {
           setError(errorMessage(error));
           return;
@@ -500,6 +545,7 @@ function OptionEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const write = useCatalogWrite(ws);
   const [items, setItems] = useState(optionSet.options.map((o) => ({ ...o })));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -528,10 +574,9 @@ function OptionEditor({
     setBusy(true);
     setError("");
     try {
-      const { data, error } = await api.PATCH(
-        "/v1/workspaces/{ws}/catalog/option-sets/{set}",
-        { params: { path: { ws, set: optionSet.key } }, body: { options } },
-      );
+      const { data, error } = await write.updateOptionSet(optionSet.key, {
+        options,
+      });
       if (error) {
         setError(errorMessage(error));
         return;
@@ -653,6 +698,256 @@ function OptionEditor({
     </Dialog>
   );
 }
+type Destination = Schemas["LabelDestination"];
+const allDestinations: Destination[] = [
+  "webhooks",
+  "exports",
+  "ai",
+  "published_queries",
+  "email",
+];
+const destinationLabels: Record<Destination, string> = {
+  webhooks: "Webhooks",
+  exports: "Exports",
+  ai: "AI",
+  published_queries: "Published queries",
+  email: "Email",
+};
+
+// Labels are a field's or product event's labels as the editor holds them.
+type Labels = {
+  sensitivity: Schemas["Field"]["sensitivity"];
+  owner: string;
+  retention: string;
+  destinations: Destination[];
+};
+
+function labelsOf(l: {
+  sensitivity: Labels["sensitivity"];
+  owner_id: string | null;
+  retention_days: number | null;
+  destinations: Destination[];
+}): Labels {
+  return {
+    sensitivity: l.sensitivity,
+    owner: l.owner_id ?? "",
+    retention: l.retention_days === null ? "" : String(l.retention_days),
+    destinations: l.destinations,
+  };
+}
+
+// labelsBody is what the API takes: null for nobody, forever and every
+// destination.
+function labelsBody(l: Labels) {
+  return {
+    sensitivity: l.sensitivity,
+    owner_id: l.owner || null,
+    retention_days: l.retention === "" ? null : Number(l.retention),
+    destinations:
+      l.destinations.length === allDestinations.length ? null : l.destinations,
+  };
+}
+
+function LabelsFieldset({
+  ws,
+  value,
+  onChange,
+}: {
+  ws: string;
+  value: Labels;
+  onChange: (l: Labels) => void;
+}) {
+  const set = (p: Partial<Labels>) => onChange({ ...value, ...p });
+  const [members, setMembers] = useState<{ user_id: string; name: string }[]>(
+    [],
+  );
+  useEffect(() => {
+    api
+      .GET("/v1/workspaces/{ws}/members", { params: { path: { ws } } })
+      .then(({ data }) =>
+        setMembers(
+          (data?.data ?? []).flatMap((m) =>
+            m.user_id
+              ? [{ user_id: m.user_id, name: m.name || m.email || "A member" }]
+              : [],
+          ),
+        ),
+      );
+  }, [ws]);
+  return (
+    <fieldset className="space-y-3 rounded-lg border p-3">
+      <legend className="px-1 text-sm font-medium">Labels</legend>
+      <p className="text-xs text-muted-foreground">
+        For your team's reference: nothing is blocked or deleted because of
+        them.
+      </p>
+      <label className="block text-sm">
+        Sensitivity
+        <select
+          className={`${field} mt-1 w-full`}
+          value={value.sensitivity}
+          onChange={(e) =>
+            set({ sensitivity: e.target.value as Labels["sensitivity"] })
+          }
+        >
+          <option value="public">Public</option>
+          <option value="internal">Internal</option>
+          <option value="confidential">Confidential</option>
+          <option value="restricted">Restricted</option>
+        </select>
+      </label>
+      <label className="block text-sm">
+        Owner
+        <select
+          className={`${field} mt-1 w-full`}
+          value={value.owner}
+          onChange={(e) => set({ owner: e.target.value })}
+        >
+          <option value="">Nobody</option>
+          {members.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              {m.name}
+            </option>
+          ))}
+          {value.owner && !members.some((m) => m.user_id === value.owner) && (
+            <option value={value.owner}>A former member</option>
+          )}
+        </select>
+      </label>
+      <label className="block text-sm">
+        Kept for
+        <select
+          className={`${field} mt-1 w-full`}
+          value={value.retention}
+          onChange={(e) => set({ retention: e.target.value })}
+        >
+          <option value="">Forever</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">1 year</option>
+          <option value="730">2 years</option>
+          <option value="2555">7 years</option>
+          {value.retention !== "" &&
+            !["30", "90", "365", "730", "2555"].includes(value.retention) && (
+              <option value={value.retention}>{value.retention} days</option>
+            )}
+        </select>
+      </label>
+      <div className="text-sm">
+        May be sent to
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          {allDestinations.map((d) => (
+            <label key={d} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={value.destinations.includes(d)}
+                onChange={(e) =>
+                  set({
+                    destinations: e.target.checked
+                      ? allDestinations.filter(
+                          (x) => x === d || value.destinations.includes(x),
+                        )
+                      : value.destinations.filter((x) => x !== d),
+                  })
+                }
+              />
+              {destinationLabels[d]}
+            </label>
+          ))}
+        </div>
+      </div>
+    </fieldset>
+  );
+}
+
+// EventEditor sets a product event's label, description and labels.
+function EventEditor({
+  ws,
+  event,
+  onClose,
+  onSaved,
+}: {
+  ws: string;
+  event: Schemas["EventDefinition"];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const write = useCatalogWrite(ws);
+  const [label, setLabel] = useState(event.label);
+  const [description, setDescription] = useState(event.description);
+  const [labels, setLabels] = useState<Labels>(() => labelsOf(event));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const { error } = await write.updateEvent(event.name, {
+        label: label.trim(),
+        description,
+        ...labelsBody(labels),
+      });
+      if (error) {
+        setError(errorMessage(error));
+        return;
+      }
+      toast("Event updated.");
+      onSaved();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Dialog open onOpenChange={(v) => !v && !busy && onClose()}>
+      <DialogContent>
+        <form className="space-y-4" onSubmit={save}>
+          <DialogHeader>
+            <DialogTitle>Labels for {event.name}</DialogTitle>
+            <DialogDescription>
+              Its name and properties stay as your product sends them.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="block text-sm">
+            Label
+            <input
+              className={`${field} mt-1 w-full`}
+              value={label}
+              maxLength={80}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+          </label>
+          <label className="block text-sm">
+            Description
+            <textarea
+              className={`${field} mt-1 min-h-16 w-full`}
+              value={description}
+              maxLength={1000}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+          <LabelsFieldset ws={ws} value={labels} onChange={setLabels} />
+          <ErrorText>{error}</ErrorText>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={onClose}
+            >
+              Cancel
+            </Button>
+            <Button disabled={busy}>{busy ? "Saving…" : "Save labels"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AttributeEditor({
   ws,
   type,
@@ -666,12 +961,21 @@ function AttributeEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const write = useCatalogWrite(ws);
+  const builtin = attribute.builtin;
   const [label, setLabel] = useState(attribute.label);
   const [description, setDescription] = useState(attribute.description);
   const [archived, setArchived] = useState(attribute.archived);
+  // Labels only (docs/customers.md, "Field labels"): nothing is blocked or
+  // deleted because of them.
+  const [labels, setLabels] = useState<Labels>(() => labelsOf(attribute));
   // How long a person's edit wins over other sources: "" for the brand's
   // setting, 0 for forever (docs/customers.md, "Where a value comes from").
-  const [days, setDays] = useState(attribute.manual_edit_days === null ? "" : String(attribute.manual_edit_days));
+  const [days, setDays] = useState(
+    attribute.manual_edit_days === null
+      ? ""
+      : String(attribute.manual_edit_days),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(e: FormEvent) {
@@ -680,13 +984,17 @@ function AttributeEditor({
     setBusy(true);
     setError("");
     try {
-      const { data, error } = await api.PATCH(
-        "/v1/workspaces/{ws}/catalog/types/{type}/fields/{field}",
-        {
-          params: { path: { ws, type, field: attribute.key } },
-          body: { label: label.trim(), description, archived, manual_edit_days: days === "" ? null : Number(days) },
-        },
-      );
+      const { data, error } = await write.updateField(type, attribute.key, {
+        ...(builtin
+          ? {}
+          : {
+              label: label.trim(),
+              description,
+              archived,
+              manual_edit_days: days === "" ? null : Number(days),
+            }),
+        ...labelsBody(labels),
+      });
       if (error) {
         setError(errorMessage(error));
         return;
@@ -706,55 +1014,73 @@ function AttributeEditor({
       <DialogContent>
         <form className="space-y-4" onSubmit={save}>
           <DialogHeader>
-            <DialogTitle>Edit attribute</DialogTitle>
+            <DialogTitle>
+              {builtin ? `Labels for ${attribute.label}` : "Edit attribute"}
+            </DialogTitle>
             <DialogDescription>
-              The field's type and relationships stay fixed so existing data
-              keeps its meaning.
+              {builtin
+                ? "A built-in attribute stays as it is; you can say how sensitive it is, who owns it, how long it's kept and where it may go."
+                : "The field's type and relationships stay fixed so existing data keeps its meaning."}
             </DialogDescription>
           </DialogHeader>
-          <label className="block text-sm">
-            Label
-            <input
-              required
-              maxLength={100}
-              className={`${field} mt-1 w-full`}
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            Description
-            <textarea
-              maxLength={1000}
-              className={`${field} mt-1 w-full`}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </label>
-          <label className="block text-sm">
-            A person's edit wins over other sources for
-            <select className={`${field} mt-1 w-full`} value={days} onChange={(e) => setDays(e.target.value)}>
-              <option value="">The brand's setting</option>
-              <option value="30">30 days</option>
-              <option value="90">90 days</option>
-              <option value="180">180 days</option>
-              <option value="365">1 year</option>
-              <option value="0">Forever</option>
-              {days !== "" && !["0", "30", "90", "180", "365"].includes(days) && <option value={days}>{days} days</option>}
-            </select>
-            <span className="mt-1 block text-xs text-muted-foreground">After it, the value your CRM or enrichment gives takes over, unless the edit is pinned.</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={archived}
-              onChange={(e) => setArchived(e.target.checked)}
-            />
-            Archive this attribute
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Archiving hides the attribute without deleting its saved values.
-          </p>
+          {!builtin && (
+            <>
+              <label className="block text-sm">
+                Label
+                <input
+                  required
+                  maxLength={100}
+                  className={`${field} mt-1 w-full`}
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm">
+                Description
+                <textarea
+                  maxLength={1000}
+                  className={`${field} mt-1 w-full`}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </label>
+              <label className="block text-sm">
+                A person's edit wins over other sources for
+                <select
+                  className={`${field} mt-1 w-full`}
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                >
+                  <option value="">The brand's setting</option>
+                  <option value="30">30 days</option>
+                  <option value="90">90 days</option>
+                  <option value="180">180 days</option>
+                  <option value="365">1 year</option>
+                  <option value="0">Forever</option>
+                  {days !== "" &&
+                    !["0", "30", "90", "180", "365"].includes(days) && (
+                      <option value={days}>{days} days</option>
+                    )}
+                </select>
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  After it, the value your CRM or enrichment gives takes over,
+                  unless the edit is pinned.
+                </span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={archived}
+                  onChange={(e) => setArchived(e.target.checked)}
+                />
+                Archive this attribute
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Archiving hides the attribute without deleting its saved values.
+              </p>
+            </>
+          )}
+          <LabelsFieldset ws={ws} value={labels} onChange={setLabels} />
           <ErrorText>{error}</ErrorText>
           <DialogFooter>
             <Button
@@ -765,8 +1091,8 @@ function AttributeEditor({
             >
               Cancel
             </Button>
-            <Button disabled={busy || !label.trim()}>
-              {busy ? "Saving…" : "Save attribute"}
+            <Button disabled={busy || (!builtin && !label.trim())}>
+              {busy ? "Saving…" : builtin ? "Save labels" : "Save attribute"}
             </Button>
           </DialogFooter>
         </form>

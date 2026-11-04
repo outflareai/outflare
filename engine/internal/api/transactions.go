@@ -114,6 +114,10 @@ func pow10(n int) int64 {
 	return p
 }
 
+// errTransactionDeleted is a transaction sent again while the one with its
+// source id waits in Recently deleted.
+var errTransactionDeleted = errors.New("transaction deleted")
+
 // saveTransaction adds a transaction to brand, or finds the one with the
 // same source and source id (created false). A known one only changes its
 // status, which is recorded as transaction.updated. Each new transaction
@@ -122,6 +126,16 @@ func saveTransaction(ctx context.Context, tx pgx.Tx, p *principal, ws, brand str
 	var brandCurrency string
 	if err := tx.QueryRow(ctx, `SELECT currency FROM brands WHERE id = $1 AND workspace_id = $2`, brand, ws).Scan(&brandCurrency); err != nil {
 		return transactionView{}, false, err
+	}
+	// One deleted into Recently deleted stays deleted until it is restored
+	// or purged: sending it again doesn't add it back.
+	var deleted bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM deleted_rows WHERE brand_id = $1 AND source_table = 'transactions'
+		AND data->>'source' = $2 AND data->>'source_id' = $3)`, brand, in.Source, in.SourceID).Scan(&deleted); err != nil {
+		return transactionView{}, false, err
+	}
+	if deleted {
+		return transactionView{}, false, errTransactionDeleted
 	}
 	converted, err := brandAmount(ctx, tx, in.Currency, in.AmountMinor, brandCurrency, in.OccurredAt)
 	if err != nil {
@@ -255,6 +269,12 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, new(errInvalid)) {
 			outcome = "invalid"
 		}
+	}
+	if errors.Is(err, errTransactionDeleted) {
+		metrics.TransactionSaved("api", "deleted", time.Since(start))
+		writeError(w, r, http.StatusConflict, "transaction_deleted",
+			"a transaction with this source_id was deleted and is in Recently deleted: restore it there (POST .../recently-deleted/{deletion}/restore) instead of sending it again")
+		return
 	}
 	metrics.TransactionSaved("api", outcome, time.Since(start))
 	if s.allocError(w, r, err) {

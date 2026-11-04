@@ -200,6 +200,9 @@ func (s *Service) Compose(ctx context.Context, q jobs.Querier, d Draft) (NewEmai
 	if err != nil {
 		return e, invalid("the content has a mistake in " + err.Error())
 	}
+	// Data can come from records and events with a NUL character in it,
+	// which Postgres can't store; it never belongs in an email.
+	out.Subject, out.HTML, out.Text = stripNUL(out.Subject), stripNUL(out.HTML), stripNUL(out.Text)
 	if len(out.Missing) > 0 {
 		return e, refuse(422, "template_variables_missing", "data is missing required variables: "+strings.Join(out.Missing, ", "))
 	}
@@ -222,3 +225,5 @@ func (s *Service) Compose(ctx context.Context, q jobs.Querier, d Draft) (NewEmai
 	e.Subject, e.HTML, e.Text = out.Subject, out.HTML, out.Text
 	return e, nil
 }
+
+func stripNUL(s string) string { return strings.ReplaceAll(s, "\x00", "") }

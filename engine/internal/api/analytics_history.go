@@ -17,10 +17,14 @@ import (
 
 func (s *Server) routesAnalyticsHistory(mux *http.ServeMux) {
 	read := auth.ScopeAnalyticsRead
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/history", s.inBrand(read, s.analyticsHistory))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/overview", s.inBrand(read, s.analyticsOverview))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/compare", s.inBrand(read, s.analyticsCompare))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/syncs", s.inWorkspace(read, s.analyticsSyncs))
+	// A brand's numbers are the rows of the sites assigned to it
+	// (brand_website.go); the syncs themselves are the connections'.
+	for _, t := range s.twins("analytics") {
+		mux.HandleFunc("GET "+t.path+"/history", t.on(s.inBrand)(read, s.analyticsHistory))
+		mux.HandleFunc("GET "+t.path+"/overview", t.on(s.inBrand)(read, s.analyticsOverview))
+		mux.HandleFunc("GET "+t.path+"/compare", t.on(s.inBrand)(read, s.analyticsCompare))
+		mux.HandleFunc("GET "+t.path+"/syncs", t.on(s.inWorkspace)(read, s.analyticsSyncs))
+	}
 	mux.HandleFunc("POST /v1/workspaces/{ws}/analytics/sync", s.inWorkspace(read, s.analyticsSyncAll))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/analytics/{id}/sync", s.inWorkspace(read, s.analyticsSyncOne))
 }
@@ -111,7 +115,7 @@ func (f historyFilter) where(ws string) (string, []any) {
 		args = append(args, f.host)
 		sql += ` AND d.host = $` + strconv.Itoa(len(args))
 	}
-	sql += f.brand.sql(`analytics_site_brand(d.workspace_id, d.integration_id, d.site, d.host)`, &args)
+	sql += f.brand.sql(`d.brand_id`, &args)
 	return sql, args
 }
 
@@ -130,7 +134,7 @@ func (s *Server) analyticsHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if f.brand, ok = s.brandFilter(w, r); !ok {
+	if f.brand, ok = s.dataBrand(w, r); !ok {
 		return
 	}
 	group := r.URL.Query().Get("group")
@@ -230,7 +234,7 @@ func (s *Server) analyticsOverview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if f.brand, ok = s.brandFilter(w, r); !ok {
+	if f.brand, ok = s.dataBrand(w, r); !ok {
 		return
 	}
 	f.report = connectors.ReportTraffic
@@ -329,7 +333,7 @@ func (s *Server) analyticsCompare(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if f.brand, ok = s.brandFilter(w, r); !ok {
+	if f.brand, ok = s.dataBrand(w, r); !ok {
 		return
 	}
 	if f.host == "" {
@@ -403,7 +407,7 @@ func (s *Server) syncStatuses(ctx context.Context, ws string, sel brandSel) ([]s
 		// One row per site the sync has run for, or one for the connection
 		// before its first run.
 		args := []any{src.ID}
-		inBrand := sel.sql(`analytics_site_brand(i.workspace_id, i.id, a.site, a.host)`, &args)
+		inBrand := sel.sql(`a.brand_id`, &args)
 		rows, err := s.pool.Query(ctx, `
 			SELECT a.site, a.host, to_char(a.first_day, 'YYYY-MM-DD'), to_char(a.last_day, 'YYYY-MM-DD'), a.last_run_at, a.last_ok_at, a.last_error,
 				COALESCE((i.config->>'sync_paused')::boolean, false)
@@ -444,7 +448,7 @@ func (n nullText) Scan(v any) error {
 func nullable(dst *string) nullText { return nullText{dst} }
 
 func (s *Server) analyticsSyncs(w http.ResponseWriter, r *http.Request) {
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

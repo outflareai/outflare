@@ -389,5 +389,6 @@ func accountVia(ctx context.Context) string {
 
 // emitUser records an account event (signed up, signed in, verified).
 func emitUser(ctx context.Context, name, userID string, props map[string]any) {
-	track.Emit(ctx, track.Event{Name: name, UserID: userID, ActorType: "human", RequestID: RequestID(ctx), Props: props})
+	track.Emit(ctx, track.Event{Name: name, UserID: userID, ActorType: "human", RequestID: RequestID(ctx), Props: props,
+		AnonymousID: visitorID(ctx)})
 }

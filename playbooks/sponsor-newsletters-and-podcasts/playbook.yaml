@@ -47,7 +47,7 @@ steps:
   - say: Draft a short rate card request to the best shortlisted ones that don't publish prices, as a sequence held until a person approves it.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Suggest which test slots to book within the budget, cheapest per reader first. For each slot a person books, make its tracked link, save it and the promo code on the partnership, and record the fee as spend.
-    tools: [updateRecord, createTrackingLink, recordSpend]
+    tools: [updateRecord, createBrandTrackingLink, recordSpend]
   - say: Thirty days after each slot runs, report visits, sign-ups, paying customers and cost per paying customer, and say which to book again.
     tools: [getAnalyticsReport, outcomesReport, updateRecord]
 guardrails:

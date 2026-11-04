@@ -44,14 +44,18 @@ var abAIKinds = []string{"suggest", "versions", "summary", "learning", "ask"}
 
 func (s *Server) routesABTestAI(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/suggestions", s.inWorkspace(manage, s.suggestABTests))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/versions", s.inWorkspace(manage, s.writeABVersions))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/summary", s.inWorkspace(manage, s.summarizeABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/learning", s.inWorkspace(manage, s.writeABLearning))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/learnings", s.inWorkspace(read, s.listABLearnings))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/ask", s.inWorkspace(manage, s.askABTests))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-test-ai-runs", s.inWorkspace(read, s.listABAIRuns))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-test-ai-runs/{run}", s.inWorkspace(read, s.getABAIRun))
+	for _, t := range s.twins("ab-tests") {
+		mux.HandleFunc("POST "+t.path+"/suggestions", t.on(s.inWorkspace)(manage, s.suggestABTests))
+		mux.HandleFunc("POST "+t.path+"/versions", t.on(s.inWorkspace)(manage, s.writeABVersions))
+		mux.HandleFunc("POST "+t.path+"/{test}/summary", t.on(s.inWorkspace)(manage, s.summarizeABTest))
+		mux.HandleFunc("POST "+t.path+"/{test}/learning", t.on(s.inWorkspace)(manage, s.writeABLearning))
+		mux.HandleFunc("GET "+t.path+"/learnings", t.on(s.inWorkspace)(read, s.listABLearnings))
+		mux.HandleFunc("POST "+t.path+"/ask", t.on(s.inWorkspace)(manage, s.askABTests))
+	}
+	for _, t := range s.twins("ab-test-ai-runs") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listABAIRuns))
+		mux.HandleFunc("GET "+t.path+"/{run}", t.on(s.inWorkspace)(read, s.getABAIRun))
+	}
 }
 
 func (s *Server) registerABTestJobs(q *jobs.Queue) {
@@ -100,7 +104,7 @@ func loadABAIRuns(ctx context.Context, q abtests.Querier, ws, where string, args
 
 func (s *Server) listABAIRuns(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -121,12 +125,6 @@ func (s *Server) listABAIRuns(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, t)
 		where += fmt.Sprintf(` AND test_id = $%d`, len(args)+1)
-	}
-	// A brand's runs include those for no brand, as with tests.
-	if sel.id != "" && sel.id != "none" {
-		args = append(args, sel.id)
-		where += fmt.Sprintf(` AND (brand_id IS NULL OR brand_id = $%d)`, len(args)+1)
-		sel.id = ""
 	}
 	all := append([]any{a.WorkspaceID}, args...)
 	where += sel.sql("brand_id", &all)
@@ -251,15 +249,13 @@ func (s *Server) suggestABTests(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "notes are at most 2,000 characters")
 		return
 	}
-	if in.BrandID != nil {
-		if err := s.siteKeyBrand(r.Context(), a.WorkspaceID, in.BrandID); s.allocError(w, r, err) {
-			return
-		}
-	}
-	if !a.writes(in.BrandID) {
-		writeError(w, r, http.StatusForbidden, "forbidden", "you are limited to some brands: pick one of your brands")
+	// Suggestions are for one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.activationBrand(r.Context(), a, in.BrandID)
+	if s.allocError(w, r, err) {
 		return
 	}
+	in.BrandID = &brand
 	s.startABAIRun(w, r, "suggest", in.BrandID, nil, nil, in)
 }
 

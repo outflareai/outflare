@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 // Channels: the CMO view. Visits, conversions, revenue and cost for every
 // channel, under one attribution model the whole workspace shares (last
 // non-direct touch unless changed), with a switch to compare the others.
@@ -73,7 +75,15 @@ export function totals(report: AttributionChannels) {
   };
 }
 
-export function Channels({ ws, canManage, go }: Props) {
+// Channels belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Channels(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Channels" brands={active.length} />;
+  return <ChannelsPage key={brand.id} {...props} />;
+}
+
+function ChannelsPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
@@ -98,7 +108,7 @@ export function Channels({ ws, canManage, go }: Props) {
     const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}), ...(match !== "all" ? { match } : {}) };
     const [s, r, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }),
+      api.GET("/v1/brands/{brand}/attribution/channels", { params: { path: { brand: pickedBrandId() }, query } }),
       api.GET("/v1/workspaces/{ws}/attribution/models", { params: { path: { ws } } }),
     ]);
     setError(s.error || r.error ? errorMessage(s.error ?? r.error) : "");
@@ -231,7 +241,7 @@ function Drilldown({ ws, row, query, onClose }: { ws: string; row: Row | null; q
     if (!channel) return;
     setList(null);
     const q = { ...JSON.parse(key), channel, ...(byContent ? { split: "content" as const } : {}) };
-    api.GET("/v1/workspaces/{ws}/attribution/campaigns", { params: { path: { ws }, query: q } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/attribution/campaigns", { params: { path: { brand: pickedBrandId() }, query: q } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setList(data?.data ?? []);
     });

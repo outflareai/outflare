@@ -1,3 +1,4 @@
+import { pageIsAvailable } from "./lib/extensions";
 // The app's frame: sidebar navigation, the top bar with the page path, the
 // command palette (⌘K) and the API panel, which shows the call behind the
 // page you are on.
@@ -55,6 +56,7 @@ export const tabNames: Record<Tab, string> = {
   "ab-tests": "A/B tests",
   seo: "Rankings & backlinks",
   "seo-overview": "SEO overview",
+  content: "Content",
   audits: "Site audits",
   fixes: "Fixes",
   experiments: "Experiments",
@@ -105,11 +107,13 @@ export const tabNames: Record<Tab, string> = {
   automations: "Automation map",
   providers: "Email providers",
   support: "Support inbox",
+  "agent-mail": "Overview",
   knowledge: "Library",
   "help-centre": "Help centre",
   company: "About your company",
   brands: "Brands",
   "ideal-customers": "Ideal customers",
+  "brand-accounts": "Accounts",
   workspace: "General",
   members: "Members",
   alerts: "Alerts",
@@ -177,6 +181,7 @@ export const tabBlurbs: Record<Tab, string> = {
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
   partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
+  content: "Posts and pages written for the brand's website: approve them, copy or download them, and see where each went live.",
   "seo-overview": "Is each brand growing in search: branded search, visitors, domain rating and links, with their trends.",
   experiments: "Did a change help? Hold back a matched group of pages and measure the difference from Search Console.",
   audits: "OutflareBot crawls your websites, scores their health and finds what to fix, page by page.",
@@ -194,12 +199,14 @@ export const tabBlurbs: Record<Tab, string> = {
   "reddit-campaigns": "Comments, replies, posts and upvotes placed through Engain within each brand's budget, and how long each mention stayed live.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
   connectors: "The services Outflare can use, connected once for the whole workspace.",
+  "agent-mail": "Hosted email inboxes for your agents, within the current brand.",
   support: "Customers who write to your support mailbox, as conversations your team assigns, answers and closes.",
   knowledge: "Articles and quick answers your team writes once: products, prices, policies and stock answers. Your team and every AI in Outflare answer from them.",
   "help-centre": "A public site where customers read and search what you've marked for the help centre, styled like your brand.",
   company: "What Outflare knows about your company, so people and agents never have to repeat it.",
   brands: "The businesses you market from this workspace, each with its own website, context, links and mailboxes.",
   "ideal-customers": "Who you sell to, described once for lead lists and the lead finder.",
+  "brand-accounts": "The external accounts your brand's agent acts through: how each signs in, whether access works, the vault, incidents, and the takeovers waiting for a person.",
   workspace: "The workspace's name and its address in the app.",
   members: "Who is in this workspace, and what each person can do.",
   alerts: "What needs someone now, such as hot replies and hot website visitors, and who hears about it by email.",
@@ -300,7 +307,7 @@ export const modules: Module[] = [
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
-  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "seo", "backlinks", "ai-visibility", "competitors"] },
+  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "seo", "backlinks", "ai-visibility", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
@@ -314,14 +321,15 @@ export const modules: Module[] = [
   // every module and agent reads.
   { id: "knowledge", label: "Knowledge", icon: "book", tabs: ["knowledge", "help-centre", "company"] },
   // The company hub: its brands, their setup and who it sells to.
-  { id: "company", label: "Company", icon: "company", tabs: ["brands", "setup", "ideal-customers"] },
+  { id: "company", label: "Company", icon: "company", tabs: ["brands", "setup", "ideal-customers", "brand-accounts"] },
+  { id: "agent-mail", label: "Agent Mail", icon: "inbox", tabs: ["agent-mail"] },
 ];
 export const moduleOf = (t: Tab) => modules.find((m) => m.tabs.includes(t));
 const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "members", "account", "instance", "ai-accounts", "support", "help-centre"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -474,6 +482,9 @@ export type MenuLink = { id: string; label: string; href: string; icon: string }
 type SidebarProps = {
   me: { email?: string };
   links?: MenuLink[];
+  // badges are short texts next to links, by link id, for the open
+  // workspace (GET /v1/workspaces/{ws}/menu-badges).
+  badges?: Record<string, string>;
   workspaces: Workspace[];
   ws?: Workspace;
   onWorkspace: (id: string) => void;
@@ -495,7 +506,7 @@ export function Sidebar(p: SidebarProps) {
   const close = () => setOpenMobile(false);
   const prefs = useNavPrefs();
   const open = prefs.open;
-  const shown = (t: Tab) => canOpen(p.ws, t);
+  const shown = (t: Tab) => canOpen(p.ws, t) && pageIsAvailable(t);
   const pins = prefs.pins.filter(shown);
   const modules = allModules.map((m) => ({ ...m, tabs: m.tabs.filter(shown) })).filter((m) => m.tabs.length > 0);
   useEffect(() => visited(p.tab), [p.tab]);
@@ -588,6 +599,7 @@ export function Sidebar(p: SidebarProps) {
                 <a href={l.href}>
                   <Icon name={isIconName(l.icon) ? l.icon : "external"} className="size-4" />
                   <span className="flex-1">{l.label}</span>
+                  {p.badges?.[l.id] && <span className="text-[11px] tabular-nums text-muted-foreground">{p.badges[l.id]}</span>}
                 </a>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -920,6 +932,8 @@ type Call = { title: string; path: string; params: Record<string, string>; query
 function callFor(tab: Tab, ws: string, item?: string): Call {
   const base = { ws };
   switch (tab) {
+    case "agent-mail":
+      return { title: "Agent Mail inboxes", path: "/v1/workspaces/{ws}/cloud/agent-mail/brands/{brand}/inboxes", params: { ws, brand: "BRAND_ID" }, scope: "inbox.read" };
     case "crm":
       return { title: "CRM records", path: "/v1/workspaces/{ws}/records", params: base, query: { type: item?.split(":")[0] ?? "person", limit: 50 }, mcp: "list_records", ask: "Show my sales relationships and the next follow-ups.", scope: "customers.read" };
     case "overview":
@@ -1106,6 +1120,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         : { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
     case "ideal-customers":
       return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
+    case "content":
+      return { title: "The brand's posts and pages", path: "/v1/brands/{brand}/content", params: { brand: "BRAND_ID" }, mcp: "list_content", ask: "Write a comparison page against our main competitor, in Australian English, for review.", scope: "content.read" };
+    case "brand-accounts":
+      return { title: "The brand's accounts", path: "/v1/brands/{brand}/accounts", params: { brand: "BRAND_ID" }, mcp: "list_accounts", ask: "Which of our accounts need attention, and is anything waiting for a person?", scope: "accounts.read" };
     case "workspace":
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
     case "members":

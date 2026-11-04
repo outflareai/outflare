@@ -47,7 +47,7 @@ func New(m *Manifest, pubs map[string]PublisherEntry) (*Connector, error) {
 		}
 	}
 	d := c.Definition{
-		ID: m.ID, Name: m.Name, Category: m.Category, Summary: m.Summary, Description: m.Description,
+		ID: m.ID, Name: m.Name, Category: m.Category, BrandKind: m.BrandKind, Summary: m.Summary, Description: m.Description,
 		Website: m.Website, DocsURL: m.DocsURL, KeyURL: m.KeyURL, Pricing: m.Pricing,
 		Auth: c.AuthAPIKey, Publisher: pub, Trust: trust, Capabilities: []string{},
 	}

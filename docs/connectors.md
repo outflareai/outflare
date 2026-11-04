@@ -152,7 +152,15 @@ In a workspace with [brands](../README.md#brands), a tool is connected once and 
 
 `GET /v1/workspaces/{ws}/integrations?brand=repocket` lists what a brand uses: its own connections and the shared ones, minus any shared connection to a tool it has its own of. `brand=none` lists the connections every brand shares. Set who uses a connection with `POST /integrations` or `PATCH /integrations/{id}` (`brand_id`, `brand_ids`), or `?brand=` on the OAuth `authorize` link; moving a connection to a brand stops sharing it. In the app, **Connectors** shows who uses each connection, and lists what the brand picked in the sidebar uses. Someone kept to some brands sees only the connections their brands use. The SQL function `integration_serves(integration, brand)` gives the same answer to queries.
 
-An analytics site read through a brand's own connection counts for that brand. Sites read through a workspace connection go to the brand whose domains include theirs, among the brands it is shared with.
+### Connections and brands
+
+No brand, no data. Each connection has a kind (`brand_kind`), chosen when connecting (`brand_kind` on `POST /integrations`, `PATCH /integrations/{id}` and the OAuth `authorize` link; each connector in `GET /v1/connectors` has a default):
+
+- **`brand`**: the whole connection belongs to one brand (`brand_id`), such as Stripe for Acme. Payments, CRMs, sequencers, email providers and calendars default to it.
+- **`split`**: one sign-in whose sites, properties or ad accounts belong to different brands, each assigned on its own: Google Analytics properties, Search Console sites, Meta and Google ad accounts. Analytics and ads default to it.
+- **`shared`**: a tool every brand uses (or the brands in `brand_ids`), such as DataForSEO, the AI model key or Slack. What it produces belongs to the brand that used it. Models, notifications, data, verification, DNS and SEO data tools default to it, and so do Gmail and Outlook mailbox sign-ins: each mailbox carries its own brand, and one with none is shared.
+
+Data from a brand connection with no brand, or a site or ad account nobody assigned, is stored with no brand and shown in none. `GET /v1/workspaces/{ws}/connections/unassigned` lists them; assign a connection with `PATCH /integrations/{id}` (`brand_id`) and a site or ad account with `PUT /integrations/{id}/accounts/{account}` (`GET /integrations/{id}/accounts` lists them, with a brand whose domains match each site as a suggestion; a domain never assigns a site by itself). Assigning moves what was stored for it to that brand. In a workspace with one brand everything is that brand's, and a new brand connection gets it when connected. The app shows a notice above every page while anything has no brand, and **Connectors** lists each item with a brand to pick. The SQL function `outflare_site_brand(integration, site)` is a site's brand: its assignment, else its connection's brand, else the workspace's only brand.
 
 ## Letting an agent connect things
 

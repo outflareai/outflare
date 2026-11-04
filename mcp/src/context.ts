@@ -32,7 +32,7 @@ Outflare is the brain of a company's go-to-market. It sends cold email from the 
 - Leads and lists: leads are people; lead lists group them, and can be built from a data connector. The suppression list is never emailed.
 - Sequences: steps of email. Enroll leads, then activate the sequence; mailboxes are allocated to it automatically. Replies land in the inbox.
 - Connectors: optional. Nothing needs connecting to run. list_connectors shows what can connect; request_connection gives the person a link to connect it, so keys never pass through chat.
-- Missions: an agent working toward a goal within limits. Writes are dry runs or wait for a person until the mission allows them. An agent can never approve its own writes.
+- Agents and the action layer: your changes run, wait for a person or are refused by the grants a person gave your token (list_actions). run_playbook hands a playbook to Outflare's agent. An agent can never approve its own changes. Missions are retired; what they did stays readable.
 - Outcomes and reports: meetings, deals and spend give cost per meeting; reports and analytics show what is working.
 - Reddit campaigns: comments, replies, posts and upvotes placed through Engain (the workspace's own connection), within each brand's budget, as experiments whose results are tracked. Read get_reddit_guide before the first one.
 - Events: every change is in the audit log and events feed (list_events), and can go to webhooks.
@@ -40,7 +40,7 @@ Outflare is the brain of a company's go-to-market. It sends cold email from the 
 ## When something is wrong
 - get_status lists every blocker, worst first, with the tool that fixes it and whether you or a person must act.
 - A failed call returns a code and a next step. forbidden means you aren't allowed to do that: give the person the link in the message and say which permission to turn on; do not retry.
-- Never ask for API keys or passwords in chat. Never approve spending or a mission's held writes yourself.
+- Never ask for API keys or passwords in chat. Never approve spending or a held change yourself.
 `;
 
 export function registerContextTools(

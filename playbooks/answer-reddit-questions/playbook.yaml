@@ -1,0 +1,57 @@
+id: answer-reddit-questions
+version: 1
+title: Answer the Reddit questions the brand can help with
+summary: Watch the subreddits where the brand's buyers ask for advice, and draft helpful replies from the brand's own account for a person to approve.
+description: |
+  Reddit threads rank in search and get read for years, and buyers ask
+  there for honest advice. This playbook watches the subreddits and
+  keywords the team picks, finds the posts the brand can genuinely help
+  with, and drafts a reply from what the brand knows. Every reply waits
+  for a person and posts from the brand's own account, within the
+  brand's Reddit limits.
+tier: clever
+goals: [customers, search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: social.search
+      label: Reddit, with the workspace's own app
+      recommended: [reddit]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: watch
+    label: Subreddits and keywords to watch
+    example: r/projectmanagement, "best tool for client projects"
+steps:
+  - say: Read the brand's context and voice, and the brand's Reddit settings and limits.
+    tools: [getBrandContext, listRedditSettings]
+  - say: Set up a watch on the subreddits and keywords.
+    tools: [createSocialWatch, listSocialWatches]
+  - say: Read new posts and pick the ones the brand can genuinely help with.
+    tools: [listSocialItems, getSocialItem]
+  - say: Draft a reply to each from what the brand knows, held for a person's approval.
+    tools: [findKnowledgePassages, draftSocialReply]
+  - say: Check which replies are still up and what they brought.
+    tools: [listSocialActions]
+guardrails:
+  - Every reply waits for a person's approval and posts from the brand's own account.
+  - Replies help first; the brand is named only where it is the honest answer.
+  - Stays within the brand's Reddit limits and each subreddit's rules.
+  - Never votes, asks for votes, or posts from another account.
+measure:
+  - { metric: Replies kept up, how: Replies that went live and are still up. }
+  - { metric: Visits from Reddit, how: Visits and sign-ups traced back to the replies. }
+prompt: |
+  Watch {{watch}} for posts {{brand}} can genuinely help with, and draft a
+  helpful reply to each from the brand's own account for me to approve.
+example: |
+  In a month the watch found 90 posts; the team approved 11 replies. Two
+  threads ranked on Google for the brand's category and kept sending
+  visits.

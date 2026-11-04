@@ -109,6 +109,9 @@ export type Connector = Schemas["Connector"];
 export type ConnectorAuthMethod = Schemas["ConnectorAuthMethod"];
 export type ConnectorAuthOption = Schemas["ConnectorAuthOption"];
 export type ConnectorAccount = Schemas["ConnectorAccount"];
+export type ConnectionKind = Schemas["ConnectionKind"];
+export type ConnectionAccount = Schemas["ConnectionAccount"];
+export type UnassignedConnection = Schemas["UnassignedConnection"];
 export type Integration = Schemas["Integration"];
 export type ConnectionHook = Schemas["ConnectionHook"];
 export type HookEvent = Schemas["HookEvent"];
@@ -154,6 +157,11 @@ export type DigestSettings = Schemas["DigestSettings"];
 export type DigestSection = Schemas["DigestSection"];
 export type Digest = Schemas["Digest"];
 export type Alert = Schemas["Alert"];
+export type Account = Schemas["Account"];
+export type AccountIncident = Schemas["AccountIncident"];
+export type AccountTakeover = Schemas["AccountTakeover"];
+export type BrowserTask = Schemas["BrowserTask"];
+export type ContentItem = Schemas["ContentItem"];
 export type AlertKind = Schemas["AlertKind"];
 export type AlertSetting = Schemas["AlertSetting"];
 export type Experiment = Schemas["Experiment"];
@@ -220,6 +228,7 @@ export type AdTrackingHealth = Schemas["AdTrackingHealth"];
 export type ConversionDefinition = Schemas["ConversionDefinition"];
 export type ConversionPreset = Schemas["ConversionPreset"];
 export type AdAccount = Schemas["AdAccount"];
+export type AdTrackingPlan = Schemas["AdTrackingPlan"];
 export type AIProvider = Schemas["AIProvider"];
 export type AIAccount = Schemas["AIAccount"];
 export type AIAccountMember = Schemas["AIAccountMember"];
@@ -418,15 +427,9 @@ export type ClientOptions = {
   token?: string;
   fetch?: typeof fetch;
   /**
-   * Act inside an agent mission: every call carries the Outflare-Mission
-   * header, so it is logged against the mission and writes follow its mode
-   * (they may be answered 202 with a MissionHeld body instead of running).
-   */
-  mission?: string;
-  /**
-   * The client will act inside missions without a fixed one (it sets the
-   * Outflare-Mission header itself, as the MCP server does), so it is typed
-   * as a {@link MissionClient}.
+   * The client's token is an agent on the action layer, so any workspace
+   * write may be answered 202 with a held change instead of running: it is
+   * typed as a {@link MissionClient}. (Missions themselves are retired.)
    */
   missions?: boolean;
   /**
@@ -460,30 +463,29 @@ type WithoutHeldResponses<Rs> = {
 type WithoutHeldOperation<O> = O extends { responses: infer Rs } ? Omit<O, "responses"> & { responses: WithoutHeldResponses<Rs> } : O;
 
 /**
- * The API as a client outside any mission sees it: writes are never answered
- * with a MissionHeld 202, so those answers are left out of the types.
+ * The API as a client whose writes are never held sees it: writes are never
+ * answered with a MissionHeld 202, so those answers are left out of the types.
  */
 export type DirectPaths = { [P in keyof paths]: { [M in keyof paths[P]]: WithoutHeldOperation<paths[P][M]> } };
 
 /** A client outside missions (the default). */
 export type OutflareClient = Client<DirectPaths>;
-/** A client that may act inside a mission: any workspace write can answer 202 with {@link MissionHeld}. */
+/** A client whose writes may be held for a person: any workspace write can answer 202 with {@link MissionHeld}. */
 export type MissionClient = Client<paths>;
 
 /**
- * Whether a write was held by its mission (a dry run, or waiting for a
- * person) instead of running.
+ * Whether a write was held for a person (on the action layer, or by a
+ * mission before missions retired) instead of running.
  */
 export function isHeld(data: unknown): data is MissionHeld {
-  return typeof data === "object" && data !== null && "mission_action" in data && "approval_required" in data;
+  return typeof data === "object" && data !== null && ("action" in data || "mission_action" in data) && "approval_required" in data;
 }
 
-export function createClient(opts: ClientOptions & ({ mission: string } | { missions: true })): MissionClient;
+export function createClient(opts: ClientOptions & { missions: true }): MissionClient;
 export function createClient(opts?: ClientOptions): OutflareClient;
 export function createClient(opts: ClientOptions & { missions?: boolean } = {}): OutflareClient | MissionClient {
   const headers: Record<string, string> = { "Outflare-Client": opts.clientName ?? `sdk-ts/${SDK_VERSION}` };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  if (opts.mission) headers["Outflare-Mission"] = opts.mission;
   return createFetchClient<DirectPaths>({
     baseUrl: (opts.baseUrl ?? "").replace(/\/+$/, ""),
     headers,

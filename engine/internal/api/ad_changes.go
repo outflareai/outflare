@@ -18,7 +18,8 @@ import (
 
 // Managing campaigns (the brand agent plan, step 7): a person, or an agent
 // within the grants a person set, pauses or resumes a campaign and sets
-// its daily budget on the workspace's own ad accounts. That is all
+// its daily budget on the workspace's own ad accounts. That and adding the
+// tracking template (ad_tracking_fix.go) are all
 // Outflare changes about ads. Each request makes an ad_changes row with
 // its audit event and queues the job that calls the platform (adsync,
 // JobChange): the call is the side effect, so it never runs here. The

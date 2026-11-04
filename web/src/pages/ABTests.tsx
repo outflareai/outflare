@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 // A/B tests: which version of a feature flag does best at a goal. A test
 // names the flag, its control and its goals; Outflare counts visitors who
 // were shown each version and how many of them converted, and says which
@@ -44,7 +46,15 @@ const pct = (n: number, digits = 1) => `${(n * 100).toFixed(digits)}%`;
 const chance = (n: number) => (n > 0.99 ? "over 99%" : n < 0.01 ? "under 1%" : pct(n, 0));
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n * 100))}%`;
 
-export function ABTests({ ws, canManage, go }: Props) {
+// A/B tests belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function ABTests(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="A/B tests" brands={active.length} />;
+  return <ABTestsPage key={brand.id} {...props} />;
+}
+
+function ABTestsPage({ ws, canManage, go }: Props) {
   const { query } = useBrand(ws);
   const [tests, setTests] = useState<ABTest[] | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
@@ -55,10 +65,10 @@ export function ABTests({ ws, canManage, go }: Props) {
   const [error, setError] = useState("");
 
   const loadFlags = useCallback(() => {
-    api.GET("/v1/workspaces/{ws}/flags", { params: { path: { ws }, query } }).then(({ data }) => setFlags(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/flags", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setFlags(data?.data ?? []));
   }, [ws, query.brand]); // eslint-disable-line react-hooks/exhaustive-deps
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws }, query } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/ab-tests", { params: { path: { brand: pickedBrandId() } } });
     if (error) setError(errorMessage(error));
     setTests(data?.data ?? []);
     setOpen((cur) => (cur ? data?.data.find((t) => t.id === cur.id) ?? null : null));
@@ -286,7 +296,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: { ws } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect, factors: factors.filter((k) => k && k !== flagKey).map((k) => ({ flag: k })) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ab-tests", { params: { path: { brand: pickedBrandId() } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect, factors: factors.filter((k) => k && k !== flagKey).map((k) => ({ flag: k })) } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Added ${data!.name}. Start it when the pages are ready.`);
@@ -412,7 +422,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     setGuardrails(test.guardrails);
     setMinEffect(test.min_effect);
     if (test.status === "draft") return;
-    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/results", { params: { path: { ws, test: test.id } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/results", { params: { path: { brand: pickedBrandId(), test: test.id } } }).then(({ data, error }) => {
       if (error) setError(errorMessage(error));
       else {
         setResults(data);
@@ -425,7 +435,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     setBusy(true);
     const changed = JSON.stringify(goals) !== JSON.stringify(test.goals) || JSON.stringify(guardrails) !== JSON.stringify(test.guardrails) || minEffect !== test.min_effect;
     if (changed) {
-      const { error } = await api.PATCH("/v1/workspaces/{ws}/ab-tests/{test}", { params: { path: { ws, test: test.id } }, body: { goals, guardrails, min_effect: minEffect } });
+      const { error } = await api.PATCH("/v1/brands/{brand}/ab-tests/{test}", { params: { path: { brand: pickedBrandId(), test: test.id } }, body: { goals, guardrails, min_effect: minEffect } });
       if (error) {
         setBusy(false);
         return setError(errorMessage(error));
@@ -436,7 +446,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
       setBusy(false);
       return onChanged();
     }
-    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/start", { params: { path: { ws, test: test.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/start", { params: { path: { brand: pickedBrandId(), test: test.id } } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`${test.name} is running.`);
@@ -447,7 +457,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     const kept = decision ? `You keep ${decision}; change the flag to show it to everyone.` : "You keep no version.";
     if (!(await confirmAction(`End ${test.name}?`, `The results are kept as they are now. ${kept} The flag stays as it is.`, "End test"))) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/end", { params: { path: { ws, test: test.id } }, body: { decision } });
+    const { error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/end", { params: { path: { brand: pickedBrandId(), test: test.id } }, body: { decision } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Ended ${test.name}.`);
@@ -457,7 +467,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
   async function freeze(frozen: boolean) {
     if (frozen && !(await confirmAction(`Freeze ${test.name}?`, "New visitors stop joining; those already in keep counting, so the test can finish on the visitors it has. You can unfreeze it.", "Freeze"))) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/freeze", { params: { path: { ws, test: test.id } }, body: { frozen } });
+    const { error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/freeze", { params: { path: { brand: pickedBrandId(), test: test.id } }, body: { frozen } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(frozen ? `${test.name} is frozen: no new visitors join.` : `${test.name} lets new visitors join again.`);
@@ -468,7 +478,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
     const what = variant === test.control ? `${variant}, the control,` : variant;
     if (!(await confirmAction(`Ship ${variant}?`, `Everyone sees ${what} from now on: ${test.flag_key} gives it all the traffic.${test.status === "running" ? " The test ends, keeping its results." : ""}`, `Ship ${variant}`))) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/ship", { params: { path: { ws, test: test.id } }, body: { variant } });
+    const { error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/ship", { params: { path: { brand: pickedBrandId(), test: test.id } }, body: { variant } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Shipped ${variant}.`);
@@ -478,7 +488,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
 
   async function duplicate() {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ws, test: test.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/duplicate", { params: { path: { brand: pickedBrandId(), test: test.id } } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(`Added ${data.name} as a draft.`);
@@ -686,7 +696,7 @@ function FactorialPanel({ ws, testID }: { ws: string; testID: string }) {
   const [data, setData] = useState<{ factors: string[] | null; cells: Cell[]; best: Cell | null; corrected_for: number; metric: string } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/factorial", { params: { path: { ws, test: testID } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/factorial", { params: { path: { brand: pickedBrandId(), test: testID } } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setData((data?.result as never) ?? null);
     });
@@ -720,14 +730,14 @@ function FactorialPanel({ ws, testID }: { ws: string; testID: string }) {
 
 // InteractionsPanel checks the test against others that ran at the same
 // time, on demand: whether one change altered the other's effect.
-function InteractionsPanel({ ws, testID, names }: { ws: string; testID: string; names: (v: string) => string }) {
+function InteractionsPanel({ testID, names }: { ws: string; testID: string; names: (v: string) => string }) {
   type Data = { interactions: { test_id: string; name: string; flag_key: string; overlap: number; versions: { variant: string; p_value: number; interacts: boolean; effects: { other_variant: string; visitors: number; difference: number }[] }[] }[] };
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState("");
   const [asked, setAsked] = useState(false);
   const check = () => {
     setAsked(true);
-    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/interactions", { params: { path: { ws, test: testID } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/interactions", { params: { path: { brand: pickedBrandId(), test: testID } } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setData((data as Data | undefined) ?? null);
     });
@@ -777,7 +787,7 @@ function BreakdownPanel({ ws, testID, control, names }: { ws: string; testID: st
     if (!by) return setData(null);
     let live = true;
     setData(null);
-    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/breakdown", { params: { path: { ws, test: testID }, query: { by } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/breakdown", { params: { path: { brand: pickedBrandId(), test: testID }, query: { by } } }).then(({ data, error }) => {
       if (!live) return;
       setError(error ? errorMessage(error) : "");
       setData(data ?? null);
@@ -839,7 +849,7 @@ function PreviewPanel({ ws, testID, canManage, onChecked }: { ws: string; testID
   const load = useCallback(
     (url?: string) => {
       setError("");
-      api.GET("/v1/workspaces/{ws}/ab-tests/{test}/previews", { params: { path: { ws, test: testID }, query: url ? { page: url } : {} } }).then(({ data, error }) => {
+      api.GET("/v1/brands/{brand}/ab-tests/{test}/previews", { params: { path: { brand: pickedBrandId(), test: testID }, query: url ? { page: url } : {} } }).then(({ data, error }) => {
         if (error) setError(errorMessage(error));
         else setData(data);
       });
@@ -850,8 +860,8 @@ function PreviewPanel({ ws, testID, canManage, onChecked }: { ws: string; testID
   const check = async (variant: string, status: "ok" | "broken") => {
     setBusy(variant);
     setError("");
-    const { data: out, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/{test}/checks", {
-      params: { path: { ws, test: testID } },
+    const { data: out, error } = await api.POST("/v1/brands/{brand}/ab-tests/{test}/checks", {
+      params: { path: { brand: pickedBrandId(), test: testID } },
       body: { variant, status, note: notes[variant] ?? "" },
     });
     setBusy("");
@@ -952,7 +962,7 @@ function ChecklistPanel({ ws, testID, deps }: { ws: string; testID: string; deps
   const [checks, setChecks] = useState<{ id: string; status: "ok" | "warn" | "fail"; text: string }[] | null>(null);
   useEffect(() => {
     let live = true;
-    api.GET("/v1/workspaces/{ws}/ab-tests/{test}/checklist", { params: { path: { ws, test: testID } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/checklist", { params: { path: { brand: pickedBrandId(), test: testID } } }).then(({ data }) => {
       if (live) setChecks(data?.checks ?? []);
     });
     return () => {

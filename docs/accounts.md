@@ -57,6 +57,8 @@ When a managed use meets MFA, a CAPTCHA, a passkey or a consent screen, the tool
 - `outflare_accounts_attempts_total{purpose,outcome}`, `outflare_accounts_incidents_open{severity}`, `outflare_accounts_takeovers_total{step}`, `outflare_accounts_takeovers_waiting` and `outflare_accounts_takeovers_oldest_seconds`; the **Accounts** dashboard row; `OutflareAccountIncidentsCritical` when a critical incident stays open for a day and `OutflareAccountTakeoverWaiting` when a takeover waits four hours for a person ([monitoring.md](monitoring.md)).
 - MCP tools: `list_accounts`, `create_account`, `record_account_attempt`, `list_account_incidents`, `update_account_incident`, `request_account_takeover`, `list_account_takeovers`, `offboard_accounts`.
 
-## Not here yet
+## The page
 
-An Accounts page in the web app is the next slice of the plan. The browser workers that sign in through the vault, record attempts and ask for takeovers are in [browser-workers.md](browser-workers.md).
+**Company → Accounts** in the web app (`web/src/pages/BrandAccounts.tsx`): the brand's accounts by view, with their health, what they sign in through, what the vault holds (add or remove a password, an authenticator seed or recovery codes; the value is never shown again), block, unblock and archive; the open incidents with resolve; the takeovers waiting for a person (take over for 15 minutes, hand back saying who is signed in, cancel); the browser tasks under way; and offboarding, with the list of what the owner still does at each platform. Browser events `ui.account_recorded`, `ui.account_takeover_started`, `ui.account_takeover_handed_back`, `ui.accounts_offboarded`.
+
+The browser workers that sign in through the vault, record attempts and ask for takeovers are in [browser-workers.md](browser-workers.md).

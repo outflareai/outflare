@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -53,10 +54,28 @@ export function parseChangelog(md: string, max = 40): Release[] {
   return out.filter((r) => r.changes.length > 0);
 }
 
+// An operator build may supply private page implementations without adding them
+// to the open app. The default build has no extensions. This is a local build
+// input, never a URL or anything a workspace/request can choose.
+export function pageExtensions(entry = process.env.OUTFLARE_WEB_EXTENSION_ENTRY): Plugin {
+  const id = "virtual:outflare-pages";
+  return {
+    name: "outflare-page-extensions",
+    resolveId(source) { return source === id ? "\0" + id : undefined; },
+    load(source) {
+      if (source !== "\0" + id) return;
+      if (!entry) return "export const pages = {};";
+      const file = resolve(entry);
+      this.addWatchFile(file);
+      return `export { pages } from ${JSON.stringify(file)};`;
+    },
+  };
+}
+
 // In development the engine runs on :8080; proxy API calls to it.
 export default defineConfig({
-  plugins: [react(), tailwindcss(), changelog()],
-  resolve: { alias: { "@": decodeURIComponent(new URL("./src", import.meta.url).pathname) } },
+  plugins: [react(), tailwindcss(), changelog(), pageExtensions()],
+  resolve: { dedupe: ["react", "react-dom"], alias: { "@": decodeURIComponent(new URL("./src", import.meta.url).pathname) } },
   build: { rolldownOptions: { input: { app: decodeURIComponent(new URL("./index.html",import.meta.url).pathname), portal: decodeURIComponent(new URL("./portal.html",import.meta.url).pathname) } } },
   server: {
     proxy: {

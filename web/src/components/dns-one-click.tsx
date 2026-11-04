@@ -3,6 +3,7 @@ import type { components, Connector } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Status, toast } from "../ui";
 import { cn } from "@/lib/utils";
+import { pickedBrandId } from "@/lib/brand";
 import { Button as UIButton } from "@/components/ui/button";
 import { Icon } from "../icons";
 import { plural } from "../format";
@@ -39,6 +40,8 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
     case "seo_site":
       return api.GET("/v1/workspaces/{ws}/seo-sites/{site}/dns/approval", { params: { path: { ws, site: f.id }, query } });
     case "tracking_domain":
+      // A tracking domain is its brand's: the brand route when one is picked.
+      if (pickedBrandId()) return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand: pickedBrandId(), id: f.id }, query } });
       return api.GET("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
     case "email_domain":
       return api.GET("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
@@ -52,6 +55,7 @@ async function reportApproval(ws: string, f: DNSApprovalFor, body: { error?: str
     case "seo_site":
       return api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns/approved", { params: { path: { ws, site: f.id } }, body });
     case "tracking_domain":
+      if (pickedBrandId()) return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand: pickedBrandId(), id: f.id } }, body });
       return api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });
     case "email_domain":
       return api.POST("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });

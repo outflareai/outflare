@@ -26,8 +26,10 @@ import (
 
 func (s *Server) routesAnalytics(mux *http.ServeMux) {
 	read := auth.ScopeAnalyticsRead
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics", s.inWorkspace(read, s.listAnalytics))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/summary", s.inBrand(read, s.analyticsSummary))
+	for _, t := range s.twins("analytics") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listAnalytics))
+		mux.HandleFunc("GET "+t.path+"/summary", t.on(s.inBrand)(read, s.analyticsSummary))
+	}
 	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/{id}/sites", s.inBrand(read, s.analyticsSites))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/analytics/{id}/site", s.inWorkspace(auth.ScopeIntegrationsManage, s.setAnalyticsSite))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/analytics/{id}/sites/{site}", s.inBrand(auth.ScopeIntegrationsManage, s.updateAnalyticsSite))
@@ -88,7 +90,7 @@ func (s *Server) listAnalytics(w http.ResponseWriter, r *http.Request) {
 	if !s.needIntegrations(w, r) {
 		return
 	}
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -107,8 +109,7 @@ func (s *Server) siteInBrand(ctx context.Context, ws, integration, site string, 
 		return true, nil
 	}
 	var brand *string
-	err := s.pool.QueryRow(ctx, `SELECT analytics_site_brand($1, $2, $3,
-		COALESCE((SELECT host FROM analytics_syncs WHERE integration_id = $2 AND site = $3 LIMIT 1), ''))::text`, ws, integration, site).Scan(&brand)
+	err := s.pool.QueryRow(ctx, `SELECT outflare_site_brand($1, $2)::text`, integration, site).Scan(&brand)
 	return sel.matches(brand), err
 }
 
@@ -614,7 +615,7 @@ func (s *Server) analyticsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := accessFrom(r.Context()).WorkspaceID
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

@@ -9,7 +9,7 @@ func TestMissionReferredRevenue(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 
-	mission := owner.must(201, "POST", base+"/missions", map[string]any{"name": "Partners", "goal_metric": "revenue_referred", "goal_target": 300})["id"].(string)
+	mission := seedMission(t, e, ws, "Partners", "running", "autonomous", ptr("revenue_referred"), ptr(300), nil, nil)
 	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate", "landing_url": "https://northpeak.example/"})
 	owner.must(201, "POST", base+"/partners", map[string]any{"program": "affiliates", "email": "ana@acme.example", "code": "ana"})
 	conv := base + "/partner-conversions"

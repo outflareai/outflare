@@ -108,13 +108,22 @@ func TestAnalyticsReports(t *testing.T) {
 	if len(sum) != 1 || sum[0].(map[string]any)["error"] != nil || sum[0].(map[string]any)["totals"].(map[string]any)["pageviews"] != 90.0 {
 		t.Fatalf("summary: %v", sum)
 	}
-	// A token kept to a brand reads the summary too: its brand's sites and
-	// the shared ones (a site no brand owns is every brand's).
+	// A token kept to a brand reads the summary too, for its brand's sites
+	// only. While the workspace has one brand, a site nobody assigned is
+	// that brand's; once there are two it is in no brand until assigned
+	// (brands step 6), so a brand added since sees none of it.
+	summaryFor := func(brand string) []any {
+		tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reader " + brand, "scopes": []string{"analytics.read"}, "brand": brand})
+		reader := &client{t: t, h: owner.h, bearer: tok["token"].(string)}
+		return reader.must(200, "GET", base+"/analytics/summary?from=2026-10-01&to=2026-10-03", nil)["data"].([]any)
+	}
+	first := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	if got := summaryFor(first); len(got) != 1 {
+		t.Fatalf("summary as the only brand: %v", got)
+	}
 	acme := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme"})["id"].(string)
-	limited := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Acme reader", "scopes": []string{"analytics.read"}, "brand": acme})
-	reader := &client{t: t, h: owner.h, bearer: limited["token"].(string)}
-	if got := reader.must(200, "GET", base+"/analytics/summary?from=2026-10-01&to=2026-10-03", nil)["data"].([]any); len(got) != 1 {
-		t.Fatalf("summary as a brand-limited token: %v", got)
+	if got := summaryFor(acme); len(got) != 0 {
+		t.Fatalf("summary as another brand: %v", got)
 	}
 
 	// Other connections are not analytics.

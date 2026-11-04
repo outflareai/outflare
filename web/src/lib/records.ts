@@ -37,6 +37,42 @@ export const namespaces: Record<string, string> = {
   "outflare.lead": "Lead",
 };
 
+// catalogWrite sends a catalog change to the brand whose catalog the page
+// shows (useCatalog): the brand picked in the switcher, or, with all
+// brands picked, the workspace's first brand, which the workspace routes
+// write to. Each brand has its own catalog, so a change must never land on
+// another brand's.
+export function useCatalogWrite(ws: string) {
+  const { brand: picked } = useBrand(ws);
+  const brand = picked?.id ?? "";
+  return useMemo(() => ({
+    createType: (body: Schemas["RecordTypeInput"]) =>
+      brand
+        ? api.POST("/v1/brands/{brand}/catalog/types", { params: { path: { brand } }, body })
+        : api.POST("/v1/workspaces/{ws}/catalog/types", { params: { path: { ws } }, body }),
+    createOptionSet: (body: Schemas["OptionSetInput"]) =>
+      brand
+        ? api.POST("/v1/brands/{brand}/catalog/option-sets", { params: { path: { brand } }, body })
+        : api.POST("/v1/workspaces/{ws}/catalog/option-sets", { params: { path: { ws } }, body }),
+    updateOptionSet: (set: string, body: Schemas["OptionSetInput"]) =>
+      brand
+        ? api.PATCH("/v1/brands/{brand}/catalog/option-sets/{set}", { params: { path: { brand, set } }, body })
+        : api.PATCH("/v1/workspaces/{ws}/catalog/option-sets/{set}", { params: { path: { ws, set } }, body }),
+    createField: (type: string, body: Schemas["FieldInput"]) =>
+      brand
+        ? api.POST("/v1/brands/{brand}/catalog/types/{type}/fields", { params: { path: { brand, type } }, body })
+        : api.POST("/v1/workspaces/{ws}/catalog/types/{type}/fields", { params: { path: { ws, type } }, body }),
+    updateField: (type: string, field: string, body: Schemas["FieldInput"]) =>
+      brand
+        ? api.PATCH("/v1/brands/{brand}/catalog/types/{type}/fields/{field}", { params: { path: { brand, type, field } }, body })
+        : api.PATCH("/v1/workspaces/{ws}/catalog/types/{type}/fields/{field}", { params: { path: { ws, type, field } }, body }),
+    updateEvent: (event: string, body: Schemas["EventDefinitionInput"]) =>
+      brand
+        ? api.PATCH("/v1/brands/{brand}/catalog/events/{event}", { params: { path: { brand, event } }, body })
+        : api.PATCH("/v1/workspaces/{ws}/catalog/events/{event}", { params: { path: { ws, event } }, body }),
+  }), [ws, brand]);
+}
+
 // The catalog's fields and option labels, read once per page. Each brand
 // has its own catalog: brandId's (a record's brand), else the brand picked
 // in the switcher, else, with all brands picked, the workspace's first

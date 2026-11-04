@@ -1265,7 +1265,7 @@
     {
       "type": "timeseries",
       "title": "Jobs put back after their lease ran out",
-      "description": "Running jobs requeued because their worker stopped holding them (a crash, or a job longer than the lease). Each may run twice.",
+      "description": "Running jobs requeued because their worker stopped holding them (a crash, or a process killed before its shutdown grace ended). Each may run twice. Normal is none: a deploy hands its jobs back at once (outcome interrupted or released on the jobs panel).",
       "id": 25,
       "datasource": {
         "type": "prometheus",
@@ -3504,7 +3504,7 @@
         {
           "refId": "A",
           "expr": "sum by (level, period) (increase(outflare_connection_limits_alerts_total{job=\"$job\"}[1h]))",
-          "legendFormat": "{{level}}% \u00b7 {{period}}",
+          "legendFormat": "{{level}}% · {{period}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -6474,6 +6474,56 @@
       }
     },
     {
+      "type": "timeseries",
+      "title": "Link pitches sent without approval, by outcome",
+      "description": "Pitches through sequences that skip approval, per hour: sent, or why they wait. Normal: mostly sent, with some unsure or spammy_site waiting for a person. daily_cap means a sequence hit its daily limit; those go out on later days (alert OutflareLinkPitchesHeldByCap if they pile up).",
+      "id": 925,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 436
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_seo_link_pitches_auto_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "row",
       "title": "News watch (saved news searches, on workspaces' own web search connections)",
       "id": 111,
@@ -7449,7 +7499,7 @@
     {
       "type": "timeseries",
       "title": "Paid ad landings, by how they were tracked",
-      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads \u2192 Tracking templates).",
+      "description": "Landing pages per minute from paid ads (a paid utm_medium), by outcome: click_id is the network's own click id (best), ad_ids only the tracking template's ad ids, none neither, which means the ad has no tracking template and can be credited only by its UTM tags. Mostly click_id is normal; a network that is mostly none has ads without the template (Paid ads → Tracking templates).",
       "id": 144,
       "datasource": {
         "type": "prometheus",
@@ -10238,7 +10288,7 @@
         {
           "refId": "A",
           "expr": "sum by (outcome) (increase(outflare_query_saved_runs_total{job=\"$job\"}[1h]))",
-          "legendFormat": "saved \u00b7 {{outcome}}",
+          "legendFormat": "saved · {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -10247,7 +10297,7 @@
         {
           "refId": "B",
           "expr": "sum by (outcome) (increase(outflare_query_exports_total{job=\"$job\"}[1h]))",
-          "legendFormat": "csv \u00b7 {{outcome}}",
+          "legendFormat": "csv · {{outcome}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -13121,7 +13171,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 24,
+        "w": 16,
         "x": 0,
         "y": 1015
       },
@@ -13154,6 +13204,122 @@
           "placement": "right",
           "calcs": [
             "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Saved sign-in sessions a day",
+      "description": "Saved sessions of brand accounts: restored (a task started signed in), saved (a run that confirmed the account's identity kept its cookies) and cleared (the wrong identity, a locked account, a refused credential, or too old). Normal is mostly restored and saved; many cleared means accounts were signed out or changed hands.",
+      "id": 929,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1015
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (event) (increase(outflare_browser_sessions_total{job=\"$job\"}[1d]))",
+          "legendFormat": "{{event}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Connections and brands (no brand, no data)",
+      "id": 927,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1023
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Connections and accounts with no brand",
+      "description": "Brand connections with no brand (connection) and analytics or Search Console sites and ad accounts nobody assigned (account), across every workspace, counted every ten minutes. Their data is stored but shows in no brand until someone assigns it on the Connectors page. Normal: low and falling after people connect something; a count that keeps growing means new sites or accounts arrive faster than anyone assigns them. A flat line with no data means the count is failing (integration.unassigned_count_failed in the log).",
+      "id": 928,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1024
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (outflare_connections_unassigned{job=\"$job\"})",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
             "max"
           ]
         },

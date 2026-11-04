@@ -44,14 +44,12 @@ func TestFixAutonomy(t *testing.T) {
 		t.Fatalf("defaults = %v", set)
 	}
 
-	// An agent in an autonomous mission.
-	agent := agentToken(t, owner, base, "Fixer", "missions.read", "missions.run", "seo.read", "seo.manage")
-	m := agent.must(201, "POST", base+"/missions", map[string]any{"name": "Fix the blog", "goal": "Clear the audit"})
-	mission := m["id"].(string)
-	owner.must(200, "POST", base+"/missions/"+mission+"/approve", map[string]any{"mode": "autonomous"})
+	// An agent on the action layer whose grants run everything.
+	agent, agentID := gatedAgent(t, owner, base, "Fixer", "seo.read", "seo.manage")
+	owner.must(201, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "**", "mode": "run"})
 	held := func(fixID string) bool {
 		t.Helper()
-		code, out := agent.inMission(mission, "POST", base+"/fixes/"+fixID+"/start", nil)
+		code, out := agent.do("POST", base+"/fixes/"+fixID+"/start", nil)
 		switch code {
 		case 202:
 			return out["approval_required"] == true
@@ -62,7 +60,7 @@ func TestFixAutonomy(t *testing.T) {
 		return false
 	}
 
-	// Copilot holds every fix, even in an autonomous mission.
+	// Copilot holds every fix, even for an agent whose grants run everything.
 	if !held(title) {
 		t.Fatal("copilot ran a fix")
 	}
@@ -77,7 +75,7 @@ func TestFixAutonomy(t *testing.T) {
 	if set["mode"] != "rules" || set["updated_at"] == nil {
 		t.Fatalf("rules = %v", set)
 	}
-	code, out := agent.inMission(mission, "POST", base+"/fixes/"+title+"/start", nil)
+	code, out := agent.do("POST", base+"/fixes/"+title+"/start", nil)
 	if code != 200 || out["autonomy"].(map[string]any)["reason"] != "allowed" || out["fix"].(map[string]any)["status"] != "in_progress" || out["prompt"].(map[string]any)["prompt"] == "" {
 		t.Fatalf("allowed start = %d %v", code, out)
 	}
@@ -90,7 +88,7 @@ func TestFixAutonomy(t *testing.T) {
 	}
 
 	// The agent can't widen its own room.
-	if code, out := agent.inMission(mission, "PUT", base+"/fix-autonomy", map[string]any{"mode": "autonomous"}); code != 202 || out["approval_required"] != true {
+	if code, out := agent.do("PUT", base+"/fix-autonomy", map[string]any{"mode": "autonomous"}); code != 202 || out["approval_required"] != true {
 		t.Fatalf("agent changed autonomy = %d %v", code, out)
 	}
 
@@ -110,7 +108,7 @@ func TestFixAutonomy(t *testing.T) {
 		t.Fatalf("reset = %v", set)
 	}
 
-	// Outside a mission a person takes any fix, and sees what agents may do.
+	// A person takes any fix, and sees what agents may do.
 	if out := owner.must(200, "POST", base+"/fixes/"+canonical+"/start", map[string]any{"note": "Template fix"}); out["autonomy"].(map[string]any)["reason"] != "always_person" ||
 		out["fix"].(map[string]any)["note"] != "Template fix" {
 		t.Fatalf("person start = %v", out)
@@ -192,7 +190,7 @@ func TestFixAutonomy(t *testing.T) {
 	for _, ev := range got() {
 		seen[ev.Name] = true
 	}
-	for _, name := range []string{"fix_autonomy.updated", "fix_autonomy.reset", "fix.started", "mission.action_held", "crawl.started", "fix.verify_requested"} {
+	for _, name := range []string{"fix_autonomy.updated", "fix_autonomy.reset", "fix.started", "action.held", "crawl.started", "fix.verify_requested"} {
 		if !seen[name] {
 			t.Errorf("no %s event", name)
 		}

@@ -9,7 +9,11 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/outflareai/outflare/engine/internal/accounts"
 	browserwork "github.com/outflareai/outflare/engine/internal/browser"
 	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/research"
@@ -237,4 +241,158 @@ func TestBrowserTasks(t *testing.T) {
 	// Another brand sees nothing.
 	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
 	owner.must(404, "GET", "/v1/brands/"+other+"/browser-tasks/"+id, nil)
+}
+
+// sessionSite is a site that keeps its users signed in with a cookie, as
+// a test double of a browser that can save and restore sessions.
+type sessionSite struct {
+	browserSite
+	jar     []browserwork.Cookie
+	account string // who the cookie signs in as
+}
+
+func (d *sessionSite) Navigate(ctx context.Context, url string) error {
+	if err := d.browserSite.Navigate(ctx, url); err != nil {
+		return err
+	}
+	for _, c := range d.jar {
+		if c.Name == "sid" && c.Value == "signed-in" {
+			d.page = "home"
+		}
+	}
+	return nil
+}
+
+func (d *sessionSite) Click(ctx context.Context, ref int) error {
+	if err := d.browserSite.Click(ctx, ref); err != nil {
+		return err
+	}
+	if d.page == "home" && len(d.jar) == 0 {
+		d.jar = []browserwork.Cookie{
+			{Name: "sid", Value: "signed-in", Domain: "community.example.com", Path: "/", Secure: true, HTTPOnly: true},
+			{Name: "ads", Value: "elsewhere", Domain: ".tracker.example.net", Path: "/"},
+		}
+	}
+	return nil
+}
+
+func (d *sessionSite) Cookies(context.Context) ([]browserwork.Cookie, error) { return d.jar, nil }
+
+func (d *sessionSite) SetCookies(_ context.Context, cs []browserwork.Cookie) error {
+	d.jar = append([]browserwork.Cookie(nil), cs...)
+	return nil
+}
+
+type sessionOpener struct{ site *sessionSite }
+
+func (o sessionOpener) Open(context.Context, browserwork.Boundary) (browserwork.Driver, error) {
+	o.site.page, o.site.typed, o.site.jar = "", nil, nil // a new browser holds nothing
+	return o.site, nil
+}
+
+// A task that signed in and confirmed the identity saves the account's
+// session; the next task starts signed in with only the task's own
+// cookies; a wrong identity clears it; nothing of it reaches the model or
+// the API.
+func TestBrowserSessionsKept(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	brand := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	apath := "/v1/brands/" + brand + "/accounts"
+	accID := owner.must(201, "POST", apath, map[string]any{"platform": "community", "label": "Community", "identity": "ops@acme.example", "sign_in": "local_password", "url": "https://community.example.com/u/acme"})["id"].(string)
+	owner.must(200, "PUT", apath+"/"+accID+"/secrets/password", map[string]any{"value": "correct horse battery staple"})
+	path := "/v1/brands/" + brand + "/browser-tasks"
+	newTask := func() string {
+		return owner.must(201, "POST", path, map[string]any{"goal": "Read the inbox", "account_id": accID, "hosts": []string{"community.example.com"}})["id"].(string)
+	}
+	site := &sessionSite{}
+	model := &browserModel{}
+	svc := &browserwork.Service{Pool: e.pool, Box: e.box, Models: browserAI{model}, Opener: sessionOpener{site}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	secretKinds := func() string { return fmt.Sprint(owner.must(200, "GET", apath+"/"+accID, nil)["secrets"]) }
+
+	// First task: signs in with the password, confirms, finishes: saved.
+	model.rounds = [][]llm.ToolCall{
+		{toolCall("navigate", map[string]any{"url": "https://community.example.com/login"})},
+		{toolCall("type", map[string]any{"ref": 1, "text": "ops@acme.example"}), toolCall("fill_secret", map[string]any{"ref": 2, "kind": "password"}), toolCall("click", map[string]any{"ref": 3})},
+		{toolCall("report_sign_in", map[string]any{"outcome": "authenticated"})},
+		{toolCall("finish", map[string]any{"outcome": "done", "summary": "Read."})},
+	}
+	if err := svc.RunTask(ctx, newTask()); err != nil {
+		t.Fatal(err)
+	}
+	if got := secretKinds(); got != "[password session]" {
+		t.Fatalf("after the first task the account keeps a session: %s", got)
+	}
+	var saved int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'account.session_saved' AND target_id = $1`, accID).Scan(&saved); err != nil || saved != 1 {
+		t.Fatalf("session_saved audit: %d %v", saved, err)
+	}
+
+	// Second task: starts signed in, with the task's own cookie only.
+	model.calls, model.seen = 0, nil
+	model.rounds = [][]llm.ToolCall{
+		{toolCall("navigate", map[string]any{"url": "https://community.example.com/"})},
+		{toolCall("report_sign_in", map[string]any{"outcome": "authenticated"})},
+		{toolCall("finish", map[string]any{"outcome": "done", "summary": "Read again."})},
+	}
+	second := newTask()
+	if err := svc.RunTask(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if got := owner.must(200, "GET", path+"/"+second, nil); got["status"] != "done" {
+		t.Fatalf("second task: %v", got)
+	}
+	seen := strings.Join(model.seen, "\n")
+	if !strings.Contains(seen, "saved session") || !strings.Contains(seen, "Signed in.") {
+		t.Fatalf("the second run should start signed in and be told so: %s", seen)
+	}
+	if len(site.jar) != 1 || site.jar[0].Name != "sid" {
+		t.Fatalf("only the task's own cookies come back: %v", site.jar)
+	}
+	if strings.Contains(seen, "signed-in") || strings.Contains(jsonText(owner.must(200, "GET", path+"/"+second, nil)), "signed-in") || strings.Contains(jsonText(owner.must(200, "GET", apath+"/"+accID, nil)), "signed-in") {
+		t.Fatal("a cookie value leaked to the model or the API")
+	}
+
+	// A session too old to use is removed instead of used.
+	raw, _ := browserwork.Session{SavedAt: time.Now().Add(-browserwork.SessionMaxAge - time.Hour), Cookies: []browserwork.Cookie{{Name: "sid", Value: "signed-in", Domain: "community.example.com"}}}.Encode()
+	if err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		return accounts.Vault{Box: e.box}.Set(ctx, tx, ws, brand, accID, browserwork.SecretSession, raw, "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model.calls, model.seen = 0, nil
+	model.rounds = [][]llm.ToolCall{
+		{toolCall("navigate", map[string]any{"url": "https://community.example.com/"})},
+		{toolCall("finish", map[string]any{"outcome": "failed", "summary": "Signed out."})},
+	}
+	if err := svc.RunTask(ctx, newTask()); err != nil {
+		t.Fatal(err)
+	}
+	if got := secretKinds(); got != "[password]" || strings.Contains(strings.Join(model.seen, "\n"), "saved session") {
+		t.Fatalf("an old session is removed and not used: %s", got)
+	}
+
+	raw, _ = browserwork.Session{SavedAt: time.Now(), Cookies: []browserwork.Cookie{{Name: "sid", Value: "signed-in", Domain: "community.example.com"}}}.Encode()
+	if err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		return accounts.Vault{Box: e.box}.Set(ctx, tx, ws, brand, accID, browserwork.SecretSession, raw, "")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Third task: the site shows someone else; the session is cleared.
+	model.calls = 0
+	model.rounds = [][]llm.ToolCall{
+		{toolCall("navigate", map[string]any{"url": "https://community.example.com/"})},
+		{toolCall("report_sign_in", map[string]any{"outcome": "wrong_identity"})},
+		{toolCall("finish", map[string]any{"outcome": "failed", "summary": "Signed in as someone else."})},
+	}
+	if err := svc.RunTask(ctx, newTask()); err != nil {
+		t.Fatal(err)
+	}
+	if got := secretKinds(); got != "[password]" {
+		t.Fatalf("a wrong identity clears the session: %s", got)
+	}
+
 }

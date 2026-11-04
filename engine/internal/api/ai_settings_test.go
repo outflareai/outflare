@@ -120,9 +120,10 @@ func TestAISettings(t *testing.T) {
 	if s["problem"].(map[string]any)["code"] != "ai_model_needed" {
 		t.Errorf("settings without a model = %v", s["problem"])
 	}
-	code, out := owner.do("POST", base+"/missions/plan", map[string]any{"goal": "Book 5 meetings"})
-	if code != 409 || out["error"].(map[string]any)["code"] != "ai_model_needed" {
-		t.Errorf("plan without a model = %d %v", code, out)
+	pb, inputs := "answer-interested-replies", map[string]string{"booking_link": "https://cal.example/ana"}
+	code, out := owner.do("POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs})
+	if code != 409 {
+		t.Errorf("run without a model = %d %v", code, out)
 	}
 	list := owner.must(200, "GET", base+"/integrations/"+cid+"/models", nil)["data"].([]any)
 	if len(list) != 2 || list[0].(map[string]any)["id"] != "gpt-test" {
@@ -144,48 +145,36 @@ func TestAISettings(t *testing.T) {
 	otherConn := owner.must(201, "POST", "/v1/workspaces/"+ws2+"/integrations", map[string]any{"connector": "openai", "credentials": map[string]any{"api_key": openAIKey}})
 	owner.must(400, "PUT", base+"/ai-settings", map[string]any{"integration_id": otherConn["id"], "model": "gpt-test", "input_cents_per_million": 1, "output_cents_per_million": 1})
 
-	// Plans run on OpenAI and their cost is booked to it: 2000 in at 250, 500 out at 1000 = 1 cent.
-	res := owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Book 5 meetings with fintech CFOs"})
-	m := res["mission"].(map[string]any)
-	if m["name"] != "Fintech CFOs" || m["progress"].(map[string]any)["spend_cents"].(float64) != 1 {
-		t.Errorf("planned = %v", m)
-	}
-	if s = owner.must(200, "GET", base+"/ai-settings", nil); s["spent_this_month_cents"].(float64) != 1 {
-		t.Errorf("month spend = %v", s["spent_this_month_cents"])
-	}
-
-	// Outflare's agent runs on OpenAI too. Even autonomous, a reply it
-	// wants to send waits for a person; the lead goes straight in.
-	id := m["id"].(string)
-	owner.must(200, "POST", base+"/missions/"+id+"/approve", map[string]any{"mode": "autonomous", "runner": "builtin"})
-	if n, err := e.srv.RunDueTurns(ctx); err != nil || n != 1 {
+	// Outflare's agent runs on OpenAI and its cost is booked to it: each
+	// model call is 2000 in at 250 and 500 out at 1000, 1 cent. Even
+	// autonomous, a reply it wants to send waits for a person; the lead
+	// goes straight in.
+	run := owner.must(201, "POST", base+"/playbooks/"+pb+"/agent-runs", map[string]any{"inputs": inputs, "mode": "autonomous", "max_spend_cents": 10000})
+	id := run["id"].(string)
+	if n, err := e.srv.RunDueAgentTurns(ctx); err != nil || n != 1 {
 		t.Fatalf("turn = %d, %v", n, err)
 	}
-	d := owner.must(200, "GET", base+"/missions/"+id, nil)
-	m = d["mission"].(map[string]any)
-	if m["turns"].(map[string]any)["summary"] != "Added a lead and drafted a reply." || m["pending_actions"].(float64) != 1 {
-		t.Errorf("after the turn = %v", m)
-	}
-	acts := owner.must(200, "GET", base+"/missions/"+id+"/actions", nil)["data"].([]any)
-	if len(acts) != 1 || !strings.HasSuffix(acts[0].(map[string]any)["path"].(string), "/reply") {
-		t.Errorf("held = %v", acts)
+	run = owner.must(200, "GET", base+"/agent-runs/"+id, nil)["run"].(map[string]any)
+	if run["turn_summary"] != "Added a lead and drafted a reply." || run["held_actions"].(float64) != 1 {
+		t.Errorf("after the turn = %v", run)
 	}
 	if leads := owner.must(200, "GET", base+"/leads", nil)["data"].([]any); len(leads) != 1 {
 		t.Errorf("leads = %d", len(leads))
 	}
-
-	// The monthly limit stops planning and pauses the agent.
-	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": cid, "model": "gpt-test",
-		"input_cents_per_million": 250, "output_cents_per_million": 1000, "monthly_limit_cents": 2})
-	code, out = owner.do("POST", base+"/missions/plan", map[string]any{"goal": "Another goal"})
-	if code != 409 || out["error"].(map[string]any)["code"] != "ai_budget_reached" {
-		t.Errorf("plan over the limit = %d %v", code, out)
+	s = owner.must(200, "GET", base+"/ai-settings", nil)
+	spent := s["spent_this_month_cents"].(float64)
+	if spent < 1 {
+		t.Errorf("month spend = %v", spent)
 	}
-	owner.must(201, "POST", base+"/missions/"+id+"/updates", map[string]any{"kind": "note", "body": "Any news?"})
-	e.srv.RunDueTurns(ctx)
-	m = owner.must(200, "GET", base+"/missions/"+id, nil)["mission"].(map[string]any)
-	if m["status"] != "paused" || !strings.Contains(m["status_reason"].(string), "monthly limit") {
-		t.Errorf("over the limit = %v / %v", m["status"], m["status_reason"])
+
+	// The monthly limit pauses the agent.
+	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": cid, "model": "gpt-test",
+		"input_cents_per_million": 250, "output_cents_per_million": 1000, "monthly_limit_cents": int(spent)})
+	owner.must(201, "POST", base+"/agent-runs/"+id+"/updates", map[string]any{"kind": "instruction", "body": "Any news?"})
+	e.srv.RunDueAgentTurns(ctx)
+	run = owner.must(200, "GET", base+"/agent-runs/"+id, nil)["run"].(map[string]any)
+	if run["status"] != "paused" || !strings.Contains(run["status_reason"].(string), "monthly limit") {
+		t.Errorf("over the limit = %v / %v", run["status"], run["status_reason"])
 	}
 
 	// Each task can have its own model. Routine check-ins move to a
@@ -212,11 +201,11 @@ func TestAISettings(t *testing.T) {
 	if s["task_models"].(map[string]any)["check_in"] == nil {
 		t.Errorf("task models were dropped: %v", s["task_models"])
 	}
-	owner.must(200, "POST", base+"/missions/"+id+"/resume", nil)
-	e.srv.RunDueTurns(ctx) // a person resumed it: the main model
-	e.pool.Exec(ctx, `UPDATE missions SET next_turn_at = now() WHERE id = $1`, id)
+	owner.must(200, "POST", base+"/agent-runs/"+id+"/resume", nil)
+	e.srv.RunDueAgentTurns(ctx) // a person resumed it: the main model
+	e.pool.Exec(ctx, `UPDATE agent_runs SET next_turn_at = now() WHERE id = $1`, id)
 	used = nil
-	e.srv.RunDueTurns(ctx) // nothing new: a routine check-in
+	e.srv.RunDueAgentTurns(ctx) // nothing new: a routine check-in
 	if len(used) == 0 || used[0] != "gpt-other" {
 		t.Errorf("check-in used %v, want gpt-other", used)
 	}

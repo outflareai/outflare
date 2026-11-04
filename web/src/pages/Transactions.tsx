@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, Empty, ErrorText, field, Loading, PageHeader } from "../ui";
-import { DataTable } from "@/components/data-table";
+import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast } from "../ui";
+import { DataTable, type ColumnDef } from "@/components/data-table";
 import { useBrand } from "@/lib/brand";
 import { nameItem } from "@/lib/records";
 import { ago } from "../format";
@@ -50,11 +50,36 @@ function useTransactions(brand: string, record?: string, kind?: Kind | "") {
   useEffect(() => {
     load();
   }, [load]);
-  return { list, next, error, more: () => next && load(next) };
+  const drop = (id: string) => setList((l) => l?.filter((t) => t.id !== id) ?? l);
+  return { list, next, error, more: () => next && load(next), drop };
+}
+
+// deleteTransaction asks, then deletes one transaction into Recently
+// deleted. True when it went.
+async function deleteTransaction(brand: string, t: Transaction): Promise<boolean> {
+  const ok = await confirmAction(
+    `Delete this ${kindLabels[t.kind].toLowerCase()}?`,
+    <>
+      <p>
+        {signed(t, t.amount_minor, t.currency)} from {t.source} is hidden from transactions, Query and the person's page.
+        A billing sync won't add it back while it is deleted.
+      </p>
+      <p>You can restore it from People → Recently deleted for 7 days; then it is gone for good.</p>
+    </>,
+    "Delete",
+  );
+  if (!ok) return false;
+  const { error } = await api.POST("/v1/brands/{brand}/transactions/{transaction}/delete", { params: { path: { brand, transaction: t.id } } });
+  if (error) {
+    toast(errorMessage(error), "error");
+    return false;
+  }
+  toast("Deleted. Restore it from Recently deleted within 7 days.");
+  return true;
 }
 
 // Transactions is the Transactions tab of People.
-export function Transactions({ ws, tabs, onOpen }: { ws: string; tabs: ReactNode; onOpen: (item: string) => void }) {
+export function Transactions({ ws, canManage, tabs, onOpen }: { ws: string; canManage: boolean; tabs: ReactNode; onOpen: (item: string) => void }) {
   const { brand, active } = useBrand(ws);
   useEffect(() => nameItem("transactions", "Transactions"), []);
   return (
@@ -65,7 +90,7 @@ export function Transactions({ ws, tabs, onOpen }: { ws: string; tabs: ReactNode
       />
       {tabs}
       {brand ? (
-        <TransactionsFor key={brand.id} brand={brand.id} onOpen={onOpen} />
+        <TransactionsFor key={brand.id} brand={brand.id} canManage={canManage} onOpen={onOpen} />
       ) : (
         <Empty title="Pick a brand">
           Transactions belong to one brand. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see its transactions.
@@ -75,9 +100,9 @@ export function Transactions({ ws, tabs, onOpen }: { ws: string; tabs: ReactNode
   );
 }
 
-function TransactionsFor({ brand, onOpen }: { brand: string; onOpen: (item: string) => void }) {
+function TransactionsFor({ brand, canManage, onOpen }: { brand: string; canManage: boolean; onOpen: (item: string) => void }) {
   const [kind, setKind] = useState<Kind | "">("");
-  const { list, next, error, more } = useTransactions(brand, undefined, kind);
+  const { list, next, error, more, drop } = useTransactions(brand, undefined, kind);
   return (
     <div className="space-y-3">
       <select aria-label="Kind" className={field} value={kind} onChange={(e) => setKind(e.target.value as Kind | "")}>
@@ -105,6 +130,16 @@ function TransactionsFor({ brand, onOpen }: { brand: string; onOpen: (item: stri
             { id: "who", header: "Who", enableSorting: false, cell: ({ row: { original: t } }) => (t.record_id ? <button type="button" className="underline" onClick={() => onOpen(t.record_id!)}>Open</button> : <span className="text-muted-foreground">–</span>) },
             { id: "source", header: "From", accessorFn: (t) => t.source, cell: ({ row: { original: t } }) => <span className="font-mono text-[12px]">{t.source}</span> },
             { id: "at", header: "When", accessorFn: (t) => t.occurred_at, cell: ({ row: { original: t } }) => <span className="text-muted-foreground">{ago(t.occurred_at)}</span> },
+            ...(canManage ? [{
+              id: "actions",
+              header: "",
+              enableSorting: false,
+              cell: ({ row: { original: t } }) => (
+                <Button variant="ghost" onClick={async () => (await deleteTransaction(brand, t)) && drop(t.id)}>
+                  Delete
+                </Button>
+              ),
+            } satisfies ColumnDef<Transaction, unknown>] : []),
           ]}
         />
       )}

@@ -9,7 +9,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChangePreview } from "./Missions";
+import { ChangePreview } from "@/components/change-preview";
 
 // Agent runs: Outflare's own agent carrying a playbook out in turns, as an
 // agent token on the action layer (docs/actions.md, "Outflare's agent on the

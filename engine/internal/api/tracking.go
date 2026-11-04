@@ -6,6 +6,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/quota"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,13 +19,17 @@ import (
 
 func (s *Server) routesTracking(mux *http.ServeMux) {
 	read, manage := auth.ScopeMailboxesRead, auth.ScopeMailboxesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-domains", s.inBrand(read, s.listTrackingDomains))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-domains", s.inWorkspace(manage, s.addTrackingDomain))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-domains/{id}/check", s.inWorkspace(manage, s.checkTrackingDomain))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-domains/{id}/dns", s.inWorkspace(manage, s.addTrackingDomainDNS))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-domains/{id}/dns/approval", s.inWorkspace(manage, s.trackingDomainDNSApproval))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-domains/{id}/dns/approved", s.inWorkspace(manage, s.trackingDomainDNSApproved))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/tracking-domains/{id}", s.inWorkspace(manage, s.removeTrackingDomain))
+	for _, t := range s.twins("tracking-domains") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inBrand)(read, s.listTrackingDomains))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.addTrackingDomain))
+		mux.HandleFunc("POST "+t.path+"/{id}/check", t.on(s.inWorkspace)(manage, s.owned("tracking_domains", "id", s.checkTrackingDomain)))
+		mux.HandleFunc("POST "+t.path+"/{id}/dns", t.on(s.inWorkspace)(manage, s.owned("tracking_domains", "id", s.addTrackingDomainDNS)))
+		mux.HandleFunc("GET "+t.path+"/{id}/dns/approval", t.on(s.inWorkspace)(manage, s.owned("tracking_domains", "id", s.trackingDomainDNSApproval)))
+		mux.HandleFunc("POST "+t.path+"/{id}/dns/approved", t.on(s.inWorkspace)(manage, s.owned("tracking_domains", "id", s.trackingDomainDNSApproved)))
+		mux.HandleFunc("DELETE "+t.path+"/{id}", t.on(s.inWorkspace)(manage, s.owned("tracking_domains", "id", s.removeTrackingDomain)))
+	}
+	// Moving a domain to another brand is the workspace's: it crosses brands.
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/tracking-domains/{id}", s.inWorkspace(manage, s.moveTrackingDomain))
 	// Click links in emails. Public: the link id is the authority.
 	mux.HandleFunc("GET /c/{id}", s.click)
 	// Campaign redirect links. Public: the code is the authority.
@@ -42,13 +47,15 @@ type trackingDomainView struct {
 	PartnerProgramID *string `json:"partner_program_id"`
 	// HelpCentreID is the help centre the domain serves.
 	HelpCentreID *string `json:"help_centre_id"`
+	// BrandID is the brand whose links the domain carries.
+	BrandID *string `json:"brand_id"`
 }
 
 func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]trackingDomainView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error,
 			(SELECT p.id::text FROM partner_programs p WHERE p.portal_domain_id = d.id),
-			(SELECT h.id::text FROM help_centres h WHERE h.domain_id = d.id) FROM tracking_domains d
+			(SELECT h.id::text FROM help_centres h WHERE h.domain_id = d.id), d.brand_id::text FROM tracking_domains d
 		WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at`, ws, id)
 	if err != nil {
 		return nil, err
@@ -56,7 +63,7 @@ func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]
 	target := s.trackingHost()
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingDomainView, error) {
 		v := trackingDomainView{Domain: tracking.Domain{Target: target}}
-		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID, &v.HelpCentreID)
+		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID, &v.HelpCentreID, &v.BrandID)
 		return v, err
 	})
 	if err != nil || len(list) == 0 {
@@ -85,7 +92,7 @@ func (s *Server) trackingDomain(ctx context.Context, ws, id string) (trackingDom
 
 func (s *Server) listTrackingDomains(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -94,25 +101,8 @@ func (s *Server) listTrackingDomains(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	// A domain tied to a partner program belongs to that program's brand;
-	// the rest serve every brand.
-	if sel.id != "" || sel.in != nil {
-		rows, err := s.pool.Query(r.Context(), `SELECT id::text, brand_id::text FROM partner_programs WHERE workspace_id = $1`, a.WorkspaceID)
-		if err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		brands := map[string]*string{}
-		var id string
-		var brand *string
-		if _, err := pgx.ForEachRow(rows, []any{&id, &brand}, func() error { brands[id] = brand; return nil }); err != nil {
-			s.internal(w, r, err)
-			return
-		}
-		list = slices.DeleteFunc(list, func(d trackingDomainView) bool {
-			return d.PartnerProgramID != nil && !sel.matches(brands[*d.PartnerProgramID])
-		})
-	}
+	// A domain belongs to one brand and carries its links only.
+	list = slices.DeleteFunc(list, func(d trackingDomainView) bool { return !sel.matches(d.BrandID) })
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "target": s.trackingHost()})
 }
 
@@ -141,6 +131,9 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		Domain string `json:"domain"`
 		// A partner program's id or slug: the domain serves its portal.
 		PartnerProgram string `json:"partner_program"`
+		// The brand whose links it carries: the route's, else this one,
+		// else the workspace's first.
+		BrandID *string `json:"brand_id"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -155,6 +148,10 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	brand, err := s.activationBrand(ctx, a, req.BrandID)
+	if !s.activationError(w, r, err) {
+		return
+	}
 	var program *string
 	if req.PartnerProgram != "" {
 		if !a.has(auth.ScopePartnersManage) {
@@ -178,9 +175,9 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `INSERT INTO tracking_domains (workspace_id, domain) VALUES ($1, $2) ON CONFLICT (domain) DO NOTHING RETURNING id`,
-			a.WorkspaceID, domain).Scan(&id)
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `INSERT INTO tracking_domains (workspace_id, domain, brand_id) VALUES ($1, $2, $3) ON CONFLICT (domain) DO NOTHING RETURNING id`,
+			a.WorkspaceID, domain, brand).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errInvalid(domain + " is already in use")
 		}
@@ -197,7 +194,7 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 			}
 			s.forgetHosts()
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_domain.added", "tracking_domain", id, map[string]any{"domain": domain})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_domain.added", "tracking_domain", id, map[string]any{"domain": domain, "brand_id": brand})
 	})
 	var inv errInvalid
 	if errors.As(err, &inv) {
@@ -209,6 +206,75 @@ func (s *Server) addTrackingDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.verifyTrackingDomain(w, r, a.WorkspaceID, id, http.StatusCreated)
+}
+
+// moveTrackingDomain moves a tracking domain to another brand, whose
+// emails then use it for their links. The caller manages both brands. A
+// domain serving a partner portal or help centre stays with that brand.
+func (s *Server) moveTrackingDomain(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	id := r.PathValue("id")
+	var req struct {
+		BrandID *string `json:"brand_id"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.BrandID == nil || strings.TrimSpace(*req.BrandID) == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id is required")
+		return
+	}
+	ctx := r.Context()
+	var cur *string
+	var domain string
+	var tied bool
+	err := errNotFound
+	if validUUID(id) {
+		err = s.pool.QueryRow(ctx, `SELECT brand_id::text, domain,
+				EXISTS (SELECT 1 FROM partner_programs p WHERE p.portal_domain_id = d.id) OR EXISTS (SELECT 1 FROM help_centres h WHERE h.domain_id = d.id)
+			FROM tracking_domains d WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, id).Scan(&cur, &domain, &tied)
+	}
+	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errNotFound) || (err == nil && !a.sees(cur)) {
+		writeError(w, r, http.StatusNotFound, "not_found", "tracking domain not found")
+		return
+	}
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if !a.writes(cur) {
+		writeError(w, r, http.StatusForbidden, "forbidden", "you can't manage the brand this domain belongs to")
+		return
+	}
+	brand, err := s.activationBrand(ctx, a, req.BrandID)
+	if !s.activationError(w, r, err) {
+		return
+	}
+	if cur != nil && *cur == brand {
+		s.verifyTrackingDomain(w, r, a.WorkspaceID, id, http.StatusOK)
+		return
+	}
+	if tied {
+		writeError(w, r, http.StatusConflict, "conflict", domain+" serves a partner portal or help centre, so it stays with that brand")
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE tracking_domains SET brand_id = $3 WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, id, brand); err != nil {
+			return err
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_domain.moved", "tracking_domain", id, map[string]any{"from_brand_id": cur, "brand_id": brand})
+	})
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	s.forgetHosts()
+	d, err := s.trackingDomain(ctx, a.WorkspaceID, id)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 func (s *Server) checkTrackingDomain(w http.ResponseWriter, r *http.Request) {

@@ -33,6 +33,16 @@ Each amount is kept in its own currency and converted to the brand's (`currency`
 - Query has them as `transactions`, for example revenue by month: `SELECT date_trunc('month', occurred_at), sum(brand_amount_minor) FILTER (WHERE kind = 'payment') FROM transactions GROUP BY 1`.
 - Webhooks: `transaction.created` once per transaction, `transaction.updated` when its status changes.
 
-A transaction is the business's record of money: merging two records moves their transactions to the one kept, and erasing a person keeps their transactions, unlinked from them.
+## Deleting and restoring
+
+A wrong or test transaction can be deleted: `POST /v1/brands/{brand}/transactions/{transaction}/delete` (MCP `delete_transaction`), with the `customers.manage` scope. It goes to Recently deleted, like everything in the [7-day recovery window](customers.md):
+
+- While it is there, the list, Query and the record card leave it out.
+- The same `source_id` sent again doesn't add it back: a billing sync skips it, and the API answers 409 `transaction_deleted`. Restore it instead.
+- Restoring it (`POST .../recently-deleted/{deletion}/restore`) within 7 days puts it back as it was. `transaction.created` is not sent again; `deletion.restored` is. If its person or company was merged since, it comes back on the record kept.
+- After 7 days it is purged for good, and the same `source_id` can be sent again.
+- Webhook: `transaction.deleted`.
+
+A transaction is the business's record of money: merging two records moves their transactions to the one kept, and erasing a person keeps their transactions, unlinked from them, including any waiting in Recently deleted.
 
 Operators see what was saved, and amounts not converted, on the Grafana row "Transactions" ([monitoring](monitoring.md)).

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AdAccount, AdCampaign, AdConnection, AdSummaryRow, AdTotals } from "@outflare/sdk";
+import type { AdAccount, AdCampaign, AdConnection, AdSummaryRow, AdTotals, AttributionAdRow } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
@@ -8,15 +9,17 @@ import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Loading, Pag
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
-import { AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
+import { AdTrackingFix, AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
-import { AdTrend, CampaignDetail, ConversionActions } from "./AdDrilldown";
+import { AdTrend, CampaignDetail, ConversionActions, outflareColumns } from "./AdDrilldown";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
 // are the platform's own claims, so they are never added across platforms.
 
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+// item opens one campaign ({campaign id}) or one of its ad groups
+// ({campaign id}/{ad group id}) as a page of its own.
+type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void; item?: string };
 
 const platforms: { id: string; name: string }[] = [
   { id: "google_ads", name: "Google Ads" },
@@ -34,6 +37,43 @@ const platforms: { id: string; name: string }[] = [
   { id: "pinterest_ads", name: "Pinterest Ads" },
 ];
 export const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? id;
+
+// An account's id as its platform shows it (Google: 123-456-7890), and a
+// link that opens it there, when the platform has one.
+export const accountId = (connector: string, id: string) => {
+  const digits = id.replace(/\D/g, "");
+  return connector === "google_ads" && digits.length === 10 ? `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}` : id;
+};
+export const accountLink = (connector: string, id: string) => {
+  const digits = id.replace(/\D/g, "");
+  if (!digits) return null;
+  if (connector === "google_ads") return `https://ads.google.com/aw/overview?__e=${digits}`;
+  if (connector === "meta_ads") return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${digits}`;
+  return null;
+};
+
+// A platform's own word (performance_max, maximize_conversions) as words.
+const words = (v: string) => (v && v !== "unknown" && v !== "unspecified" ? v.charAt(0).toUpperCase() + v.slice(1).replace(/_/g, " ") : "");
+
+const targetTone = { over: "red", under: "green", on_target: "blue", no_target: "grey", no_spend: "grey" } as const;
+const targetWord = { over: "Over target", under: "Under target", on_target: "On target", no_target: "", no_spend: "No spend" } as const;
+const trendWord = { scaling_up: "Scaling up", scaling_down: "Scaling down", steady: "Steady", new: "New", stopped: "Stopped", idle: "" } as const;
+const trendTone = { scaling_up: "green", scaling_down: "amber", steady: "grey", new: "blue", stopped: "grey", idle: "grey" } as const;
+
+function AccountName({ a }: { a: AdAccount }) {
+  const link = accountLink(a.connector, a.external_id);
+  return (
+    <div className="space-y-0.5">
+      <div className="font-medium">{a.name || accountId(a.connector, a.external_id)}</div>
+      <div className="text-[12px] text-muted-foreground">
+        {platformName(a.connector)} · <span className="font-mono">{accountId(a.connector, a.external_id)}</span> · {a.currency}
+        {a.time_zone && <> · {a.time_zone}</>}
+        {link && <> · <a className="underline underline-offset-2 hover:text-foreground" href={link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open in {platformName(a.connector)}</a></>}
+        {a.status === "gone" && <> · <Badge tone="grey" title="The sign-in no longer sees this account. Its history is kept.">Gone</Badge></>}
+      </div>
+    </div>
+  );
+}
 
 const ranges = [7, 28, 90] as const;
 const day = (d: Date) => d.toISOString().slice(0, 10);
@@ -54,17 +94,29 @@ const roas = (v: number | null | undefined) => (v === null || v === undefined ? 
 // The platforms whose campaigns Outflare can change (connectors.AdsManager).
 const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads"]);
 
-export function Ads({ ws, canManage, go }: Props) {
+// The page's tabs, as the item in its URL (the overview has none).
+const adsTabs = ["overview", "campaigns", "tracking", "conversions", "accounts"] as const;
+type AdsTab = (typeof adsTabs)[number];
+
+export function Ads({ ws, canManage, go, item }: Props) {
+  // The item is a tab, or a campaign's id (and its ad group's) for its
+  // own page.
+  const tab: AdsTab = (adsTabs as readonly string[]).includes(item ?? "") ? (item as AdsTab) : "overview";
+  const [openId, openGroup] = tab === "overview" && item ? item.split("/") : [];
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
   const [conns, setConns] = useState<AdConnection[] | null>(null);
   const [accounts, setAccounts] = useState<AdAccount[]>([]);
+  // Every account, whatever its brand, so the accounts list can give one a
+  // brand and each connection can say what it sees.
+  const [allAccounts, setAllAccounts] = useState<AdAccount[]>([]);
   const [campaigns, setCampaigns] = useState<AdCampaign[]>([]);
   const [byPlatform, setByPlatform] = useState<AdSummaryRow[]>([]);
   const [totals, setTotals] = useState<AdSummaryRow[]>([]);
   const [byDay, setByDay] = useState<AdSummaryRow[]>([]);
-  const [open, setOpen] = useState<AdCampaign | null>(null);
+  // What Outflare's own attribution credits each campaign, by its id.
+  const [credited, setCredited] = useState<Record<string, AttributionAdRow>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -73,21 +125,25 @@ export function Ads({ ws, canManage, go }: Props) {
     const query = brandKey ? { brand: brandKey } : {};
     const to = new Date();
     const range = { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
-    const [c, a, cp, s, d] = await Promise.all([
+    const [c, a, all, cp, s, d, at] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path } }),
       api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query } }),
+      brandKey ? api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query: { brand: "all" } } }) : null,
       api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...query, ...range, limit: 200 } } }),
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "connector" } } }),
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "day" } } }),
+      api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...query, ...range } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
     setError(a.error || cp.error || s.error ? errorMessage(a.error ?? cp.error ?? s.error) : "");
     setConns(c.data.data);
     setAccounts(a.data?.data ?? []);
+    setAllAccounts((all ? all.data?.data : a.data?.data) ?? []);
     setCampaigns(cp.data?.data ?? []);
     setByPlatform(s.data?.data ?? []);
     setTotals(s.data?.totals ?? []);
     setByDay(d.data?.data ?? []);
+    setCredited(Object.fromEntries((at.data?.data ?? []).map((r) => [r.id, r])));
   }, [ws, brandKey, days]);
   useEffect(() => {
     load();
@@ -116,6 +172,36 @@ export function Ads({ ws, canManage, go }: Props) {
     toast(kind === "budget" ? "Budget change sent to the platform. It shows here once the platform confirms it." : `${kind === "pause" ? "Pause" : "Resume"} sent to the platform. It shows here once the platform confirms it.`);
     setTimeout(load, 3000);
   }
+  // The brand's own target cost per conversion, for a campaign or for an
+  // account's campaigns without one. Nothing changes on the platform.
+  async function setTarget(kind: "campaigns" | "accounts", id: string, name: string, currency: string, current: number | null, own: boolean) {
+    const r = await ask({
+      title: `Target cost per conversion for ${name}`,
+      body:
+        kind === "campaigns"
+          ? `In ${currency}. Outflare compares the campaign's cost per conversion with it and says whether it is over or under. Nothing changes in the ad platform.`
+          : `In ${currency}, for every campaign of this account without a target of its own. Nothing changes in the ad platform.`,
+      input: { label: "Target cost per conversion", type: "number", value: current ? (current / 1e6).toFixed(2) : "", placeholder: "25.00" },
+      choices: [
+        { label: "Cancel", value: "cancel", variant: "ghost" },
+        ...(own ? [{ label: "Clear", value: "clear", variant: "ghost" as const }] : []),
+        { label: "Set the target", value: "ok", variant: "primary" },
+      ],
+    });
+    if (!r || r.choice === "cancel") return;
+    const v = Number(r.value);
+    if (r.choice === "ok" && !(v > 0)) return toast("Enter an amount above zero.", "error");
+    const body = { cost_per_conversion_micros: r.choice === "clear" ? null : Math.round(v * 1e6) };
+    const path = { ws, id };
+    const { error } =
+      kind === "campaigns"
+        ? await api.PUT("/v1/workspaces/{ws}/ads/campaigns/{id}/target", { params: { path }, body })
+        : await api.PUT("/v1/workspaces/{ws}/ads/accounts/{id}/target", { params: { path }, body });
+    if (error) return toast(errorMessage(error), "error");
+    toast(r.choice === "clear" ? "Target cleared." : "Target set.");
+    load();
+  }
+
   async function setBudget(c: AdCampaign) {
     const current = c.daily_budget_micros ? (c.daily_budget_micros / 1e6).toFixed(2) : "";
     const r = await ask({
@@ -151,7 +237,7 @@ export function Ads({ ws, canManage, go }: Props) {
   const header = (
     <PageHeader
       title="Paid ads"
-      description="Spend, clicks and the conversions each platform reports, from your own ad accounts, by brand. Outflare never changes your campaigns; it only sends conversions back when you add a rule. Agents use the ads tools."
+      description="Spend, clicks and the conversions each platform reports, from your own ad accounts, by brand. Outflare changes a campaign only when you, or an agent you allow, ask it to."
       action={
         <div className="flex items-center gap-2">
           <div className="flex rounded-md border" role="group" aria-label="Date range">
@@ -159,7 +245,7 @@ export function Ads({ ws, canManage, go }: Props) {
               <button key={r} type="button" className={`px-2.5 py-1 text-[13px] ${r === days ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setDays(r)}>{r} days</button>
             ))}
           </div>
-          {canManage && accounts.length > 0 && <Button variant="ghost" disabled={busy} onClick={syncNow}>Sync now</Button>}
+          {canManage && conns && conns.length > 0 && <Button variant="ghost" disabled={busy} onClick={syncNow}>Sync now</Button>}
           {canManage && brand.brand && campaigns.some((c) => c.status === "active") && <Button variant="danger" disabled={busy} onClick={pauseAll}>Pause all ads</Button>}
         </div>
       }
@@ -167,6 +253,24 @@ export function Ads({ ws, canManage, go }: Props) {
   );
   if (error && !conns) return <div className="space-y-6">{header}<ErrorText>{error}</ErrorText></div>;
   if (!conns) return <div className="space-y-6">{header}<Loading /></div>;
+
+  // One campaign, or one of its ad groups, as a page of its own.
+  if (openId) {
+    const c = campaigns.find((x) => x.id === openId);
+    return (
+      <div className="space-y-6">
+        {header}
+        {c ? (
+          <CampaignDetail key={c.id} ws={ws} campaign={c} groupId={openGroup || undefined} from={range.from} to={range.to}
+            open={(g) => go("ads", g ? `${c.id}/${g}` : c.id)} back={() => go("ads", "campaigns")} />
+        ) : (
+          <Card title="Campaign not found" description={`It didn't spend or run in the last ${days} days, or belongs to another brand.`}>
+            <Button variant="ghost" onClick={() => go("ads", "campaigns")}>All campaigns</Button>
+          </Card>
+        )}
+      </div>
+    );
+  }
 
   if (conns.length === 0)
     return (
@@ -182,10 +286,21 @@ export function Ads({ ws, canManage, go }: Props) {
   return (
     <div className="space-y-6">
       {header}
+      <Tabs value={tab} onValueChange={(v) => go("ads", v === "overview" ? undefined : v)}>
+        <TabsList className="h-8">
+          <TabsTrigger value="overview" className="px-3 text-[12px]">Overview</TabsTrigger>
+          <TabsTrigger value="campaigns" className="px-3 text-[12px]">Campaigns</TabsTrigger>
+          <TabsTrigger value="tracking" className="px-3 text-[12px]">Tracking</TabsTrigger>
+          <TabsTrigger value="conversions" className="px-3 text-[12px]">Send conversions</TabsTrigger>
+          <TabsTrigger value="accounts" className="px-3 text-[12px]">Accounts</TabsTrigger>
+        </TabsList>
+      </Tabs>
       {error && <ErrorText>{error}</ErrorText>}
 
       {conns.filter((c) => c.setup_needed.length > 0).map((c) => <Setup key={c.id} ws={ws} conn={c} canManage={canManage} done={load} />)}
 
+      {tab === "overview" && (
+        <>
       {totals.length === 0 ? null : totals.map((t) => (
         <Stats key={t.currency} cols={5}>
           <Stat label={totals.length > 1 ? `Spend, ${t.currency}` : `Spend, ${days} days`} value={money(t.totals.spend_micros, t.currency)} />
@@ -217,11 +332,16 @@ export function Ads({ ws, canManage, go }: Props) {
 
       <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card />
 
-      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its numbers by day, its ad sets and its ads (Meta and Google). Pause, resume or set the daily budget of a Google Ads, Meta, Microsoft, LinkedIn or TikTok campaign; each change is read back from the platform.`}>
+        </>
+      )}
+
+      {tab === "campaigns" && (
+        <>
+      <Card title="Campaigns" description={`Ranked by spend over the last ${days} days. Open a campaign for its own page: its numbers by day, its ad groups or ad sets and its ads (Google and Meta), each of which opens in turn. Pause, resume or set the daily budget of a Google Ads, Meta, Microsoft, LinkedIn or TikTok campaign; each change is read back from the platform.`}>
         <DataTable
           data={campaigns}
           rowId={(c) => c.id}
-          onRowClick={(c) => setOpen(open?.id === c.id ? null : c)}
+          onRowClick={(c) => go("ads", c.id)}
           searchPlaceholder="Search campaigns"
           hidden={deliveryColumns}
           empty="Campaigns appear after the first sync."
@@ -232,27 +352,66 @@ export function Ads({ ws, canManage, go }: Props) {
               header: "Campaign",
               accessorFn: (c) => `${c.name} ${c.account_name}`,
               cell: ({ row: { original: c } }) => (
-                <div className="space-y-0.5">
-                  <div className="font-medium">{c.name}</div>
+                <div className="min-w-56 space-y-0.5">
+                  <div className="font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400">{c.name || c.external_id}</div>
                   <div className="text-[12px] text-muted-foreground">
-                    {platformName(c.connector)} · {c.account_name}
+                    {platformName(c.connector)}{allAccounts.length > 1 && <> · {c.account_name}</>}
+                    {words(c.objective) && <> · {words(c.objective)}</>}
+                    {words(c.bidding_strategy) && <> · <span title="How the platform bids">{words(c.bidding_strategy)}</span></>}
                     {c.status !== "active" && <> · <Badge tone={c.status === "removed" ? "red" : "grey"} title={c.provider_status}>{c.status === "paused" ? "Paused" : c.status === "removed" ? "Removed" : c.provider_status || "Other"}</Badge></>}
                   </div>
                 </div>
               ),
             },
+            {
+              id: "target",
+              header: "Target / conv.",
+              accessorFn: (c) => c.target_cost_per_conversion_micros ?? -1,
+              cell: ({ row: { original: c } }) => (
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono tabular-nums">{money(c.target_cost_per_conversion_micros, c.currency)}</span>
+                    {targetWord[c.target_status] && <Badge tone={targetTone[c.target_status]} title="Cost per conversion over this range against the target, within a tenth either way is on target">{targetWord[c.target_status]}</Badge>}
+                  </div>
+                  {c.target_from === "account" && <div className="text-[11px] text-muted-foreground">The account's target</div>}
+                  {c.platform_target_cpa_micros != null && <div className="text-[11px] text-muted-foreground">{platformName(c.connector)} bids to {money(c.platform_target_cpa_micros, c.currency)}</div>}
+                  {c.platform_target_roas != null && <div className="text-[11px] text-muted-foreground">{platformName(c.connector)} bids to {Math.round(c.platform_target_roas * 100)}% return</div>}
+                </div>
+              ),
+            },
+            {
+              id: "trend",
+              header: "Trend",
+              accessorFn: (c) => c.spend_change ?? (c.trend === "new" ? 99 : c.trend === "stopped" ? -99 : 0),
+              cell: ({ row: { original: c } }) =>
+                trendWord[c.trend] && (
+                  <span title={`Spend against the ${days} days before: ${money(c.previous_totals.spend_micros, c.currency)}, ${n(c.previous_totals.conversions)} conversions`}>
+                    <Badge tone={trendTone[c.trend]}>
+                      {c.trend === "scaling_up" ? "↑ " : c.trend === "scaling_down" ? "↓ " : ""}
+                      {trendWord[c.trend]}
+                      {c.spend_change != null && ` ${c.spend_change > 0 ? "+" : ""}${Math.round(c.spend_change * 100)}%`}
+                    </Badge>
+                  </span>
+                ),
+            },
             { id: "budget", header: "Daily budget", accessorFn: (c) => c.daily_budget_micros ?? -1, cell: ({ row: { original: c } }) => <span className="font-mono tabular-nums">{money(c.daily_budget_micros, c.currency)}</span> },
             ...metricColumns<AdCampaign>((c) => c.totals, (c) => c.currency),
+            ...outflareColumns<AdCampaign>(credited),
             { id: "brand", header: "Brand", accessorFn: (c) => brand.byId(c.brand_id)?.name ?? "", cell: ({ row: { original: c } }) => <BrandBadge id={c.brand_id} /> },
             {
               id: "manage",
               header: "",
               enableSorting: false,
               cell: ({ row: { original: c } }) =>
-                canManage && manageable.has(c.connector) && c.status !== "removed" && (
+                canManage && (
                   <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                    {c.status === "active" ? <Button variant="ghost" disabled={busy} onClick={() => change(c, "pause")}>Pause</Button> : <Button variant="ghost" disabled={busy} onClick={() => change(c, "resume")}>Resume</Button>}
-                    <Button variant="ghost" disabled={busy} onClick={() => setBudget(c)}>Budget</Button>
+                    <Button variant="ghost" disabled={busy} onClick={() => setTarget("campaigns", c.id, c.name, c.currency, c.target_cost_per_conversion_micros, c.target_from === "campaign")}>Target</Button>
+                    {manageable.has(c.connector) && c.status !== "removed" && (
+                      <>
+                        {c.status === "active" ? <Button variant="ghost" disabled={busy} onClick={() => change(c, "pause")}>Pause</Button> : <Button variant="ghost" disabled={busy} onClick={() => change(c, "resume")}>Resume</Button>}
+                        <Button variant="ghost" disabled={busy} onClick={() => setBudget(c)}>Budget</Button>
+                      </>
+                    )}
                   </div>
                 ),
             },
@@ -260,32 +419,36 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
-      {open && <CampaignDetail key={open.id} ws={ws} campaign={open} from={range.from} to={range.to} onClose={() => setOpen(null)} />}
-
       <AdResults ws={ws} from={range.from} to={range.to} brand={brandKey} go={go} />
 
-      <AdConversions ws={ws} canManage={canManage} accounts={accounts} />
+        </>
+      )}
 
-      <Card title="Ad accounts" description="Every account your connections can see. Give each a brand so its spend counts there, in the costs ledger too; switch one off to stop syncing it.">
+      {tab === "tracking" && (
+        <>
+          <AdTrackingFix ws={ws} accounts={accounts} canManage={canManage} />
+      <AdTrackingHealthCard ws={ws} brand={brandKey || undefined} />
+      <AdTrackingTemplates ws={ws} />
+
+        </>
+      )}
+
+      {tab === "conversions" && <AdConversions ws={ws} canManage={canManage} accounts={accounts} />}
+
+      {tab === "accounts" && (
+        <>
+      <Card title="Ad accounts" description="Every account your connections can see, in every brand. Give each a brand so its campaigns, spend and clicks show under it, in the costs ledger too; switch one off to stop syncing it.">
         <DataTable
-          data={accounts}
+          data={allAccounts}
           rowId={(a) => a.id}
           searchPlaceholder="Search accounts"
-          empty="Accounts appear after the first sync."
+          empty={conns.some((c) => c.accounts > 0) ? "Your connections see accounts, but none are saved yet. Press Sync now." : "Accounts appear after the first sync."}
           columns={[
             {
               id: "account",
               header: "Account",
-              accessorFn: (a) => `${a.name} ${a.external_id}`,
-              cell: ({ row: { original: a } }) => (
-                <div className="space-y-0.5">
-                  <div className="font-medium">{a.name || a.external_id}</div>
-                  <div className="text-[12px] text-muted-foreground">
-                    {platformName(a.connector)} · {a.currency} · {a.time_zone}
-                    {a.status === "gone" && <> · <Badge tone="grey" title="The sign-in no longer sees this account. Its history is kept.">Gone</Badge></>}
-                  </div>
-                </div>
-              ),
+              accessorFn: (a) => `${a.name} ${a.external_id} ${accountId(a.connector, a.external_id)}`,
+              cell: ({ row: { original: a } }) => <AccountName a={a} />,
             },
             {
               id: "brand",
@@ -301,6 +464,19 @@ export function Ads({ ws, canManage, go }: Props) {
                   <BrandBadge id={a.brand_id} />
                 ),
             },
+            {
+              id: "target",
+              header: "Target / conv.",
+              accessorFn: (a) => a.target_cost_per_conversion_micros ?? -1,
+              cell: ({ row: { original: a } }) =>
+                canManage ? (
+                  <Button variant="ghost" onClick={() => setTarget("accounts", a.id, a.name || accountId(a.connector, a.external_id), a.currency, a.target_cost_per_conversion_micros, a.target_cost_per_conversion_micros != null)}>
+                    {a.target_cost_per_conversion_micros != null ? money(a.target_cost_per_conversion_micros, a.currency) : "Set target"}
+                  </Button>
+                ) : (
+                  <span className="font-mono tabular-nums">{money(a.target_cost_per_conversion_micros, a.currency)}</span>
+                ),
+            },
             { id: "synced", header: "Synced", accessorFn: (a) => a.last_synced_at ?? "", cell: ({ row: { original: a } }) => <span className={a.last_error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} title={a.last_error ?? undefined}>{a.sync_on ? (a.last_synced_at ? ago(a.last_synced_at) : "Not yet") : "Off"}</span> },
             {
               id: "actions",
@@ -312,24 +488,38 @@ export function Ads({ ws, canManage, go }: Props) {
         />
       </Card>
 
-      <AdTrackingHealthCard ws={ws} brand={brandKey || undefined} />
-      <AdTrackingTemplates ws={ws} />
-
       <Card title="Connections" description="Your ad platform sign-ins. Add or remove one under Connectors.">
         <div className="space-y-2 text-[13px]">
-          {conns.map((c) => (
-            <div key={c.id} className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <span className="font-medium">{platformName(c.connector)}</span> <span className="text-muted-foreground">{c.name !== platformName(c.connector) && `· ${c.name} `}· {c.accounts === 1 ? "1 account" : `${c.accounts} accounts`}</span>
+          {conns.map((c) => {
+            const seen = allAccounts.filter((a) => a.integration_id === c.id);
+            return (
+              <div key={c.id} className="space-y-1.5 rounded-md border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="font-medium">{platformName(c.connector)}</span> <span className="text-muted-foreground">{c.name !== platformName(c.connector) && `· ${c.name} `}· {c.accounts === 1 ? "1 account" : `${c.accounts} accounts`}</span>
+                  </div>
+                  <div className={c.last_error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} title={c.last_error ?? undefined}>
+                    {c.setup_needed.length > 0 ? "Waiting for setup" : c.last_error ? "Last sync failed" : c.last_ok_at ? `Synced ${ago(c.last_ok_at)}` : "Not synced yet"}
+                  </div>
+                </div>
+                {c.last_error && <p className="text-[12px] text-red-600 dark:text-red-400">{c.last_error}</p>}
+                {seen.map((a) => (
+                  <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 border-t pt-1.5">
+                    <AccountName a={a} />
+                    <div className="flex items-center gap-2">
+                      <BrandBadge id={a.brand_id} />
+                      <span className="text-[12px] text-muted-foreground">{a.sync_on ? "Syncing" : "Not syncing"}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className={c.last_error ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} title={c.last_error ?? undefined}>
-                {c.setup_needed.length > 0 ? "Waiting for setup" : c.last_error ? "Last sync failed" : c.last_ok_at ? `Synced ${ago(c.last_ok_at)}` : "Not synced yet"}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {canManage && <Button variant="ghost" onClick={() => go("connectors", "ads")}>Connect another</Button>}
         </div>
       </Card>
+        </>
+      )}
     </div>
   );
 }

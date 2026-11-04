@@ -291,10 +291,53 @@ func (s *Server) loadIntegration(w http.ResponseWriter, r *http.Request) (connec
 }
 
 // integrationShare is who uses a connection: one brand's own (BrandID), or
-// the workspace's shared with BrandIDs (empty: every brand).
+// the workspace's shared with BrandIDs (empty: every brand). Kind is the
+// connection's kind (connectors.KindFor), empty for the connector's
+// default.
 type integrationShare struct {
 	BrandID  *string
 	BrandIDs []string
+	Kind     string
+}
+
+// errBadKind: brand_kind is one of three words.
+var errBadKind = errInvalid("brand_kind is brand (the whole connection is one brand's), split (its accounts or properties are assigned to brands one by one) or shared (a tool every brand uses)")
+
+// checkKind says what is wrong with a share for a connection of kind
+// kind, or nil: a brand connection is one brand's and shared with no
+// other, a split one is assigned account by account so the connection
+// itself has no brand, and a shared one is no single brand's.
+func checkKind(kind string, sh integrationShare) error {
+	switch kind {
+	case connectors.KindBrand:
+		if len(sh.BrandIDs) > 0 {
+			return errInvalid("a brand connection belongs to one brand: set brand_id and leave brand_ids empty")
+		}
+	case connectors.KindSplit:
+		if sh.BrandID != nil || len(sh.BrandIDs) > 0 {
+			return errInvalid("a split connection's accounts and properties are assigned to brands one by one (PUT .../integrations/{id}/accounts/{account}): leave brand_id and brand_ids empty")
+		}
+	case connectors.KindShared:
+		if sh.BrandID != nil {
+			return errInvalid("a shared connection is a tool every brand uses: leave brand_id empty (brand_ids limits it to some brands)")
+		}
+	default:
+		return errBadKind
+	}
+	return nil
+}
+
+// onlyBrand is the workspace's brand when it has exactly one active
+// brand, else nil: a single-brand company never assigns anything.
+func (s *Server) onlyBrand(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, ws string) (*string, error) {
+	var id *string
+	err := q.QueryRow(ctx, `SELECT min(id::text) FROM brands WHERE workspace_id = $1 AND status = 'active' HAVING count(*) = 1`, ws).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return id, err
 }
 
 // errOwnAndShared: a brand's own connection is not shared with others.
@@ -323,7 +366,8 @@ func setShare(ctx context.Context, tx pgx.Tx, ws, id string, sh integrationShare
 	if ids == nil {
 		ids = []string{}
 	}
-	_, err := tx.Exec(ctx, `UPDATE integrations SET brand_id = $3, brand_ids = $4::uuid[], updated_at = now() WHERE workspace_id = $1 AND id = $2`, ws, id, sh.BrandID, ids)
+	_, err := tx.Exec(ctx, `UPDATE integrations SET brand_id = $3, brand_ids = $4::uuid[], brand_kind = COALESCE(NULLIF($5, ''), brand_kind), updated_at = now()
+		WHERE workspace_id = $1 AND id = $2`, ws, id, sh.BrandID, ids, sh.Kind)
 	return err
 }
 
@@ -367,12 +411,17 @@ func (s *Server) createIntegration(w http.ResponseWriter, r *http.Request) {
 		Credentials map[string]string `json:"credentials"`
 		BrandID     *string           `json:"brand_id"`
 		BrandIDs    []string          `json:"brand_ids"`
+		BrandKind   string            `json:"brand_kind"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	share, err := s.integrationShareFrom(r.Context(), a.WorkspaceID, req.BrandID, req.BrandIDs)
 	if s.allocError(w, r, err) {
+		return
+	}
+	share.Kind = req.BrandKind
+	if req.BrandKind != "" && s.allocError(w, r, checkKind(req.BrandKind, share)) {
 		return
 	}
 	def, ok := s.integrations.Registry.Definition(req.Connector)
@@ -456,15 +505,26 @@ func (s *Server) updateIntegration(w http.ResponseWriter, r *http.Request) {
 		Config      json.RawMessage   `json:"config"`
 		BrandID     optional[string]  `json:"brand_id"`
 		BrandIDs    *[]string         `json:"brand_ids"`
+		BrandKind   *string           `json:"brand_kind"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
 	var share *integrationShare
-	if req.BrandID.Set || req.BrandIDs != nil {
+	if req.BrandID.Set || req.BrandIDs != nil || req.BrandKind != nil {
 		// Unchanged parts keep their value; moving a connection to a brand
-		// stops sharing it.
+		// stops sharing it, and a new kind starts from what suits it.
 		brand, brands := i.BrandID, i.BrandIDs
+		kind := i.BrandKind
+		if req.BrandKind != nil && *req.BrandKind != i.BrandKind {
+			kind = *req.BrandKind
+			if kind != connectors.KindBrand {
+				brand = nil
+			}
+			if kind != connectors.KindShared {
+				brands = nil
+			}
+		}
 		if req.BrandID.Set {
 			brand = req.BrandID.Value
 			if brand != nil && req.BrandIDs == nil {
@@ -474,8 +534,21 @@ func (s *Server) updateIntegration(w http.ResponseWriter, r *http.Request) {
 		if req.BrandIDs != nil {
 			brands = *req.BrandIDs
 		}
+		// Without a kind, naming one brand makes it that brand's, and
+		// sharing it with brands makes it a shared tool.
+		if req.BrandKind == nil {
+			if brand != nil {
+				kind = connectors.KindBrand
+			} else if len(brands) > 0 {
+				kind = connectors.KindShared
+			}
+		}
 		sh, err := s.integrationShareFrom(r.Context(), a.WorkspaceID, brand, brands)
 		if s.allocError(w, r, err) {
+			return
+		}
+		sh.Kind = kind
+		if s.allocError(w, r, checkKind(kind, sh)) {
 			return
 		}
 		share = &sh
@@ -548,8 +621,11 @@ func (s *Server) updateIntegration(w http.ResponseWriter, r *http.Request) {
 			if err := setShare(r.Context(), tx, a.WorkspaceID, i.ID, *share); err != nil {
 				return err
 			}
+			if err := rebrandConnection(r.Context(), tx, a.WorkspaceID, i.ID); err != nil {
+				return err
+			}
 			changed = append(changed, "brands")
-			data = map[string]any{"changed": changed, "brand_id": share.BrandID, "brand_ids": len(share.BrandIDs)}
+			data = map[string]any{"changed": changed, "brand_id": share.BrandID, "brand_ids": len(share.BrandIDs), "brand_kind": share.Kind}
 			if share.BrandID != nil {
 				noteBrand(r.Context(), *share.BrandID)
 			}
@@ -655,6 +731,8 @@ type integrationState struct {
 	Name        string `json:"n,omitempty"`
 	// Set when the connection is a brand's own (?brand=).
 	Brand string `json:"b,omitempty"`
+	// The connection's kind (?brand_kind=), empty for the default.
+	Kind string `json:"k,omitempty"`
 	// The pool for the mailbox a mailbox sign-in adds (?pool=).
 	Pool     string `json:"o,omitempty"`
 	Verifier string `json:"v"`
@@ -664,9 +742,9 @@ type integrationState struct {
 // share is who uses the connection the sign-in makes.
 func (st integrationState) share() integrationShare {
 	if st.Brand == "" {
-		return integrationShare{}
+		return integrationShare{Kind: st.Kind}
 	}
-	return integrationShare{BrandID: &st.Brand}
+	return integrationShare{BrandID: &st.Brand, Kind: st.Kind}
 }
 
 func (s *Server) integrationRedirectURI() string {
@@ -728,8 +806,15 @@ func (s *Server) integrationAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		brand = id
 	}
+	kind := r.URL.Query().Get("brand_kind")
+	if kind != "" {
+		if err := checkKind(kind, integrationShare{BrandID: nilIfEmpty(brand)}); err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", string(err.(errInvalid)))
+			return
+		}
+	}
 	st, _ := json.Marshal(integrationState{
-		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand, Pool: pool,
+		Workspace: a.WorkspaceID, Actor: a.ActorID, ActorType: a.ActorType, Connector: def.ID, Name: cleanName(r.URL.Query().Get("name")), Return: back, Brand: brand, Kind: kind, Pool: pool,
 		Verifier: newID() + newID(), Expires: time.Now().Add(15 * time.Minute).Unix(),
 	})
 	// The verifier rides inside the signed state; the state is sealed so the
@@ -935,19 +1020,36 @@ func (s *Server) saveIntegration(ctx context.Context, p *principal, ws string, d
 		if out, err = s.integrations.Insert(ctx, tx, ws, def.ID, method, name, creds, account, p.ActorID); err != nil {
 			return err
 		}
-		if share.BrandID != nil || len(share.BrandIDs) > 0 {
-			if err := setShare(ctx, tx, ws, out.ID, share); err != nil {
+		// The connection's kind is the one chosen, else the connector's.
+		// A brand connection in a workspace with one brand is that brand's.
+		switch {
+		case share.Kind != "":
+		case share.BrandID != nil:
+			share.Kind = connectors.KindBrand
+		case len(share.BrandIDs) > 0:
+			share.Kind = connectors.KindShared
+		default:
+			share.Kind = out.BrandKind
+		}
+		if share.Kind == connectors.KindBrand && share.BrandID == nil && len(share.BrandIDs) == 0 {
+			if share.BrandID, err = s.onlyBrand(ctx, tx, ws); err != nil {
 				return err
 			}
-			out.BrandID, out.BrandIDs = share.BrandID, share.BrandIDs
-			if share.BrandID != nil {
-				noteBrand(ctx, *share.BrandID)
-			}
+		}
+		if err := setShare(ctx, tx, ws, out.ID, share); err != nil {
+			return err
+		}
+		out.BrandID, out.BrandIDs, out.BrandKind = share.BrandID, share.BrandIDs, share.Kind
+		if out.BrandIDs == nil {
+			out.BrandIDs = []string{}
+		}
+		if share.BrandID != nil {
+			noteBrand(ctx, *share.BrandID)
 		}
 		if err := s.integrations.Connected(ctx, tx, out); err != nil {
 			return err
 		}
-		data := map[string]any{"connector": def.ID, "auth_method": method, "name": name, "via": via, "brand_id": share.BrandID}
+		data := map[string]any{"connector": def.ID, "auth_method": method, "name": name, "via": via, "brand_id": share.BrandID, "brand_kind": share.Kind}
 		if requestID != "" {
 			data["connect_request_id"] = requestID
 			if err := completeConnectRequest(ctx, tx, ws, requestID, out.ID, def); err != nil {

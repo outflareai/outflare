@@ -26,11 +26,13 @@ import (
 
 func (s *Server) routesCookiePolicy(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/site-keys/{id}/cookies", s.inWorkspace(read, s.listSiteCookies))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}", s.inWorkspace(manage, s.updateSiteCookie))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/site-keys/{id}/cookie-scans", s.inWorkspace(manage, s.startCookieScan))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy", s.inWorkspace(read, s.getCookiePolicy))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions", s.inWorkspace(read, s.listCookiePolicyVersions))
+	for _, t := range s.twins("site-keys") {
+		mux.HandleFunc("GET "+t.path+"/{id}/cookies", t.on(s.inWorkspace)(read, s.listSiteCookies))
+		mux.HandleFunc("PATCH "+t.path+"/{id}/cookies/{cookie}", t.on(s.inWorkspace)(manage, s.updateSiteCookie))
+		mux.HandleFunc("POST "+t.path+"/{id}/cookie-scans", t.on(s.inWorkspace)(manage, s.startCookieScan))
+		mux.HandleFunc("GET "+t.path+"/{id}/cookie-policy", t.on(s.inWorkspace)(read, s.getCookiePolicy))
+		mux.HandleFunc("GET "+t.path+"/{id}/cookie-policy/versions", t.on(s.inWorkspace)(read, s.listCookiePolicyVersions))
+	}
 	// Public: the key is the authority, or for the hosted page the key's id.
 	mux.HandleFunc("GET /v1/site/cookie-policy", s.siteCookiePolicy)
 	mux.HandleFunc("POST /v1/site/cookies", s.siteCookieReport)

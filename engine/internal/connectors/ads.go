@@ -53,6 +53,14 @@ type AdCampaign struct {
 	ProviderStatus    string `json:"provider_status"`
 	Objective         string `json:"objective,omitempty"`
 	DailyBudgetMicros *int64 `json:"daily_budget_micros,omitempty"`
+	// BiddingStrategy is how the platform bids, lowercase in its own words
+	// (Google: target_cpa, maximize_conversions, manual_cpc). Empty when the
+	// platform doesn't say; then the stored one is kept.
+	BiddingStrategy string `json:"bidding_strategy,omitempty"`
+	// The cost per conversion or return on spend the platform bids to,
+	// when its strategy has one.
+	TargetCPAMicros *int64   `json:"target_cpa_micros,omitempty"`
+	TargetROAS      *float64 `json:"target_roas,omitempty"`
 }
 
 // AdDay is one campaign's numbers for one day. Conversions and their value
@@ -247,8 +255,9 @@ func MicrosOf(s string) int64 {
 const CapAdsManage = "ads.manage"
 
 // AdsManager changes a campaign on an ad platform: its status (active or
-// paused) and its daily budget. Those are the only changes Outflare makes
-// to ads; every one goes through the action layer for an agent, and is
+// paused) and its daily budget. Those, and the tracking template on URL
+// suffixes (AdTracker), are the only changes Outflare makes to ads; every
+// one goes through the action layer for an agent, and a campaign change is
 // read back from the platform afterwards (AdCampaign) to confirm it took.
 type AdsManager interface {
 	Connector
@@ -260,6 +269,47 @@ type AdsManager interface {
 	// SetCampaignDailyBudget sets a campaign's daily budget, in micros of
 	// the account's currency. Platforms that round to a minor unit round.
 	SetCampaignDailyBudget(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string, micros int64) error
+}
+
+// CapAdsTracking marks a connector that implements AdTracker.
+const CapAdsTracking = "ads.tracking"
+
+// Tracking levels, where a platform keeps an ad's URL suffix. The lowest
+// level that has one wins, so an ad uses its own, else its ad group's,
+// its campaign's, then its account's.
+const (
+	TrackingAccount  = "account"
+	TrackingCampaign = "campaign"
+	TrackingAdGroup  = "ad_group"
+	TrackingAd       = "ad"
+)
+
+// TrackingChange is one URL suffix (or set of URL parameters) that needs
+// Outflare's tracking template: where it is, what it says, and what it
+// will say with the template added.
+type TrackingChange struct {
+	Level  string `json:"level"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+	// Error is why the platform refused this one, after ApplyTracking.
+	Error string `json:"error,omitempty"`
+}
+
+// AdTracker puts Outflare's tracking template on every ad of an account:
+// on the account's own URL suffix, and on each campaign, ad group or ad
+// suffix that would override it without the template. It changes those
+// fields only, and keeps every parameter already in them.
+type AdTracker interface {
+	Connector
+	// TrackingPlan reads the account's URL suffixes and returns the
+	// changes that leave every ad with the template (template is the
+	// network's adtrack template). Empty when nothing needs changing.
+	TrackingPlan(ctx context.Context, c *Client, creds Creds, acct AdAccount, template string) ([]TrackingChange, error)
+	// ApplyTracking makes the changes, and returns them with Error set on
+	// the ones the platform refused. An error means none were made.
+	ApplyTracking(ctx context.Context, c *Client, creds Creds, acct AdAccount, changes []TrackingChange) ([]TrackingChange, error)
 }
 
 // CapAdsConversions marks a connector that implements ConversionSender.
@@ -298,7 +348,10 @@ type AdConversion struct {
 	Emails      []string
 	Phones      []string
 	PhoneDigits []string
-	ExternalID  string
+	// GoogleEmails are the same addresses hashed with HashGoogleEmail,
+	// the way Google's enhanced conversions ask.
+	GoogleEmails []string
+	ExternalID   string
 	// ConsentGranted is true when the person granted ad_user_data; false
 	// means it was not asked where the law allows sending without it.
 	ConsentGranted bool
@@ -339,6 +392,18 @@ func HashID(v string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// HashGoogleEmail hashes an email the way Google Ads asks for enhanced
+// conversions and Customer Match: like HashID, and for gmail.com and
+// googlemail.com addresses without the dots before the @, which Gmail
+// ignores.
+func HashGoogleEmail(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if local, domain, ok := strings.Cut(v, "@"); ok && (domain == "gmail.com" || domain == "googlemail.com") {
+		v = strings.ReplaceAll(local, ".", "") + "@" + domain
+	}
+	return HashID(v)
+}
+
 // CapAdsAudiences marks a connector that implements AudienceSyncer.
 const CapAdsAudiences = "ads.audiences"
 
@@ -356,6 +421,8 @@ type AudienceMember struct {
 	Emails      []string
 	Phones      []string
 	PhoneDigits []string
+	// GoogleEmails are the addresses hashed with HashGoogleEmail.
+	GoogleEmails []string
 	// ConsentGranted is true when the person granted ad data and ad
 	// personalisation; false means it was not asked where the law allows
 	// adding them without it.

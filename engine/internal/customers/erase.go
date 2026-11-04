@@ -108,6 +108,20 @@ func Erase(ctx context.Context, tx pgx.Tx, workspaceID string, ids, emails []str
 		}
 		gone["event_inbox"] += int(tag.RowsAffected())
 	}
+	// A deleted transaction waiting in Recently deleted is kept like a live
+	// one: unlinked from them, so erasing them doesn't delete it.
+	if ok, err := tableExists(ctx, tx, "transactions"); err != nil {
+		return nil, err
+	} else if ok {
+		if _, err := tx.Exec(ctx, `UPDATE deleted_rows SET record_id = NULL, data = data || '{"record_id": null}'
+			WHERE workspace_id = $1 AND source_table = 'transactions' AND record_id = ANY($2)`, workspaceID, ids); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE deletions SET record_id = NULL
+			WHERE workspace_id = $1 AND kind = 'transaction' AND record_id = ANY($2)`, workspaceID, ids); err != nil {
+			return nil, err
+		}
+	}
 	for _, r := range Erased {
 		ok, err := tableExists(ctx, tx, r.Table)
 		if err != nil {

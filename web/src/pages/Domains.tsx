@@ -283,22 +283,36 @@ function trackingToast(t: TrackingDomain) {
   return "";
 }
 
+// Tracking domains belong to one brand, and each brand's emails use only
+// its own: with all brands picked the card asks for one, and switching
+// brands opens it afresh.
 function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) {
+  const { brand, active } = useBrand(ws);
+  if (!brand) {
+    return (
+      <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address.">
+        <p className="text-sm text-muted-foreground">Each brand's emails use its own tracking domain. Pick {active.length > 1 ? `one of your ${active.length} brands` : "your brand"} in the brand switcher to see or add one.</p>
+      </Card>
+    );
+  }
+  return <BrandTrackingDomains key={brand.id} ws={ws} canManage={canManage} brand={brand.id} brands={active} />;
+}
+
+function BrandTrackingDomains({ ws, canManage, brand, brands }: { ws: string; canManage: boolean; brand: string; brands: { id: string; name: string }[] }) {
   const [list, setList] = useState<TrackingDomain[]>();
   const [target, setTarget] = useState("");
   const fallback = window.location.host;
   const [domain, setDomain] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
-  const path = { ws };
 
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } } });
+    const { data } = await api.GET("/v1/brands/{brand}/tracking-domains", { params: { path: { brand } } });
     if (data) {
       setList(data.data);
       setTarget(data.target);
     }
-  }, [ws]);
+  }, [brand]);
   // Outflare re-checks DNS and the certificate on its own; keep the page
   // current while a domain is on its way.
   const settling = list?.some((t) => !trackingReady(t) && t.https_status !== "failed");
@@ -321,7 +335,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
   async function add(e: FormEvent) {
     e.preventDefault();
     setBusy("add");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains", { params: { path }, body: { domain } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/tracking-domains", { params: { path: { brand } }, body: { domain } });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setDomain("");
@@ -332,7 +346,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
 
   async function check(t: TrackingDomain) {
     setBusy(t.id);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/check", { params: { path: { ws, id: t.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/tracking-domains/{id}/check", { params: { path: { brand, id: t.id } } });
     setBusy("");
     if (error) return toast(errorMessage(error), "error");
     toast(trackingToast(data) || `Not yet: ${data.error}`, data.status === "verified" ? "ok" : "error");
@@ -341,14 +355,24 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
 
   async function remove(t: TrackingDomain) {
     if (!(await confirmAction(`Remove ${t.domain}?`, <p>New emails go back to this server's address. Links in emails already sent keep working while {t.domain} still points here.</p>, "Remove"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/tracking-domains/{id}", { params: { path: { ws, id: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/tracking-domains/{id}", { params: { path: { brand, id: t.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Removed ${t.domain}.`);
     load();
   }
 
+  async function move(t: TrackingDomain, to: string) {
+    const name = brands.find((b) => b.id === to)?.name ?? "the other brand";
+    setBusy(t.id);
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/tracking-domains/{id}", { params: { path: { ws, id: t.id } }, body: { brand_id: to } });
+    setBusy("");
+    if (error) return toast(errorMessage(error), "error");
+    toast(`Moved ${t.domain} to ${name}. ${name}'s emails use it now; pick ${name} in the brand switcher to see it.`);
+    load();
+  }
+
   return (
-    <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address.">
+    <Card title="Tracking domain" description="Optional. Unsubscribe links, and click links on sequences that track clicks, use your own domain instead of this server's address. Each brand's emails use its own.">
       {list === undefined ? <Loading /> : (
         <div className="space-y-3 text-sm">
           {list.length === 0 && <p className="text-muted-foreground">None yet. Links use {fallback}.</p>}
@@ -359,7 +383,13 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                 <Badge tone={trackingBadge(t).tone}>{trackingBadge(t).label}</Badge>
                 {t.last_checked_at && <span className="text-xs text-muted-foreground">checked {ago(t.last_checked_at)}</span>}
                 {canManage && (
-                  <span className="ml-auto flex gap-2">
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                    {brands.length > 1 && (
+                      <select className={`${field} h-8 text-[13px]`} aria-label={`Brand for ${t.domain}`} value={t.brand_id ?? brand} disabled={busy === t.id}
+                        onChange={(e) => e.target.value !== (t.brand_id ?? brand) && move(t, e.target.value)}>
+                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    )}
                     <Button variant="ghost" onClick={() => check(t)} disabled={busy === t.id}>{busy === t.id ? "Checking…" : "Check now"}</Button>
                     <Button variant="ghost" onClick={() => remove(t)}>Remove</Button>
                   </span>
@@ -371,7 +401,7 @@ function TrackingDomains({ ws, canManage }: { ws: string; canManage: boolean }) 
                   <div className="flex flex-wrap items-center gap-2 rounded bg-muted/50 px-2 py-1.5 font-mono text-xs">
                     <span className="text-muted-foreground">CNAME</span> <span>{t.domain}</span> <span className="text-muted-foreground">→</span> <span>{t.target}</span> <Copy text={t.target} />
                   </div>
-                  <TrackingDNS ws={ws} t={t} canManage={canManage} reload={load} />
+                  <TrackingDNS ws={ws} brand={brand} t={t} canManage={canManage} reload={load} />
                 </>
               )}
             </div>
@@ -708,7 +738,7 @@ function TrackingStepMark({ state, n }: { state: TrackingStep["state"]; n: numbe
 }
 
 // The ways to add a tracking domain's CNAME.
-function TrackingDNS({ ws, t, canManage, reload }: { ws: string; t: TrackingDomain; canManage: boolean; reload: () => void }) {
+function TrackingDNS({ ws, brand, t, canManage, reload }: { ws: string; brand: string; t: TrackingDomain; canManage: boolean; reload: () => void }) {
   const records = [{ type: "CNAME", name: t.domain, value: t.target }];
   return (
     <DNSWays ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id }} connections={t.dns_connections} canManage={canManage} reload={reload}
@@ -721,7 +751,7 @@ function TrackingDNS({ ws, t, canManage, reload }: { ws: string; t: TrackingDoma
       intro={<>Connect the Cloudflare account {t.domain} is on.</>}
       after="Then Outflare looks for it on its own over the next hour."
       onAdd={async (integration) => {
-        const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns", { params: { path: { ws, id: t.id } }, body: { integration_id: integration } });
+        const { data, error } = await api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns", { params: { path: { brand, id: t.id } }, body: { integration_id: integration } });
         return { error, held: heldByMission(data) };
       }} />
   );

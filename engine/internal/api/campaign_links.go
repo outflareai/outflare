@@ -26,13 +26,17 @@ const (
 
 func (s *Server) routesCampaignLinks(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-taxonomy", s.inWorkspace(read, s.getTrackingTaxonomy))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-campaigns", s.inWorkspace(read, s.listTrackingCampaigns))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-campaigns", s.inWorkspace(manage, s.createTrackingCampaign))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-campaigns/{id}", s.inWorkspace(read, s.getTrackingCampaign))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/tracking-campaigns/{id}", s.inWorkspace(manage, s.updateTrackingCampaign))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/tracking-campaigns/{id}/links", s.inWorkspace(read, s.listTrackingLinks))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/tracking-campaigns/{id}/links", s.inWorkspace(manage, s.createTrackingLink))
+	for _, t := range s.twins("tracking-taxonomy") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.getTrackingTaxonomy))
+	}
+	for _, t := range s.twins("tracking-campaigns") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listTrackingCampaigns))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createTrackingCampaign))
+		mux.HandleFunc("GET "+t.path+"/{id}", t.on(s.inWorkspace)(read, s.getTrackingCampaign))
+		mux.HandleFunc("PATCH "+t.path+"/{id}", t.on(s.inWorkspace)(manage, s.updateTrackingCampaign))
+		mux.HandleFunc("GET "+t.path+"/{id}/links", t.on(s.inWorkspace)(read, s.listTrackingLinks))
+		mux.HandleFunc("POST "+t.path+"/{id}/links", t.on(s.inWorkspace)(manage, s.createTrackingLink))
+	}
 }
 
 type trackingCampaignView struct {
@@ -93,7 +97,7 @@ func (s *Server) getTrackingTaxonomy(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listTrackingCampaigns(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
-	status, channel, brand := q.Get("status"), q.Get("channel"), q.Get("brand")
+	status, channel := q.Get("status"), q.Get("channel")
 	if status != "" && status != "active" && status != "archived" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is active or archived")
 		return
@@ -102,17 +106,14 @@ func (s *Server) listTrackingCampaigns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", utm.ErrChannel.Error())
 		return
 	}
-	brandID := ""
-	if brand != "" {
-		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, brand)
-		if s.allocError(w, r, err) {
-			return
-		}
-		brandID = id
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
 	}
+	args := []any{a.WorkspaceID, status, channel}
 	rows, err := s.pool.Query(r.Context(), trackingCampaignSelect+`
-		AND ($2 = '' OR c.status = $2) AND ($3 = '' OR c.channel = $3) AND ($4 = '' OR c.brand_id::text = $4)
-		ORDER BY c.created_at DESC LIMIT 1000`, a.WorkspaceID, status, channel, brandID)
+		AND ($2 = '' OR c.status = $2) AND ($3 = '' OR c.channel = $3)`+sel.sql("c.brand_id", &args)+`
+		ORDER BY c.created_at DESC LIMIT 1000`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -138,6 +139,11 @@ func (s *Server) findTrackingCampaign(w http.ResponseWriter, r *http.Request, ws
 	}
 	if err != nil {
 		s.internal(w, r, err)
+		return nil, false
+	}
+	// A brand route reaches its own brand's campaigns only.
+	if !accessFrom(r.Context()).sees(v.BrandID) {
+		writeError(w, r, http.StatusNotFound, "not_found", "campaign not found")
 		return nil, false
 	}
 	return &v, true
@@ -237,10 +243,13 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	if s.allocError(w, r, err) {
 		return
 	}
-	brand, err := s.campaignBrand(r, a.WorkspaceID, in.Brand)
+	// A campaign belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brandID, err := s.activationBrand(r.Context(), a, in.Brand)
 	if s.allocError(w, r, err) {
 		return
 	}
+	brand := &brandID
 	ctx := r.Context()
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -312,9 +321,11 @@ func (s *Server) updateTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	}
 	brand := cur.BrandID
 	if in.Brand != nil {
-		if brand, err = s.campaignBrand(r, a.WorkspaceID, in.Brand); s.allocError(w, r, err) {
+		id, err := s.activationBrand(r.Context(), a, in.Brand)
+		if s.allocError(w, r, err) {
 			return
 		}
+		brand = &id
 	}
 	ctx := r.Context()
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -363,7 +374,7 @@ func (s *Server) listTrackingLinks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, s.publicURL)
+	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, c.BrandID, s.publicURL)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -451,7 +462,7 @@ func (s *Server) createTrackingLink(w http.ResponseWriter, r *http.Request) {
 	if in.Redirect != nil {
 		redirect = *in.Redirect
 	}
-	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, s.publicURL)
+	base, err := tracking.BaseURL(r.Context(), s.pool, a.WorkspaceID, c.BrandID, s.publicURL)
 	if err != nil {
 		s.internal(w, r, err)
 		return

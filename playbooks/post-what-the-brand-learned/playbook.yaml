@@ -1,0 +1,57 @@
+id: post-what-the-brand-learned
+version: 1
+title: Post what the brand learned this week
+summary: Turn the brand's own news, findings and customer questions into a week of posts on X and LinkedIn, each approved by a person.
+description: |
+  The posts that grow a brand's audience share something useful: a
+  number from its own data, an answer to a question customers keep
+  asking, what it shipped and why. This playbook drafts a week of posts
+  from the brand's knowledge and recent results, in the brand's voice,
+  for the team to approve, then reads each post's numbers so the next
+  week leans on what people engaged with.
+tier: obvious
+goals: [customers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: social.publish
+      label: A social account that can post
+      recommended: [x, linkedin]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: per_week
+    label: Posts a week
+    example: "4"
+steps:
+  - say: Read the brand's context and voice, and how recent posts did.
+    tools: [getBrandContext, getSocialOverview, listSocialPosts, getSocialGrowth]
+  - say: Gather this week's material from the brand's knowledge and its customer questions.
+    tools: [listKnowledgeItems, findKnowledgePassages]
+  - say: Draft the week's posts as a series, each held for a person's approval.
+    tools: [createSocialSeries, draftSocialPublication, createSocialPublication]
+  - say: The next week, read each post's numbers and note what to do more of.
+    tools: [listSocialPosts, getSocialGrowth]
+automation:
+  schedule: weekly
+guardrails:
+  - Every post waits for a person's approval.
+  - Never claims a number or a result the brand's knowledge doesn't support.
+  - Never replies to, tags or messages people on the brand's behalf.
+measure:
+  - { metric: Engagement per post, how: "The brand's own posts' numbers, against the last four weeks." }
+  - { metric: Followers, how: Followers gained across the brand's accounts. }
+prompt: |
+  Draft {{per_week}} posts for {{brand}} this week from what the brand
+  learned, shipped and keeps being asked, in its voice, for me to
+  approve. Next week, tell me which ones people engaged with.
+example: |
+  Northpeak's week led with a chart from its own data on how long
+  projects slip. That post had four times the usual engagement, and the
+  next week's plan added two more data posts.

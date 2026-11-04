@@ -261,7 +261,7 @@ func (c *runner) logout() int {
 // ---- Calling ----
 
 // Global flags every operation takes.
-var globalFlags = []string{"url", "token", "workspace", "mission", "idempotency-key", "data", "query", "all", "curl", "raw"}
+var globalFlags = []string{"url", "token", "workspace", "idempotency-key", "data", "query", "all", "curl", "raw"}
 
 func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 	fl, err := parseFlags(args)
@@ -278,7 +278,7 @@ func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 	if v := fl.take("workspace"); v != "" {
 		s.Workspace = v
 	}
-	mission, key, data := fl.take("mission"), fl.take("idempotency-key"), fl.take("data")
+	key, data := fl.take("idempotency-key"), fl.take("data")
 	all, curl, raw := fl.bool("all"), fl.bool("curl"), fl.bool("raw")
 	extraQuery := fl.takeAll("query")
 	if s.URL == "" {
@@ -391,7 +391,7 @@ func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 		target += "?" + q.Encode()
 	}
 	if curl {
-		c.printCurl(op.Method, target, contentType, body, mission, key)
+		c.printCurl(op.Method, target, contentType, body, key)
 		return 0
 	}
 	if s.Token == "" {
@@ -399,9 +399,9 @@ func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 	}
 
 	if all && op.Method == "GET" {
-		return c.paginate(ctx, s, target, mission, raw)
+		return c.paginate(ctx, s, target, raw)
 	}
-	status, resp, hdr, err := c.send(ctx, s, op.Method, target, contentType, body, mission, key)
+	status, resp, hdr, err := c.send(ctx, s, op.Method, target, contentType, body, key)
 	if err != nil {
 		return c.fail(1, err)
 	}
@@ -485,7 +485,7 @@ func (c *runner) unknownFlags(op *operation, fl *flags) error {
 // send makes the request, retrying network errors, 429 and 502–504. Writes
 // are only retried when they carry an Idempotency-Key, so a retry never
 // does anything twice.
-func (c *runner) send(ctx context.Context, s settings, method, target, contentType string, body []byte, mission string, key ...string) (int, []byte, http.Header, error) {
+func (c *runner) send(ctx context.Context, s settings, method, target, contentType string, body []byte, key ...string) (int, []byte, http.Header, error) {
 	idem := ""
 	if len(key) > 0 {
 		idem = key[0]
@@ -519,9 +519,6 @@ func (c *runner) send(ctx context.Context, s settings, method, target, contentTy
 		req.Header.Set("Authorization", "Bearer "+s.Token)
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", "outflare-cli/"+c.env.Version)
-		if mission != "" {
-			req.Header.Set("Outflare-Mission", mission)
-		}
 		if idem != "" {
 			req.Header.Set("Idempotency-Key", idem)
 		}
@@ -566,8 +563,8 @@ func (c *runner) output(status int, body []byte, hdr http.Header, raw bool) int 
 	}
 	switch {
 	case status >= 200 && status < 300:
-		if status == http.StatusAccepted && bytes.Contains(body, []byte(`"mission_action"`)) {
-			fmt.Fprintln(c.env.Stderr, "Held by the mission: it did not run yet (see mission_action).")
+		if status == http.StatusAccepted && bytes.Contains(body, []byte(`"approval_required"`)) {
+			fmt.Fprintln(c.env.Stderr, "Held for a person: it did not run yet (see action).")
 		}
 		return 0
 	default:
@@ -596,10 +593,10 @@ func (c *runner) write(body []byte, raw bool) {
 
 // paginate follows next_cursor and prints one
 // {"data": [...]} with every page.
-func (c *runner) paginate(ctx context.Context, s settings, target, mission string, raw bool) int {
+func (c *runner) paginate(ctx context.Context, s settings, target string, raw bool) int {
 	var all []json.RawMessage
 	for pages := 0; pages < 1000; pages++ {
-		status, body, hdr, err := c.send(ctx, s, "GET", target, "", nil, mission)
+		status, body, hdr, err := c.send(ctx, s, "GET", target, "", nil)
 		if err != nil {
 			return c.fail(1, err)
 		}
@@ -640,14 +637,11 @@ func (c *runner) paginate(ctx context.Context, s settings, target, mission strin
 	return 0
 }
 
-func (c *runner) printCurl(method, target, contentType string, body []byte, mission, key string) {
+func (c *runner) printCurl(method, target, contentType string, body []byte, key string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "curl -X %s %s \\\n  -H \"Authorization: Bearer $OUTFLARE_TOKEN\"", method, shellQuote(target))
 	if contentType != "" {
 		fmt.Fprintf(&b, " \\\n  -H %s", shellQuote("Content-Type: "+contentType))
-	}
-	if mission != "" {
-		fmt.Fprintf(&b, " \\\n  -H %s", shellQuote("Outflare-Mission: "+mission))
 	}
 	if key != "" {
 		fmt.Fprintf(&b, " \\\n  -H %s", shellQuote("Idempotency-Key: "+key))

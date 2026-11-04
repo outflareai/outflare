@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
+import { BulkEditSheet } from "./BulkEdit";
 import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, PageHeader, toast } from "../ui";
 import { ago, plural, stamp } from "../format";
 import { useBrand } from "@/lib/brand";
@@ -47,6 +48,7 @@ function Studio({ ws, brand, canManage, canPublish, open, onOpen }: { ws: string
   const [tables, setTables] = useState<Table[]>([]);
   const [saved, setSaved] = useState<Saved[] | null>(null);
   const [current, setCurrent] = useState<Saved | null>(null);
+  const [bulk, setBulk] = useState(false);
   const [sql, setSQL] = useState("");
   const [viewing, setViewing] = useState<Version | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -248,6 +250,7 @@ function Studio({ ws, brand, canManage, canPublish, open, onOpen }: { ws: string
                   current.mine && { label: current.visibility === "brand" ? "Make private" : "Share with the brand", onClick: () => patch({ visibility: current.visibility === "brand" ? "private" : "brand" }, current.visibility === "brand" ? "Only you see it now." : "Shared with everyone who can query this brand.") },
                   { label: "Save as new query", onClick: saveAs },
                   canPublish && !current.archived_at && { label: "Publish as an endpoint", onClick: () => setPublishing(true) },
+                  !current.archived_at && !dirty && { label: "Bulk edit its records", onClick: () => setBulk(true) },
                   { label: "Archive", onClick: archive, danger: true },
                 ]}
               />
@@ -255,6 +258,7 @@ function Studio({ ws, brand, canManage, canPublish, open, onOpen }: { ws: string
           </div>
         }
       />
+      {bulk && current && <BulkEditSheet ws={ws} brand={brand} source={{ kind: "query", id: current.id, name: current.name }} onClose={() => setBulk(false)} onDone={() => setBulk(false)} />}
       {canManage === false && <p className="text-[12px] text-muted-foreground">You can run queries and download their results. Saving and sharing queries needs the customers.manage permission.</p>}
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="space-y-4">

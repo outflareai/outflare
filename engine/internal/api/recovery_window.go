@@ -59,6 +59,7 @@ const (
 	deletedIdentity     = "identity"
 	deletedRelationship = "relationship"
 	deletedEvent        = "event"
+	deletedTransaction  = "transaction"
 )
 
 // fieldValueRows is the source_table of a field value in deleted_rows.
@@ -72,6 +73,8 @@ var deletedTables = []string{
 	// An undone batch's list places and leads (batches.go); a lead before
 	// what hangs off it.
 	"static_list_members", "leads", "lead_list_members", "lead_sources",
+	// A deleted transaction.
+	"transactions",
 }
 
 // rowID is each table's id, as text, over alias t.
@@ -86,6 +89,7 @@ var rowID = map[string]string{
 	"leads":                   "t.id::text",
 	"lead_list_members":       "t.list_id::text || ':' || t.lead_id::text",
 	"lead_sources":            "t.lead_id::text || ':' || t.provider",
+	"transactions":            "t.id::text",
 }
 
 func (s *Server) routesRecoveryWindow(mux *http.ServeMux) {
@@ -95,6 +99,7 @@ func (s *Server) routesRecoveryWindow(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/records/{record}/identities/{identity}/delete", s.onBrand(manage, s.deleteIdentity))
 	mux.HandleFunc("POST /v1/brands/{brand}/records/{record}/relationships/{relationship}/delete", s.onBrand(manage, s.deleteRelationship))
 	mux.HandleFunc("POST /v1/brands/{brand}/customer-events/{event}/delete", s.onBrand(manage, s.deleteCustomerEvent))
+	mux.HandleFunc("POST /v1/brands/{brand}/transactions/{transaction}/delete", s.onBrand(manage, s.deleteTransaction))
 	mux.HandleFunc("GET /v1/brands/{brand}/recently-deleted", s.onBrand(read, s.listRecentlyDeleted))
 	mux.HandleFunc("GET /v1/brands/{brand}/recently-deleted/{deletion}", s.onBrand(read, s.getDeletion))
 	mux.HandleFunc("POST /v1/brands/{brand}/recently-deleted/{deletion}/restore", s.onBrand(manage, s.restoreDeletion))
@@ -123,7 +128,8 @@ type deletionView struct {
 	RecordID   *string `json:"record_id"`
 	RecordType *string `json:"record_type"`
 	// What was deleted, as people know it: the record's name, the field's
-	// key, the identity's value, the link's kind or the event's name.
+	// key, the identity's value, the link's kind, the event's name, or a
+	// transaction's description (else its kind and source id).
 	Label       string         `json:"label"`
 	Target      string         `json:"target"`
 	Counts      map[string]int `json:"counts"`
@@ -141,6 +147,9 @@ const deletionColumns = `d.id::text, d.brand_id::text, d.kind, d.record_id::text
 		WHEN 'identity' THEN (SELECT x.data->>'value' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'record_identities' LIMIT 1)
 		WHEN 'relationship' THEN (SELECT x.data->>'kind' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'record_relationships' LIMIT 1)
 		WHEN 'event' THEN (SELECT x.data->>'name' FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'customer_events' LIMIT 1)
+		WHEN 'transaction' THEN (SELECT CASE WHEN x.data->>'description' <> '' THEN x.data->>'description'
+			ELSE (x.data->>'kind') || ' ' || (x.data->>'source_id') END
+			FROM deleted_rows x WHERE x.deletion_id = d.id AND x.source_table = 'transactions' LIMIT 1)
 		WHEN 'batch' THEN (SELECT CASE WHEN b.label <> '' THEN b.label ELSE replace(b.kind, '_', ' ') END FROM batches b WHERE b.id::text = d.target)
 	END, ''),
 	d.target, d.counts, d.actor_type, d.user_id::text, d.token_id::text, u.name, d.deleted_at, d.purge_after, d.restored_at, d.not_restored`
@@ -645,6 +654,52 @@ func (s *Server) deleteCustomerEvent(w http.ResponseWriter, r *http.Request) {
 	s.writeDeletion(w, r, err, id, "event")
 }
 
+// deleteTransaction deletes one transaction of the brand into Recently
+// deleted. While it is there, lists, Query and the record card leave it
+// out, and the same source id sent again (a billing sync, the API) is not
+// added back. Restoring puts the row back as it was: no transaction.created
+// is sent again.
+func (s *Server) deleteTransaction(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	if !decodeOptional(w, r, &struct{}{}) {
+		return
+	}
+	id := r.PathValue("transaction")
+	var deletionID string
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if !validUUID(id) {
+			return errNotFound
+		}
+		var kind, source string
+		var rec *string
+		if err := tx.QueryRow(ctx, `SELECT kind, source, record_id::text FROM transactions WHERE id = $1 AND workspace_id = $2 AND brand_id = $3 FOR UPDATE`,
+			id, a.WorkspaceID, a.Brand).Scan(&kind, &source, &rec); errors.Is(err, pgx.ErrNoRows) {
+			return errNotFound
+		} else if err != nil {
+			return err
+		}
+		d, err := startDeletion(ctx, tx, a, deletedTransaction, rec, id)
+		if err != nil {
+			return err
+		}
+		deletionID = d.id
+		if _, err := d.move(ctx, tx, "transactions", `gone.record_id`, `t.workspace_id = $1 AND t.id = $2`, d.ws, id); err != nil {
+			return err
+		}
+		if err := d.finish(ctx, tx); err != nil {
+			return err
+		}
+		metrics.RecoveryDeleted(deletedTransaction)
+		data := map[string]any{"kind": deletedTransaction, "transaction_kind": kind, "source": source}
+		if rec != nil {
+			data["record_id"] = *rec
+		}
+		return recordDeleted(ctx, tx, a, "transaction.deleted", "transaction", id, d, data)
+	})
+	s.writeDeletion(w, r, err, deletionID, "transaction")
+}
+
 // quietKey marks a context whose field changes tell no rule or journey.
 type quietKey struct{}
 
@@ -681,8 +736,8 @@ func (s *Server) listRecentlyDeleted(w http.ResponseWriter, r *http.Request) {
 	where := []string{"d.brand_id = $1", "d.workspace_id = $2", "d.restored_at IS NULL", "d.purge_after > now()", "(d.deleted_at, d.id::text) < ($3, $4)"}
 	args := []any{a.Brand, a.WorkspaceID, beforeAt, beforeID}
 	if v := q.Get("kind"); v != "" {
-		if !slices.Contains([]string{deletedRecord, deletedFieldValue, deletedIdentity, deletedRelationship, deletedEvent, deletedBatch}, v) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is record, field_value, identity, relationship, event or batch")
+		if !slices.Contains([]string{deletedRecord, deletedFieldValue, deletedIdentity, deletedRelationship, deletedEvent, deletedBatch, deletedTransaction}, v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is record, field_value, identity, relationship, event, batch or transaction")
 			return
 		}
 		args = append(args, v)
@@ -795,7 +850,7 @@ func (s *Server) restoreDeletion(w http.ResponseWriter, r *http.Request) {
 		case expired:
 			return errDeletionExpired
 		}
-		res, failed, err := restoreRows(ctx, tx, a, id, kind, rec)
+		res, failed, err := restoreRows(ctx, tx, a, id, kind, target, rec)
 		if err != nil {
 			return err
 		}
@@ -852,7 +907,7 @@ func (s *Server) restoreDeletion(w http.ResponseWriter, r *http.Request) {
 // restoreRows puts back what deletion id still holds and returns what came
 // back, by table, and what couldn't, with why. A row that can't come back
 // stays in the deletion.
-func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec *string) (map[string]int, []notRestored, error) {
+func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind, target string, rec *string) (map[string]int, []notRestored, error) {
 	if kind == deletedBatch {
 		return restoreBatchRows(ctx, tx, a, id)
 	}
@@ -879,7 +934,9 @@ func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec
 			return nil, nil, err
 		}
 	}
-	if kind != deletedRecord && !recordLive {
+	// A transaction is the business's record of money, not the person's:
+	// it comes back whether or not its record is deleted, as live ones stay.
+	if kind != deletedRecord && kind != deletedTransaction && !recordLive {
 		rows, err := tx.Query(ctx, `SELECT source_table, row_id FROM deleted_rows WHERE deletion_id = $1 AND source_table <> 'event_inbox' ORDER BY id`, id)
 		if err != nil {
 			return nil, nil, err
@@ -962,6 +1019,17 @@ func restoreRows(ctx context.Context, tx pgx.Tx, a *access, id, kind string, rec
 	}
 	if err := relinkInbox(ctx, tx, a.WorkspaceID, id); err != nil {
 		return nil, nil, err
+	}
+	if kind == deletedTransaction && res["transactions"] > 0 && rec != nil {
+		// Its record may have been merged since: live transactions moved
+		// to the record kept, so this one goes there too.
+		if _, err := tx.Exec(ctx, `UPDATE transactions t SET record_id = m.id
+			FROM (WITH RECURSIVE m AS (SELECT id, merged_into, 0 AS depth FROM records WHERE id = $2
+				UNION ALL SELECT r.id, r.merged_into, m.depth + 1 FROM records r JOIN m ON r.id = m.merged_into WHERE m.depth < 20)
+				SELECT id FROM m WHERE merged_into IS NULL LIMIT 1) m
+			WHERE t.id = $1::uuid AND t.workspace_id = $3 AND t.record_id = $2 AND m.id <> $2`, target, *rec, a.WorkspaceID); err != nil {
+			return nil, nil, err
+		}
 	}
 	for r := range payments {
 		if err := quietBilling(ctx, tx, a.WorkspaceID, r); err != nil {

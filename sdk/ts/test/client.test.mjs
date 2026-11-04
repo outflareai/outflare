@@ -37,13 +37,14 @@ test("ok passes an empty success through", async () => {
   assert.equal(ok(await gtm.DELETE("/v1/workspaces/{ws}/mailboxes/{id}", { params: { path: { ws: "w", id: "m" } } })), undefined);
 });
 
-test("isHeld spots a write a mission held", async () => {
-  const held = { mission_action: { id: "a1" }, dry_run: false, approval_required: true, message: "Held for approval" };
+test("isHeld spots a write held for a person", async () => {
+  const held = { action: { id: "a1" }, approval_required: true, message: "Held for approval" };
   const { fetch, calls } = fakeFetch(202, held);
-  const gtm = createClient({ token: "t", baseUrl: "http://x", fetch, mission: "m1" });
+  const gtm = createClient({ token: "t", baseUrl: "http://x", fetch, missions: true });
   const data = ok(await gtm.POST("/v1/workspaces/{ws}/leads", { params: { path: { ws: "w" } }, body: { email: "a@b-co.example" } }));
-  assert.equal(calls[0].headers.get("Outflare-Mission"), "m1");
+  assert.equal(calls[0].headers.get("Outflare-Mission"), null);
   assert.ok(isHeld(data));
+  assert.ok(isHeld({ mission_action: { id: "a0" }, dry_run: false, approval_required: true, message: "Held" }));
   assert.ok(!isHeld({ id: "l1", email: "a@b-co.example" }));
   assert.ok(!isHeld(undefined));
 });

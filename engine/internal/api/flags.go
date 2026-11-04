@@ -36,18 +36,20 @@ var flagStatuses = []string{"on", "off", "archived"}
 
 func (s *Server) routesFlags(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/flags", s.inWorkspace(read, s.listFlags))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/flags", s.inWorkspace(manage, s.createFlag))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/flags/evaluate", s.inWorkspace(read, s.evaluateFlags))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/flags/{flag}", s.inWorkspace(read, s.getFlag))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/flags/{flag}", s.inWorkspace(manage, s.updateFlag))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/flags/{flag}", s.inWorkspace(manage, s.archiveFlag))
+	for _, t := range s.twins("flags") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listFlags))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createFlag))
+		mux.HandleFunc("POST "+t.path+"/evaluate", t.on(s.inWorkspace)(read, s.evaluateFlags))
+		mux.HandleFunc("GET "+t.path+"/{flag}", t.on(s.inWorkspace)(read, s.getFlag))
+		mux.HandleFunc("PATCH "+t.path+"/{flag}", t.on(s.inWorkspace)(manage, s.updateFlag))
+		mux.HandleFunc("DELETE "+t.path+"/{flag}", t.on(s.inWorkspace)(manage, s.archiveFlag))
+		mux.HandleFunc("POST "+t.path+"/{flag}/edit-link", t.on(s.inWorkspace)(manage, s.createFlagEditLink))
+	}
 	// Public: the site key in the body is the authority.
 	mux.HandleFunc("POST /v1/site/flags", s.siteFlags)
 	mux.HandleFunc("OPTIONS /v1/site/flags", s.siteEventsPreflight)
 	s.flagGroupRoutes(mux)
 	// The visual editor: the signed edit token is the authority.
-	mux.HandleFunc("POST /v1/workspaces/{ws}/flags/{flag}/edit-link", s.inWorkspace(manage, s.createFlagEditLink))
 	mux.HandleFunc("GET /v1/site/flags/edits", s.siteFlagEdits)
 	mux.HandleFunc("POST /v1/site/flags/edits", s.siteFlagEdits)
 	mux.HandleFunc("OPTIONS /v1/site/flags/edits", s.siteEventsPreflight)
@@ -143,7 +145,7 @@ func (s *Server) loadFlags(ctx context.Context, q pgx.Tx, ws string, where strin
 
 func (s *Server) listFlags(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -162,13 +164,7 @@ func (s *Server) listFlags(w http.ResponseWriter, r *http.Request) {
 		args = append(args, status)
 		where = ` AND status = $2`
 	}
-	// A brand's flags include the shared ones, since those reach its site
-	// too.
-	if sel.id != "" && sel.id != "none" {
-		args = append(args, sel.id)
-		where += fmt.Sprintf(` AND (brand_id IS NULL OR brand_id = $%d)`, len(args))
-		sel.id = ""
-	}
+	// A flag belongs to one brand; nothing is shared by every brand.
 	where += sel.sql("brand_id", &args)
 	list, err := s.loadFlags(r.Context(), nil, a.WorkspaceID, where, args[1:]...)
 	if err != nil {
@@ -232,11 +228,14 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 	if len(f.Description) > flags.MaxDescription {
 		return errInvalid("description is at most 1,000 characters")
 	}
-	if in.BrandID.Set {
-		f.BrandID = in.BrandID.Value
-		if err := s.siteKeyBrand(ctx, a.WorkspaceID, f.BrandID); err != nil {
+	// A flag belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	if in.BrandID.Set || f.BrandID == nil {
+		brand, err := s.optionalBrand(ctx, a, in.BrandID, f.BrandID)
+		if err != nil {
 			return err
 		}
+		f.BrandID = brand
 	}
 	if !a.writes(f.BrandID) {
 		return errDenied("you are limited to some brands: give the flag one of your brands")

@@ -26,11 +26,11 @@ inputs:
     example: Northpeak
 steps:
   - say: Read the channels and sources campaign links can use.
-    tools: [getTrackingTaxonomy]
+    tools: [getBrandTrackingTaxonomy]
   - say: Compare where visits come from with the campaigns that exist, and list the channels with untagged traffic.
-    tools: [getAnalyticsOverview, listTrackingCampaigns]
+    tools: [getBrandAnalyticsOverview, listBrandTrackingCampaigns]
   - say: Create a campaign for each gap and a tagged link for every place the brand shares links.
-    tools: [createTrackingCampaign, createTrackingLink]
+    tools: [createBrandTrackingCampaign, createBrandTrackingLink]
 guardrails:
   - Only creates campaigns and links; it never changes your site or posts anything.
 measure:

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -88,6 +89,11 @@ type Config struct {
 	MetricsToken string
 	MetricsPprof bool
 
+	// ShutdownGrace is OUTFLARE_SHUTDOWN_GRACE (a duration, default 10s):
+	// how long job workers wait for running jobs on SIGTERM before handing
+	// them back to the queue. Keep it under the time the host allows
+	// between SIGTERM and SIGKILL.
+	ShutdownGrace time.Duration
 	// QueryConnections is OUTFLARE_QUERY_CONNECTIONS: how many Query runs
 	// at once on this server, each on its own database connection
 	// (default 3, 0 turns Query off). Count them in the database's
@@ -172,6 +178,7 @@ func Load() (Config, error) {
 		PublicURL:         getenv("PUBLIC_URL", "http://localhost:8080"),
 		Workers:           32,
 		QueryConnections:  3,
+		ShutdownGrace:     10 * time.Second,
 		RateLimit:         600,
 		LogRetentionDays:  30,
 		MetricsAddr:       strings.TrimSpace(os.Getenv("OUTFLARE_METRICS_ADDR")),
@@ -269,6 +276,13 @@ func Load() (Config, error) {
 			return c, fmt.Errorf("WORKERS must be a non-negative integer, got %q", v)
 		}
 		c.Workers = n
+	}
+	if v := os.Getenv("OUTFLARE_SHUTDOWN_GRACE"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return c, fmt.Errorf("OUTFLARE_SHUTDOWN_GRACE must be a duration such as 10s or 1m, got %q", v)
+		}
+		c.ShutdownGrace = d
 	}
 	if v := os.Getenv("OUTFLARE_QUERY_CONNECTIONS"); v != "" {
 		n, err := strconv.Atoi(v)

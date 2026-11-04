@@ -126,3 +126,22 @@ func TestArrival(t *testing.T) {
 		}
 	}
 }
+
+func TestAddTemplate(t *testing.T) {
+	g, _ := NetworkOf("google")
+	tpl := g.Template()
+	for _, tc := range []struct{ in, want string }{
+		{"", tpl},
+		{"utm_source=adwords&gad_campaignid={campaignid}", "utm_source=adwords&gad_campaignid={campaignid}&utm_medium=cpc&utm_term={keyword}&of_campaign={campaignid}&of_adset={adgroupid}&of_ad={creative}&of_placement={network}"},
+		{"?ref=ppc&", "ref=ppc&" + tpl},
+		{tpl, tpl},
+	} {
+		got := AddTemplate(tc.in, tpl)
+		if got != tc.want {
+			t.Errorf("AddTemplate(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if !HasTemplate(got) {
+			t.Errorf("AddTemplate(%q) lacks the template", tc.in)
+		}
+	}
+}

@@ -111,6 +111,11 @@ type fieldView struct {
 	// How long a hand edit of this field wins over other sources, in days
 	// (0: forever); null: the brand's setting.
 	ManualEditDays *int `json:"manual_edit_days"`
+	// Labels only (catalog_labels.go): who owns the field, how long its
+	// data is meant to be kept (null: forever) and where it may be sent.
+	OwnerID       *string  `json:"owner_id"`
+	RetentionDays *int     `json:"retention_days"`
+	Destinations  []string `json:"destinations"`
 }
 
 type recordTypeView struct {
@@ -130,11 +135,15 @@ type eventDefinitionView struct {
 	Properties  []eventProperty `json:"properties"`
 	Status      string          `json:"status"`
 	Sensitivity string          `json:"sensitivity"`
-	FirstSeenAt *time.Time      `json:"first_seen_at"`
-	LastSeenAt  *time.Time      `json:"last_seen_at"`
-	SeenCount   int64           `json:"seen_count"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	// Labels only, as for fields.
+	OwnerID       *string    `json:"owner_id"`
+	RetentionDays *int       `json:"retention_days"`
+	Destinations  []string   `json:"destinations"`
+	FirstSeenAt   *time.Time `json:"first_seen_at"`
+	LastSeenAt    *time.Time `json:"last_seen_at"`
+	SeenCount     int64      `json:"seen_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type eventProperty struct {
@@ -421,6 +430,9 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 		}
 	}
 	c.OptionSets = append(c.OptionSets, sets...)
+	if err := applyFieldLabels(ctx, q, ws, c); err != nil {
+		return nil, err
+	}
 	c.Events = []eventDefinitionView{}
 	if withEvents {
 		if c.Events, err = loadEventDefinitions(ctx, q, ws, c.Brand, nil, ""); err != nil {
@@ -434,7 +446,8 @@ func loadCatalog(ctx context.Context, q pgx.Tx, ws, brand string, withEvents boo
 // resolved id (catalog.Brand).
 func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws, brand string, name *string, status string) ([]eventDefinitionView, error) {
 	rows, err := q.Query(ctx, `
-		SELECT name, label, description, properties, status, sensitivity, first_seen_at, last_seen_at, seen_count, created_at, updated_at
+		SELECT name, label, description, properties, status, sensitivity, owner_id::text, retention_days, destinations,
+		       first_seen_at, last_seen_at, seen_count, created_at, updated_at
 		FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid
 		  AND ($2::text IS NULL OR name = $2) AND ($3 = '' OR status = $3)
 		ORDER BY name`, ws, name, status, brand)
@@ -443,8 +456,9 @@ func loadEventDefinitions(ctx context.Context, q pgx.Tx, ws, brand string, name 
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (eventDefinitionView, error) {
 		var e eventDefinitionView
-		err := row.Scan(&e.Name, &e.Label, &e.Description, &e.Properties, &e.Status, &e.Sensitivity, &e.FirstSeenAt, &e.LastSeenAt,
-			&e.SeenCount, &e.CreatedAt, &e.UpdatedAt)
+		err := row.Scan(&e.Name, &e.Label, &e.Description, &e.Properties, &e.Status, &e.Sensitivity, &e.OwnerID, &e.RetentionDays, &e.Destinations,
+			&e.FirstSeenAt, &e.LastSeenAt, &e.SeenCount, &e.CreatedAt, &e.UpdatedAt)
+		e.Destinations = orEvery(e.Destinations)
 		return e, err
 	})
 }
@@ -739,11 +753,15 @@ type fieldInput struct {
 	Archived    *bool     `json:"archived"`
 	// Days a hand edit wins (0: forever), or null for the brand's.
 	ManualEditDays optional[int] `json:"manual_edit_days"`
+	labelInput
 }
 
 // validateCommon checks the fields that both creating and updating a field
 // may set.
 func (in *fieldInput) validateCommon() error {
+	if err := in.labelInput.validate(); err != nil {
+		return err
+	}
 	if d := in.ManualEditDays; d.Set && d.Value != nil && (*d.Value < 0 || *d.Value > 3650) {
 		return errInvalid("manual_edit_days is 0 (forever) to 3650 days, or null for the brand's setting")
 	}
@@ -874,6 +892,14 @@ func (s *Server) createField(w http.ResponseWriter, r *http.Request) {
 			}
 			return err
 		}
+		if req.labelInput.set() && c.Brand != "" {
+			if err := req.labelInput.checkOwner(ctx, tx, a.WorkspaceID); err != nil {
+				return err
+			}
+			if err := saveFieldLabels(ctx, tx, a.WorkspaceID, c.Brand, t.Key, key, nil, req.labelInput); err != nil {
+				return err
+			}
+		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "field.created", "field", t.Key+"."+key, catalogData(c, map[string]any{
 			"record_type": t.Key, "value_type": vt, "multiple": multiple,
 		})); err != nil {
@@ -913,13 +939,30 @@ func (s *Server) updateField(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "not_found", "field not found")
 		return
 	}
-	if f.Builtin {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "built-in fields cannot be changed")
+	if f.Builtin && (req.Label != nil || req.Description != nil || req.WritePolicy != nil || req.Precedence != nil || req.Filterable != nil ||
+		req.Archived != nil || req.ManualEditDays.Set) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "a built-in field's sensitivity, owner_id, retention_days and destinations can be set; nothing else of it changes")
+		return
+	}
+	if f.Builtin && c.Brand == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "built-in fields are labelled per brand: add a brand first")
 		return
 	}
 	ctx := r.Context()
 	var view *fieldView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := req.labelInput.checkOwner(ctx, tx, a.WorkspaceID); err != nil {
+			return err
+		}
+		if f.Builtin || (req.labelInput.set() && c.Brand != "") {
+			var sens *string
+			if f.Builtin {
+				sens = req.Sensitivity
+			}
+			if err := saveFieldLabels(ctx, tx, a.WorkspaceID, c.Brand, t.Key, f.Key, sens, req.labelInput); err != nil {
+				return err
+			}
+		}
 		archived := "keep"
 		if req.Archived != nil {
 			archived = fmt.Sprint(*req.Archived)
@@ -1171,9 +1214,13 @@ type eventDefinitionInput struct {
 	Properties  *[]eventProperty `json:"properties"`
 	Status      *string          `json:"status"`
 	Sensitivity *string          `json:"sensitivity"`
+	labelInput
 }
 
 func (in *eventDefinitionInput) validate() error {
+	if err := in.labelInput.validate(); err != nil {
+		return err
+	}
 	if in.Label != nil && len(strings.TrimSpace(*in.Label)) > 80 {
 		return errInvalid("label is at most 80 characters")
 	}
@@ -1242,6 +1289,9 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var view eventDefinitionView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := req.labelInput.checkOwner(ctx, tx, a.WorkspaceID); err != nil {
+			return err
+		}
 		b, err := catalogBrand(ctx, tx, a.WorkspaceID, brand)
 		if err != nil {
 			return err
@@ -1250,8 +1300,10 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO event_definitions (workspace_id, brand_id, name, label, description, properties, status, sensitivity, created_by)
-			VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8)`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID, b); err != nil {
+			INSERT INTO event_definitions (workspace_id, brand_id, name, label, description, properties, status, sensitivity, created_by,
+				owner_id, retention_days, destinations)
+			VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8, $10, $11, $12)`, a.WorkspaceID, *req.Name, label, description, props, status, sensitivity, a.ActorID, b,
+			req.OwnerID.Value, req.RetentionDays.Value, req.Destinations.Value); err != nil {
 			if isUnique(err) {
 				return errInvalid("event " + *req.Name + " is already defined; change it with PATCH")
 			}
@@ -1324,6 +1376,9 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var view eventDefinitionView
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := req.labelInput.checkOwner(ctx, tx, a.WorkspaceID); err != nil {
+			return err
+		}
 		b, err := catalogBrand(ctx, tx, a.WorkspaceID, brand)
 		if err != nil {
 			return err
@@ -1342,9 +1397,14 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE event_definitions SET label = COALESCE($3, label), description = COALESCE($4, description),
-				properties = COALESCE($5, properties), status = COALESCE($6, status), sensitivity = COALESCE($7, sensitivity), updated_at = now()
+				properties = COALESCE($5, properties), status = COALESCE($6, status), sensitivity = COALESCE($7, sensitivity),
+				owner_id = CASE WHEN $9 THEN $10::uuid ELSE owner_id END,
+				retention_days = CASE WHEN $11 THEN $12::int ELSE retention_days END,
+				destinations = CASE WHEN $13 THEN $14::text[] ELSE destinations END,
+				updated_at = now()
 			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $8::uuid AND name = $2`,
-			a.WorkspaceID, name, req.Label, req.Description, req.Properties, req.Status, req.Sensitivity, b); err != nil {
+			a.WorkspaceID, name, req.Label, req.Description, req.Properties, req.Status, req.Sensitivity, b,
+			req.OwnerID.Set, req.OwnerID.Value, req.RetentionDays.Set, req.RetentionDays.Value, req.Destinations.Set, req.Destinations.Value); err != nil {
 			return err
 		}
 		action := "event_definition.updated"

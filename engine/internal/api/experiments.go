@@ -23,14 +23,16 @@ import (
 
 func (s *Server) routesExperiments(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/experiments", s.inBrand(read, s.listExperiments))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/experiments", s.inBrand(manage, s.createExperiment))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/experiments/{id}", s.inBrand(read, s.getExperiment))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/experiments/{id}", s.inBrand(manage, s.updateExperiment))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/experiments/{id}", s.inBrand(manage, s.deleteExperiment))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/experiments/{id}/pages", s.inBrand(read, s.listExperimentPages))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/experiments/{id}/start", s.inBrand(manage, s.startExperiment))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/experiments/{id}/stop", s.inBrand(manage, s.stopExperiment))
+	for _, t := range s.twins("experiments") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inBrand)(read, s.listExperiments))
+		mux.HandleFunc("POST "+t.path, t.on(s.inBrand)(manage, s.createExperiment))
+		mux.HandleFunc("GET "+t.path+"/{id}", t.on(s.inBrand)(read, s.getExperiment))
+		mux.HandleFunc("PATCH "+t.path+"/{id}", t.on(s.inBrand)(manage, s.updateExperiment))
+		mux.HandleFunc("DELETE "+t.path+"/{id}", t.on(s.inBrand)(manage, s.deleteExperiment))
+		mux.HandleFunc("GET "+t.path+"/{id}/pages", t.on(s.inBrand)(read, s.listExperimentPages))
+		mux.HandleFunc("POST "+t.path+"/{id}/start", t.on(s.inBrand)(manage, s.startExperiment))
+		mux.HandleFunc("POST "+t.path+"/{id}/stop", t.on(s.inBrand)(manage, s.stopExperiment))
+	}
 }
 
 // experimentView adds the site's host.
@@ -70,7 +72,7 @@ func (s *Server) experimentFor(w http.ResponseWriter, r *http.Request, a *access
 
 func (s *Server) listExperiments(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -190,13 +192,22 @@ func (s *Server) createExperiment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.pool.QueryRow(ctx, `SELECT host, brand_id::text FROM seo_sites WHERE id = $1 AND workspace_id = $2`, req.SiteID, a.WorkspaceID).Scan(&host, &brand)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(brand)) {
+	// An SEO site shared by every brand (SEO sites move to brands in step
+	// 7) can be tested by any brand; the experiment is that brand's.
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && brand != nil && !a.sees(brand)) {
 		bad("site_id is an SEO site in this workspace; GET .../seo-sites lists them")
 		return
 	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	if brand == nil {
+		id, err := s.activationBrand(ctx, a, nil)
+		if s.allocError(w, r, err) {
+			return
+		}
+		brand = &id
 	}
 	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))

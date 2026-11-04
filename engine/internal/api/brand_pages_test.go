@@ -28,6 +28,9 @@ func TestBrandHandlesAreNotPages(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("pageNames in brands.go must match appTabs in web/src/lib/paths.ts:\n brands.go: %s\n paths.ts:  %s", strings.Join(got, " "), strings.Join(want, " "))
 	}
+	if handleProblem("agent-mail") == "" || handleFrom("Agent Mail") != "agent-mail-brand" {
+		t.Fatalf("agent-mail: %q, %q", handleProblem("agent-mail"), handleFrom("Agent Mail"))
+	}
 	if handleProblem("seo") == "" || handleFrom("SEO") != "seo-brand" {
 		t.Fatalf("seo: %q, %q", handleProblem("seo"), handleFrom("SEO"))
 	}

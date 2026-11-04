@@ -13,5 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-cer
 COPY --from=engine /outflare /outflare
 USER outflare
 ENV OUTFLARE_ROLE=browser OUTFLARE_BROWSER=/usr/bin/chromium
+# Go turns on Multipath TCP for listeners by default (Go 1.24+). Nothing
+# here needs it, so turn it off: it only widens what the kernel's TCP code
+# has to handle (for example CVE-2026-98432).
+ENV GODEBUG=multipathtcp=0
 ENTRYPOINT ["/outflare"]
 CMD ["serve"]

@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useState } from "react";
 import type { Experiment, ExperimentGroup, SEOSite } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
@@ -21,7 +23,15 @@ const verdictTone: Record<keyof typeof verdictLabel, Tone> = { better: "green", 
 const metricLabel = { clicks: "Clicks", impressions: "Impressions", ctr: "CTR", position: "Position" } as const;
 const pct = (x: number | null | undefined) => (x === null || x === undefined ? "–" : `${x > 0 ? "+" : ""}${Math.round(x * 100)}%`);
 
-export function Experiments({ ws, canManage, go }: Props) {
+// SEO experiments belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Experiments(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="SEO experiments" brands={active.length} />;
+  return <ExperimentsPage key={brand.id} {...props} />;
+}
+
+function ExperimentsPage({ ws, canManage, go }: Props) {
   const [list, setList] = useState<Experiment[] | null>(null);
   const [sites, setSites] = useState<SEOSite[]>([]);
   const [error, setError] = useState("");
@@ -30,7 +40,7 @@ export function Experiments({ ws, canManage, go }: Props) {
   const brandKey = useBrand(ws).query.brand ?? "";
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/experiments", { params: { path: { ws }, query: brandKey ? { brand: brandKey } : {} } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/experiments", { params: { path: { brand: pickedBrandId() }, query: {} } });
     setList(data?.data ?? []);
     setError(error ? errorMessage(error) : "");
   }, [ws, brandKey]);
@@ -83,14 +93,14 @@ export function Experiments({ ws, canManage, go }: Props) {
   );
 }
 
-function CreateForm({ ws, sites, onDone }: { ws: string; sites: SEOSite[]; onDone: (id?: string) => void }) {
+function CreateForm({ sites, onDone }: { ws: string; sites: SEOSite[]; onDone: (id?: string) => void }) {
   const [f, setF] = useState({ site_id: sites[0]?.id ?? "", name: "", hypothesis: "", pattern: "", design: "holdout", metric: "clicks", start_on: "deploy" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save() {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/experiments", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/experiments", {
+      params: { path: { brand: pickedBrandId() } },
       body: { ...f, design: f.design as "holdout", metric: f.metric as "clicks", start_on: f.start_on as "deploy" },
     });
     setBusy(false);
@@ -131,14 +141,14 @@ function CreateForm({ ws, sites, onDone }: { ws: string; sites: SEOSite[]; onDon
 }
 
 function Detail({ ws, id, canManage, onChange, onClose, go }: { ws: string; id: string; canManage: boolean; onChange: () => void; onClose: () => void; go: (tab: Tab, item?: string) => void }) {
-  const path = { params: { path: { ws, id } } };
+  const path = { params: { path: { brand: pickedBrandId(), id } } };
   const [e, setE] = useState<Experiment | null>(null);
   const [pages, setPages] = useState<{ url: string; group: string }[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/experiments/{id}", path).then(({ data, error }) => { if (data) setE(data); setError(error ? errorMessage(error) : ""); });
-    api.GET("/v1/workspaces/{ws}/experiments/{id}/pages", path).then(({ data }) => setPages(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/experiments/{id}", path).then(({ data, error }) => { if (data) setE(data); setError(error ? errorMessage(error) : ""); });
+    api.GET("/v1/brands/{brand}/experiments/{id}/pages", path).then(({ data }) => setPages(data?.data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, id]);
 
@@ -147,8 +157,8 @@ function Detail({ ws, id, canManage, onChange, onClose, go }: { ws: string; id: 
     setBusy(kind);
     const res =
       kind === "delete"
-        ? await api.DELETE("/v1/workspaces/{ws}/experiments/{id}", path)
-        : await api.POST(kind === "start" ? "/v1/workspaces/{ws}/experiments/{id}/start" : "/v1/workspaces/{ws}/experiments/{id}/stop", path);
+        ? await api.DELETE("/v1/brands/{brand}/experiments/{id}", path)
+        : await api.POST(kind === "start" ? "/v1/brands/{brand}/experiments/{id}/start" : "/v1/brands/{brand}/experiments/{id}/stop", path);
     setBusy("");
     setError(res.error ? errorMessage(res.error) : "");
     if (res.error) return;

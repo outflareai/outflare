@@ -34,23 +34,25 @@ var abStatuses = []string{"draft", "running", "done"}
 
 func (s *Server) routesABTests(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests", s.inWorkspace(read, s.listABTests))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests", s.inWorkspace(manage, s.createABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/plan", s.inWorkspace(read, s.planABTest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}", s.inWorkspace(read, s.getABTest))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ab-tests/{test}", s.inWorkspace(manage, s.updateABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/start", s.inWorkspace(manage, s.startABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/end", s.inWorkspace(manage, s.endABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/freeze", s.inWorkspace(manage, s.freezeABTest))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate", s.inWorkspace(manage, s.duplicateABTest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/checklist", s.inWorkspace(read, s.abTestChecklist))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/ship", s.inWorkspace(manage, s.shipABTest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/previews", s.inWorkspace(read, s.abTestPreviews))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/ab-tests/{test}/checks", s.inWorkspace(manage, s.checkABTestVersion))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/results", s.inWorkspace(read, s.abTestResults))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown", s.inWorkspace(read, s.abTestBreakdown))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/interactions", s.inWorkspace(read, s.abTestInteractions))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ab-tests/{test}/factorial", s.inWorkspace(read, s.abTestFactorial))
+	for _, t := range s.twins("ab-tests") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listABTests))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createABTest))
+		mux.HandleFunc("POST "+t.path+"/plan", t.on(s.inWorkspace)(read, s.planABTest))
+		mux.HandleFunc("GET "+t.path+"/{test}", t.on(s.inWorkspace)(read, s.getABTest))
+		mux.HandleFunc("PATCH "+t.path+"/{test}", t.on(s.inWorkspace)(manage, s.updateABTest))
+		mux.HandleFunc("POST "+t.path+"/{test}/start", t.on(s.inWorkspace)(manage, s.startABTest))
+		mux.HandleFunc("POST "+t.path+"/{test}/end", t.on(s.inWorkspace)(manage, s.endABTest))
+		mux.HandleFunc("POST "+t.path+"/{test}/freeze", t.on(s.inWorkspace)(manage, s.freezeABTest))
+		mux.HandleFunc("POST "+t.path+"/{test}/duplicate", t.on(s.inWorkspace)(manage, s.duplicateABTest))
+		mux.HandleFunc("GET "+t.path+"/{test}/checklist", t.on(s.inWorkspace)(read, s.abTestChecklist))
+		mux.HandleFunc("POST "+t.path+"/{test}/ship", t.on(s.inWorkspace)(manage, s.shipABTest))
+		mux.HandleFunc("GET "+t.path+"/{test}/previews", t.on(s.inWorkspace)(read, s.abTestPreviews))
+		mux.HandleFunc("POST "+t.path+"/{test}/checks", t.on(s.inWorkspace)(manage, s.checkABTestVersion))
+		mux.HandleFunc("GET "+t.path+"/{test}/results", t.on(s.inWorkspace)(read, s.abTestResults))
+		mux.HandleFunc("GET "+t.path+"/{test}/breakdown", t.on(s.inWorkspace)(read, s.abTestBreakdown))
+		mux.HandleFunc("GET "+t.path+"/{test}/interactions", t.on(s.inWorkspace)(read, s.abTestInteractions))
+		mux.HandleFunc("GET "+t.path+"/{test}/factorial", t.on(s.inWorkspace)(read, s.abTestFactorial))
+	}
 }
 
 type abTestView struct {
@@ -127,7 +129,7 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 
 func (s *Server) listABTests(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -149,13 +151,6 @@ func (s *Server) listABTests(w http.ResponseWriter, r *http.Request) {
 		} else {
 			where += ` AND f.key = ` + n
 		}
-	}
-	// A brand's tests include those of shared flags, which reach its site
-	// too.
-	if sel.id != "" && sel.id != "none" {
-		args = append(args, sel.id)
-		where += fmt.Sprintf(` AND (t.brand_id IS NULL OR t.brand_id = $%d)`, len(args))
-		sel.id = ""
 	}
 	where += sel.sql("t.brand_id", &args)
 	list, err := loadABTests(r.Context(), s.pool, a.WorkspaceID, where, args[1:]...)
@@ -336,10 +331,18 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 		if f.Status == "archived" {
 			return errInvalid("this flag is archived; test a live one")
 		}
+		if !a.sees(f.BrandID) {
+			return errInvalid("flag is not a flag of this brand")
+		}
 		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)
 		}
-		t := abTestView{FlagID: f.ID, BrandID: f.BrandID, Status: "draft"}
+		// A test is its flag's brand's.
+		brand, err := s.optionalBrand(ctx, a, optional[string]{}, f.BrandID)
+		if err != nil {
+			return err
+		}
+		t := abTestView{FlagID: f.ID, BrandID: brand, Status: "draft"}
 		if err := applyABInput(&t, f, in); err != nil {
 			return err
 		}

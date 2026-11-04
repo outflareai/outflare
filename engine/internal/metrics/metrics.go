@@ -51,7 +51,7 @@ var (
 
 	jobsDone = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "jobs", Name: "processed_total",
-		Help: "Jobs this process ran, by kind and outcome (succeeded, retried, dead).",
+		Help: "Jobs this process ran, by kind and outcome (succeeded, retried, dead, interrupted by a shutdown and requeued, released: still running when the shutdown grace ended and handed back).",
 	}, []string{"kind", "outcome"})
 	jobDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "jobs", Name: "duration_seconds",
@@ -296,6 +296,10 @@ var (
 		Namespace: namespace, Subsystem: "browser", Name: "steps_total",
 		Help: "Tool calls made by browser tasks, by tool (navigate, read_page, click, type, type_content, fill_secret, report_sign_in, need_person, finish).",
 	}, []string{"tool"})
+	browserSessions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "browser", Name: "sessions_total",
+		Help: "Saved sign-in sessions of brand accounts used by browser tasks, by event: restored (a task started signed in), saved (a run that confirmed the account's identity kept its cookies) or cleared (a run found the wrong identity, a locked account or a refused credential, or the session was too old).",
+	}, []string{"event"})
 	accountTakeovers = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "accounts", Name: "takeovers_total",
 		Help: "Steps of human takeovers of brands' external accounts (a person asked for at MFA, a CAPTCHA, a passkey or a consent screen): requested, started, handed_back, cancelled.",
@@ -310,7 +314,7 @@ var (
 	}, []string{"connector", "kind", "outcome"})
 	adChanges = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "changes_total",
-		Help: "Changes Outflare made to campaigns on ad platforms (pausing, resuming, setting a daily budget), by connector (google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads), kind (pause, resume, budget) and outcome (applied, unverified when the platform did not show the change afterwards, failed, error for a database failure).",
+		Help: "Changes Outflare made to campaigns on ad platforms (pausing, resuming, setting a daily budget, adding the tracking template to URL suffixes), by connector (google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads), kind (pause, resume, budget, tracking) and outcome (applied, unverified when the platform did not show the change afterwards, failed, error for a database failure).",
 	}, []string{"connector", "kind", "outcome"})
 	adAudienceSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "audience_syncs_total",
@@ -339,7 +343,7 @@ var (
 	}, []string{"where"})
 	transactionsSaved = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "transactions", Name: "saved_total",
-		Help: "Transactions sent to Outflare, by where from (api, connector) and outcome (created; duplicate: the same source id again; invalid; error).",
+		Help: "Transactions sent to Outflare, by where from (api, connector) and outcome (created; duplicate: the same source id again; deleted: the same source id as one in Recently deleted, not added back; invalid; error).",
 	}, []string{"from", "outcome"})
 	transactionSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "transactions", Name: "save_seconds",
@@ -686,6 +690,8 @@ var (
 
 	linkPitches = linkCounter("link_pitches_written_total",
 		"Openers the workspace's AI wrote for link pitches, by outcome (written, no_ai, ai_unavailable, ai_failed).", "outcome")
+	linkAutoSends = linkCounter("link_pitches_auto_total",
+		"Link pitches through sequences that skip approval: sent, or why they wait (unsure, spammy_site, daily_cap, site_in_outreach, opted_out, not_pitchable, sequence_archived).", "outcome")
 	linkReplies = linkCounter("link_replies_read_total",
 		"Replies to link pitches the workspace's AI read, by what they say (agreed, declined, wants_payment, wants_content, other, no_ai, ai_unavailable, ai_failed).", "kind")
 	linkLiveChecks = linkCounter("link_live_checks_total",
@@ -772,7 +778,7 @@ var (
 	// restored, then are purged.
 	recoveryDeleted = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "recovery", Name: "deleted_total",
-		Help: "Customer data deleted into the 7-day recovery window, by kind (record, field_value, identity, relationship, event).",
+		Help: "Customer data deleted into the 7-day recovery window, by kind (record, field_value, identity, relationship, event, batch, transaction).",
 	}, []string{"kind"})
 	recoveryRestored = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "recovery", Name: "restored_total",
@@ -866,6 +872,11 @@ var (
 		Help: "Usage readings deleted after 90 days.",
 	})
 
+	connectionsUnassigned = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "connections", Name: "unassigned",
+		Help: "Connections (kind connection: a brand connection with no brand) and their accounts or properties (kind account: an analytics site or ad account no brand has) whose data shows in no brand, across every workspace, as of the last count.",
+	}, []string{"kind"})
+
 	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Namespace: namespace, Name: "build_info",
 		Help: "Always 1; the labels are the running engine version and its role (OUTFLARE_ROLE).",
@@ -888,7 +899,7 @@ var own = []prometheus.Collector{
 	domainConnectLookups, domainConnectDuration,
 	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
-	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, mailSignInsMoved,
+	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, browserSessions, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
@@ -897,7 +908,7 @@ var own = []prometheus.Collector{
 	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest,
 	meetingEvents, meetingEventsPending,
-	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkReplies, linkLiveChecks, webSearches,
+	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
 	redditSends,
 	redditChecks,
@@ -905,6 +916,7 @@ var own = []prometheus.Collector{
 	coverageChecks, coverageReviews, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
+	connectionsUnassigned,
 	inboundReceived, inboundProcessed, inboundBytes, inboundPurged,
 	eventInboxReceived, eventInboxProcessed, eventInboxRejected, eventInboxDuration, eventInboxPending, eventInboxOldest, eventInboxPurged, eventInboxPurgeOverdue,
 	privacyExportsBuilt, privacyExportSeconds, privacyExportBytes, privacyExportsExpired,
@@ -931,6 +943,10 @@ func SetVersion(v, role string) { buildInfo.WithLabelValues(v, role).Set(1) }
 // JobReaped counts a running job of this kind that was requeued because its
 // lease expired.
 func JobReaped(kind string) { jobsReaped.WithLabelValues(kind).Inc() }
+
+// JobReleased counts a job of this kind that was still running when the
+// shutdown grace ended and was handed back to the queue.
+func JobReleased(kind string) { jobsDone.WithLabelValues(kind, JobReleasedOutcome).Inc() }
 
 // SetWorkers records how many job workers this process runs.
 func SetWorkers(n int) { workers.Set(float64(n)) }
@@ -965,6 +981,12 @@ const (
 	JobSucceeded = "succeeded"
 	JobRetried   = "retried"
 	JobDead      = "dead"
+	// JobInterrupted is a handler that stopped for a shutdown; its job is
+	// requeued without using up an attempt.
+	JobInterrupted = "interrupted"
+	// JobReleasedOutcome is a job still running when the shutdown grace
+	// ended, handed back to the queue.
+	JobReleasedOutcome = "released"
 )
 
 // JobStarted counts a job as running and records how long it waited after
@@ -1146,6 +1168,12 @@ func AccountAttempt(purpose, outcome string) {
 // waiting_person.
 func BrowserTask(status string) {
 	browserTasks.WithLabelValues(status).Inc()
+}
+
+// BrowserSession records a saved session of a brand account being
+// restored, saved or cleared by a browser task.
+func BrowserSession(event string) {
+	browserSessions.WithLabelValues(event).Inc()
 }
 
 // BrowserStep records one tool call of a browser task, by tool.
@@ -1453,6 +1481,11 @@ func linkCounter(name, help, label string) *prometheus.CounterVec {
 // LinkPitchWritten records one opener the AI wrote, or why it didn't.
 func LinkPitchWritten(outcome string) { linkPitches.WithLabelValues(outcome).Inc() }
 
+// LinkPitchAutoSent records one pitch through a sequence that skips
+// approval: sent, or why it waits (unsure, spammy_site, daily_cap, or why
+// it couldn't be approved).
+func LinkPitchAutoSent(outcome string) { linkAutoSends.WithLabelValues(outcome).Inc() }
+
 // LinkReplyRead records one reply to a pitch the AI read.
 func LinkReplyRead(kind string) { linkReplies.WithLabelValues(kind).Inc() }
 
@@ -1670,6 +1703,12 @@ func RecoveryRestored(kind, outcome string) { recoveryRestored.WithLabelValues(k
 
 // RecoveryPurged counts a deletion purged after its 7 days.
 func RecoveryPurged(kind string) { recoveryPurged.WithLabelValues(kind).Inc() }
+
+// SetConnectionsUnassigned sets how many connections (kind connection) or
+// accounts (kind account) have no brand.
+func SetConnectionsUnassigned(kind string, n int) {
+	connectionsUnassigned.WithLabelValues(kind).Set(float64(n))
+}
 
 // SetRecoveryPurgeOverdue records how far past its 7 days the oldest
 // deletion waiting for the purge is.

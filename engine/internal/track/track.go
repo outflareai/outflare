@@ -54,6 +54,11 @@ type Event struct {
 	RequestID string
 	Props     map[string]any
 	At        time.Time // when it happened; zero is now
+	// AnonymousID is the website visitor id the person's browser carried
+	// (the operator's own site.js cookie), on sign-up and sign-in. Only
+	// the events workspace sink reads it, to join the person to their
+	// earlier visits; it is never sent to PostHog.
+	AnonymousID string
 }
 
 // Client sends events to PostHog in batches. The zero value is unusable;

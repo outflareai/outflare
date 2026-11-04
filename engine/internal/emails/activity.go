@@ -33,6 +33,9 @@ func (s *Service) addTracking(base, emailID, htmlBody, text string, opens, click
 		if strings.HasPrefix(url, base+"/") || strings.HasPrefix(url, strings.TrimRight(s.PublicURL, "/")+"/u/") {
 			return url // the unsubscribe link, or one already tracked
 		}
+		if len(url) > tracking.MaxLinkLen {
+			return url // too long to store; sent untracked
+		}
 		id, ok := ids[url]
 		if !ok {
 			id = newID()
@@ -43,7 +46,11 @@ func (s *Service) addTracking(base, emailID, htmlBody, text string, opens, click
 	if clicks {
 		htmlBody = hrefs.ReplaceAllStringFunc(htmlBody, func(m string) string {
 			p := hrefs.FindStringSubmatch(m)
-			return p[1] + p[2] + link(html.UnescapeString(p[3])) + p[4]
+			u := html.UnescapeString(p[3])
+			if to := link(u); to != u {
+				return p[1] + p[2] + to + p[4]
+			}
+			return m // left as written
 		})
 		text = tracking.ReplaceLinks(text, link)
 	}

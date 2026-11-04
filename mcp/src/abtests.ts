@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller, brandRef } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -57,6 +58,8 @@ export function registerABTestTools(
   withBrand: <T extends { brand?: string }>(q: T) => T,
 ): void {
   const path = () => ({ ws: workspace() });
+  // Flags and A/B tests belong to one brand: calls go to its routes.
+  const onBrand = brandCaller(gtm, workspace);
 
   server.registerTool(
     "list_ab_tests",
@@ -64,19 +67,19 @@ export function registerABTestTools(
       title: "List A/B tests",
       description: "A/B tests of feature flags: draft, running or done, their control, goals and the version chosen when they ended.",
       inputSchema: {
-        brand: z.string().optional().describe("Only this brand's tests and those of shared flags: a handle or id from list_brands."),
+        brand: brandRef,
         status: z.enum(["draft", "running", "done"]).optional(),
         flag: z.string().optional().describe("Only the tests of this flag, by id or key."),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests", { params: { path: path(), query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
     "get_ab_test",
-    { title: "Get an A/B test", description: "One A/B test.", inputSchema: { test: testRef }, annotations: read },
-    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}", { params: { path: { ...path(), test } } })),
+    { title: "Get an A/B test", description: "One A/B test.", inputSchema: { brand: brandRef, test: testRef }, annotations: read },
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -85,10 +88,10 @@ export function registerABTestTools(
       title: "Get an A/B test's results",
       description:
         "Visitors and conversions (or the mean count or value per visitor) per version for each goal, each version's chance to beat the control, its lift with a 95% range, an always-valid p_value (below 0.05 it is safe to stop, however often you looked; corrected when several versions compete), a sample-ratio warning, and the winner if one is clear. Goals after the first are exploratory and never decide. Live while running; as it stood when it ended once done.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: read,
     },
-    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/results", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/results", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -97,10 +100,10 @@ export function registerABTestTools(
       title: "Break an A/B test's results down",
       description:
         "The first goal's results within groups of visitors, by the visit they first saw their version in: device, source (utm_source, else the referring site, else direct), country, or visitor (new or returning). The largest 8 groups, the rest as other; every comparison is corrected for every version in every group. For learning where a change works, not for picking a winner.",
-      inputSchema: { test: testRef, by: z.enum(["device", "source", "country", "visitor"]).describe("What to group visitors by.") },
+      inputSchema: { brand: brandRef, test: testRef, by: z.enum(["device", "source", "country", "visitor"]).describe("What to group visitors by.") },
       annotations: read,
     },
-    ({ test, by }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/breakdown", { params: { path: { ...path(), test }, query: { by } } })),
+    ({ brand, test, by }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/breakdown", { params: { path: { brand: b, test }, query: { by } } }))),
   );
 
   server.registerTool(
@@ -109,10 +112,10 @@ export function registerABTestTools(
       title: "Read a multivariate A/B test",
       description:
         "A multivariate test's first goal for every combination of versions (cell), each against the all-controls cell (corrected for every cell), the best combination, each flag's own effect pooled over the others, and whether the other flags change this flag's effect (interacts).",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: read,
     },
-    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/factorial", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/factorial", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -121,10 +124,10 @@ export function registerABTestTools(
       title: "Check an A/B test for interactions",
       description:
         "For each other test of another flag that ran at the same time (outside this flag's exclusion group): how many visitors saw both, and whether each version's effect on the first goal differs by the other test's version (interacts, at p < 0.01). An interaction means one change alters the other's effect; read the effects before shipping either.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: read,
     },
-    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/interactions", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/interactions", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -134,6 +137,7 @@ export function registerABTestTools(
       description:
         "How long a test of a flag is likely to take before it starts: from the last 28 days of traffic (on one page if given) and the goal's rate. Gives visitors per version and weeks for true lifts of +5% to +50%, the smallest lift findable in 4 and 8 weeks, and a warning when it won't finish in 8 weeks. Nothing is stored.",
       inputSchema: {
+        brand: brandRef,
         flag: z.string().min(1).describe("The flag's id or key."),
         goal: goal.describe("The goal the test would be judged on."),
         page: z.string().max(500).optional().describe("The page the test changes, such as /pricing, or /docs/* for a section."),
@@ -141,7 +145,7 @@ export function registerABTestTools(
       },
       annotations: read,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/plan", { params: { path: path() }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/plan", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -149,10 +153,10 @@ export function registerABTestTools(
     {
       title: "Get an A/B test AI run",
       description: "A run from suggest_ab_tests, write_ab_test_versions or summarize_ab_test. Poll until status is ready (output holds the answer) or failed (error says why).",
-      inputSchema: { run: z.string().uuid() },
+      inputSchema: { brand: brandRef, run: z.string().uuid() },
       annotations: read,
     },
-    ({ run }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-test-ai-runs/{run}", { params: { path: { ...path(), run } } })),
+    ({ brand, run }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-test-ai-runs/{run}", { params: { path: { brand: b, run } } }))),
   );
 
   if (readOnly) return;
@@ -164,6 +168,7 @@ export function registerABTestTools(
       description:
         "The workspace's own AI model proposes tests from the site's busiest pages, the goals visitors reach, the brand's context and past tests, each with the engine's plan (weeks, findable lift, warning). Returns a queued run: read it with get_ab_test_ai_run. Nothing is created.",
       inputSchema: {
+        brand: brandRef,
         brand_id: z.string().nullable().optional().describe("Use this brand's context (an id from list_brands)."),
         page: z.string().max(500).optional().describe("Only pages under this path."),
         goal: goal.optional().describe("Judge every suggestion on this goal."),
@@ -172,7 +177,7 @@ export function registerABTestTools(
       },
       annotations: { ...write, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/suggestions", { params: { path: path() }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/suggestions", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -182,6 +187,7 @@ export function registerABTestTools(
       description:
         "The workspace's own AI model writes new versions of a flag's content from a prompt, in the brand's voice. Returns a queued run (get_ab_test_ai_run); the versions are proposals: add the ones the person approves to the flag with update_flag.",
       inputSchema: {
+        brand: brandRef,
         flag: z.string().min(1).describe("The flag's id or key."),
         prompt: z.string().min(1).max(2000).describe('What to change and for whom, such as "a shorter, more urgent headline for agencies".'),
         count: z.number().int().min(1).max(4).optional(),
@@ -189,7 +195,7 @@ export function registerABTestTools(
       },
       annotations: { ...write, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/versions", { params: { path: path() }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/versions", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -198,10 +204,10 @@ export function registerABTestTools(
       title: "Summarise a test with AI",
       description:
         "The workspace's own AI model puts a running or finished test's results into plain English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) comes from the engine. Returns a queued run: read it with get_ab_test_ai_run.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: { ...write, openWorldHint: true },
     },
-    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/summary", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/summary", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -210,10 +216,10 @@ export function registerABTestTools(
       title: "Add an A/B test",
       description:
         "Test a feature flag with two or more versions (create_flag) against goals. It starts as a draft; start_ab_test starts measuring. Visitors join when a page shows them the flag's version (the website script sends Experiment Viewed).",
-      inputSchema: { flag: z.string().min(1).describe("The flag's id or key."), ...fields, goals: fields.goals.unwrap() },
+      inputSchema: { brand: brandRef, flag: z.string().min(1).describe("The flag's id or key."), ...fields, goals: fields.goals.unwrap() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests", { params: { path: path() }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -221,10 +227,10 @@ export function registerABTestTools(
     {
       title: "Change an A/B test",
       description: "Its name or hypothesis at any time; its control, goals, guardrails and min_effect only while it is a draft.",
-      inputSchema: { test: testRef, ...fields },
+      inputSchema: { brand: brandRef, test: testRef, ...fields },
       annotations: write,
     },
-    ({ test, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/ab-tests/{test}", { params: { path: { ...path(), test } }, body: body as never })),
+    ({ brand, test, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/ab-tests/{test}", { params: { path: { brand: b, test } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -232,10 +238,10 @@ export function registerABTestTools(
     {
       title: "Start an A/B test",
       description: "Start measuring from now. Turns the flag on if it is off. A flag runs one test at a time.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: write,
     },
-    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/start", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/start", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -243,10 +249,10 @@ export function registerABTestTools(
     {
       title: "End an A/B test",
       description: 'Stop measuring and keep the results, with the version the team chose (decision; "" for none). The flag is left as it is: ship the winner with update_flag.',
-      inputSchema: { test: testRef, decision: z.string().describe('The version to keep, or "" for none.') },
+      inputSchema: { brand: brandRef, test: testRef, decision: z.string().describe('The version to keep, or "" for none.') },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ test, decision }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/end", { params: { path: { ...path(), test } }, body: { decision } })),
+    ({ brand, test, decision }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/end", { params: { path: { brand: b, test } }, body: { decision } }))),
   );
 
   server.registerTool(
@@ -255,10 +261,10 @@ export function registerABTestTools(
       title: "Freeze or unfreeze an A/B test",
       description:
         "frozen true stops new visitors joining a running test while those already in keep counting, so it can finish on the visitors it has (such as before a launch that would change the traffic); false lets them join again.",
-      inputSchema: { test: testRef, frozen: z.boolean() },
+      inputSchema: { brand: brandRef, test: testRef, frozen: z.boolean() },
       annotations: write,
     },
-    ({ test, frozen }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/freeze", { params: { path: { ...path(), test } }, body: { frozen } })),
+    ({ brand, test, frozen }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/freeze", { params: { path: { brand: b, test } }, body: { frozen } }))),
   );
 
   server.registerTool(
@@ -266,10 +272,10 @@ export function registerABTestTools(
     {
       title: "Duplicate an A/B test",
       description: "A new draft with the same flag, control, goals, guardrails and hypothesis, to run a test again or try a variation.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: write,
     },
-    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/duplicate", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/duplicate", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -278,10 +284,10 @@ export function registerABTestTools(
       title: "Check an A/B test before it starts",
       description:
         "What would stop a test measuring anything useful: the flag, another running test of it, whether pages showed its versions lately, whether visitors reach the goal, how long it will take, and guardrails. ready is false while any check fails.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: read,
     },
-    ({ test }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/checklist", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/checklist", { params: { path: { brand: b, test } } }))),
   );
 
   server.registerTool(
@@ -290,10 +296,10 @@ export function registerABTestTools(
       title: "Preview an A/B test's versions",
       description:
         "Links that show each version of a test to whoever opens them, on the pages that showed its flag most lately (or on page), without counting them; and whether a person has checked each version. Give the links to the person to look at: an agent can't judge how a page renders.",
-      inputSchema: { test: testRef, page: z.string().url().optional().describe("A page of the site to give links for.") },
+      inputSchema: { brand: brandRef, test: testRef, page: z.string().url().optional().describe("A page of the site to give links for.") },
       annotations: read,
     },
-    ({ test, page }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/{test}/previews", { params: { path: { ...path(), test }, query: { page } } })),
+    ({ brand, test, page }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/previews", { params: { path: { brand: b, test }, query: { page } } }))),
   );
 
   server.registerTool(
@@ -303,6 +309,7 @@ export function registerABTestTools(
       description:
         "Record what the person saw when they previewed a version: ok when it renders right, broken when it doesn't (a broken version stops the test passing its checklist). Only record what the person told you.",
       inputSchema: {
+        brand: brandRef,
         test: testRef,
         variant: z.string().min(1),
         status: z.enum(["ok", "broken"]),
@@ -310,8 +317,8 @@ export function registerABTestTools(
       },
       annotations: write,
     },
-    ({ test, variant, status, note }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/checks", { params: { path: { ...path(), test } }, body: { variant, status, note } })),
+    ({ brand, test, variant, status, note }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/checks", { params: { path: { brand: b, test } }, body: { variant, status, note } }))),
   );
 
   server.registerTool(
@@ -320,10 +327,10 @@ export function registerABTestTools(
       title: "Ship a version of an A/B test",
       description:
         "Show the chosen version to everyone: its flag gives it all the traffic at full rollout, and a running test ends with it as the decision. Confirm with the person first: visitors see the change at once.",
-      inputSchema: { test: testRef, variant: z.string().min(1).describe("The version to ship, usually the winner from get_ab_test_results.") },
+      inputSchema: { brand: brandRef, test: testRef, variant: z.string().min(1).describe("The version to ship, usually the winner from get_ab_test_results.") },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ test, variant }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/ship", { params: { path: { ...path(), test } }, body: { variant } })),
+    ({ brand, test, variant }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/ship", { params: { path: { brand: b, test } }, body: { variant } }))),
   );
 
   server.registerTool(
@@ -332,10 +339,10 @@ export function registerABTestTools(
       title: "List what past A/B tests taught",
       description:
         "Finished A/B tests, newest first: the hypothesis, the goal, how each came out in a line, the version kept, and the learning the workspace's AI wrote when it ended. q finds tests whose name, hypothesis, flag or learning mention it. Read this before suggesting a new test, so it doesn't repeat one.",
-      inputSchema: { q: z.string().max(200).optional().describe("Words to look for, such as headline or pricing.") },
+      inputSchema: { brand: brandRef, q: z.string().max(200).optional().describe("Words to look for, such as headline or pricing.") },
       annotations: read,
     },
-    ({ q }) => call(() => gtm.GET("/v1/workspaces/{ws}/ab-tests/learnings", { params: { path: path(), query: q ? { q } : {} } })),
+    ({ brand, q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/learnings", { params: { path: { brand: b }, query: q ? { q } : {} } }))),
   );
 
   server.registerTool(
@@ -345,12 +352,13 @@ export function registerABTestTools(
       description:
         "The workspace's own AI model answers a question over the most recent 40 finished tests, citing the tests it drew on. Returns a queued run: read it with get_ab_test_ai_run.",
       inputSchema: {
+        brand: brandRef,
         question: z.string().min(1).max(2000).describe('Such as "What have we learned about headlines on the pricing page?"'),
         brand_id: z.string().uuid().optional().describe("Only this brand's tests and those of shared flags."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/ask", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/ask", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -359,9 +367,9 @@ export function registerABTestTools(
       title: "Write a finished A/B test's learning",
       description:
         "The workspace's own AI model writes (or rewrites) what a finished test taught, kept on the test for the library. It is written on its own when a test ends, if the workspace has an AI model. Returns a queued run.",
-      inputSchema: { test: testRef },
+      inputSchema: { brand: brandRef, test: testRef },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    ({ test }) => call(() => gtm.POST("/v1/workspaces/{ws}/ab-tests/{test}/learning", { params: { path: { ...path(), test } } })),
+    ({ brand, test }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests/{test}/learning", { params: { path: { brand: b, test } } }))),
   );
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 func TestTrackingDomainAndClicks(t *testing.T) {
@@ -24,8 +26,11 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	}
 	owner, base, srv := sendingSetup(t, e, clock)
 
+	// The sequence below is Acme's, and its links use Acme's tracking
+	// domain only (brands step 6).
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
 	// A tracking domain is pending until its CNAME points here.
-	td := owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "https://Links.Acme-com.example/"})
+	td := owner.must(201, "POST", base+"/tracking-domains", map[string]string{"domain": "https://Links.Acme-com.example/", "brand_id": "acme"})
 	if td["domain"] != "links.acme-com.example" || td["status"] != "pending" || td["target"] != "localhost" || !strings.Contains(td["error"].(string), "CNAME") {
 		t.Fatalf("pending: %v", td)
 	}
@@ -38,7 +43,6 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 
 	// Links to the brand's own site carry the sequence's campaign
 	// (outbound_email); the tracking domain is under it but its links don't.
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
 	// The leads and the sequence are Acme's (brands step 5).
 	_, imp := owner.raw("POST", base+"/leads/import?list=L&brand=acme", "text/csv", "email,first_name\nli@one-io.example,Li\n")
 	seq := owner.must(201, "POST", base+"/sequences", map[string]any{
@@ -98,7 +102,7 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	if rec := click("x"); rec.Code != http.StatusFound {
 		t.Fatal("repeat click")
 	}
-	if c := owner.must(200, "GET", base+"/tracking-campaigns?channel=outbound_email", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["slug"] != "links" {
+	if c := owner.must(200, "GET", base+"/tracking-campaigns?channel=outbound_email&brand=acme", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["slug"] != "links" {
 		t.Fatalf("campaign: %v", c)
 	}
 	if rows, err := e.pool.Query(t.Context(), `SELECT url FROM tracked_links`); err != nil {
@@ -195,5 +199,35 @@ func TestTrackingDomainRidesOutAStaleLookup(t *testing.T) {
 	var since *time.Time
 	if err := e.pool.QueryRow(t.Context(), `SELECT failing_since FROM tracking_domains WHERE id = $1`, td["id"]).Scan(&since); err != nil || since != nil {
 		t.Fatalf("failing_since after the fix: %v %v", since, err)
+	}
+}
+
+// A tracking domain belongs to one brand, and can be moved to another:
+// each brand lists only its own.
+func TestTrackingDomainMovesBetweenBrands(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	acme := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme-com.example"})
+	north := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "website": "northpeak.example"})
+	list := func(brand map[string]any) []any {
+		return owner.must(200, "GET", "/v1/brands/"+brand["id"].(string)+"/tracking-domains", nil)["data"].([]any)
+	}
+	td := owner.must(201, "POST", "/v1/brands/"+acme["id"].(string)+"/tracking-domains", map[string]string{"domain": "links.northpeak.example"})
+	if td["brand_id"] != acme["id"] || len(list(acme)) != 1 || len(list(north)) != 0 {
+		t.Fatalf("added under Acme: %v", td)
+	}
+
+	path := base + "/tracking-domains/" + td["id"].(string)
+	owner.must(400, "PATCH", path, map[string]any{})
+	owner.must(400, "PATCH", path, map[string]any{"brand_id": "no-such-brand"})
+	owner.must(404, "PATCH", base+"/tracking-domains/00000000-0000-4000-8000-000000000000", map[string]any{"brand_id": north["handle"]})
+	moved := owner.must(200, "PATCH", path, map[string]any{"brand_id": north["handle"]})
+	if moved["brand_id"] != north["id"] || len(list(acme)) != 0 || len(list(north)) != 1 {
+		t.Fatalf("moved to Northpeak: %v", moved)
+	}
+	if ev := named(got(), "tracking_domain.moved"); len(ev) != 1 {
+		t.Fatalf("moved events: %+v", ev)
 	}
 }

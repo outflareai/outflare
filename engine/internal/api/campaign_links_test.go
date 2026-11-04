@@ -50,7 +50,7 @@ func TestCampaignLinks(t *testing.T) {
 	}
 	owner.must(400, "PATCH", base+"/tracking-campaigns/"+code, map[string]any{"source": "meta"})
 	owner.must(400, "PATCH", base+"/tracking-campaigns/"+code, map[string]any{"slug": "other"})
-	if v := owner.must(200, "PATCH", base+"/tracking-campaigns/"+code, map[string]any{"name": "Spring launch", "brand": ""}); v["name"] != "Spring launch" || v["brand_id"] != nil || v["slug"] != "spring-launch-us" {
+	if v := owner.must(200, "PATCH", base+"/tracking-campaigns/"+code, map[string]any{"name": "Spring launch", "brand": ""}); v["name"] != "Spring launch" || v["brand_id"] == nil || v["slug"] != "spring-launch-us" {
 		t.Fatalf("patch = %v", v)
 	}
 

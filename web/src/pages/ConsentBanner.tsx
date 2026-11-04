@@ -1,3 +1,4 @@
+import { pickedBrandId } from "@/lib/brand";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { components } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -79,7 +80,7 @@ export function ConsentBannerEditor({ ws, keyID, name, canManage, onDone }: { ws
 
   useEffect(() => {
     track("ui.consent_banner_opened", { site_key_id: keyID });
-    api.GET("/v1/workspaces/{ws}/site-keys/{id}/consent-banner", { params: { path: { ws, id: keyID } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/site-keys/{id}/consent-banner", { params: { path: { brand: pickedBrandId(), id: keyID } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setBanner(data);
       setCfg(data.config);
@@ -98,7 +99,7 @@ export function ConsentBannerEditor({ ws, keyID, name, canManage, onDone }: { ws
     // Custom markup needs a higher scope; send it only when it changed.
     if (cfg.custom_html === banner.config.custom_html) delete body.custom_html;
     if (cfg.custom_css === banner.config.custom_css) delete body.custom_css;
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/site-keys/{id}/consent-banner", { params: { path: { ws, id: keyID } }, body });
+    const { data, error } = await api.PUT("/v1/brands/{brand}/site-keys/{id}/consent-banner", { params: { path: { brand: pickedBrandId(), id: keyID } }, body });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     setBanner(data);
@@ -108,7 +109,7 @@ export function ConsentBannerEditor({ ws, keyID, name, canManage, onDone }: { ws
 
   async function reask() {
     if (!(await confirmAction("Ask every visitor again?", <p>Visitors who already chose see the banner again on their next page, where their region asks first. Do this when the site starts using a new kind of cookie.</p>, "Ask again", false))) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask", { params: { path: { ws, id: keyID } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/site-keys/{id}/consent-banner/reask", { params: { path: { brand: pickedBrandId(), id: keyID } } });
     if (error || !data) return setError(errorMessage(error));
     setBanner(data);
     toast("Visitors will be asked again.");

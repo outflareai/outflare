@@ -91,18 +91,21 @@ func Verify(ctx context.Context, r CNAMEResolver, domain, target string) error {
 	return nil
 }
 
-// BaseURL is where a workspace's unsubscribe and click links point: its
-// verified tracking domain, or the instance's public URL. When the server
+// BaseURL is where a brand's unsubscribe and click links point: the
+// brand's verified tracking domain, or the instance's public URL. Another
+// brand's domain is never used, so links never mix brands; a nil brand
+// (an email of no brand) takes any of the workspace's. When the server
 // gets certificates for tracking domains, a domain is used only once its
 // certificate is active, so no link goes out that a browser would refuse.
-func BaseURL(ctx context.Context, q Querier, ws, publicURL string) (string, error) {
+func BaseURL(ctx context.Context, q Querier, ws string, brand *string, publicURL string) (string, error) {
 	var domain string
 	// A domain tied to a partner program serves its portal, and one tied
 	// to a help centre the help centre, not the workspace's email links.
 	err := q.QueryRow(ctx, `SELECT domain FROM tracking_domains d WHERE workspace_id = $1 AND status = 'verified'
 		AND NOT EXISTS (SELECT 1 FROM partner_programs p WHERE p.portal_domain_id = d.id)
 		AND NOT EXISTS (SELECT 1 FROM help_centres h WHERE h.domain_id = d.id)
-		AND (https_status IS NULL OR https_status = 'active') ORDER BY verified_at LIMIT 1`, ws).Scan(&domain)
+		AND (https_status IS NULL OR https_status = 'active') AND ($2::uuid IS NULL OR d.brand_id = $2)
+		ORDER BY verified_at LIMIT 1`, ws, brand).Scan(&domain)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return strings.TrimRight(publicURL, "/"), nil
 	}
@@ -116,6 +119,11 @@ func BaseURL(ctx context.Context, q Querier, ws, publicURL string) (string, erro
 // ends a sentence is left out of the link.
 var links = regexp.MustCompile(`https?://[^\s<>"']+[^\s<>"'.,;:!?)\]]`)
 
+// MaxLinkLen is the longest link that is tracked. Longer ones (signed or
+// magic links of several KB) are sent as they are: tracked_links indexes
+// its url, and Postgres refuses an index entry over about 2.7 KB.
+const MaxLinkLen = 2000
+
 // ReplaceLinks replaces each http(s) link in plain text with what f returns.
 func ReplaceLinks(body string, f func(link string) string) string {
 	return links.ReplaceAllStringFunc(body, f)
@@ -127,7 +135,7 @@ func ReplaceLinks(body string, f func(link string) string) string {
 func Rewrite(ctx context.Context, q Querier, ws, enrollmentID, sequenceID string, step int, body, base string, skip ...string) (string, error) {
 	var err error
 	out := links.ReplaceAllStringFunc(body, func(link string) string {
-		if err != nil || strings.HasPrefix(link, base+"/") {
+		if err != nil || strings.HasPrefix(link, base+"/") || len(link) > MaxLinkLen {
 			return link
 		}
 		for _, s := range skip {

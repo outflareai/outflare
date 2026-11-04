@@ -1,0 +1,65 @@
+id: test-your-best-page
+version: 1
+title: Test the page that matters most
+summary: Find the page where most visitors decide, test a better version of it against the current one, and keep the winner once a person agrees.
+description: |
+  Most sites have one or two pages where visitors decide whether to sign
+  up or buy: a home page, a pricing page, a landing page for paid ads.
+  Small changes there are worth more than anything else on the site, but
+  only when you can tell a real lift from noise. This playbook picks that
+  page from the brand's own visits, writes one clear change to test
+  against the current version, runs it as an A/B test through the
+  website script, and reads the result against the control. Shipping the
+  winner is always a person's call.
+tier: obvious
+goals: [activation, revenue]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: site_tracking, label: The website script installed on the brand's site }
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: goal
+    label: What a visitor should do on the page
+    help: Leave it empty and the agent uses the brand's main conversion.
+    example: start a free trial
+    optional: true
+steps:
+  - say: Read the brand's context and the tests it has already run, so nothing is tested twice.
+    tools: [getBrandContext, listBrandABTests, listBrandABTestLearnings]
+  - say: Find the page with the most visitors who leave without converting.
+    tools: [getAnalyticsReport]
+  - say: Suggest a few changes to that page, pick the one with the clearest reason, and plan the test with its sample size.
+    tools: [suggestBrandABTests, planBrandABTest]
+  - say: Create the test with the current page as control and one new version, and run its checklist.
+    tools: [createBrandABTest, writeBrandABTestVersions, getBrandABTestChecklist]
+  - say: Start the test once the checklist passes.
+    tools: [startBrandABTest]
+  - say: Read the results when the planned sample is reached, end the test and write down what was learned.
+    tools: [getBrandABTestResults, summarizeBrandABTest, endBrandABTest, writeBrandABTestLearning]
+  - say: Propose shipping the winner, for a person to decide.
+    tools: [shipBrandABTest]
+guardrails:
+  - Shipping a version is always a person's decision.
+  - One test per page at a time, and never one that changes prices, legal text or what the product promises.
+  - A test is read only once its planned sample is reached; no early calls.
+measure:
+  - { metric: Conversion rate on the page, how: "The winning version against the control, with the test's confidence." }
+  - { metric: Tests that shipped, how: "Tests ended with a winner a person shipped." }
+prompt: |
+  For {{brand}}, find the page where most visitors leave without
+  converting (the goal is "{{goal}}" if I gave one), suggest one change worth testing, and run it as an
+  A/B test against the current page. Read the result when the planned
+  sample is reached and propose shipping the winner for me to approve.
+example: |
+  Northpeak's pricing page had the most visitors who left. The test moved
+  the annual plan's saving into the headline; after 4,200 visitors the
+  new version converted 11% better, and the team shipped it.

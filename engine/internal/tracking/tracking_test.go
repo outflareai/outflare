@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestValidDomain(t *testing.T) {
@@ -62,5 +64,22 @@ func TestVerify(t *testing.T) {
 	}
 	if err := Verify(ctx, r, "missing.acme.example", "domains.outflare.test"); err == nil || !strings.Contains(err.Error(), "no DNS record") {
 		t.Fatalf("missing: %v", err)
+	}
+}
+
+// noQueries fails the test if Rewrite tries to store a link.
+type noQueries struct{ t *testing.T }
+
+func (q noQueries) QueryRow(context.Context, string, ...any) pgx.Row {
+	q.t.Fatal("a link over MaxLinkLen was stored")
+	return nil
+}
+
+func TestRewriteLeavesLongLinks(t *testing.T) {
+	long := "https://acme-com.example/magic?token=" + strings.Repeat("x", MaxLinkLen)
+	body := "Sign in: " + long
+	got, err := Rewrite(context.Background(), noQueries{t}, "ws", "en", "seq", 1, body, "https://t.acme-com.example")
+	if err != nil || got != body {
+		t.Fatalf("got %q, %v", got, err)
 	}
 }

@@ -21,6 +21,16 @@ const valueTypes = z.enum(["text", "number", "currency", "date", "timestamp", "c
 const sources = z.enum(["manual", "first_party", "crm_sync", "enrichment", "import"]);
 const origins = z.enum(["first_party", "prospect", "crm_sync", "import", "manual"]);
 const sensitivity = z.enum(["public", "internal", "confidential", "restricted"]);
+// Labels only (who owns it, how long it's kept, where it may go): nothing is blocked or deleted because of them.
+const labels = {
+  owner_id: id.nullable().optional().describe("Label: the team member who looks after it (a user id), or null for nobody."),
+  retention_days: z.number().int().min(1).max(36500).nullable().optional().describe("Label: how long its data is meant to be kept, in days; null for forever."),
+  destinations: z
+    .array(z.enum(["webhooks", "exports", "ai", "published_queries", "email"]))
+    .nullable()
+    .optional()
+    .describe("Label: where its data may be sent; null for everywhere."),
+};
 const writePolicy = z.enum(["source_owned", "platform_owned", "manual_override_allowed", "computed"]);
 const options = z
   .array(z.object({ key: z.string().min(1).max(63), label: z.string().min(1).max(80), archived: z.boolean().optional() }))
@@ -369,7 +379,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         "Restore one with restore_deletion.",
       inputSchema: {
         brand: brandRef,
-        kind: z.enum(["record", "field_value", "identity", "relationship", "event", "batch"]).optional(),
+        kind: z.enum(["record", "field_value", "identity", "relationship", "event", "batch", "transaction"]).optional(),
         record: id.optional().describe("Only deletions about this record."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
@@ -760,6 +770,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         precedence: z.array(sources).optional(),
         sensitivity: sensitivity.optional(),
         filterable: z.boolean().optional(),
+        ...labels,
       },
       annotations: write,
     },
@@ -771,7 +782,9 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     "update_field",
     {
       title: "Change or archive a field",
-      description: "Label, description, write policy, precedence, sensitivity, filterable or archived (how a field is deleted). Built-in fields never change.",
+      description:
+        "Label, description, write policy, precedence, sensitivity, filterable, archived (how a field is deleted), and the labels owner_id, " +
+        "retention_days and destinations. Of a built-in field only sensitivity and those labels change. Labels block nothing.",
       inputSchema: {
         brand: brandRef,
         type: typeKey,
@@ -783,6 +796,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         sensitivity: sensitivity.optional(),
         filterable: z.boolean().optional(),
         archived: z.boolean().optional(),
+        ...labels,
       },
       annotations: write,
     },
@@ -828,6 +842,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         properties: eventProperties.optional(),
         status: z.enum(["quarantined", "approved", "deprecated"]).optional(),
         sensitivity: sensitivity.optional(),
+        ...labels,
       },
       annotations: write,
     },
@@ -847,6 +862,7 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         properties: eventProperties.optional(),
         status: z.enum(["quarantined", "approved", "deprecated"]).optional(),
         sensitivity: sensitivity.optional(),
+        ...labels,
       },
       annotations: write,
     },
@@ -1089,6 +1105,21 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     },
     ({ brand, event }) =>
       call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/customer-events/{event}/delete", { params: { path: { brand: b, event } } }))),
+  );
+
+  server.registerTool(
+    "delete_transaction",
+    {
+      title: "Delete a transaction (restorable for 7 days)",
+      description:
+        "Moves one of a brand's transactions, such as a test payment, into Recently deleted: lists, query and the record card leave it out, and " +
+        "the same source_id sent again isn't added back. restore_deletion brings it back within 7 days without sending transaction.created again. " +
+        "Only when the user asked.",
+      inputSchema: { brand: brandRef, transaction: id.describe("The transaction's id, from list_transactions.") },
+      annotations: recoverable,
+    },
+    ({ brand, transaction }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions/{transaction}/delete", { params: { path: { brand: b, transaction } } }))),
   );
 
   server.registerTool(

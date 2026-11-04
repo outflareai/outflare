@@ -15,6 +15,12 @@ export type CloudFeature = { tab?: Tab; capability: string; name: string; line: 
 
 export const cloudFeatures: CloudFeature[] = [
   {
+    tab: "agent-mail",
+    capability: "agent_mail",
+    name: "Agent Mail",
+    line: "Persistent inboxes for agents, with sending, receiving, attachments, API access and webhooks.",
+  },
+  {
     tab: "lead-finder",
     capability: "lead_finder",
     name: "Lead finder",

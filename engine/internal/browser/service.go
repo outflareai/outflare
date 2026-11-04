@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -217,7 +218,15 @@ func (s *Service) run(ctx context.Context, t taskRow, run int) (out Outcome) {
 	if t.Account.Identity != "" {
 		t.Goal += "\n\naccount_identity: " + t.Account.Identity
 	}
+	keeper, keeps := drv.(SessionKeeper)
+	keeps = keeps && t.AccountID != "" && slices.Contains(t.Operations, OpSignIn)
+	if keeps {
+		t.SessionRestored = s.restoreSession(ctx, t, keeper)
+	}
 	out = Run(ctx, t.Task, deps)
+	if keeps {
+		s.afterRun(ctx, t, keeper, out)
+	}
 	if err := s.Models.Spent(ctx, t.WorkspaceID, choice, out.Usage, "browser_task:"+t.ID, "Ran a browser task"); err != nil {
 		s.Log.Warn("browser task: AI spend not booked", "err", err)
 	}
@@ -225,6 +234,96 @@ func (s *Service) run(ctx context.Context, t taskRow, run int) (out Outcome) {
 		metrics.BrowserStep(st.Tool)
 	}
 	return out
+}
+
+// restoreSession puts the account's saved session into the browser, and
+// says whether it did. A session too old to use is removed; any other
+// problem just means the task signs in from scratch.
+func (s *Service) restoreSession(ctx context.Context, t taskRow, k SessionKeeper) bool {
+	raw, err := vaultFor{s: s, t: t}.Open(ctx, SecretSession)
+	if errors.Is(err, accounts.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		track.Fail(ctx, s.Log, track.Event{Name: "browser_session.restore_failed", WorkspaceID: t.WorkspaceID, ActorType: "system", Surface: "job",
+			Props: map[string]any{"brand_id": t.BrandID, "task_id": t.ID, "account_id": t.AccountID}}, "internal", err)
+		return false
+	}
+	sess, err := ParseSession(raw, s.now())
+	if err != nil {
+		s.changeSession(ctx, t, SessionClear, "", 0)
+		return false
+	}
+	cookies := Keep(sess.Cookies, t.Hosts, s.now())
+	if len(cookies) == 0 {
+		return false
+	}
+	if err := k.SetCookies(ctx, cookies); err != nil {
+		track.Fail(ctx, s.Log, track.Event{Name: "browser_session.restore_failed", WorkspaceID: t.WorkspaceID, ActorType: "system", Surface: "job",
+			Props: map[string]any{"brand_id": t.BrandID, "task_id": t.ID, "account_id": t.AccountID}}, "browser_failed", err)
+		return false
+	}
+	metrics.BrowserSession("restored")
+	return true
+}
+
+// afterRun saves or clears the account's session by how the run ended
+// (SessionAfter).
+func (s *Service) afterRun(ctx context.Context, t taskRow, k SessionKeeper, out Outcome) {
+	switch SessionAfter(out) {
+	case SessionClear:
+		s.changeSession(ctx, t, SessionClear, "", 0)
+	case SessionSave:
+		cookies, err := k.Cookies(ctx)
+		if err == nil {
+			cookies = Keep(cookies, t.Hosts, s.now())
+		}
+		var raw string
+		if err == nil && len(cookies) > 0 {
+			raw, err = Session{SavedAt: s.now().UTC(), Cookies: cookies}.Encode()
+		}
+		if err != nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "browser_session.save_failed", WorkspaceID: t.WorkspaceID, ActorType: "system", Surface: "job",
+				Props: map[string]any{"brand_id": t.BrandID, "task_id": t.ID, "account_id": t.AccountID}}, "browser_failed", err)
+			return
+		}
+		if raw != "" {
+			s.changeSession(ctx, t, SessionSave, raw, len(cookies))
+		}
+	}
+}
+
+// changeSession writes or removes the account's saved session, with its
+// audit event, in one transaction.
+func (s *Service) changeSession(ctx context.Context, t taskRow, what, raw string, cookies int) {
+	props := map[string]any{"brand_id": t.BrandID, "task_id": t.ID}
+	action := "account.session_saved"
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		v := accounts.Vault{Box: s.Box}
+		if what == SessionClear {
+			action = "account.session_cleared"
+			removed, err := v.Remove(ctx, tx, t.WorkspaceID, t.BrandID, t.AccountID, SecretSession)
+			if err != nil || !removed {
+				return err
+			}
+		} else {
+			props["cookies"] = cookies
+			if err := v.Set(ctx, tx, t.WorkspaceID, t.BrandID, t.AccountID, SecretSession, raw, ""); err != nil {
+				return err
+			}
+		}
+		return audit.Record(ctx, tx, audit.Event{WorkspaceID: t.WorkspaceID, ActorType: "system", Action: action, TargetType: "account", TargetID: t.AccountID, Data: props, Props: props})
+	})
+	if err != nil {
+		track.Fail(ctx, s.Log, track.Event{Name: "browser_session." + what + "_failed", WorkspaceID: t.WorkspaceID, ActorType: "system", Surface: "job",
+			Props: map[string]any{"brand_id": t.BrandID, "task_id": t.ID, "account_id": t.AccountID}}, "internal", err)
+		return
+	}
+	if what == SessionClear {
+		metrics.BrowserSession("cleared")
+	} else {
+		metrics.BrowserSession("saved")
+	}
 }
 
 type vaultFor struct {

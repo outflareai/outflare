@@ -359,6 +359,8 @@ type linkSequenceView struct {
 	Status         string  `json:"status"`
 	BrandID        *string `json:"brand_id"`
 	ApprovePitches bool    `json:"approve_pitches"`
+	AutoSendPerDay int     `json:"auto_send_per_day"`
+	SentToday      int     `json:"sent_today"`
 	// UsesOpener: one of its steps has {{custom.opener}}.
 	UsesOpener bool `json:"uses_opener"`
 	Pitches    int  `json:"pitches"`
@@ -372,9 +374,11 @@ func (s *Server) listLinkSequences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID}
+	args := []any{a.WorkspaceID, linkbuild.DefaultAutoSendPerDay}
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT q.id::text, q.name, q.status, q.brand_id::text, COALESCE(l.approve_pitches, true),
+		SELECT q.id::text, q.name, q.status, q.brand_id::text, COALESCE(l.approve_pitches, true), COALESCE(l.auto_send_per_day, $2),
+			(SELECT count(*) FROM link_pitches k WHERE k.sequence_id = q.id AND k.status = 'enrolled' AND k.approved_by IS NULL
+				AND k.approved_at > now() - interval '24 hours')::int,
 			EXISTS (SELECT 1 FROM sequence_steps st WHERE st.sequence_id = q.id AND (st.body ILIKE '%custom.opener%' OR st.body ILIKE '%{{opener%')),
 			(SELECT count(*) FROM link_pitches k WHERE k.sequence_id = q.id)::int
 		FROM sequences q LEFT JOIN link_sequence_settings l ON l.sequence_id = q.id
@@ -386,7 +390,7 @@ func (s *Server) listLinkSequences(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (linkSequenceView, error) {
 		var v linkSequenceView
-		return v, row.Scan(&v.SequenceID, &v.Name, &v.Status, &v.BrandID, &v.ApprovePitches, &v.UsesOpener, &v.Pitches)
+		return v, row.Scan(&v.SequenceID, &v.Name, &v.Status, &v.BrandID, &v.ApprovePitches, &v.AutoSendPerDay, &v.SentToday, &v.UsesOpener, &v.Pitches)
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -398,7 +402,6 @@ func (s *Server) listLinkSequences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
-// updateLinkSequence turns approval of a sequence's link pitches on or off.
 // starterSteps are the starter sequence for link pitches: the opener the
 // workspace's AI wrote for the page, then one short follow-up in the same
 // thread. People edit them like any sequence.
@@ -438,7 +441,7 @@ func (s *Server) createLinkSequence(w http.ResponseWriter, r *http.Request) {
 	if s.seqError(w, r, err) {
 		return
 	}
-	v := linkSequenceView{SequenceID: id, Name: name, ApprovePitches: true, UsesOpener: true}
+	v := linkSequenceView{SequenceID: id, Name: name, ApprovePitches: true, AutoSendPerDay: linkbuild.DefaultAutoSendPerDay, UsesOpener: true}
 	if err := s.pool.QueryRow(ctx, `SELECT status, brand_id::text FROM sequences WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID).
 		Scan(&v.Status, &v.BrandID); err != nil {
 		s.internal(w, r, err)
@@ -447,16 +450,23 @@ func (s *Server) createLinkSequence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, v)
 }
 
+// updateLinkSequence turns approval of a sequence's link pitches on or off,
+// and sets how many a day go out without it.
 func (s *Server) updateLinkSequence(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var in struct {
 		ApprovePitches *bool `json:"approve_pitches"`
+		AutoSendPerDay *int  `json:"auto_send_per_day"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.ApprovePitches == nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "approve_pitches is true or false")
+	if in.ApprovePitches == nil && in.AutoSendPerDay == nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "send approve_pitches (true or false), auto_send_per_day (1 to 200), or both")
+		return
+	}
+	if in.AutoSendPerDay != nil && (*in.AutoSendPerDay < 1 || *in.AutoSendPerDay > 200) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "auto_send_per_day is 1 to 200")
 		return
 	}
 	id := r.PathValue("sequence")
@@ -475,19 +485,24 @@ func (s *Server) updateLinkSequence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
 	}
+	var approve bool
+	var perDay int
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO link_sequence_settings (sequence_id, workspace_id, approve_pitches, updated_by) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (sequence_id) DO UPDATE SET approve_pitches = EXCLUDED.approve_pitches, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-			id, a.WorkspaceID, *in.ApprovePitches, nullIfEmpty(a.ActorID)); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO link_sequence_settings (sequence_id, workspace_id, approve_pitches, auto_send_per_day, updated_by)
+			VALUES ($1, $2, COALESCE($3::boolean, true), COALESCE($4::int, $6::int), $5)
+			ON CONFLICT (sequence_id) DO UPDATE SET approve_pitches = COALESCE($3::boolean, link_sequence_settings.approve_pitches),
+				auto_send_per_day = COALESCE($4::int, link_sequence_settings.auto_send_per_day), updated_by = EXCLUDED.updated_by, updated_at = now()
+			RETURNING approve_pitches, auto_send_per_day`,
+			id, a.WorkspaceID, in.ApprovePitches, in.AutoSendPerDay, nullIfEmpty(a.ActorID), linkbuild.DefaultAutoSendPerDay).Scan(&approve, &perDay); err != nil {
 			return err
 		}
-		data := map[string]any{"approve_pitches": *in.ApprovePitches}
+		data := map[string]any{"approve_pitches": approve, "auto_send_per_day": perDay}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "link_building.sequence_updated", "sequence", id, data, data)
 	})
 	if s.allocError(w, r, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sequence_id": id, "approve_pitches": *in.ApprovePitches})
+	writeJSON(w, http.StatusOK, map[string]any{"sequence_id": id, "approve_pitches": approve, "auto_send_per_day": perDay})
 }
 
 type linkResultRow struct {

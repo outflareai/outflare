@@ -5,7 +5,6 @@
 //
 // The token says which workspace it belongs to, so OUTFLARE_WORKSPACE is
 // optional.
-// OUTFLARE_MISSION=<uuid> makes every call act inside that agent mission.
 // OUTFLARE_BRAND=<handle> makes get_context and the list tools default to
 // one brand; the agent can still ask for others.
 //
@@ -53,7 +52,6 @@ async function main() {
     client,
     workspace: workspace ?? env("WORKSPACE"),
     readOnly: ["1", "true", "yes"].includes((opt("MCP_READ_ONLY") ?? "").toLowerCase()),
-    mission: opt("MISSION"),
     brand: opt("BRAND"),
   });
   await server.connect(new StdioServerTransport());

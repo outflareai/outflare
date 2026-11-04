@@ -76,7 +76,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "9";
+  var VERSION = "10";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -315,6 +315,9 @@
       var v = q.get("of_" + k);
       if (v) { ad[k] = v; anyAd = true; }
     });
+    // Google's auto-tagging adds the campaign id itself, so a click is
+    // tied to its campaign even before the tracking template is set.
+    if (!ad.campaign && q.get("gad_campaignid")) { ad.campaign = q.get("gad_campaignid"); anyAd = true; }
     if (anyAd) p.ad = ad;
     if (q.get("ofc")) p.ofc = q.get("ofc");
     // A redirect link's click key, so the visit can claim the click.

@@ -28,13 +28,17 @@ const (
 	maxLiveChecks = 500
 )
 
-// Run schedules live checks and overdue notices every hour until ctx ends.
+// Run schedules live checks and overdue notices, and sends the pitches
+// held by a sequence's daily cap, every hour until ctx ends.
 func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
 		if err := s.Schedule(ctx, time.Now()); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "link_live.schedule_failed", Surface: "job"}, "internal", err)
+		}
+		if err := s.SendHeld(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "link_pitch.send_held_failed", Surface: "job"}, "internal", err)
 		}
 		select {
 		case <-ctx.Done():

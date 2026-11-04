@@ -230,15 +230,18 @@ type adAccountOut struct {
 	LastSyncedAt  *time.Time `json:"last_synced_at"`
 	LastError     *string    `json:"last_error"`
 	CreatedAt     time.Time  `json:"created_at"`
+	// The cost per conversion the brand wants from campaigns of this
+	// account that have no target of their own (PUT .../target).
+	TargetCPAMicros *int64 `json:"target_cost_per_conversion_micros"`
 }
 
 const adAccountCols = `a.id, a.integration_id, a.connector, a.external_id, a.name, a.currency, a.time_zone, a.brand_id, a.sync_on, a.status,
-	to_char(a.first_day, 'YYYY-MM-DD'), to_char(a.last_day, 'YYYY-MM-DD'), a.last_synced_at, a.last_error, a.created_at`
+	to_char(a.first_day, 'YYYY-MM-DD'), to_char(a.last_day, 'YYYY-MM-DD'), a.last_synced_at, a.last_error, a.created_at, a.target_cost_per_conversion_micros`
 
 func scanAdAccount(row pgx.Row) (adAccountOut, error) {
 	var x adAccountOut
 	err := row.Scan(&x.ID, &x.IntegrationID, &x.Connector, &x.ExternalID, &x.Name, &x.Currency, &x.TimeZone, &x.BrandID, &x.SyncOn, &x.Status,
-		&x.FirstDay, &x.LastDay, &x.LastSyncedAt, &x.LastError, &x.CreatedAt)
+		&x.FirstDay, &x.LastDay, &x.LastSyncedAt, &x.LastError, &x.CreatedAt, &x.TargetCPAMicros)
 	return x, err
 }
 
@@ -485,6 +488,64 @@ type adCampaignOut struct {
 	BrandID           *string  `json:"brand_id"`
 	Currency          string   `json:"currency"`
 	Totals            adTotals `json:"totals"`
+	// How the platform bids and the target it bids to, from the platform.
+	BiddingStrategy string   `json:"bidding_strategy"`
+	PlatformCPA     *int64   `json:"platform_target_cpa_micros"`
+	PlatformROAS    *float64 `json:"platform_target_roas"`
+	// The brand's own target: the campaign's, else its account's.
+	TargetCPAMicros *int64  `json:"target_cost_per_conversion_micros"`
+	TargetFrom      *string `json:"target_from"`
+	TargetStatus    string  `json:"target_status"`
+	// The same numbers over the same number of days just before from, and
+	// which way spend moved between the two.
+	PreviousTotals adTotals `json:"previous_totals"`
+	SpendChange    *float64 `json:"spend_change"`
+	Trend          string   `json:"trend"`
+}
+
+// targetBand is how far cost per conversion may sit from its target and
+// still count as on target: a tenth either way.
+const targetBand = 0.10
+
+// trendBand is how much spend must move against the period before to
+// count as scaling up or down.
+const trendBand = 0.15
+
+// judge works out target_status, spend_change and trend.
+func (c *adCampaignOut) judge() {
+	switch cpa := c.Totals.CostPerConvMicros; {
+	case c.TargetCPAMicros == nil:
+		c.TargetStatus = "no_target"
+	case cpa == nil && c.Totals.SpendMicros == 0:
+		c.TargetStatus = "no_spend"
+	case cpa == nil:
+		// Money spent and nothing back: over any target.
+		c.TargetStatus = "over"
+	case float64(*cpa) > float64(*c.TargetCPAMicros)*(1+targetBand):
+		c.TargetStatus = "over"
+	case float64(*cpa) < float64(*c.TargetCPAMicros)*(1-targetBand):
+		c.TargetStatus = "under"
+	default:
+		c.TargetStatus = "on_target"
+	}
+	now, before := c.Totals.SpendMicros, c.PreviousTotals.SpendMicros
+	switch {
+	case now == 0 && before == 0:
+		c.Trend = "idle"
+	case before == 0:
+		c.Trend = "new"
+	case now == 0:
+		c.Trend = "stopped"
+	default:
+		v := float64(now-before) / float64(before)
+		c.SpendChange = &v
+		c.Trend = "steady"
+		if v > trendBand {
+			c.Trend = "scaling_up"
+		} else if v < -trendBand {
+			c.Trend = "scaling_down"
+		}
+	}
 }
 
 func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
@@ -513,7 +574,8 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 	f.args = append(f.args, limit)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT e.id, a.id, a.connector, a.name, e.external_id, e.name, e.status, e.provider_status, e.objective, e.daily_budget_micros,
-			COALESCE(e.brand_id, a.brand_id), a.currency, `+adSums+`
+			COALESCE(e.brand_id, a.brand_id), a.currency, e.bidding_strategy, e.platform_target_cpa_micros, e.platform_target_roas,
+			e.target_cost_per_conversion_micros, a.target_cost_per_conversion_micros, `+adSums+`
 		FROM ad_entities e JOIN ad_accounts a ON a.id = e.ad_account_id
 		LEFT JOIN ad_metrics_daily m ON m.ad_entity_id = e.id AND m.day BETWEEN $2 AND $3
 		WHERE e.workspace_id = $1 AND e.level = 'campaign'`+where+`
@@ -529,20 +591,70 @@ func (s *Server) listAdCampaigns(w http.ResponseWriter, r *http.Request) {
 	out := []adCampaignOut{}
 	for rows.Next() {
 		var c adCampaignOut
+		var accountTarget *int64
 		t := &c.Totals
 		if err := rows.Scan(append([]any{&c.ID, &c.AdAccountID, &c.Connector, &c.AccountName, &c.ExternalID, &c.Name, &c.Status, &c.ProviderStatus, &c.Objective,
-			&c.DailyBudgetMicros, &c.BrandID, &c.Currency}, t.dest()...)...); err != nil {
+			&c.DailyBudgetMicros, &c.BrandID, &c.Currency, &c.BiddingStrategy, &c.PlatformCPA, &c.PlatformROAS, &c.TargetCPAMicros, &accountTarget}, t.dest()...)...); err != nil {
 			s.internal(w, r, err)
 			return
 		}
 		t.derive()
+		if c.TargetCPAMicros != nil {
+			c.TargetFrom = ptr("campaign")
+		} else if accountTarget != nil {
+			c.TargetCPAMicros, c.TargetFrom = accountTarget, ptr("account")
+		}
 		out = append(out, c)
 	}
 	if rows.Err() != nil {
 		s.internal(w, r, rows.Err())
 		return
 	}
+	rows.Close()
+	if err := s.previousAdTotals(r, f, out); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	for i := range out {
+		out[i].judge()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"from": f.from, "to": f.to, "data": out})
+}
+
+// previousAdTotals fills each campaign's numbers for the days just before
+// the range, as many as the range has.
+func (s *Server) previousAdTotals(r *http.Request, f adFilter, out []adCampaignOut) error {
+	if len(out) == 0 {
+		return nil
+	}
+	from, _ := time.Parse(time.DateOnly, f.from)
+	to, _ := time.Parse(time.DateOnly, f.to)
+	days := int(to.Sub(from).Hours()/24) + 1
+	ids := make([]string, len(out))
+	at := map[string]int{}
+	for i, c := range out {
+		ids[i], at[c.ID] = c.ID, i
+	}
+	rows, err := s.pool.Query(r.Context(), `
+		SELECT m.ad_entity_id, `+adSums+`
+		FROM ad_metrics_daily m
+		WHERE m.workspace_id = $1 AND m.ad_entity_id = ANY($4) AND m.day BETWEEN $2 AND $3
+		GROUP BY m.ad_entity_id`,
+		f.args[0], from.AddDate(0, 0, -days).Format(time.DateOnly), from.AddDate(0, 0, -1).Format(time.DateOnly), ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var t adTotals
+		if err := rows.Scan(append([]any{&id}, t.dest()...)...); err != nil {
+			return err
+		}
+		t.derive()
+		out[at[id]].PreviousTotals = t
+	}
+	return rows.Err()
 }
 
 type adSummaryRow struct {

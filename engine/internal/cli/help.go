@@ -29,7 +29,6 @@ Every API operation is a command. Flags are its parameters and body fields
 --data - (stdin). The workspace comes from your login.
   --all               follow pages and print every item
   --curl              print the request as curl instead of sending it
-  --mission ID        act inside an agent mission
   --idempotency-key K retry-safe key (writes get a fresh one automatically)
   --raw               print the answer as the server sent it
 

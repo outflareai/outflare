@@ -76,6 +76,7 @@ func audienceCall(ctx context.Context, c *call) callResult {
 		}
 		if ns == "email" {
 			m.Emails = append(m.Emails, connectors.HashID(v))
+			m.GoogleEmails = append(m.GoogleEmails, connectors.HashGoogleEmail(v))
 		} else {
 			// E.164 with the plus; Meta wants digits only.
 			m.Phones = append(m.Phones, connectors.HashID(v))

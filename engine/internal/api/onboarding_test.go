@@ -9,7 +9,8 @@ import (
 
 func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 	got := track.Capture(t)
-	h := freshServer(t)
+	e := freshEnv(t)
+	h := e.h
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
@@ -82,7 +83,7 @@ func TestOnboardingStepsSkipsAndDismissal(t *testing.T) {
 	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["website"]["done"] != true || o["next_step"] != "mission" {
 		t.Fatalf("script and DNS under way: %v", o)
 	}
-	owner.must(201, "POST", base+"/missions", map[string]any{"name": "First", "goal": "Find the pages losing traffic"})
+	seedMission(t, e, ws, "First", "running", "dry_run", nil, nil, nil, nil) // one made before missions retired
 	if o = owner.must(200, "GET", base+"/onboarding", nil); stepsOf(o)["mission"]["done"] != true || o["complete"] != true || o["next_step"] != nil {
 		t.Fatalf("a mission completes it: %v", o)
 	}

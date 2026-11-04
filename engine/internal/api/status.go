@@ -444,7 +444,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		SELECT s.integration_id::text, COALESCE(NULLIF(s.site_name, ''), s.site), i.name, count(*) OVER ()::int
 		FROM analytics_syncs s JOIN integrations i ON i.id = s.integration_id, b
 		WHERE s.workspace_id = $1 AND s.site <> '' AND i.status <> 'error' AND $2::uuid IS NULL
-		  AND CASE WHEN b.any THEN analytics_site_brand($1, s.integration_id, s.site, s.host) IS NULL
+		  AND CASE WHEN b.any THEN outflare_site_brand(s.integration_id, s.site) IS NULL
 		        AND NOT EXISTS (SELECT 1 FROM analytics_site_brands o WHERE o.integration_id = s.integration_id AND o.site = s.site)
 		      ELSE s.host = '' END
 		ORDER BY i.name, 2 LIMIT 5`, ws, brandArg)
@@ -483,7 +483,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		WHERE b.workspace_id = $1 AND b.status = 'active' AND b.website <> '' AND ($2::uuid IS NULL OR b.id = $2::uuid)
 		  AND EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.site <> '')
 		  AND NOT EXISTS (SELECT 1 FROM analytics_syncs s WHERE s.workspace_id = $1 AND s.site <> ''
-		      AND analytics_site_brand($1, s.integration_id, s.site, s.host) = b.id)
+		      AND outflare_site_brand(s.integration_id, s.site) = b.id)
 		ORDER BY b.created_at LIMIT 5`, ws, brandArg)
 	if err != nil {
 		return v, err

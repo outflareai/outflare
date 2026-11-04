@@ -97,3 +97,53 @@ func TestChromeDriverOnALocalSite(t *testing.T) {
 		t.Fatal("a ref the page doesn't have must fail")
 	}
 }
+
+// A session's cookies read from one browser and set in a new one sign
+// the second in, the way a saved session does.
+func TestChromeDriverKeepsCookies(t *testing.T) {
+	if FindChrome() == "" {
+		t.Skip("no Chrome on this host")
+	}
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		if r.URL.Path == "/login" {
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: "s3ss10n", Path: "/", HttpOnly: true, Expires: time.Now().Add(time.Hour)})
+		}
+		who := "nobody"
+		if c, err := r.Cookie("sid"); err == nil && c.Value == "s3ss10n" {
+			who = "ops"
+		}
+		w.Write([]byte(`<html><head><title>T</title></head><body><p>Signed in as ` + who + `.</p></body></html>`))
+	}))
+	defer site.Close()
+	b := Boundary{Hosts: []string{NormalizeHost(site.URL)}, AllowPrivate: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	first, err := Chrome{}.Open(ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Navigate(ctx, site.URL+"/login"); err != nil {
+		t.Fatal(err)
+	}
+	cookies, err := first.(SessionKeeper).Cookies(ctx)
+	first.Close()
+	if err != nil || len(Keep(cookies, b.Hosts, time.Now())) != 1 {
+		t.Fatalf("cookies: %v %v", cookies, err)
+	}
+	second, err := Chrome{}.Open(ctx, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if err := second.(SessionKeeper).SetCookies(ctx, Keep(cookies, b.Hosts, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Navigate(ctx, site.URL+"/"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := second.Page(ctx)
+	if err != nil || !strings.Contains(p.Text, "Signed in as ops.") {
+		t.Fatalf("restored: %+v %v", p, err)
+	}
+}

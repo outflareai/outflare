@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AdTrackingHealth, AdTrackingTemplate } from "@outflare/sdk";
+import type { AdAccount, AdTrackingHealth, AdTrackingPlan, AdTrackingTemplate } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
-import { Badge, Card, CopyButton, ErrorText, field, Loading } from "../ui";
+import { Badge, Button, Card, CopyButton, ErrorText, field, Loading } from "../ui";
 
 // The tracking template for each ad network: pasted once into the network,
 // it makes every paid click land with UTM tags and the network's own
@@ -124,5 +124,116 @@ export function AdTrackingHealthCard({ ws, brand }: { ws: string; brand?: string
         )}
       </div>
     </Card>
+  );
+}
+
+// Fixing tracking links: one box per Google Ads account, where Outflare
+// adds the template for you.
+export function AdTrackingFix({ ws, accounts, canManage }: { ws: string; accounts: AdAccount[]; canManage: boolean }) {
+  const google = accounts.filter((a) => a.connector === "google_ads" && a.status === "active");
+  if (google.length === 0) return null;
+  return (
+    <Card
+      title="Fix tracking links"
+      description="Outflare adds its tracking template to your Google Ads URL suffixes, so every click carries its campaign, ad group and ad ids. You see each change before anything is changed."
+    >
+      <div className="space-y-3 text-[13px]">
+        {canManage ? (
+          google.map((a) => <AddTracking key={a.id} ws={ws} account={a} />)
+        ) : (
+          <p className="text-muted-foreground">Ask an admin to fix tracking links: it changes your Google Ads account.</p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+const levelWord: Record<string, string> = { account: "Account", campaign: "Campaign", ad_group: "Ad group", ad: "Ad" };
+
+// Adding the template for you: Outflare reads the account's URL suffixes,
+// shows what it would change, and changes them only when you confirm.
+function AddTracking({ ws, account }: { ws: string; account: AdAccount }) {
+  const [plan, setPlan] = useState<AdTrackingPlan | null>(null);
+  const [state, setState] = useState<"idle" | "reading" | "ready" | "adding" | "queued">("idle");
+  const [error, setError] = useState("");
+  const path = { params: { path: { ws, id: account.id } } };
+  const read = () => {
+    setState("reading");
+    setError("");
+    api.GET("/v1/workspaces/{ws}/ads/accounts/{id}/tracking", path).then(({ data, error }) => {
+      if (error) {
+        setError(errorMessage(error));
+        setState("idle");
+        return;
+      }
+      setPlan(data);
+      setState("ready");
+    });
+  };
+  const add = () => {
+    setState("adding");
+    setError("");
+    api.POST("/v1/workspaces/{ws}/ads/accounts/{id}/tracking", path).then(({ error }) => {
+      if (error) {
+        setError(errorMessage(error));
+        setState("ready");
+        return;
+      }
+      setState("queued");
+    });
+  };
+  const changes = plan?.changes ?? [];
+  const ads = changes.filter((c) => c.level === "ad").length;
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium">{account.name || account.external_id}</div>
+          <div className="text-[12px] text-muted-foreground">
+            Google uses an ad's own URL suffix, else its ad group's, its campaign's, then the account's. Outflare adds the template to each one that needs it and keeps the parameters already there.
+          </div>
+        </div>
+        {state === "idle" && <Button variant="ghost" onClick={read}>See what changes</Button>}
+        {state === "reading" && <Loading />}
+      </div>
+      {error && <ErrorText>{error}</ErrorText>}
+      {(state === "ready" || state === "adding") && plan && (
+        changes.length === 0 ? (
+          <p className="text-muted-foreground">Every URL suffix already has the template. If ads are still marked, press Sync now.</p>
+        ) : (
+          <>
+            <div className="max-h-80 divide-y overflow-y-auto rounded-md border">
+              {changes.map((c) => (
+                <div key={c.level + c.id} className="space-y-0.5 px-3 py-1.5">
+                  <div className="flex items-baseline gap-2">
+                    <Badge>{levelWord[c.level] ?? c.level}</Badge>
+                    <span className="min-w-0 truncate">{c.name || c.id}</span>
+                  </div>
+                  <div className="break-all font-mono text-[11px] text-muted-foreground">
+                    {c.before ? <span className="line-through">{c.before}</span> : <span>No suffix</span>}
+                    <span> → </span>
+                    <span className="text-foreground">{c.after}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button disabled={state === "adding"} onClick={add}>
+                Add it to {changes.length === 1 ? "this one" : `these ${changes.length}`}
+              </Button>
+              <Button variant="ghost" disabled={state === "adding"} onClick={() => setState("idle")}>Cancel</Button>
+              {ads > 0 && (
+                <span className="text-[12px] text-muted-foreground">
+                  {ads === 1 ? "One ad has" : `${ads} ads have`} a suffix of {ads === 1 ? "its" : "their"} own, so Google reviews {ads === 1 ? "it" : "them"} again.
+                </span>
+              )}
+            </div>
+          </>
+        )
+      )}
+      {state === "queued" && (
+        <p>Queued. Outflare changes them in Google Ads now, then syncs the account; reload this page in a minute to see every ad with the template. Each change is in the audit log.</p>
+      )}
+    </div>
   );
 }

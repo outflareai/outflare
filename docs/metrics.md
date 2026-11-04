@@ -2,7 +2,7 @@
 
 A metric is a number Outflare keeps for each company and person and keeps up to date, such as their spend in the last 30 days or how many times they used your product this week. Rules, journeys, smart lists and Query read metrics like any field, so you can act on totals, not only single events: "a company spent over $1,000 this month", or "usage this week fell below half of last week".
 
-Metrics are part of the [customer data platform](customers.md) and belong to one brand. Everything here works the same from the REST API (`/v1/brands/{brand}/metrics`), the MCP server and Query.
+Metrics are part of the [customer data platform](customers.md) and belong to one brand. Everything here works the same from the REST API (`/v1/brands/{brand}/metrics`), the MCP server and Query. In the app, People → Metrics turns metrics on, adds your own, changes what one counts, refills one from stored events and archives one (people with `catalog.manage`; everyone else can read them).
 
 ## Live, always up to date
 

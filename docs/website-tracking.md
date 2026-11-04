@@ -63,6 +63,10 @@ utm_source=meta&utm_medium=cpc&utm_campaign={{campaign.name}}&utm_content={{ad.n
 
 There are templates for Google Ads and Microsoft Advertising (the final URL suffix), Meta, LinkedIn, Reddit, TikTok, Snapchat, Pinterest, Taboola and Outbrain. X and Amazon Ads have no macros for their ids, so their template is the tags alone. LinkedIn sets its values on the campaign: add each parameter there and choose the dynamic value named after the `=`. Apple Ads (formerly Apple Search Ads) send people to your app, not your site, so they have none. A template works without connecting the network: connecting it in [Paid ads](paid-media.md) adds its spend, and sends conversions back.
 
+### Adding the template to Google Ads for you
+
+Google Ads uses the lowest Final URL suffix that is set: an ad's own, else its ad group's, its campaign's, then the account's. So a suffix on the account alone isn't enough when campaigns have suffixes of their own. On a connected Google Ads account, Outflare can add the template everywhere it is needed: **Paid ads → Tracking → Fix tracking links** first shows each suffix it would change, and what it would say, then changes them when you confirm. It adds the template to the account's suffix (so new campaigns get it) and to every campaign, ad group or ad suffix that lacks it, keeping the parameters already there and adding only the keys missing. Nothing else changes. An ad with a suffix of its own goes back to Google's review; account, campaign and ad group suffixes don't. The changes run on the workspace's own Google sign-in, are listed in one `ad_account.tracking_added` audit event, and the account syncs afterwards so tracking health shows the result. By API: `GET /v1/workspaces/{ws}/ads/accounts/{id}/tracking` (scope `analytics.read`) shows the changes and `POST` to the same path (scope `ads.manage`) makes them; MCP `plan_ad_tracking` and `add_ad_tracking`. Other networks' templates are pasted in by hand.
+
 The script reads click ids and `of_` parameters on any page, and the pixel cookies only after consent (see [Consent](#consent)).
 
 ### Tracking health

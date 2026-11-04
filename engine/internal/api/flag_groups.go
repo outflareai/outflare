@@ -20,9 +20,11 @@ import (
 
 func (s *Server) flagGroupRoutes(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/flag-groups", s.inWorkspace(read, s.listFlagGroups))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/flag-groups/{group}", s.inWorkspace(manage, s.setFlagGroup))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/flag-groups/{group}/holdout", s.inWorkspace(read, s.flagGroupHoldout))
+	for _, t := range s.twins("flag-groups") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listFlagGroups))
+		mux.HandleFunc("PUT "+t.path+"/{group}", t.on(s.inWorkspace)(manage, s.setFlagGroup))
+		mux.HandleFunc("GET "+t.path+"/{group}/holdout", t.on(s.inWorkspace)(read, s.flagGroupHoldout))
+	}
 }
 
 type flagGroupMember struct {
@@ -41,15 +43,21 @@ type flagGroupView struct {
 	Free int `json:"free"`
 }
 
-func (s *Server) loadFlagGroups(ctx context.Context, ws, only string) ([]flagGroupView, error) {
+// loadFlagGroups lists a brand's exclusion groups (brand "": every
+// brand's) with their flags. flag_groups has no brand_id yet (the version
+// before 0411 lists every group), so a group's own row counts for every
+// brand: to_jsonb reads the column once a later migration adds it.
+func (s *Server) loadFlagGroups(ctx context.Context, ws, brand, only string) ([]flagGroupView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT g.name, coalesce(fg.holdout, 0), f.key, f.name, f.status, f.group_from, f.group_to
 		FROM (SELECT DISTINCT exclusion_group AS name FROM flags WHERE workspace_id = $1 AND exclusion_group <> '' AND status <> 'archived'
-			UNION SELECT name FROM flag_groups WHERE workspace_id = $1) g
+				AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid)
+			UNION SELECT name FROM flag_groups g WHERE workspace_id = $1 AND ($3 = '' OR COALESCE(to_jsonb(g) ->> 'brand_id', $3) = $3)) g
 		LEFT JOIN flag_groups fg ON fg.workspace_id = $1 AND fg.name = g.name
 		LEFT JOIN flags f ON f.workspace_id = $1 AND f.exclusion_group = g.name AND f.status <> 'archived'
+			AND ($3 = '' OR f.brand_id = NULLIF($3, '')::uuid)
 		WHERE $2 = '' OR g.name = $2
-		ORDER BY g.name, f.group_from`, ws, only)
+		ORDER BY g.name, f.group_from`, ws, only, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +86,11 @@ func (s *Server) loadFlagGroups(ctx context.Context, ws, only string) ([]flagGro
 
 func (s *Server) listFlagGroups(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	list, err := s.loadFlagGroups(r.Context(), a.WorkspaceID, "")
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.loadFlagGroups(r.Context(), a.WorkspaceID, groupBrand(sel), "")
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -105,12 +117,16 @@ func (s *Server) setFlagGroup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "holdout is the percent of the group's visitors kept out of every flag in it, 0 to 50")
 		return
 	}
-	if !a.writes(nil) {
-		writeError(w, r, http.StatusForbidden, "forbidden", "a group spans brands: only someone with every brand can change its holdout")
+	ctx := r.Context()
+	// A group's flags are the brand's: the route's, else the workspace's
+	// first. Its holdout row is still the workspace's (flag_groups has no
+	// brand_id yet), so a name is one group across brands.
+	brand, err := s.defaultBrand(ctx, a)
+	if err != nil {
+		s.internal(w, r, err)
 		return
 	}
-	ctx := r.Context()
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		limit := flags.Buckets - *in.Holdout*100
 		var clash string
 		err := tx.QueryRow(ctx, `SELECT key FROM flags WHERE workspace_id = $1 AND exclusion_group = $2 AND status <> 'archived' AND group_to > $3
@@ -125,12 +141,12 @@ func (s *Server) setFlagGroup(w http.ResponseWriter, r *http.Request) {
 			ON CONFLICT (workspace_id, name) DO UPDATE SET holdout = EXCLUDED.holdout, updated_at = now()`, a.WorkspaceID, name, *in.Holdout); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "flag_group.updated", "flag_group", "", map[string]any{"holdout": *in.Holdout})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "flag_group.updated", "flag_group", "", map[string]any{"holdout": *in.Holdout, "brand_id": brand})
 	})
 	if s.abWriteError(w, r, err) {
 		return
 	}
-	list, err := s.loadFlagGroups(ctx, a.WorkspaceID, name)
+	list, err := s.loadFlagGroups(ctx, a.WorkspaceID, brand, name)
 	if err != nil || len(list) != 1 {
 		s.internal(w, r, err)
 		return
@@ -167,9 +183,13 @@ func (s *Server) flagGroupHoldout(w http.ResponseWriter, r *http.Request) {
 		}
 		days = n
 	}
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), abResultsTimeout)
 	defer cancel()
-	list, err := s.loadFlagGroups(ctx, a.WorkspaceID, name)
+	list, err := s.loadFlagGroups(ctx, a.WorkspaceID, groupBrand(sel), name)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -189,4 +209,13 @@ func (s *Server) flagGroupHoldout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// groupBrand is the brand a group list keeps to: the filter's one brand,
+// or "" for every brand (?brand=all).
+func groupBrand(sel brandSel) string {
+	if sel.id == "none" {
+		return "00000000-0000-0000-0000-000000000000"
+	}
+	return sel.id
 }

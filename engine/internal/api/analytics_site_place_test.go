@@ -22,6 +22,9 @@ func TestBrandLimitedPlacesSites(t *testing.T) {
 		}
 	}
 	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/shared", "brand": "none"})
+	// A domain only suggests a brand: Repocket's site is Repocket's once
+	// someone assigns it.
+	owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "s/rp", "brand": "repocket"})
 
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode agent", "scopes": []string{"integrations.manage", "analytics.read"}, "brand": "geonode"})["token"].(string)
 	agent := &client{t: t, h: e.h, bearer: tok}

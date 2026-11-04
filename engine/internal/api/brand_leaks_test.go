@@ -428,7 +428,15 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 	case "currency", "brand_currency":
 		return cast, "USD"
 	}
-	if tbl == "support_chat_widgets" && c.name == "key" {
+	// Columns whose checks are patterns rather than lists.
+	switch tbl + "." + c.name {
+	case "attribution_model_pins.module", "conversion_definitions.event_name":
+		return cast, "bravo"
+	case "tracking_link_clicks.click_key":
+		return cast, "bravo00000000000"
+	case "visitor_alerts.kind":
+		return cast, "hot"
+	case "support_chat_widgets.key":
 		return cast, "ofw_bravobravobravobravobrav"
 	}
 	if tbl == "rules" && c.name == "trigger" {

@@ -35,3 +35,9 @@ A request a role doesn't answer gets a `404` with error code `not_found`.
 4. Give each service its own share of database connections with `pool_max_conns` in `DATABASE_URL`, so the total stays under the database's `max_connections`. For example, with a limit of 100: api 2 × 15, ingest 2 × 5, worker 1 × 45 (the worker needs about `WORKERS` plus 10). [Query](query.md) opens its own connections on top, up to `OUTFLARE_QUERY_CONNECTIONS` (default 3) per api server, so count those too or lower `pool_max_conns` by as many.
 
 All services share the same settings. `OUTFLARE_SECRET_KEY` must be the same everywhere.
+
+## Restarts and deploys
+
+On `SIGTERM` the server stops taking new jobs and tells running ones to stop. A job that stops goes straight back in the queue for another worker, without using up one of its retries (`job.interrupted`). A job still running after `OUTFLARE_SHUTDOWN_GRACE` (default `10s`) is handed back to the queue as it is (`job.released`, with its `kind`), so it starts again elsewhere at once. Only a process killed outright, before either happens, leaves its jobs to wait out their 5-minute lease (`job.reaped`, with the `kinds` it hit).
+
+Give the server more time between `SIGTERM` and `SIGKILL` than `OUTFLARE_SHUTDOWN_GRACE`: Docker's default is 10 seconds (`stop_grace_period`), Kubernetes' 30 (`terminationGracePeriodSeconds`), and some platforms allow almost none unless you set it (Railway: `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`). For example, a 30-second stop window with `OUTFLARE_SHUTDOWN_GRACE=20s`.

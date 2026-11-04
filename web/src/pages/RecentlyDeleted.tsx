@@ -9,7 +9,7 @@ import { nameItem } from "@/lib/records";
 // Recently deleted: what was deleted from a brand's customer data in the
 // last 7 days (the recovery window). Each row is one delete: a person or
 // company with their emails, ids, links and events, or one field value,
-// identity, link or product event. Restoring puts it back as it was and
+// identity, link, product event or transaction. Restoring puts it back as it was and
 // sends nothing again; after 7 days it is purged for good.
 
 type Deletion = Schemas["Deletion"];
@@ -22,6 +22,7 @@ const kinds: Record<Kind, string> = {
   relationship: "Link",
   event: "Product event",
   batch: "Undone import",
+  transaction: "Transaction",
 };
 
 const reasons: Record<string, string> = {

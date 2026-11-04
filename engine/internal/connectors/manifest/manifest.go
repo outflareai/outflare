@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,9 +30,12 @@ import (
 
 // Manifest is one connector's manifest.yaml.
 type Manifest struct {
-	ID          string       `yaml:"id"`
-	Name        string       `yaml:"name"`
-	Category    string       `yaml:"category"`
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Category string `yaml:"category"`
+	// BrandKind overrides the category's default kind for new
+	// connections: brand, split or shared.
+	BrandKind   string       `yaml:"brand_kind"`
 	Summary     string       `yaml:"summary"`
 	Description string       `yaml:"description"`
 	Website     string       `yaml:"website"`
@@ -318,6 +322,9 @@ func (m *Manifest) Validate() error {
 	}
 	if !categories[m.Category] {
 		bad("category %q is not supported by manifests yet", m.Category)
+	}
+	if m.BrandKind != "" && !slices.Contains(c.BrandKinds, m.BrandKind) {
+		bad("brand_kind %q is not brand, split or shared", m.BrandKind)
 	}
 	if m.Summary == "" || len(m.Summary) > 160 {
 		bad("summary is required (one sentence, at most 160 characters)")

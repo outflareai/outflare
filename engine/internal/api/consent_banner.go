@@ -37,9 +37,11 @@ import (
 
 func (s *Server) routesConsentBanner(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/site-keys/{id}/consent-banner", s.inWorkspace(read, s.getConsentBanner))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/site-keys/{id}/consent-banner", s.inWorkspace(manage, s.updateConsentBanner))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask", s.inWorkspace(manage, s.reaskConsentBanner))
+	for _, t := range s.twins("site-keys") {
+		mux.HandleFunc("GET "+t.path+"/{id}/consent-banner", t.on(s.inWorkspace)(read, s.getConsentBanner))
+		mux.HandleFunc("PUT "+t.path+"/{id}/consent-banner", t.on(s.inWorkspace)(manage, s.updateConsentBanner))
+		mux.HandleFunc("POST "+t.path+"/{id}/consent-banner/reask", t.on(s.inWorkspace)(manage, s.reaskConsentBanner))
+	}
 	// Public: the key is the authority.
 	mux.HandleFunc("GET /v1/site/consent", s.siteConsentConfig)
 	mux.HandleFunc("POST /v1/site/consent", s.siteConsentChoice)

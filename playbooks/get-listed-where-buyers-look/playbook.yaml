@@ -1,0 +1,61 @@
+id: get-listed-where-buyers-look
+version: 1
+title: Get listed where buyers look
+summary: Find the directories, marketplaces and comparison sites where buyers in the brand's category look, and keep a current profile on each.
+description: |
+  Buyers shortlist tools on directories, integration marketplaces, review
+  sites and comparison pages before they ever reach a website. A missing
+  or stale profile there loses the sale quietly. This playbook lists the
+  sites that matter for the brand's category, checks which already have a
+  profile, and submits or updates the rest from the brand's own context,
+  signed in as the brand's own account on each site. Each listing is kept
+  in Coverage, so the team can see which ones are live and which bring
+  visits.
+tier: obvious
+goals: [search, customers]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: category
+    label: The category buyers search for
+    example: project management software
+steps:
+  - say: Read the brand's context, so every profile says the same true things.
+    tools: [getBrandContext]
+  - say: List where the brand is already listed, and the sites where it should be.
+    tools: [listCoveragePlacements, listCoveragePublishers]
+  - say: Check the brand has an account on each site; record any the team gives you.
+    tools: [listAccounts, createAccount]
+  - say: Submit or update each profile in a browser signed in as the brand's own account, with text a person approved.
+    tools: [createBrowserTask, getBrowserTask]
+  - say: When a site asks for a code, a CAPTCHA or a sign-in step, ask a person to take over.
+    tools: [requestAccountTakeover]
+  - say: Record each listing in Coverage and check it is live.
+    tools: [createCoveragePlacements, checkCoveragePlacement]
+guardrails:
+  - Every profile's text waits for a person's approval before it is submitted.
+  - Never pays for a listing or accepts a site's terms without a person.
+  - Only the brand's own accounts; never creates an account in someone's name.
+  - Never posts reviews or asks for them on the brand's behalf.
+measure:
+  - { metric: Listings live, how: "Coverage placements of the directory, profile and integration kinds that are live." }
+  - { metric: Referral visits, how: "Visits from each listing, by publisher." }
+prompt: |
+  Find the directories, marketplaces and comparison sites where people
+  looking for {{category}} shortlist tools, check where {{brand}} is
+  already listed, and draft a profile for each one that's missing or out
+  of date. Submit each one I approve from the brand's own account, and
+  keep them in Coverage.
+example: |
+  Northpeak was missing from four of the ten sites buyers used. Three
+  profiles went live in a week; the fourth needed a phone check, which
+  the marketing lead did in a takeover.

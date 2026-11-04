@@ -75,13 +75,18 @@ var (
 
 func (s *Server) routesSiteKeys(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/site-keys", s.inWorkspace(read, s.listSiteKeys))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/site-keys", s.inWorkspace(manage, s.createSiteKey))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/site-keys/{id}", s.inWorkspace(manage, s.updateSiteKey))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/site-keys/{id}/rotate", s.inWorkspace(manage, s.rotateSiteKey))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/site-keys/{id}", s.inWorkspace(manage, s.revokeSiteKey))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/site-keys/{id}/proxy-secret", s.inWorkspace(manage, s.createSiteProxySecret))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/site-keys/{id}/proxy-secret", s.inWorkspace(manage, s.removeSiteProxySecret))
+	// A site key belongs to one brand (brand_website.go), and so do its
+	// consent banner, cookies and policy: served under the brand, and
+	// under the workspace until the contract step.
+	for _, t := range s.twins("site-keys") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listSiteKeys))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createSiteKey))
+		mux.HandleFunc("PATCH "+t.path+"/{id}", t.on(s.inWorkspace)(manage, s.updateSiteKey))
+		mux.HandleFunc("POST "+t.path+"/{id}/rotate", t.on(s.inWorkspace)(manage, s.rotateSiteKey))
+		mux.HandleFunc("DELETE "+t.path+"/{id}", t.on(s.inWorkspace)(manage, s.revokeSiteKey))
+		mux.HandleFunc("POST "+t.path+"/{id}/proxy-secret", t.on(s.inWorkspace)(manage, s.createSiteProxySecret))
+		mux.HandleFunc("DELETE "+t.path+"/{id}/proxy-secret", t.on(s.inWorkspace)(manage, s.removeSiteProxySecret))
+	}
 	// Public: the key in the body is the authority.
 	mux.HandleFunc("POST /v1/site/events", s.siteEvents)
 	mux.HandleFunc("OPTIONS /v1/site/events", s.siteEventsPreflight)
@@ -175,7 +180,7 @@ func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]sit
 
 func (s *Server) listSiteKeys(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -198,7 +203,8 @@ func (s *Server) oneSiteKey(w http.ResponseWriter, r *http.Request) (siteKeyView
 			s.internal(w, r, err)
 			return siteKeyView{}, false
 		}
-		if len(list) == 1 {
+		// A brand route reaches its own brand's keys only.
+		if len(list) == 1 && a.sees(list[0].BrandID) {
 			return list[0], true
 		}
 	}
@@ -299,22 +305,6 @@ func originAllowed(origins []string, origin string) bool {
 	return false
 }
 
-func (s *Server) siteKeyBrand(ctx context.Context, ws string, brand *string) error {
-	if brand == nil {
-		return nil
-	}
-	var ok bool
-	if validUUID(*brand) {
-		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM brands WHERE id = $1 AND workspace_id = $2)`, *brand, ws).Scan(&ok); err != nil {
-			return err
-		}
-	}
-	if !ok {
-		return errInvalid("brand_id is not a brand in this workspace: GET .../brands lists them")
-	}
-	return nil
-}
-
 func (s *Server) createSiteKey(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req siteKeyInput
@@ -341,11 +331,15 @@ func (s *Server) createSiteKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if s.allocError(w, r, s.siteKeyBrand(ctx, a.WorkspaceID, req.BrandID)) {
+	// A key belongs to one brand: the route's, the one named, or the
+	// workspace's first.
+	brand, err := s.activationBrand(ctx, a, req.BrandID)
+	if s.allocError(w, r, err) {
 		return
 	}
+	req.BrandID = &brand
 	var id string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM site_keys WHERE workspace_id = $1 AND revoked_at IS NULL`, a.WorkspaceID).Scan(&n); err != nil {
 			return err
@@ -401,10 +395,11 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.BrandID != nil {
-		if s.allocError(w, r, s.siteKeyBrand(ctx, a.WorkspaceID, req.BrandID)) {
+		id, err := s.activationBrand(ctx, a, req.BrandID)
+		if s.allocError(w, r, err) {
 			return
 		}
-		brand = req.BrandID
+		brand = &id
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6 WHERE id = $1 AND workspace_id = $2`,

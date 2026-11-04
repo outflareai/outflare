@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 )
 
@@ -156,11 +158,22 @@ var metaSent struct {
 	events []map[string]any
 }
 
-// fakeGoogleAds accepts only the developer token "dev-ok".
+// googleSuffix is fakeGoogleAds' URL suffixes: the account's and campaign
+// 7's (which has one of its own until a test changes it), and the mutate
+// requests it took. refuse makes it refuse campaign updates.
+var googleSuffix = struct {
+	sync.Mutex
+	account, campaign string
+	mutates           []string
+	refuse            bool
+}{campaign: "gad_campaignid={campaignid}"}
+
+// fakeGoogleAds refuses a developer token other than "dev-ok". Google
+// retired the tokens, so a call without one goes through.
 type fakeGoogleAds struct{}
 
 func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("developer-token") != "dev-ok" {
+	if tok := r.Header.Get("developer-token"); tok != "" && tok != "dev-ok" {
 		w.WriteHeader(403)
 		w.Write([]byte(`{"error":{"message":"DEVELOPER_TOKEN_INVALID"}}`))
 		return
@@ -168,11 +181,42 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/v23/customers:listAccessibleCustomers":
 		json.NewEncoder(w).Encode(map[string]any{"resourceNames": []string{"customers/123"}})
+	case "/v23/customers/123:mutate", "/v23/customers/123/campaigns:mutate":
+		var body struct {
+			Operation  map[string]any   `json:"operation"`
+			Operations []map[string]any `json:"operations"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		googleSuffix.Lock()
+		defer googleSuffix.Unlock()
+		if body.Operation != nil {
+			body.Operations = append(body.Operations, body.Operation)
+		}
+		for _, op := range body.Operations {
+			u, _ := op["update"].(map[string]any)
+			b, _ := json.Marshal(op)
+			googleSuffix.mutates = append(googleSuffix.mutates, r.URL.Path+" "+string(b))
+			switch {
+			case u["resourceName"] == "customers/123":
+				googleSuffix.account = u["finalUrlSuffix"].(string)
+			case googleSuffix.refuse:
+				w.WriteHeader(400)
+				w.Write([]byte(`{"error":{"message":"FIELD_NOT_MUTABLE"}}`))
+				return
+			case u["resourceName"] == "customers/123/campaigns/7" && op["updateMask"] == "final_url_suffix":
+				googleSuffix.campaign = u["finalUrlSuffix"].(string)
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": []any{}})
 	case "/v23/customers/123/googleAds:search":
 		b, _ := io.ReadAll(r.Body)
 		q := string(b)
+		googleSuffix.Lock()
+		accountSuffix, campaignSuffix := googleSuffix.account, googleSuffix.campaign
+		googleSuffix.Unlock()
 		if strings.Contains(q, "FROM customer\"") {
-			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Pacific/Kiritimati"}}}})
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"customer": map[string]any{"id": "123", "descriptiveName": "Acme search", "currencyCode": "EUR", "timeZone": "Pacific/Kiritimati",
+				"finalUrlSuffix": accountSuffix}}}})
 			return
 		}
 		// One campaign, ad group, ad and keyword, with numbers on the last
@@ -215,7 +259,15 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case strings.Contains(q, "FROM campaign WHERE segments"):
 			out = []any{row(map[string]any{"campaign": camp})}
 		case strings.Contains(q, "FROM campaign"):
-			out = []any{map[string]any{"campaign": camp}}
+			c := maps.Clone(camp)
+			if strings.Contains(q, "bidding_strategy_type") {
+				c["biddingStrategyType"] = "MAXIMIZE_CONVERSIONS"
+				c["maximizeConversions"] = map[string]any{"targetCpaMicros": "4000000"}
+			}
+			if strings.Contains(q, "campaign.final_url_suffix") {
+				c["finalUrlSuffix"] = campaignSuffix
+			}
+			out = []any{map[string]any{"campaign": c}}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": out})
 	default:
@@ -397,8 +449,8 @@ func TestAdsSyncAndReports(t *testing.T) {
 	agentToken(t, owner, base, "no analytics", "workspace.read").must(403, "GET", base+"/ads/campaigns", nil)
 }
 
-// Google Ads signs in with Google, then needs the workspace's own developer
-// token before it can read anything.
+// Google Ads signs in with Google and needs nothing more: Google retired
+// developer tokens. One a workspace adds anyway is still checked and sealed.
 func TestAdsDeveloperTokenSetup(t *testing.T) {
 	e := freshEnv(t)
 	ctx := context.Background()
@@ -415,14 +467,13 @@ func TestAdsDeveloperTokenSetup(t *testing.T) {
 	}
 	conns := owner.must(200, "GET", base+"/ads/connections", nil)["data"].([]any)
 	need := conns[0].(map[string]any)["setup_needed"].([]any)
-	if len(need) != 1 || need[0].(map[string]any)["name"] != "developer_token" {
+	if len(need) != 0 {
 		t.Fatalf("setup needed: %v", conns)
 	}
-	if _, err := e.ads.SyncOnce(ctx, ws, id); connectors.KindOf(err) != connectors.ErrAuth || !strings.Contains(err.Error(), "developer token") {
-		t.Fatalf("sync without a developer token: %v", err)
+	if res, err := e.ads.SyncOnce(ctx, ws, id); err != nil || res.Accounts != 1 {
+		t.Fatalf("sync without a developer token: %+v %v", res, err)
 	}
 
-	owner.must(400, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{}})
 	owner.must(422, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{"developer_token": "wrong"}})
 	got := owner.must(200, "PUT", base+"/ads/connections/"+id+"/setup", map[string]any{"values": map[string]string{"developer_token": "dev-ok"}})
 	if len(got["setup_needed"].([]any)) != 0 || got["status"] != "connected" {
@@ -480,4 +531,238 @@ func TestAdsDeveloperTokenSetup(t *testing.T) {
 	meta := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "meta_ads", "credentials": map[string]string{"api_key": "mt"}})
 	owner.must(400, "PUT", base+"/ads/connections/"+meta["id"].(string)+"/setup", map[string]any{"values": map[string]string{"developer_token": "x"}})
 	owner.must(404, "PUT", base+"/ads/connections/00000000-0000-0000-0000-000000000000/setup", map[string]any{"values": map[string]string{"developer_token": "x"}})
+}
+
+// An ad account takes the brand of the connection that sees it, so a
+// brand's own Google Ads sign-in shows its accounts, campaigns and spend
+// under that brand straight away. A brand someone set by hand stays.
+func TestAdAccountTakesItsConnectionsBrand(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})["id"].(string)
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})["id"].(string)
+	var id string
+	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		i, err := e.integrations.Insert(ctx, tx, ws, "google_ads", connectors.AuthOAuth2, "Google Ads", connectors.Creds{"access_token": "gt"}, connectors.Account{}, "")
+		if err != nil {
+			return err
+		}
+		id = i.ID
+		_, err = tx.Exec(ctx, `UPDATE integrations SET brand_id = $1 WHERE id = $2`, geo, id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.ads.SyncOnce(ctx, ws, id); err != nil || res.Accounts != 1 {
+		t.Fatalf("sync: %+v %v", res, err)
+	}
+	a := owner.must(200, "GET", base+"/ads/accounts?brand="+geo, nil)["data"].([]any)
+	if len(a) != 1 || a[0].(map[string]any)["brand_id"] != geo {
+		t.Fatalf("the brand's accounts: %v", a)
+	}
+	if c := owner.must(200, "GET", base+"/ads/campaigns?brand="+geo, nil)["data"].([]any); len(c) == 0 {
+		t.Fatal("the brand's campaigns are empty")
+	}
+	if a := owner.must(200, "GET", base+"/ads/accounts?brand="+other, nil)["data"].([]any); len(a) != 0 {
+		t.Fatalf("another brand sees the account: %v", a)
+	}
+
+	// An account saved before this, with no brand, takes it on the next
+	// sync; one moved to another brand by hand keeps that.
+	acc := a[0].(map[string]any)["id"].(string)
+	if _, err := e.pool.Exec(ctx, `UPDATE ad_accounts SET brand_id = NULL WHERE id = $1`, acc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
+		t.Fatal(err)
+	}
+	if a := owner.must(200, "GET", base+"/ads/accounts?brand="+geo, nil)["data"].([]any); len(a) != 1 {
+		t.Fatalf("backfilled brand: %v", a)
+	}
+	owner.must(200, "PATCH", base+"/ads/accounts/"+acc, map[string]any{"brand": other})
+	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
+		t.Fatal(err)
+	}
+	if a := owner.must(200, "GET", base+"/ads/accounts?brand="+other, nil)["data"].([]any); len(a) != 1 {
+		t.Fatalf("the brand set by hand was replaced: %v", a)
+	}
+}
+
+// What a campaign tells the page and agents beyond its numbers: its type,
+// how Google bids and to what, the brand's own target cost per conversion
+// with over or under, and whether spend is scaling up against the days
+// before.
+func TestAdCampaignTargetsAndTrend(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	var id string
+	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		i, err := e.integrations.Insert(ctx, tx, ws, "google_ads", connectors.AuthOAuth2, "Google Ads", connectors.Creds{"access_token": "gt"}, connectors.Account{}, "")
+		id = i.ID
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
+		t.Fatal(err)
+	}
+	list := owner.must(200, "GET", base+"/ads/campaigns?connector=google_ads", nil)
+	c := list["data"].([]any)[0].(map[string]any)
+	// 9 EUR for 2 conversions: 4.50 each.
+	if c["objective"] != "search" || c["bidding_strategy"] != "maximize_conversions" || c["platform_target_cpa_micros"] != 4_000_000.0 ||
+		c["target_status"] != "no_target" || c["trend"] != "new" || c["totals"].(map[string]any)["cost_per_conversion_micros"] != 4_500_000.0 {
+		t.Fatalf("campaign: %v", c)
+	}
+	cid := c["id"].(string)
+	acc := owner.must(200, "GET", base+"/ads/accounts", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+
+	owner.must(400, "PUT", base+"/ads/campaigns/"+cid+"/target", map[string]any{"cost_per_conversion_micros": 0})
+	owner.must(404, "PUT", base+"/ads/campaigns/"+acc+"/target", map[string]any{"cost_per_conversion_micros": 1})
+	owner.must(200, "PUT", base+"/ads/accounts/"+acc+"/target", map[string]any{"cost_per_conversion_micros": 6_000_000})
+	get := func() map[string]any {
+		return owner.must(200, "GET", base+"/ads/campaigns?connector=google_ads", nil)["data"].([]any)[0].(map[string]any)
+	}
+	if c := get(); c["target_cost_per_conversion_micros"] != 6_000_000.0 || c["target_from"] != "account" || c["target_status"] != "under" {
+		t.Fatalf("account target: %v", c)
+	}
+	owner.must(200, "PUT", base+"/ads/campaigns/"+cid+"/target", map[string]any{"cost_per_conversion_micros": 3_000_000})
+	if c := get(); c["target_cost_per_conversion_micros"] != 3_000_000.0 || c["target_from"] != "campaign" || c["target_status"] != "over" {
+		t.Fatalf("campaign target: %v", c)
+	}
+	owner.must(200, "PUT", base+"/ads/campaigns/"+cid+"/target", map[string]any{"cost_per_conversion_micros": 4_400_000})
+	if c := get(); c["target_status"] != "on_target" {
+		t.Fatalf("within a tenth: %v", c)
+	}
+	owner.must(200, "PUT", base+"/ads/campaigns/"+cid+"/target", map[string]any{"cost_per_conversion_micros": nil})
+	if c := get(); c["target_from"] != "account" {
+		t.Fatalf("cleared campaign target: %v", c)
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action IN ('ad_campaign.target_set', 'ad_account.target_set')`, ws).Scan(&n); err != nil || n != 4 {
+		t.Fatalf("audit: %d %v", n, err)
+	}
+
+	// 4 EUR the day before the range, 9 in it: scaling up by 125%.
+	from, _ := time.Parse(time.DateOnly, list["from"].(string))
+	if _, err := e.pool.Exec(ctx, `INSERT INTO ad_metrics_daily (ad_entity_id, day, workspace_id, currency, spend_micros, clicks, conversions)
+		VALUES ($1, $2, $3, 'EUR', 4000000, 5, 1)`, cid, from.AddDate(0, 0, -1), ws); err != nil {
+		t.Fatal(err)
+	}
+	c = get()
+	if c["trend"] != "scaling_up" || c["spend_change"] != 1.25 || c["previous_totals"].(map[string]any)["spend_micros"] != 4_000_000.0 {
+		t.Fatalf("trend: %v", c)
+	}
+}
+
+func TestAddAdTracking(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	googleSuffix.Lock()
+	googleSuffix.account, googleSuffix.campaign, googleSuffix.mutates, googleSuffix.refuse = "", "gad_campaignid={campaignid}", nil, false
+	googleSuffix.Unlock()
+	var id string
+	err := pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
+		i, err := e.integrations.Insert(ctx, tx, ws, "google_ads", connectors.AuthOAuth2, "Google Ads", connectors.Creds{"access_token": "gt"}, connectors.Account{}, "")
+		id = i.ID
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ads.SyncOnce(ctx, ws, id); err != nil {
+		t.Fatal(err)
+	}
+	acc := owner.must(200, "GET", base+"/ads/accounts", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	owner.must(404, "GET", base+"/ads/accounts/"+"00000000-0000-4000-8000-000000000001"+"/tracking", nil)
+
+	// The account has no suffix, and the campaign's own one replaces it
+	// without the template: both need it, and the campaign keeps its own
+	// parameter. The ad group already has the template.
+	plan := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking", nil)
+	tpl := plan["template"].(string)
+	changes := plan["changes"].([]any)
+	if plan["connector"] != "google_ads" || !strings.Contains(tpl, "of_ad={creative}") || len(changes) != 2 {
+		t.Fatalf("plan: %v", plan)
+	}
+	a, c := changes[0].(map[string]any), changes[1].(map[string]any)
+	if a["level"] != "account" || a["before"] != "" || a["after"] != tpl || a["name"] != "Acme search" ||
+		c["level"] != "campaign" || c["id"] != "7" || c["after"] != adtrack.AddTemplate("gad_campaignid={campaignid}", tpl) ||
+		!strings.HasPrefix(c["after"].(string), "gad_campaignid={campaignid}&utm_source=google") {
+		t.Fatalf("changes: %v", changes)
+	}
+
+	// Reading the plan changes nothing; adding it is queued.
+	googleSuffix.Lock()
+	if len(googleSuffix.mutates) != 0 {
+		t.Fatalf("a plan changed something: %v", googleSuffix.mutates)
+	}
+	googleSuffix.Unlock()
+	owner.must(202, "POST", base+"/ads/accounts/"+acc+"/tracking", nil)
+	var queued int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'ads.tracking'`, ws).Scan(&queued); err != nil || queued != 1 {
+		t.Fatalf("queued: %d %v", queued, err)
+	}
+	if err := e.ads.AddTracking(ctx, ws, acc, "", false); err != nil {
+		t.Fatal(err)
+	}
+	googleSuffix.Lock()
+	got, mut := googleSuffix.account+" | "+googleSuffix.campaign, len(googleSuffix.mutates)
+	googleSuffix.Unlock()
+	if got != tpl+" | "+c["after"].(string) || mut != 2 {
+		t.Fatalf("suffixes: %s (%d mutates)", got, mut)
+	}
+	if p := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking", nil)["changes"].([]any); len(p) != 0 {
+		t.Fatalf("still to change: %v", p)
+	}
+	var data []byte
+	if err := e.pool.QueryRow(ctx, `SELECT data FROM audit_events WHERE workspace_id = $1 AND action = 'ad_account.tracking_added'`, ws).Scan(&data); err != nil ||
+		!strings.Contains(string(data), `"changed": 2`) && !strings.Contains(string(data), `"changed":2`) {
+		t.Fatalf("audit: %s %v", data, err)
+	}
+	var requested, syncs int
+	e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'ad_account.tracking_requested'`, ws).Scan(&requested)
+	e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'ads.sync'`, ws).Scan(&syncs)
+	if requested != 1 || syncs != 1 {
+		t.Fatalf("requested %d, syncs queued %d", requested, syncs)
+	}
+
+	// A campaign Google refuses is reported; the rest still change.
+	googleSuffix.Lock()
+	googleSuffix.account, googleSuffix.campaign, googleSuffix.refuse = "", "ref=ppc", true
+	googleSuffix.Unlock()
+	if err := e.ads.AddTracking(ctx, ws, acc, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT data FROM audit_events WHERE workspace_id = $1 AND action = 'ad_account.tracking_added' ORDER BY id DESC LIMIT 1`, ws).Scan(&data); err != nil ||
+		!strings.Contains(string(data), "FIELD_NOT_MUTABLE") {
+		t.Fatalf("refused: %s %v", data, err)
+	}
+	googleSuffix.Lock()
+	acctSuffix := googleSuffix.account
+	googleSuffix.refuse = false
+	googleSuffix.Unlock()
+	if acctSuffix != tpl {
+		t.Fatalf("account after a refused campaign: %q", acctSuffix)
+	}
+
+	// Other platforms say the template goes in by hand.
+	m := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "meta_ads", "credentials": map[string]string{"api_key": "mt"}})
+	if _, err := e.ads.SyncOnce(ctx, ws, m["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	var metaAcc string
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM ad_accounts WHERE workspace_id = $1 AND connector = 'meta_ads'`, ws).Scan(&metaAcc); err != nil {
+		t.Fatal(err)
+	}
+	if res := owner.must(422, "GET", base+"/ads/accounts/"+metaAcc+"/tracking", nil); res["error"].(map[string]any)["code"] != "connector_invalid" {
+		t.Fatalf("meta: %v", res)
+	}
 }

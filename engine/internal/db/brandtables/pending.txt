@@ -3,7 +3,6 @@
 # Nothing is added, except tables open pull requests were already adding
 # when the list was made (they may not exist on main yet).
 # search_embeddings exists only where the database has pgvector (CI does).
-ab_test_checks
 ad_conversion_rules
 ad_conversion_sends
 ad_metrics_daily
@@ -30,16 +29,10 @@ allocation_changes
 allocation_declines
 allocation_status
 allocation_suggestions
-analytics_cache
-analytics_daily
-analytics_syncs
-attribution_credits
 attribution_model_pins
 attribution_models
-attribution_settings
 backlink_events
 backlink_runs
-campaign_links
 competitor_events
 competitor_pages
 connect_requests
@@ -47,10 +40,7 @@ connection_hook_events
 connection_hooks
 connection_limit_alerts
 connection_limits
-consent_banners
 conversion_definitions
-cookie_policies
-cookie_scans
 crawl_ai_bots
 crawl_issues
 crawl_links
@@ -65,7 +55,6 @@ email_topics
 emailbison_compat_calls
 emailbison_compat_ids
 enrichment_cache
-experiment_pages
 fix_autonomy
 flag_groups
 health_settings
@@ -80,7 +69,6 @@ knowledge_chunks
 knowledge_uses
 knowledge_versions
 link_building_settings
-link_clicks
 link_page_checks
 link_pitches
 link_prospect_contacts
@@ -99,8 +87,6 @@ news_hits
 oauth_connections
 outcome_links
 outcome_syncs
-page_conversion_syncs
-page_conversions
 page_targets
 partner_assets
 partner_clicks
@@ -127,10 +113,7 @@ rank_observations
 reddit_action_events
 reddit_action_snapshots
 reply_rules
-search_daily
 search_embeddings
-search_sitemaps
-search_syncs
 semantic_search_settings
 senders
 sending_servers
@@ -138,9 +121,6 @@ seo_regressions
 seo_site_read_failures
 seo_snapshots
 seo_syncs
-site_cookies
-site_event_inbox
-site_key_days
 social_account_days
 social_post_snapshots
 spend_rates
@@ -150,15 +130,9 @@ story_quotes
 support_messages
 suppression_syncs
 tracked_keywords
-tracked_links
-tracking_domains
 tracking_link_clicks
-tracking_links
-url_inspections
 vendor_mailboxes
 vendor_syncs
 verification_settings
 visitor_alerts
-visitor_ip_lookups
-visitor_settings
 workspace_context

@@ -1,6 +1,6 @@
 # Channels: the framework every channel follows
 
-The brand agent works across channels: paid ads, content on the brand's website, social, communities, email outreach, link building, press, SEO and reviews, with more to come. Every channel is described the same way (`engine/internal/channels`), so the agent's tool selection, the readiness checks and the dashboard pick a new channel up by themselves, and the test kit holds every channel to the same bar. Channel code is open; deciding when to use a channel is the agent's.
+The brand agent works across channels: paid ads, content on the brand's website, social, communities, email outreach, link building, press, SEO, reviews, newsletters (broadcasts to the brand's own subscribers), website conversion (A/B tests, experiments and feature flags), competitor watch, and, through accounts and browser workers, listings and marketplaces and forums and launch sites, with more to come. Every channel is described the same way (`engine/internal/channels`), so the agent's tool selection, the readiness checks and the dashboard pick a new channel up by themselves, and the test kit holds every channel to the same bar. Channel code is open; deciding when to use a channel is the agent's.
 
 ## A channel's manifest
 
@@ -37,4 +37,4 @@ The MCP tool `list_channels` gives the same. The brand agent reads it before cho
 5. Tests against recorded responses and an agent's held change, named in the manifest.
 6. The manifest in `engine/internal/channels/channels.go`; the kit tells you what is missing.
 
-Channels with no API go through accounts and browser workers once those exist; until then a channel lists what it has.
+Channels with no API (`listings`, `forums`) go through accounts and browser workers ([accounts.md](accounts.md), [browser-workers.md](browser-workers.md)): their actions record the brand's account, queue a bounded browser task, ask a person to take the account over, and record the appearance in Coverage; they are ready once the brand's context is written and an account is recorded (`brand_accounts`).

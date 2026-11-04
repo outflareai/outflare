@@ -42,5 +42,9 @@ COPY --from=web /src/web/dist /web
 COPY --from=web /src/mcp/dist/outflare-mcp.mjs /mcp/outflare-mcp.mjs
 ENV HTTP_ADDR=:8080 WEB_DIR=/web OUTFLARE_MCP_SERVER=/mcp/outflare-mcp.mjs OUTFLARE_NODE=/nodejs/bin/node
 EXPOSE 8080
+# Go turns on Multipath TCP for listeners by default (Go 1.24+). Nothing
+# here needs it, so turn it off: it only widens what the kernel's TCP code
+# has to handle (for example CVE-2026-98432).
+ENV GODEBUG=multipathtcp=0
 ENTRYPOINT ["/outflare"]
 CMD ["serve"]

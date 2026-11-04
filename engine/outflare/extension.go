@@ -56,6 +56,7 @@ type Host struct {
 
 	workspaceRoutes []api.WorkspaceRoute
 	menuLinks       []api.MenuLinks
+	menuBadges      []api.MenuBadges
 	aiTools         []api.AITool
 	trackingCerts   api.TrackingCerts
 	quota           quota.Checker
@@ -151,6 +152,15 @@ func (h *Host) AddCapability(name string) {
 // opens must still check who is calling: a link is not permission.
 func (h *Host) AddMenuLinks(fn func(ctx context.Context, userID string) ([]MenuLink, error)) {
 	h.menuLinks = append(h.menuLinks, fn)
+}
+
+// AddMenuBadges shows short texts, up to 16 characters, next to the
+// extension's own sidebar links for the workspace someone has open, such as
+// an account balance next to a billing link: fn returns them by link id.
+// It runs each time the web app opens a workspace, so keep it to one quick
+// query; an error is logged and no badges are shown.
+func (h *Host) AddMenuBadges(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) {
+	h.menuBadges = append(h.menuBadges, fn)
 }
 
 // AITool names an extension's own AI calls: ID is what it passes as the

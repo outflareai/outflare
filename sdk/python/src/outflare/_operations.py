@@ -179,6 +179,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def add_ad_account_tracking(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add the tracking template to every ad of an ad account.
+
+        Scope: ads.manage. Queues a job that reads the account again, makes
+        the changes planAdAccountTracking lists on the platform (only the
+        URL suffixes), records them in one `ad_account.tracking_added`
+        audit event, and syncs the account so the ads show the template.
+        On Google Ads, changing an ad's own suffix sends that ad for
+        review again; account, campaign and ad group suffixes don't.
+
+        Needs: the ads.manage scope.
+        POST /v1/workspaces/{ws}/ads/accounts/{id}/tracking
+        """
+        return self._call(
+            "POST",
+            "/v1/workspaces/{ws}/ads/accounts/{id}/tracking",
+            path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
     def add_agent_run_update(
         self,
         id: str,
@@ -504,6 +530,57 @@ class Operations(_Mixin):
                 "source": source,
                 "values": values,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_brand_tracking_domain(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        domain: str,
+        partner_program: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a tracking domain.
+
+        Scope: mailboxes.manage. Add a CNAME record from the domain to `target` first or after; the DNS is checked straight away and whenever you call check.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/brands/{brand}/tracking-domains
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-domains",
+            path={"brand": brand},
+            body={"brand_id": brand_id, "domain": domain, "partner_program": partner_program},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def add_brand_tracking_domain_dns(
+        self,
+        brand: str,
+        id: str,
+        *,
+        integration_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a tracking domain's CNAME in one click.
+
+        Scope: mailboxes.manage. Adds the CNAME to `target` through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and Outflare looks for the CNAME on its own over the next hour.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/brands/{brand}/tracking-domains/{id}/dns
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-domains/{id}/dns",
+            path={"brand": brand, "id": id},
+            body={"integration_id": integration_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1421,6 +1498,7 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
+        brand_id: str | None = None,
         domain: str,
         partner_program: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -1428,7 +1506,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Add a tracking domain.
 
-        Scope: mailboxes.manage. Add a CNAME record from the domain to `target` first or after; the DNS is checked straight away and whenever you call check.
+        Scope: mailboxes.manage. Add a CNAME record from the domain to `target` first or after; the DNS is checked straight away and whenever you call check. Deprecated: use POST /v1/brands/{brand}/tracking-domains. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         POST /v1/workspaces/{ws}/tracking-domains
@@ -1437,7 +1515,7 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/tracking-domains",
             path={"ws": ws},
-            body={"domain": domain, "partner_program": partner_program},
+            body={"brand_id": brand_id, "domain": domain, "partner_program": partner_program},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -1453,7 +1531,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Add a tracking domain's CNAME in one click.
 
-        Scope: mailboxes.manage. Adds the CNAME to `target` through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and Outflare looks for the CNAME on its own over the next hour.
+        Scope: mailboxes.manage. Adds the CNAME to `target` through the workspace's own DNS host connection (such as Cloudflare), in the background. It only adds records, never changes or deletes one. Poll the domain: `dns_install` says how it went, and Outflare looks for the CNAME on its own over the next hour. Deprecated: use POST /v1/brands/{brand}/tracking-domains/{id}/dns. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         POST /v1/workspaces/{ws}/tracking-domains/{id}/dns
@@ -1509,6 +1587,7 @@ class Operations(_Mixin):
         that fails (no site picked, revoked key) carries an error instead
         of failing the answer. Dates are inclusive; the default is the
         last 28 days.
+        Deprecated: use GET /v1/brands/{brand}/analytics/summary. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/summary
@@ -1827,33 +1906,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
-        note: str | None = None,
-        runner: Literal["builtin", "external"] | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Approve and start a mission.
+        """Approve and start a mission (retired).
 
-        Scope: missions.approve. A person, or an approver token that is not
-        the mission's own.
-
-        `runner: builtin` hands the mission to Outflare's own agent, which
-        runs it in turns with the workspace's AI model (`GET /ai-settings`).
-        It gets a token of
-        its own (operator scopes, never more than yours, never
-        missions.approve) and goes through the same gate as any agent, so
-        the mode still decides whether its writes run, wait for you or are
-        dry runs. A turn runs at once, whenever a person writes to the
-        mission or decides on a held change, and when the agent asks to look
-        again. Answers 409 `connector_needed` until an AI model is connected,
-        or `ai_model_needed` until its model and price are chosen.
-
-        Outflare's agent treats everything it reads from outside (email
-        replies, lead fields, web pages) as data. Even in `autonomous` mode,
-        its replies to emails, test sends, and changes to mailboxes, sending
-        servers, senders, sign-ins, webhooks, suppressions, integrations,
-        tokens and the company context wait for a person.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.approve scope.
         POST /v1/workspaces/{ws}/missions/{id}/approve
@@ -1862,8 +1924,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/approve",
             path={"id": id, "ws": ws},
-            body={"mode": mode, "note": note, "runner": runner},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -1873,16 +1933,16 @@ class Operations(_Mixin):
         action: str,
         *,
         ws: str | None = None,
-        note: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Approve and run a held write.
+        """Approve and run a held write (retired).
 
-        Scope: missions.approve. Runs the stored request as the agent that
-        made it, through every normal check, and keeps the response as the
-        result. Works on pending writes, and on dry runs once the mission
-        is running. Never by the agent that made it.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.approve scope.
         POST /v1/workspaces/{ws}/missions/{id}/actions/{action}/approve
@@ -1891,8 +1951,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/actions/{action}/approve",
             path={"id": id, "action": action, "ws": ws},
-            body={"note": note},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -2149,6 +2207,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def archive_brand_flag(
+        self,
+        brand: str,
+        flag: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Archive a feature flag.
+
+        Scope: analytics.manage. Turns it off for good and frees its key. It stays listed with status=archived.
+
+        Needs: the analytics.manage scope.
+        DELETE /v1/brands/{brand}/flags/{flag}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/flags/{flag}",
+            path={"brand": brand, "flag": flag},
+            idempotency_key=idempotency_key,
+        )
+
     def archive_brand_journey(
         self,
         brand: str,
@@ -2221,7 +2300,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Archive a feature flag.
 
-        Scope: analytics.manage. Turns it off for good and frees its key. It stays listed with status=archived.
+        Scope: analytics.manage. Turns it off for good and frees its key. It stays listed with status=archived. Deprecated: use DELETE /v1/brands/{brand}/flags/{flag}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         DELETE /v1/workspaces/{ws}/flags/{flag}
@@ -2355,9 +2434,10 @@ class Operations(_Mixin):
         """Ask about past A/B tests.
 
         Scope: analytics.manage. The workspace's own AI model answers a question over the most recent 40 finished tests
-        (a brand's own and those of shared flags, with brand_id), citing the tests it drew on. Returns a queued AI run
+        (the brand's own), citing the tests it drew on. Returns a queued AI run
         (kind ask) whose output is {question, answer, test_ids, tests_considered}. 409 connector_needed without an AI
         model.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/ask. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/ask
@@ -2366,6 +2446,34 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/ask",
             path={"ws": ws},
+            body={"brand_id": brand_id, "question": question},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def ask_brand_ab_tests(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        question: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ask about past A/B tests.
+
+        Scope: analytics.manage. The workspace's own AI model answers a question over the most recent 40 finished tests
+        (the brand's own), citing the tests it drew on. Returns a queued AI run
+        (kind ask) whose output is {question, answer, test_ids, tests_considered}. 409 connector_needed without an AI
+        model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/ask
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/ask",
+            path={"brand": brand},
             body={"brand_id": brand_id, "question": question},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -2425,6 +2533,34 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ai-accounts/receipts/{id}/assign",
             path={"id": id, "ws": ws},
             body={"account_id": account_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def assign_connection_account(
+        self,
+        id: str,
+        account: str,
+        *,
+        ws: str | None = None,
+        brand_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Assign an account or property to a brand.
+
+        Scope: integrations.manage. Puts one site or ad account of a connection in a brand, and moves the data already
+        stored for it there. brand_id null takes the assignment away: the site then follows its connection's brand,
+        or has none.
+
+        Needs: the integrations.manage scope.
+        PUT /v1/workspaces/{ws}/integrations/{id}/accounts/{account}
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/integrations/{id}/accounts/{account}",
+            path={"id": id, "account": account, "ws": ws},
+            body={"brand_id": brand_id},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -2493,6 +2629,7 @@ class Operations(_Mixin):
         | None = None,
         pool: str | None = None,
         brand: str | None = None,
+        brand_kind: Literal["brand", "split", "shared"] | None = None,
     ) -> Any:
         """Start connecting an OAuth connector.
 
@@ -2519,7 +2656,14 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/integrations/oauth/{connector}/authorize",
             path={"connector": connector, "ws": ws},
-            query={"name": name, "format": format, "return": return_, "pool": pool, "brand": brand},
+            query={
+                "name": name,
+                "format": format,
+                "return": return_,
+                "pool": pool,
+                "brand": brand,
+                "brand_kind": brand_kind,
+            },
         )
 
     def authorize_my_crm_google(
@@ -2559,6 +2703,54 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/metrics/{metric}/backfill",
             path={"brand": brand, "metric": metric},
             idempotency_key=idempotency_key,
+        )
+
+    def brand_analytics_summary(
+        self,
+        brand: str,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+        fresh: bool | None = None,
+    ) -> Any:
+        """Traffic totals from every analytics tool.
+
+        Scope: analytics.read. The traffic report's totals from every
+        analytics connection over one range, in one call. A connection
+        that fails (no site picked, revoked key) carries an error instead
+        of failing the answer. Dates are inclusive; the default is the
+        last 28 days.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/summary
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/summary",
+            path={"brand": brand},
+            query={"from": from_, "to": to, "fresh": fresh},
+        )
+
+    def brand_compare_analytics_tools(
+        self,
+        brand: str,
+        *,
+        host: str,
+        from_: str | None = None,
+        to: str | None = None,
+    ) -> Any:
+        """Compare tools for one website, day by day.
+
+        Scope: analytics.read. Each tool's stored daily traffic for one domain.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/compare
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/compare",
+            path={"brand": brand},
+            query={"host": host, "from": from_, "to": to},
         )
 
     def bulk_partner_rewards(
@@ -2899,6 +3091,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. Records that a person previewed a version: it renders right (ok) or is broken, with an
         optional note. A check holds for the version's content as it was: once the content changes it is stale. A
         broken version fails the checklist. 409 once the test has ended.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/checks. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/checks
@@ -2949,6 +3142,35 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/sending-servers/check",
             path={"ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def check_brand_ab_test_version(
+        self,
+        brand: str,
+        test: str,
+        *,
+        note: str | None = None,
+        status: Literal["ok", "broken"],
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Record a check of an A/B test version.
+
+        Scope: analytics.manage. Records that a person previewed a version: it renders right (ok) or is broken, with an
+        optional note. A check holds for the version's content as it was: once the content changes it is stale. A
+        broken version fails the checklist. 409 once the test has ended.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/checks
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/checks",
+            path={"brand": brand, "test": test},
+            body={"note": note, "status": status, "variant": variant},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -3032,6 +3254,27 @@ class Operations(_Mixin):
             path={"brand": brand, "ws": ws},
             body={"step": step},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def check_brand_tracking_domain(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Check a tracking domain's DNS now.
+
+        Scope: mailboxes.manage.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/brands/{brand}/tracking-domains/{id}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-domains/{id}/check",
+            path={"brand": brand, "id": id},
             idempotency_key=idempotency_key,
         )
 
@@ -3359,7 +3602,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Check a tracking domain's DNS now.
 
-        Scope: mailboxes.manage.
+        Scope: mailboxes.manage. Deprecated: use POST /v1/brands/{brand}/tracking-domains/{id}/check. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         POST /v1/workspaces/{ws}/tracking-domains/{id}/check
@@ -3563,7 +3806,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Compare tools for one website, day by day.
 
-        Scope: analytics.read. Each tool's stored daily traffic for one domain.
+        Scope: analytics.read. Each tool's stored daily traffic for one domain. Deprecated: use GET /v1/brands/{brand}/analytics/compare. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/compare
@@ -3605,13 +3848,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        report: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Finish a mission with a report.
+        """Finish a mission with a report (retired).
 
-        Scope: missions.run. The agent's final report, in Markdown. Its campaigns are paused.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/complete
@@ -3620,8 +3866,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/complete",
             path={"id": id, "ws": ws},
-            body={"report": report},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -3717,6 +3961,7 @@ class Operations(_Mixin):
         website script sends Experiment Viewed, stored as experiment_viewed with properties flag and variant; a
         server sends the same through POST .../customer-events), and converts when a goal event follows. It starts
         as a draft: start it to measure. At most 500 tests per workspace.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests
@@ -4132,6 +4377,50 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_brand_ab_test(
+        self,
+        brand: str,
+        *,
+        control: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
+        flag: str | None = None,
+        goals: list[dict[str, Any]] | None = None,
+        guardrails: list[dict[str, Any]] | None = None,
+        hypothesis: str | None = None,
+        min_effect: float | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an A/B test.
+
+        Scope: analytics.manage. A question asked of a feature flag: which of its versions does best at the goals.
+        The flag splits visitors; a visitor joins the test the first time a page shows them the flag's version (the
+        website script sends Experiment Viewed, stored as experiment_viewed with properties flag and variant; a
+        server sends the same through POST .../customer-events), and converts when a goal event follows. It starts
+        as a draft: start it to measure. At most 500 tests per workspace.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests",
+            path={"brand": brand},
+            body={
+                "control": control,
+                "factors": factors,
+                "flag": flag,
+                "goals": goals,
+                "guardrails": guardrails,
+                "hypothesis": hypothesis,
+                "min_effect": min_effect,
+                "name": name,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_brand_deal(
         self,
         brand: str,
@@ -4333,9 +4622,12 @@ class Operations(_Mixin):
         brand: str,
         *,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         label: str | None = None,
         name: str | None = None,
+        owner_id: str | None = None,
         properties: list[dict[str, Any]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         status: Literal["quarantined", "approved", "deprecated"] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -4356,11 +4648,58 @@ class Operations(_Mixin):
             path={"brand": brand},
             body={
                 "description": description,
+                "destinations": destinations,
                 "label": label,
                 "name": name,
+                "owner_id": owner_id,
                 "properties": properties,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_experiment(
+        self,
+        brand: str,
+        *,
+        baseline_days: int | None = None,
+        design: Literal["holdout", "before_after"] | None = None,
+        holdout_percent: int | None = None,
+        hypothesis: str | None = None,
+        measure_days: int | None = None,
+        metric: Literal["clicks", "impressions", "ctr", "position"] | None = None,
+        name: str,
+        pattern: str | None = None,
+        site_id: str,
+        start_on: Literal["deploy", "manual"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make an SEO experiment.
+
+        Scope: seo.manage. Picks the site's pages that match pattern from its Search Console data (the busiest 1,000) and, for a holdout, splits them into matched treatment and control groups: make the change only on the treatment pages (GET .../pages?group=treatment). It starts as a draft; POST .../start when you're ready. Needs Search Console connected for the site (connector_needed otherwise).
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/experiments
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/experiments",
+            path={"brand": brand},
+            body={
+                "baseline_days": baseline_days,
+                "design": design,
+                "holdout_percent": holdout_percent,
+                "hypothesis": hypothesis,
+                "measure_days": measure_days,
+                "metric": metric,
+                "name": name,
+                "pattern": pattern,
+                "site_id": site_id,
+                "start_on": start_on,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -4373,13 +4712,16 @@ class Operations(_Mixin):
         *,
         archived: bool | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
         manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
+        owner_id: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         target_type: str | None = None,
         value_type: str | None = None,
@@ -4404,18 +4746,100 @@ class Operations(_Mixin):
             body={
                 "archived": archived,
                 "description": description,
+                "destinations": destinations,
                 "filterable": filterable,
                 "key": key,
                 "label": label,
                 "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
+                "owner_id": owner_id,
                 "precedence": precedence,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "target_type": target_type,
                 "value_type": value_type,
                 "write_policy": write_policy,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_flag(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        description: str | None = None,
+        exclusion_group: str | None = None,
+        group_share: int | None = None,
+        key: str | None = None,
+        name: str | None = None,
+        on_site: bool | None = None,
+        rollout: int | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        status: Literal["on", "off"] | None = None,
+        variants: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a feature flag.
+
+        Scope: analytics.manage. A switch (one variant, "on") or a split (several variants with weights) that the
+        website script and your servers read to decide what a visitor sees. It starts off unless status is on. Each
+        visitor who passes every rule and falls inside the rollout gets one variant, from a hash of the flag and the
+        visitor's id: the same on every page and server. At most 200 live flags per workspace.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/flags
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/flags",
+            path={"brand": brand},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "exclusion_group": exclusion_group,
+                "group_share": group_share,
+                "key": key,
+                "name": name,
+                "on_site": on_site,
+                "rollout": rollout,
+                "rules": rules,
+                "status": status,
+                "variants": variants,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_flag_edit_link(
+        self,
+        brand: str,
+        flag: str,
+        *,
+        url: str,
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a visual editor link for a version.
+
+        Scope: analytics.manage, for a person signed in to Outflare (API tokens and connected apps can't). A link to a page of
+        your site that previews the version (?of_flag=) and opens the visual editor over it (?of_edit=), where you pick
+        elements and change their text, hide them, or change a link or image. The page needs the website script, version 8 or
+        later, and data-flags on its tag. The link works for 2 hours, and only while you can manage analytics; it changes only
+        this version's visual changes. Nothing changes until you save in the editor.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/flags/{flag}/edit-link
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/flags/{flag}/edit-link",
+            path={"brand": brand, "flag": flag},
+            body={"url": url, "variant": variant},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -4826,6 +5250,59 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_brand_site_key(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        excluded_params: list[str] | None = None,
+        name: str | None = None,
+        origins: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a site key.
+
+        Scope: customers.manage. A public key for one website's tracking snippet. It only adds page views and
+        track events on anonymous visitors: it reads nothing, never names or merges a person and opens no other
+        endpoint, so it can sit in the page's HTML. At most 20 per workspace.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/site-keys
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/site-keys",
+            path={"brand": brand},
+            body={"brand_id": brand_id, "excluded_params": excluded_params, "name": name, "origins": origins},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_site_proxy_secret(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a site key's proxy secret.
+
+        Scope: customers.manage. For a site that forwards tracking through its own domain: the proxy sends this secret in
+        X-Outflare-Proxy and the visitor's address in X-Outflare-Client-IP with each request it forwards, so visits keep
+        their real address (for company reveal and per-visitor limits) instead of the proxy's. The secret (ofp_) is shown
+        once; put it in the proxy's configuration, never in a page. Making a new one replaces the old at once.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/site-keys/{id}/proxy-secret
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/site-keys/{id}/proxy-secret",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def create_brand_smart_list(
         self,
         brand: str,
@@ -4864,6 +5341,78 @@ class Operations(_Mixin):
                 "rules": rules,
                 "saved_query_id": saved_query_id,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_tracking_campaign(
+        self,
+        brand: str,
+        *,
+        channel: str | None = None,
+        landing_url: str | None = None,
+        name: str | None = None,
+        redirect_links: bool | None = None,
+        slug: str | None = None,
+        source: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Create a campaign.
+
+        Scope: analytics.manage. The slug (utm_campaign) comes from the name unless given; the medium comes from the
+        channel; the source is cleaned (fb and facebook.com become facebook). Slug, channel and source can't change
+        later, because links already shared carry them. Then make links with POST .../links.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/tracking-campaigns
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-campaigns",
+            path={"brand": brand},
+            body={
+                "channel": channel,
+                "landing_url": landing_url,
+                "name": name,
+                "redirect_links": redirect_links,
+                "slug": slug,
+                "source": source,
+                "status": status,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_brand_tracking_link(
+        self,
+        brand: str,
+        id: str,
+        *,
+        redirect: bool | None = None,
+        term: str | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a tagged link.
+
+        Scope: analytics.manage. Tags a page with the campaign's utm_source, utm_medium and utm_campaign, the content and
+        term given, and its ofc code. Tags the page already had are replaced; other parameters stay. The same page,
+        content and term give back the link already made (200). Links go straight to the page by default: the website
+        tracking snippet reads the tags there. With `redirect` (or the campaign's `redirect_links`), the link also gets a
+        short redirect link that counts each click first, for places the snippet can't run; asking again for a link
+        made without one adds it.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/tracking-campaigns/{id}/links
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links",
+            path={"brand": brand, "id": id},
+            body={"redirect": redirect, "term": term, "url": url},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -5082,9 +5631,15 @@ class Operations(_Mixin):
         brand: str,
         *,
         body: str | None = None,
+        brief: dict[str, Any] | None = None,
         canonical_url: str | None = None,
         excerpt: str | None = None,
+        language: str | None = None,
+        links: dict[str, Any] | None = None,
+        media: list[dict[str, Any]] | None = None,
         notes: str | None = None,
+        placement: dict[str, Any] | None = None,
+        seo: dict[str, Any] | None = None,
         slug: str | None = None,
         status: Literal["draft", "approved", "archived"] | None = None,
         tags: list[str] | None = None,
@@ -5110,9 +5665,15 @@ class Operations(_Mixin):
             path={"brand": brand},
             body={
                 "body": body,
+                "brief": brief,
                 "canonical_url": canonical_url,
                 "excerpt": excerpt,
+                "language": language,
+                "links": links,
+                "media": media,
                 "notes": notes,
+                "placement": placement,
+                "seo": seo,
                 "slug": slug,
                 "status": status,
                 "tags": tags,
@@ -6191,9 +6752,12 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         label: str | None = None,
         name: str | None = None,
+        owner_id: str | None = None,
         properties: list[dict[str, Any]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         status: Literal["quarantined", "approved", "deprecated"] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -6212,9 +6776,12 @@ class Operations(_Mixin):
             path={"ws": ws},
             body={
                 "description": description,
+                "destinations": destinations,
                 "label": label,
                 "name": name,
+                "owner_id": owner_id,
                 "properties": properties,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "status": status,
             },
@@ -6241,7 +6808,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Make an SEO experiment.
 
-        Scope: seo.manage. Picks the site's pages that match pattern from its Search Console data (the busiest 1,000) and, for a holdout, splits them into matched treatment and control groups: make the change only on the treatment pages (GET .../pages?group=treatment). It starts as a draft; POST .../start when you're ready. Needs Search Console connected for the site (connector_needed otherwise).
+        Scope: seo.manage. Picks the site's pages that match pattern from its Search Console data (the busiest 1,000) and, for a holdout, splits them into matched treatment and control groups: make the change only on the treatment pages (GET .../pages?group=treatment). It starts as a draft; POST .../start when you're ready. Needs Search Console connected for the site (connector_needed otherwise). Deprecated: use POST /v1/brands/{brand}/experiments. This workspace route stays until the brands contract step.
 
         Needs: the seo.manage scope.
         POST /v1/workspaces/{ws}/experiments
@@ -6273,13 +6840,16 @@ class Operations(_Mixin):
         ws: str | None = None,
         archived: bool | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
         manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
+        owner_id: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         target_type: str | None = None,
         value_type: str | None = None,
@@ -6304,13 +6874,16 @@ class Operations(_Mixin):
             body={
                 "archived": archived,
                 "description": description,
+                "destinations": destinations,
                 "filterable": filterable,
                 "key": key,
                 "label": label,
                 "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
+                "owner_id": owner_id,
                 "precedence": precedence,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "target_type": target_type,
                 "value_type": value_type,
@@ -6371,6 +6944,7 @@ class Operations(_Mixin):
         website script and your servers read to decide what a visitor sees. It starts off unless status is on. Each
         visitor who passes every rule and falls inside the rollout gets one variant, from a hash of the flag and the
         visitor's id: the same on every page and server. At most 200 live flags per workspace.
+        Deprecated: use POST /v1/brands/{brand}/flags. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/flags
@@ -6413,6 +6987,7 @@ class Operations(_Mixin):
         elements and change their text, hide them, or change a link or image. The page needs the website script, version 8 or
         later, and data-flags on its tag. The link works for 2 hours, and only while you can manage analytics; it changes only
         this version's visual changes. Nothing changes until you save in the editor.
+        Deprecated: use POST /v1/brands/{brand}/flags/{flag}/edit-link. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/flags/{flag}/edit-link
@@ -6619,6 +7194,7 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         brand_ids: list[str] | None = None,
+        brand_kind: Literal["brand", "split", "shared"] | None = None,
         connector: str,
         credentials: dict[str, Any],
         name: str | None = None,
@@ -6645,6 +7221,7 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "brand_ids": brand_ids,
+                "brand_kind": brand_kind,
                 "connector": connector,
                 "credentials": credentials,
                 "name": name,
@@ -7129,32 +7706,16 @@ class Operations(_Mixin):
         self,
         *,
         ws: str | None = None,
-        ends_at: str | None = None,
-        goal: str | None = None,
-        goal_metric: str | None = None,
-        goal_target: int | None = None,
-        instructions: str | None = None,
-        max_sends: int | None = None,
-        max_spend_cents: int | None = None,
-        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
-        name: str | None = None,
-        plan: str | None = None,
-        token_id: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Create a mission (deprecated).
+        """Create a mission (retired).
 
-        Deprecated: missions are being retired for agent runs on the action
-        layer (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`; an
-        agent of your own works as an API token with the action layer on,
-        with no mission). The web app and MCP no longer create missions; this
-        route still does, for agents built against it, until a later release
-        answers 410 `mission_retired`.
-
-        Scope: missions.run. Starts as a draft: writes made in it are dry
-        runs until a person approves it. A mission created with an API token
-        is run by that token; a person can assign any token with token_id.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions
@@ -7163,20 +7724,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions",
             path={"ws": ws},
-            body={
-                "ends_at": ends_at,
-                "goal": goal,
-                "goal_metric": goal_metric,
-                "goal_target": goal_target,
-                "instructions": instructions,
-                "max_sends": max_sends,
-                "max_spend_cents": max_spend_cents,
-                "mode": mode,
-                "name": name,
-                "plan": plan,
-                "token_id": token_id,
-            },
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -8469,6 +9016,7 @@ class Operations(_Mixin):
         Scope: customers.manage. A public key for one website's tracking snippet. It only adds page views and
         track events on anonymous visitors: it reads nothing, never names or merges a person and opens no other
         endpoint, so it can sit in the page's HTML. At most 20 per workspace.
+        Deprecated: use POST /v1/brands/{brand}/site-keys. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/site-keys
@@ -8495,6 +9043,7 @@ class Operations(_Mixin):
         X-Outflare-Proxy and the visitor's address in X-Outflare-Client-IP with each request it forwards, so visits keep
         their real address (for company reveal and per-visitor limits) instead of the proxy's. The secret (ofp_) is shown
         once; put it in the proxy's configuration, never in a page. Making a new one replaces the old at once.
+        Deprecated: use POST /v1/brands/{brand}/site-keys/{id}/proxy-secret. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/site-keys/{id}/proxy-secret
@@ -8905,6 +9454,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. The slug (utm_campaign) comes from the name unless given; the medium comes from the
         channel; the source is cleaned (fb and facebook.com become facebook). Slug, channel and source can't change
         later, because links already shared carry them. Then make links with POST .../links.
+        Deprecated: use POST /v1/brands/{brand}/tracking-campaigns. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/tracking-campaigns
@@ -8946,6 +9496,7 @@ class Operations(_Mixin):
         tracking snippet reads the tags there. With `redirect` (or the campaign's `redirect_links`), the link also gets a
         short redirect link that counts each click first, for places the snippet can't run; asking again for a link
         made without one adds it.
+        Deprecated: use POST /v1/brands/{brand}/tracking-campaigns/{id}/links. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/tracking-campaigns/{id}/links
@@ -9216,6 +9767,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def delete_brand_experiment(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete an experiment.
+
+        Scope: seo.manage.
+
+        Needs: the seo.manage scope.
+        DELETE /v1/brands/{brand}/experiments/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/experiments/{id}",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def delete_brand_journey_step_secret(
         self,
         brand: str,
@@ -9379,6 +9951,31 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/brands/{brand}/smart-lists/{id}",
             path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
+    def delete_brand_transaction(
+        self,
+        brand: str,
+        transaction: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Delete a transaction, restorable for 7 days.
+
+        Scope: customers.manage. Moves one transaction of the brand into Recently deleted. While it is there, the
+        transaction list, Query (query.transactions) and the record card leave it out, and the same source_id sent
+        again, by a billing sync or POST .../transactions, is not added back (the API answers 409 transaction_deleted).
+        Restore it from Recently deleted within 7 days: it comes back as it was, and transaction.created is not sent
+        again. After 7 days it is purged for good. Sends transaction.deleted.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/transactions/{transaction}/delete
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/transactions/{transaction}/delete",
+            path={"brand": brand, "transaction": transaction},
             idempotency_key=idempotency_key,
         )
 
@@ -9561,7 +10158,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Delete an experiment.
 
-        Scope: seo.manage.
+        Scope: seo.manage. Deprecated: use DELETE /v1/brands/{brand}/experiments/{id}. This workspace route stays until the brands contract step.
 
         Needs: the seo.manage scope.
         DELETE /v1/workspaces/{ws}/experiments/{id}
@@ -10697,6 +11294,38 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def deliver_content(
+        self,
+        brand: str,
+        id: str,
+        *,
+        revision: int | None = None,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report a content item live on the brand's own site.
+
+        Scope: content.manage. For a site that puts content in place
+        itself after the content.approved webhook (its own code, an
+        automation tool, a GitHub Action or a coding agent): it reports the
+        page's live address, and the item becomes published there, so
+        Outflare can measure the page. Only an approved or published item
+        is delivered. Pass the webhook's `revision` to refuse a delivery
+        of a version that was approved again since.
+
+        Needs: the content.manage scope.
+        POST /v1/brands/{brand}/content/{id}/delivered
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/content/{id}/delivered",
+            path={"brand": brand, "id": id},
+            body={"revision": revision, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def discard_brand_journey_draft(
         self,
         brand: str,
@@ -11102,6 +11731,7 @@ class Operations(_Mixin):
 
         Scope: analytics.manage. Adds a draft with the same flag, control, goals, guardrails, smallest change and
         hypothesis, named "(copy)": to run a test again or a variation of it.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/duplicate. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/duplicate
@@ -11110,6 +11740,28 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/duplicate",
             path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def duplicate_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Duplicate an A/B test.
+
+        Scope: analytics.manage. Adds a draft with the same flag, control, goals, guardrails, smallest change and
+        hypothesis, named "(copy)": to run a test again or a variation of it.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/duplicate
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/duplicate",
+            path={"brand": brand, "test": test},
             idempotency_key=idempotency_key,
         )
 
@@ -11230,6 +11882,7 @@ class Operations(_Mixin):
 
         Scope: analytics.manage. Stops measuring and keeps the results as they stand, with the version you chose
         (decision; "" for none). The flag is left as it is: ship the winner by changing the flag.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/end. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/end
@@ -11238,6 +11891,32 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/end",
             path={"test": test, "ws": ws},
+            body={"decision": decision},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def end_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        decision: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """End an A/B test.
+
+        Scope: analytics.manage. Stops measuring and keeps the results as they stand, with the version you chose
+        (decision; "" for none). The flag is left as it is: ship the winner by changing the flag.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/end
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/end",
+            path={"brand": brand, "test": test},
             body={"decision": decision},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -11349,6 +12028,49 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def evaluate_brand_flags(
+        self,
+        brand: str,
+        *,
+        anonymous_id: str | None = None,
+        keys: list[str] | None = None,
+        language: str | None = None,
+        properties: dict[str, Any] | None = None,
+        referrer: str | None = None,
+        url: str | None = None,
+        user_agent: str | None = None,
+        user_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Decide flags for a visitor.
+
+        Scope: analytics.read. The variant a visitor or user gets of every flag that is on (or of keys), for your own
+        server, with why. Send anonymous_id from the page (outflare.anonymousId()) so the server and the site agree;
+        user_id is used when there is no anonymous_id, and makes signed_in true. Rules on the page read url,
+        referrer, user_agent and language; property.<name> rules read properties. Nothing is stored.
+
+        Needs: the analytics.read scope.
+        POST /v1/brands/{brand}/flags/evaluate
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/flags/evaluate",
+            path={"brand": brand},
+            body={
+                "anonymous_id": anonymous_id,
+                "keys": keys,
+                "language": language,
+                "properties": properties,
+                "referrer": referrer,
+                "url": url,
+                "user_agent": user_agent,
+                "user_id": user_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def evaluate_flags(
         self,
         *,
@@ -11370,6 +12092,7 @@ class Operations(_Mixin):
         server, with why. Send anonymous_id from the page (outflare.anonymousId()) so the server and the site agree;
         user_id is used when there is no anonymous_id, and makes signed_in true. Rules on the page read url,
         referrer, user_agent and language; property.<name> rules read properties. Nothing is stored.
+        Deprecated: use POST /v1/brands/{brand}/flags/evaluate. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         POST /v1/workspaces/{ws}/flags/evaluate
@@ -11734,6 +12457,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. frozen true stops new visitors joining a running test while those already in keep
         counting, so it can finish on the visitors it has (such as before a launch that would change the traffic);
         false lets them join again, counting those who arrived meanwhile. 409 unless the test is running.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/freeze. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/freeze
@@ -11742,6 +12466,33 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/freeze",
             path={"test": test, "ws": ws},
+            body={"frozen": frozen},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def freeze_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        frozen: bool,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Freeze or unfreeze an A/B test.
+
+        Scope: analytics.manage. frozen true stops new visitors joining a running test while those already in keep
+        counting, so it can finish on the visitors it has (such as before a launch that would change the traffic);
+        false lets them join again, counting those who arrived meanwhile. 409 unless the test is running.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/freeze
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/freeze",
+            path={"brand": brand, "test": test},
             body={"frozen": frozen},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -11780,7 +12531,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get an A/B test.
 
-        Scope: analytics.read.
+        Scope: analytics.read. Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}
@@ -11799,7 +12550,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get an A/B test AI run.
 
-        Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words).
+        Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words). Deprecated: use GET /v1/brands/{brand}/ab-test-ai-runs/{run}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-test-ai-runs/{run}
@@ -11825,6 +12576,7 @@ class Operations(_Mixin):
         are "unknown". The largest 8 groups are shown, the rest added up as "other". Every comparison is corrected for
         every version in every group, since each is another chance of a lucky difference: use it to learn where a
         change works, not to pick a winner. Counted up to now, or to when the test ended. 409 for a draft.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/breakdown. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/breakdown
@@ -11850,6 +12602,7 @@ class Operations(_Mixin):
         when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, whether
         a person previewed every version (qa: fail when one is marked broken, warn when one is unchecked or changed
         since), and guardrails. ready is false while any check fails.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/checklist. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/checklist
@@ -11872,6 +12625,7 @@ class Operations(_Mixin):
         every factor: each cell against the one where every factor shows its control (corrected for every cell), the best
         cell, each factor's main effect (pooled over the others' versions), and whether each factor changes the test
         flag's own effect (interacts at p < 0.01). 409 for a test without factors or a draft.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/factorial. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/factorial
@@ -11894,6 +12648,7 @@ class Operations(_Mixin):
         this one did, up to 10, the most recent first: how many of this test's visitors also saw the other flag, and each
         version's effect on the first goal within each of the other flag's versions. p_value is Cochran's Q test that the
         effects are the same; interacts is true below 0.01, meaning one change alters the other's effect. 409 for a draft.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/interactions. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/interactions
@@ -11917,6 +12672,7 @@ class Operations(_Mixin):
         flag most in the last 28 days (without their query strings), or on page when given; with no such page, the
         test's brand website. A link adds of_flag=key:variant, which the site script reads: it shows that version for
         the rest of the visit and counts nothing. Also each version's check, from checkABTestVersion.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/previews. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/previews
@@ -11939,6 +12695,7 @@ class Operations(_Mixin):
         Scope: analytics.read. A running test's results now, counted from product events; a finished test's as they
         stood when it ended. 409 for a draft. Safe to check every day: p_value is always valid, so looking often
         doesn't make a false winner more likely.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/{test}/results. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/{test}/results
@@ -12451,6 +13208,7 @@ class Operations(_Mixin):
         `tool` (totals per tool), `key` (each page, source, query or event added up
         across the tools picked; the default for the other reports) or `tool_key`.
         Counts are summed, click-through rate and position are weighted by impressions.
+        Deprecated: use GET /v1/brands/{brand}/analytics/history. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/history
@@ -12481,7 +13239,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Every website across every tool.
 
-        Scope: analytics.read. Stored traffic totals per website (by domain), with each tool side by side, search clicks added up across search consoles, and every connection's sync status.
+        Scope: analytics.read. Stored traffic totals per website (by domain), with each tool side by side, search clicks added up across search consoles, and every connection's sync status. Deprecated: use GET /v1/brands/{brand}/analytics/overview. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/overview
@@ -12572,6 +13330,7 @@ class Operations(_Mixin):
         A synced campaign with spend but no tracked visits is listed too: its tracking template is usually missing. Most
         conversions first, then most spend, at most 500 rows. Ad accounts sync campaigns only, so ad sets and ads have
         first-party numbers without a name or spend.
+        Deprecated: use GET /v1/brands/{brand}/attribution/ads. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/attribution/ads
@@ -12598,7 +13357,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Drill a channel down to its sources and campaigns.
 
-        Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link. With split=content each campaign is also split by the visit's utm_content, such as the sequence step (step-1, step-2) a link went out in.
+        Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link. With split=content each campaign is also split by the visit's utm_content, such as the sequence step (step-1, step-2) a link went out in. Deprecated: use GET /v1/brands/{brand}/attribution/campaigns. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/attribution/campaigns
@@ -12638,6 +13397,7 @@ class Operations(_Mixin):
         models. Revenue is payments net of refunds, per currency. Spend with
         no channel is in unallocated_cost. pending_visits are visits not
         classified yet (within a minute or two).
+        Deprecated: use GET /v1/brands/{brand}/attribution/channels. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/attribution/channels
@@ -12860,6 +13620,177 @@ class Operations(_Mixin):
             path={"brand": brand, "ws": ws},
         )
 
+    def get_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+    ) -> Any:
+        """Get an A/B test.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}",
+            path={"brand": brand, "test": test},
+        )
+
+    def get_brand_ab_test_ai_run(
+        self,
+        brand: str,
+        run: str,
+    ) -> Any:
+        """Get an A/B test AI run.
+
+        Scope: analytics.read. Poll until status is ready (output holds the answer) or failed (error says why, in words).
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-test-ai-runs/{run}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-test-ai-runs/{run}",
+            path={"brand": brand, "run": run},
+        )
+
+    def get_brand_ab_test_breakdown(
+        self,
+        brand: str,
+        test: str,
+        *,
+        by: Literal["device", "source", "country", "visitor"],
+    ) -> Any:
+        """Break an A/B test's results down.
+
+        Scope: analytics.read. The first goal's results within groups of visitors, by the visit they first saw their
+        version in: device (desktop, mobile, tablet), source (its utm_source, else the referring site, else direct),
+        country, or visitor (new or returning). Visitors whose visit isn't known, such as exposures sent by a server,
+        are "unknown". The largest 8 groups are shown, the rest added up as "other". Every comparison is corrected for
+        every version in every group, since each is another chance of a lucky difference: use it to learn where a
+        change works, not to pick a winner. Counted up to now, or to when the test ended. 409 for a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/breakdown
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/breakdown",
+            path={"brand": brand, "test": test},
+            query={"by": by},
+        )
+
+    def get_brand_ab_test_checklist(
+        self,
+        brand: str,
+        test: str,
+    ) -> Any:
+        """Check an A/B test before it starts.
+
+        Scope: analytics.read. What would stop the test measuring anything useful: the flag (fail when archived, has one
+        version or lost the control; warn when off), another running test of the flag (fail), whether pages showed its
+        versions in the last 7 days, how long visitors waited for their version (delivery, once 20 were timed: warn
+        when one in ten waited over 400 ms), whether visitors reach the first goal, how long it is likely to take, whether
+        a person previewed every version (qa: fail when one is marked broken, warn when one is unchecked or changed
+        since), and guardrails. ready is false while any check fails.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/checklist
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/checklist",
+            path={"brand": brand, "test": test},
+        )
+
+    def get_brand_ab_test_factorial(
+        self,
+        brand: str,
+        test: str,
+    ) -> Any:
+        """Read a multivariate A/B test cell by cell.
+
+        Scope: analytics.read. The first goal for every combination of versions (cell) among visitors who saw a version of
+        every factor: each cell against the one where every factor shows its control (corrected for every cell), the best
+        cell, each factor's main effect (pooled over the others' versions), and whether each factor changes the test
+        flag's own effect (interacts at p < 0.01). 409 for a test without factors or a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/factorial
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/factorial",
+            path={"brand": brand, "test": test},
+        )
+
+    def get_brand_ab_test_interactions(
+        self,
+        brand: str,
+        test: str,
+    ) -> Any:
+        """Check an A/B test against tests that overlapped it.
+
+        Scope: analytics.read. For each other test (of another flag, outside this flag's exclusion group) that ran while
+        this one did, up to 10, the most recent first: how many of this test's visitors also saw the other flag, and each
+        version's effect on the first goal within each of the other flag's versions. p_value is Cochran's Q test that the
+        effects are the same; interacts is true below 0.01, meaning one change alters the other's effect. 409 for a draft.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/interactions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/interactions",
+            path={"brand": brand, "test": test},
+        )
+
+    def get_brand_ab_test_previews(
+        self,
+        brand: str,
+        test: str,
+        *,
+        page: str | None = None,
+    ) -> Any:
+        """Preview an A/B test's versions.
+
+        Scope: analytics.read. Links that show each version to the person who opens them, on the pages that showed the
+        flag most in the last 28 days (without their query strings), or on page when given; with no such page, the
+        test's brand website. A link adds of_flag=key:variant, which the site script reads: it shows that version for
+        the rest of the visit and counts nothing. Also each version's check, from checkABTestVersion.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/previews
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/previews",
+            path={"brand": brand, "test": test},
+            query={"page": page},
+        )
+
+    def get_brand_ab_test_results(
+        self,
+        brand: str,
+        test: str,
+    ) -> Any:
+        """Get an A/B test's results.
+
+        Scope: analytics.read. A running test's results now, counted from product events; a finished test's as they
+        stood when it ended. 409 for a draft. Safe to check every day: p_value is always valid, so looking often
+        doesn't make a false winner more likely.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/{test}/results
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/{test}/results",
+            path={"brand": brand, "test": test},
+        )
+
     def get_brand_alert_settings(
         self,
         brand: str,
@@ -12880,6 +13811,197 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/alerts/settings",
             path={"brand": brand},
+        )
+
+    def get_brand_analytics_catalog(
+        self,
+        brand: str,
+    ) -> Any:
+        """What each website can be asked.
+
+        Scope: analytics.read. For each website: the analytics tools, which metrics each has stored per report, the days stored and last sync, the SEO tools with snapshots and budget left, and gaps with the connector or action that fixes each. ask maps common questions to the tool or endpoint that answers them.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/catalog
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/catalog",
+            path={"brand": brand},
+        )
+
+    def get_brand_analytics_changes(
+        self,
+        brand: str,
+        *,
+        days: int | None = None,
+        to: str | None = None,
+        host: str | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """What changed on each website.
+
+        Scope: analytics.read. Reads stored data only, so it is free. For each website (by domain): each tool's metrics over its own latest `days` stored days against the same number of days before (so a tool that runs behind is not read as a drop), search clicks added up across search consoles, the pages, sources and search queries that rose or fell most, unusual days against the 28 days before, the latest SEO snapshot against the one before (with keyword moves), plain-sentence headlines, and gaps: what is missing and which connector or action fixes it. Units for every metric are given once, in units.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/changes
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/changes",
+            path={"brand": brand},
+            query={"days": days, "to": to, "host": host, "limit": limit},
+        )
+
+    def get_brand_analytics_history(
+        self,
+        brand: str,
+        *,
+        report: Literal["traffic", "pages", "sources", "search_queries", "events"] | None = None,
+        group: Literal["day", "tool", "key", "tool_key"] | None = None,
+        integration: str | None = None,
+        host: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """Query stored analytics history.
+
+        Scope: analytics.read. Reads what the sync stored, without calling the tools.
+        `group` is `day` (one row per day per tool; the default for traffic),
+        `tool` (totals per tool), `key` (each page, source, query or event added up
+        across the tools picked; the default for the other reports) or `tool_key`.
+        Counts are summed, click-through rate and position are weighted by impressions.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/history
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/history",
+            path={"brand": brand},
+            query={
+                "report": report,
+                "group": group,
+                "integration": integration,
+                "host": host,
+                "from": from_,
+                "to": to,
+                "limit": limit,
+            },
+        )
+
+    def get_brand_analytics_overview(
+        self,
+        brand: str,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+    ) -> Any:
+        """Every website across every tool.
+
+        Scope: analytics.read. Stored traffic totals per website (by domain), with each tool side by side, search clicks added up across search consoles, and every connection's sync status.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/overview
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/overview",
+            path={"brand": brand},
+            query={"from": from_, "to": to},
+        )
+
+    def get_brand_attribution_ads(
+        self,
+        brand: str,
+        *,
+        level: Literal["campaign", "adset", "ad"] | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
+    ) -> Any:
+        """What each ad campaign, ad set or ad brought, beside what it cost.
+
+        Scope: analytics.read. Joins paid visits, by the network's own ids the tracking template put on the landing page
+        (GET .../ads/tracking-templates), to the ad accounts' synced campaigns: first-party visits, and the conversions and
+        revenue credited to them under the model, beside spend and the conversions the platform claims for the same days.
+        A synced campaign with spend but no tracked visits is listed too: its tracking template is usually missing. Most
+        conversions first, then most spend, at most 500 rows. Ad accounts sync campaigns only, so ad sets and ads have
+        first-party numbers without a name or spend.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/attribution/ads
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/attribution/ads",
+            path={"brand": brand},
+            query={"level": level, "from": from_, "to": to, "model": model, "match": match},
+        )
+
+    def get_brand_attribution_campaigns(
+        self,
+        brand: str,
+        *,
+        channel: str | None = None,
+        tracking_campaign: str | None = None,
+        split: Literal["content"] | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
+    ) -> Any:
+        """Drill a channel down to its sources and campaigns.
+
+        Scope: analytics.read. Visits, conversions and revenue per channel, source and campaign, most conversions first, at most 500 rows. tracking_campaign_id and campaign_name are set for visits from an Outflare campaign link. With split=content each campaign is also split by the visit's utm_content, such as the sequence step (step-1, step-2) a link went out in.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/attribution/campaigns
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/attribution/campaigns",
+            path={"brand": brand},
+            query={
+                "channel": channel,
+                "tracking_campaign": tracking_campaign,
+                "split": split,
+                "from": from_,
+                "to": to,
+                "model": model,
+                "match": match,
+            },
+        )
+
+    def get_brand_attribution_channels(
+        self,
+        brand: str,
+        *,
+        from_: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
+    ) -> Any:
+        """Visits, conversions, revenue and cost for every channel.
+
+        Scope: analytics.read. One row per channel, always in the same order:
+        website visits that arrived from it, the conversions and revenue
+        credited to it under the model, and the spend recorded against it.
+        Conversions are shares, so they can be fractional under the shared
+        models. Revenue is payments net of refunds, per currency. Spend with
+        no channel is in unallocated_cost. pending_visits are visits not
+        classified yet (within a minute or two).
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/attribution/channels
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/attribution/channels",
+            path={"brand": brand},
+            query={"from": from_, "to": to, "model": model, "match": match},
         )
 
     def get_brand_automation_map(
@@ -12961,6 +14083,27 @@ class Operations(_Mixin):
             query={"archived": archived},
         )
 
+    def get_brand_consent_banner(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get a site's consent banner.
+
+        Scope: customers.read. The cookie consent banner the site key's script (/site.js) shows: the rule for each region,
+        the laws and frameworks it follows, the categories it asks about, how it looks and what it says. Until it is
+        first saved (saved false), config is the defaults and the site shows no banner. look is the logo and colours the
+        brand preset uses when the banner sets none: the key's brand's, else the company's.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/site-keys/{id}/consent-banner
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/site-keys/{id}/consent-banner",
+            path={"brand": brand, "id": id},
+        )
+
     def get_brand_context(
         self,
         brand: str,
@@ -12980,6 +14123,32 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/brands/{brand}/context",
             path={"brand": brand, "ws": ws},
+        )
+
+    def get_brand_cookie_policy(
+        self,
+        brand: str,
+        id: str,
+        *,
+        format: Literal["markdown", "text", "html"] | None = None,
+        version: int | None = None,
+    ) -> Any:
+        """Get a site's cookie policy.
+
+        Scope: customers.read. The site's cookie policy as published: its latest version, or an earlier one with version. It
+        lists what was found on the site by category and vendor, everything not ignored and seen in the last 30 days, with its
+        purpose and how long it is kept. content is the policy in format (markdown, text or html). Published again on its own
+        whenever what the site uses changes; a version that adds a vendor needing consent asks visitors again. 404 until the
+        first scan or browser report.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/site-keys/{id}/cookie-policy
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/site-keys/{id}/cookie-policy",
+            path={"brand": brand, "id": id},
+            query={"format": format, "version": version},
         )
 
     def get_brand_crm_import(
@@ -13179,6 +14348,67 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/events/summary",
             path={"brand": brand},
+        )
+
+    def get_brand_experiment(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get an SEO experiment and its result.
+
+        Scope: seo.read. While it measures, result is worked out now from the days Search Console has sent.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/experiments/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/experiments/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_brand_flag(
+        self,
+        brand: str,
+        flag: str,
+    ) -> Any:
+        """Get a feature flag.
+
+        Scope: analytics.read. By id, or by key for a live flag.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flags/{flag}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flags/{flag}",
+            path={"brand": brand, "flag": flag},
+        )
+
+    def get_brand_flag_group_holdout(
+        self,
+        brand: str,
+        group: str,
+        *,
+        event: str | None = None,
+        page: str | None = None,
+        days: int | None = None,
+    ) -> Any:
+        """Compare an exclusion group's holdout with everyone else.
+
+        Scope: analytics.read. Every visitor who viewed a page of the site in the last days, split by whether they fall in
+        the group's holdout (the same hash the flags use), and the goal after their first view: what the group's changes
+        did together. 409 when the group has no holdout.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flag-groups/{group}/holdout
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flag-groups/{group}/holdout",
+            path={"brand": brand, "group": group},
+            query={"event": event, "page": page, "days": days},
         )
 
     def get_brand_inbound_message(
@@ -13581,6 +14811,63 @@ class Operations(_Mixin):
             path={"brand": brand, "id": id},
         )
 
+    def get_brand_tracking_campaign(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """Get a campaign.
+
+        Scope: analytics.read. Look one up by its ofc code to see which campaign a visit came from.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns/{id}",
+            path={"brand": brand, "id": id},
+        )
+
+    def get_brand_tracking_domain_dns_approval(
+        self,
+        brand: str,
+        id: str,
+        *,
+        return_: str | None = None,
+    ) -> Any:
+        """Get a one-off approval link for a tracking domain's CNAME.
+
+        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+
+        Needs: the mailboxes.manage scope.
+        GET /v1/brands/{brand}/tracking-domains/{id}/dns/approval
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-domains/{id}/dns/approval",
+            path={"brand": brand, "id": id},
+            query={"return": return_},
+        )
+
+    def get_brand_tracking_taxonomy(
+        self,
+        brand: str,
+    ) -> Any:
+        """The channels campaign links can be in.
+
+        Scope: analytics.read. The workspace-wide tagging scheme: each channel, the utm_medium its links get and the
+        usual utm_source values. Spend entries use the same channel ids, so cost and credit line up per channel.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-taxonomy
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-taxonomy",
+            path={"brand": brand},
+        )
+
     def get_brand_transaction(
         self,
         brand: str,
@@ -13837,6 +15124,7 @@ class Operations(_Mixin):
         the laws and frameworks it follows, the categories it asks about, how it looks and what it says. Until it is
         first saved (saved false), config is the defaults and the site shows no banner. look is the logo and colours the
         brand preset uses when the banner sets none: the key's brand's, else the company's.
+        Deprecated: use GET /v1/brands/{brand}/site-keys/{id}/consent-banner. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/site-keys/{id}/consent-banner
@@ -13946,6 +15234,7 @@ class Operations(_Mixin):
         purpose and how long it is kept. content is the policy in format (markdown, text or html). Published again on its own
         whenever what the site uses changes; a version that adds a vendor needing consent asks visitors again. 404 until the
         first scan or browser report.
+        Deprecated: use GET /v1/brands/{brand}/site-keys/{id}/cookie-policy. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy
@@ -14943,7 +16232,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get an SEO experiment and its result.
 
-        Scope: seo.read. While it measures, result is worked out now from the days Search Console has sent.
+        Scope: seo.read. While it measures, result is worked out now from the days Search Console has sent. Deprecated: use GET /v1/brands/{brand}/experiments/{id}. This workspace route stays until the brands contract step.
 
         Needs: the seo.read scope.
         GET /v1/workspaces/{ws}/experiments/{id}
@@ -15074,7 +16363,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get a feature flag.
 
-        Scope: analytics.read. By id, or by key for a live flag.
+        Scope: analytics.read. By id, or by key for a live flag. Deprecated: use GET /v1/brands/{brand}/flags/{flag}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/flags/{flag}
@@ -15099,6 +16388,7 @@ class Operations(_Mixin):
         Scope: analytics.read. Every visitor who viewed a page of the site in the last days, split by whether they fall in
         the group's holdout (the same hash the flags use), and the goal after their first view: what the group's changes
         did together. 409 when the group has no holdout.
+        Deprecated: use GET /v1/brands/{brand}/flag-groups/{group}/holdout. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/flag-groups/{group}/holdout
@@ -15823,6 +17113,26 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/meetings/{id}",
             path={"id": id, "ws": ws},
             query={"brand": brand},
+        )
+
+    def get_menu_badges(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """Badges for extension sidebar links.
+
+        Scope: workspace.read. Short texts a server extension shows next to its own sidebar links (`menu_links` in
+        GET /v1/me) for this workspace, by link id, such as the hosted Cloud's account balance next to Plan and
+        billing. Empty on servers without such an extension.
+
+        Needs: the workspace.read scope.
+        GET /v1/workspaces/{ws}/menu-badges
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/menu-badges",
+            path={"ws": ws},
         )
 
     def get_meta(
@@ -17842,7 +19152,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get a campaign.
 
-        Scope: analytics.read. Look one up by its ofc code to see which campaign a visit came from.
+        Scope: analytics.read. Look one up by its ofc code to see which campaign a visit came from. Deprecated: use GET /v1/brands/{brand}/tracking-campaigns/{id}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/tracking-campaigns/{id}
@@ -17862,7 +19172,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Get a one-off approval link for a tracking domain's CNAME.
 
-        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way.
+        Scope: mailboxes.manage. Looks up the domain's DNS provider. When it supports Domain Connect and has Outflare's template, `url` takes the person to the provider's own screen to approve exactly these records once; Outflare keeps no access afterwards. Otherwise `reason` says why, and .../dns with a DNS host connection is the way. Deprecated: use GET /v1/brands/{brand}/tracking-domains/{id}/dns/approval. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         GET /v1/workspaces/{ws}/tracking-domains/{id}/dns/approval
@@ -17883,6 +19193,7 @@ class Operations(_Mixin):
 
         Scope: analytics.read. The workspace-wide tagging scheme: each channel, the utm_medium its links get and the
         usual utm_source values. Spend entries use the same channel ids, so cost and credit line up per channel.
+        Deprecated: use GET /v1/brands/{brand}/tracking-taxonomy. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/tracking-taxonomy
@@ -18653,7 +19964,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List A/B test AI runs.
 
-        Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand.
+        Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand. Deprecated: use GET /v1/brands/{brand}/ab-test-ai-runs. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-test-ai-runs
@@ -18676,6 +19987,7 @@ class Operations(_Mixin):
         Scope: analytics.read. The library of finished tests, newest first (up to 200): each with its hypothesis, the
         goal it was judged on, how it came out in a line, the version kept, and its learning when the AI wrote one.
         q finds tests whose name, hypothesis, flag or learning mention it.
+        Deprecated: use GET /v1/brands/{brand}/ab-tests/learnings. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests/learnings
@@ -18697,7 +20009,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List A/B tests.
 
-        Scope: analytics.read. The workspace's A/B tests, newest first. A brand's tests include those of shared flags, which reach its site too.
+        Scope: analytics.read. The brand's A/B tests, newest first. Deprecated: use GET /v1/brands/{brand}/ab-tests. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/ab-tests
@@ -19723,6 +21035,7 @@ class Operations(_Mixin):
         with POST .../integrations (API key) or the OAuth authorize link,
         or hand a person a link with POST .../connect-requests. Nothing
         needs to be connected for the rest of Outflare to work.
+        Deprecated: use GET /v1/brands/{brand}/analytics. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics
@@ -19742,7 +21055,7 @@ class Operations(_Mixin):
     ) -> Any:
         """What the sync has stored for each connection.
 
-        Scope: analytics.read.
+        Scope: analytics.read. Deprecated: use GET /v1/brands/{brand}/analytics/syncs. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/analytics/syncs
@@ -19790,7 +21103,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List credited conversions and who got the credit.
 
-        Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct.
+        Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct. Deprecated: use GET /v1/brands/{brand}/attribution/conversions. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/attribution/conversions
@@ -20009,6 +21322,70 @@ class Operations(_Mixin):
             query={"kind": kind, "limit": limit, "cursor": cursor, "fields": fields},
         )
 
+    def list_brand_ab_test_ai_runs(
+        self,
+        brand: str,
+        *,
+        kind: Literal["suggest", "versions", "summary", "learning", "ask"] | None = None,
+        test: str | None = None,
+    ) -> Any:
+        """List A/B test AI runs.
+
+        Scope: analytics.read. The latest 50 AI runs, newest first. A brand's runs include those for no brand.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-test-ai-runs
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-test-ai-runs",
+            path={"brand": brand},
+            query={"kind": kind, "test": test},
+        )
+
+    def list_brand_ab_test_learnings(
+        self,
+        brand: str,
+        *,
+        q: str | None = None,
+    ) -> Any:
+        """List what finished A/B tests taught.
+
+        Scope: analytics.read. The library of finished tests, newest first (up to 200): each with its hypothesis, the
+        goal it was judged on, how it came out in a line, the version kept, and its learning when the AI wrote one.
+        q finds tests whose name, hypothesis, flag or learning mention it.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests/learnings
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests/learnings",
+            path={"brand": brand},
+            query={"q": q},
+        )
+
+    def list_brand_ab_tests(
+        self,
+        brand: str,
+        *,
+        status: Literal["draft", "running", "done"] | None = None,
+        flag: str | None = None,
+    ) -> Any:
+        """List A/B tests.
+
+        Scope: analytics.read. The brand's A/B tests, newest first.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/ab-tests
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/ab-tests",
+            path={"brand": brand},
+            query={"status": status, "flag": flag},
+        )
+
     def list_brand_alerts(
         self,
         brand: str,
@@ -20037,6 +21414,86 @@ class Operations(_Mixin):
             query={"kind": kind, "limit": limit, "cursor": cursor, "fields": fields},
         )
 
+    def list_brand_analytics_sources(
+        self,
+        brand: str,
+    ) -> Any:
+        """List connected analytics tools.
+
+        Scope: analytics.read. Every connection that reads website or
+        product analytics or a search console (Google Analytics, Search
+        Console, Bing Webmaster Tools, PostHog, Plausible and the rest),
+        with the reports each one answers and its default site. Connect one
+        with POST .../integrations (API key) or the OAuth authorize link,
+        or hand a person a link with POST .../connect-requests. Nothing
+        needs to be connected for the rest of Outflare to work.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics",
+            path={"brand": brand},
+        )
+
+    def list_brand_analytics_syncs(
+        self,
+        brand: str,
+    ) -> Any:
+        """What the sync has stored for each connection.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/analytics/syncs
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/analytics/syncs",
+            path={"brand": brand},
+        )
+
+    def list_brand_attribution_conversions(
+        self,
+        brand: str,
+        *,
+        name: str | None = None,
+        channel: str | None = None,
+        record_id: str | None = None,
+        from_: str | None = None,
+        to: str | None = None,
+        model: str | None = None,
+        match: Literal["all", "identified", "signed_in"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List credited conversions and who got the credit.
+
+        Scope: analytics.read. Newest first. Each conversion lists the visits credited under the model, with their channel and weight; a conversion with no visit before it is credited to direct.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/attribution/conversions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/attribution/conversions",
+            path={"brand": brand},
+            query={
+                "name": name,
+                "channel": channel,
+                "record_id": record_id,
+                "from": from_,
+                "to": to,
+                "model": model,
+                "match": match,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
     def list_brand_channels(
         self,
         brand: str,
@@ -20052,6 +21509,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/channels",
             path={"brand": brand},
+        )
+
+    def list_brand_cookie_policy_versions(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """List a site's cookie policy versions.
+
+        Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/site-keys/{id}/cookie-policy/versions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/site-keys/{id}/cookie-policy/versions",
+            path={"brand": brand, "id": id},
         )
 
     def list_brand_crm_imports(
@@ -20382,6 +21857,85 @@ class Operations(_Mixin):
                 "cursor": cursor,
                 "fields": fields,
             },
+        )
+
+    def list_brand_experiment_pages(
+        self,
+        brand: str,
+        id: str,
+        *,
+        group: Literal["treatment", "control"] | None = None,
+    ) -> Any:
+        """List an experiment's pages and their groups.
+
+        Scope: seo.read. Make the change only on the treatment pages; leave the control pages alone until it ends.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/experiments/{id}/pages
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/experiments/{id}/pages",
+            path={"brand": brand, "id": id},
+            query={"group": group},
+        )
+
+    def list_brand_experiments(
+        self,
+        brand: str,
+        *,
+        site_id: str | None = None,
+        status: Literal["draft", "waiting", "measuring", "done", "stopped"] | None = None,
+    ) -> Any:
+        """List SEO experiments.
+
+        Scope: seo.read. The newest 100, newest first. Results of the ones still measuring are on GET .../experiments/{id}.
+
+        Needs: the seo.read scope.
+        GET /v1/brands/{brand}/experiments
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/experiments",
+            path={"brand": brand},
+            query={"site_id": site_id, "status": status},
+        )
+
+    def list_brand_flag_groups(
+        self,
+        brand: str,
+    ) -> Any:
+        """List exclusion groups.
+
+        Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flag-groups
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flag-groups",
+            path={"brand": brand},
+        )
+
+    def list_brand_flags(
+        self,
+        brand: str,
+        *,
+        status: Literal["on", "off", "archived", "all"] | None = None,
+    ) -> Any:
+        """List feature flags.
+
+        Scope: analytics.read. The brand's flags, oldest first; archived ones only with status=archived or all.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flags
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flags",
+            path={"brand": brand},
+            query={"status": status},
         )
 
     def list_brand_inbox(
@@ -21042,6 +22596,45 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_brand_site_cookies(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """List a site's cookies and scripts.
+
+        Scope: customers.read. Every cookie, storage key, script, embed and pixel found on the site key's site, from scans of
+        its pages and from what the website script sees in visitors' browsers (names only, never values), each matched to a
+        vendor in Outflare's catalogue. Ones the catalogue doesn't know have category unknown and status new: classify them
+        (PATCH .../cookies/{cookie}) for them to be in the cookie policy. before_consent marks one a browser had before the
+        visitor allowed its category. counts.to_review is how many wait for a person.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/site-keys/{id}/cookies
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/site-keys/{id}/cookies",
+            path={"brand": brand, "id": id},
+        )
+
+    def list_brand_site_keys(
+        self,
+        brand: str,
+    ) -> Any:
+        """List site keys.
+
+        Scope: customers.read. The keys websites send page views with, each with its snippet to paste into the site.
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/site-keys
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/site-keys",
+            path={"brand": brand},
+        )
+
     def list_brand_smart_list_changes(
         self,
         brand: str,
@@ -21152,6 +22745,67 @@ class Operations(_Mixin):
             },
         )
 
+    def list_brand_tracking_campaigns(
+        self,
+        brand: str,
+        *,
+        status: Literal["active", "archived"] | None = None,
+        channel: str | None = None,
+    ) -> Any:
+        """List campaigns, newest first.
+
+        Scope: analytics.read. Campaigns fix the tags every link in them carries: channel, source, medium, the
+        utm_campaign slug and the ofc code. Includes the ones modules made for their sequences, broadcasts, posts and
+        partners (object_kind). The latest 1000.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns",
+            path={"brand": brand},
+            query={"status": status, "channel": channel},
+        )
+
+    def list_brand_tracking_domains(
+        self,
+        brand: str,
+    ) -> Any:
+        """List tracking domains.
+
+        Scope: mailboxes.read. Optional. Once a domain is verified, the
+        workspace's unsubscribe links and any click-tracked links use it
+        instead of this server's address. `target` is what the CNAME must
+        point to.
+
+        Needs: the mailboxes.read scope.
+        GET /v1/brands/{brand}/tracking-domains
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-domains",
+            path={"brand": brand},
+        )
+
+    def list_brand_tracking_links(
+        self,
+        brand: str,
+        id: str,
+    ) -> Any:
+        """List a campaign's links, newest first.
+
+        Scope: analytics.read. Every link made in the campaign, with its tagged address.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns/{id}/links
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links",
+            path={"brand": brand, "id": id},
+        )
+
     def list_brand_transactions(
         self,
         brand: str,
@@ -21175,6 +22829,34 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/transactions",
             path={"brand": brand},
             query={"record": record, "kind": kind, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
+    def list_brand_visitors(
+        self,
+        brand: str,
+        *,
+        view: Literal["companies", "people"] | None = None,
+        days: int | None = None,
+        hot: bool | None = None,
+        limit: int | None = None,
+    ) -> Any:
+        """List website visitors.
+
+        Scope: customers.read. The companies or people on the workspace's website in the last `days`, best first by
+        score (buying intent, 0 to 100: key pages such as pricing count most, then return visits and reading, fading
+        after a week away). A person is known once the workspace's product identifies them or they arrive from a
+        tracked link in an email Outflare sent them; their company is their first company, else the company with
+        their email's domain. Counts are totals since each browser was first seen. Anonymous visitors are counted in
+        totals.browsers only. Needs the site snippet (site keys).
+
+        Needs: the customers.read scope.
+        GET /v1/brands/{brand}/visitors
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/visitors",
+            path={"brand": brand},
+            query={"view": view, "days": days, "hot": hot, "limit": limit},
         )
 
     def list_brand_webhook_deliveries(
@@ -21348,6 +23030,25 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/connect-requests",
             path={"ws": ws},
+        )
+
+    def list_connection_accounts(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List a connection's accounts and properties with their brands.
+
+        Scope: integrations.read. The sites (analytics and Search Console) its syncs read and its ad accounts, each with the brand its data belongs to.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/integrations/{id}/accounts
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/integrations/{id}/accounts",
+            path={"id": id, "ws": ws},
         )
 
     def list_connection_usage(
@@ -21525,7 +23226,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List a site's cookie policy versions.
 
-        Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again.
+        Scope: customers.read. Every version, newest first, with what it added and removed (kind:name) and whether it asked visitors again. Deprecated: use GET /v1/brands/{brand}/site-keys/{id}/cookie-policy/versions. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/site-keys/{id}/cookie-policy/versions
@@ -23012,7 +24713,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List an experiment's pages and their groups.
 
-        Scope: seo.read. Make the change only on the treatment pages; leave the control pages alone until it ends.
+        Scope: seo.read. Make the change only on the treatment pages; leave the control pages alone until it ends. Deprecated: use GET /v1/brands/{brand}/experiments/{id}/pages. This workspace route stays until the brands contract step.
 
         Needs: the seo.read scope.
         GET /v1/workspaces/{ws}/experiments/{id}/pages
@@ -23034,7 +24735,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List SEO experiments.
 
-        Scope: seo.read. The newest 100, newest first. Results of the ones still measuring are on GET .../experiments/{id}.
+        Scope: seo.read. The newest 100, newest first. Results of the ones still measuring are on GET .../experiments/{id}. Deprecated: use GET /v1/brands/{brand}/experiments. This workspace route stays until the brands contract step.
 
         Needs: the seo.read scope.
         GET /v1/workspaces/{ws}/experiments
@@ -23161,7 +24862,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List exclusion groups.
 
-        Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free.
+        Scope: analytics.read. Every exclusion group, with its holdout, its flags and their slices, and the share still free. Deprecated: use GET /v1/brands/{brand}/flag-groups. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/flag-groups
@@ -23181,7 +24882,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List feature flags.
 
-        Scope: analytics.read. The workspace's flags, oldest first; archived ones only with status=archived or all. A brand's flags include the shared ones, which reach its site too.
+        Scope: analytics.read. The brand's flags, oldest first; archived ones only with status=archived or all. Deprecated: use GET /v1/brands/{brand}/flags. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/flags
@@ -25129,9 +26830,9 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
     ) -> Any:
-        """Writes waiting for a person, across missions.
+        """Writes the retired missions held for a person.
 
-        Scope: missions.read. The approval inbox.
+        Scope: missions.read. What missions held for a person before they were retired, kept as history: none of them can be approved any more. Changes waiting now are under GET /actions.
 
         Needs: the missions.read scope.
         GET /v1/workspaces/{ws}/mission-actions
@@ -25439,7 +27140,7 @@ class Operations(_Mixin):
         self,
         brand: str,
         *,
-        kind: Literal["record", "field_value", "identity", "relationship", "event", "batch"] | None = None,
+        kind: str | None = None,
         record: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
@@ -26295,6 +27996,7 @@ class Operations(_Mixin):
         vendor in Outflare's catalogue. Ones the catalogue doesn't know have category unknown and status new: classify them
         (PATCH .../cookies/{cookie}) for them to be in the cookie policy. before_consent marks one a browser had before the
         visitor allowed its category. counts.to_review is how many wait for a person.
+        Deprecated: use GET /v1/brands/{brand}/site-keys/{id}/cookies. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/site-keys/{id}/cookies
@@ -26313,7 +28015,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List site keys.
 
-        Scope: customers.read. The keys websites send page views with, each with its snippet to paste into the site.
+        Scope: customers.read. The keys websites send page views with, each with its snippet to paste into the site. Deprecated: use GET /v1/brands/{brand}/site-keys. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/site-keys
@@ -27119,6 +28821,7 @@ class Operations(_Mixin):
         Scope: analytics.read. Campaigns fix the tags every link in them carries: channel, source, medium, the
         utm_campaign slug and the ofc code. Includes the ones modules made for their sequences, broadcasts, posts and
         partners (object_kind). The latest 1000.
+        Deprecated: use GET /v1/brands/{brand}/tracking-campaigns. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/tracking-campaigns
@@ -27141,6 +28844,7 @@ class Operations(_Mixin):
         workspace's unsubscribe links and any click-tracked links use it
         instead of this server's address. `target` is what the CNAME must
         point to.
+        Deprecated: use GET /v1/brands/{brand}/tracking-domains. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.read scope.
         GET /v1/workspaces/{ws}/tracking-domains
@@ -27159,7 +28863,7 @@ class Operations(_Mixin):
     ) -> Any:
         """List a campaign's links, newest first.
 
-        Scope: analytics.read. Every link made in the campaign, with its tagged address.
+        Scope: analytics.read. Every link made in the campaign, with its tagged address. Deprecated: use GET /v1/brands/{brand}/tracking-campaigns/{id}/links. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         GET /v1/workspaces/{ws}/tracking-campaigns/{id}/links
@@ -27168,6 +28872,28 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/tracking-campaigns/{id}/links",
             path={"id": id, "ws": ws},
+        )
+
+    def list_unassigned_connections(
+        self,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """List connections and accounts that belong to no brand.
+
+        Scope: integrations.read. No brand, no data: a brand connection with no brand, and the accounts or properties
+        of a connection (analytics and Search Console sites, ad accounts) nobody assigned, have their data stored but
+        shown in no brand. Assign a connection with PATCH .../integrations/{id} (brand_id) and an account with
+        PUT .../integrations/{id}/accounts/{account}. Shared connections are tools every brand uses, so they never show.
+        In a workspace with one brand, everything is that brand's.
+
+        Needs: the integrations.read scope.
+        GET /v1/workspaces/{ws}/connections/unassigned
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/connections/unassigned",
+            path={"ws": ws},
         )
 
     def list_verifications(
@@ -27212,6 +28938,7 @@ class Operations(_Mixin):
         tracked link in an email Outflare sent them; their company is their first company, else the company with
         their email's domain. Counts are totals since each browser was first seen. Anonymous visitors are counted in
         totals.browsers only. Needs the site snippet (site keys).
+        Deprecated: use GET /v1/brands/{brand}/visitors. This workspace route stays until the brands contract step.
 
         Needs: the customers.read scope.
         GET /v1/workspaces/{ws}/visitors
@@ -27623,6 +29350,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def move_tracking_domain(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        brand_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Move a tracking domain to another brand.
+
+        Scope: mailboxes.manage. A tracking domain belongs to one brand,
+        and that brand's emails use it for their links. This moves it to
+        another brand; you need to manage both. A domain that serves a
+        partner portal or help centre stays with that brand (409).
+
+        Needs: the mailboxes.manage scope.
+        PATCH /v1/workspaces/{ws}/tracking-domains/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/workspaces/{ws}/tracking-domains/{id}",
+            path={"id": id, "ws": ws},
+            body={"brand_id": brand_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def offboard_accounts(
         self,
         brand: str,
@@ -27925,13 +29680,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        reason: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Pause a mission.
+        """Pause a mission (retired).
 
-        Scope: missions.run, so an agent can pause itself. Writes are refused and its campaigns stop sending until it resumes.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/pause
@@ -27940,8 +29698,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/pause",
             path={"id": id, "ws": ws},
-            body={"reason": reason},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -28033,6 +29789,7 @@ class Operations(_Mixin):
         page views (on page, when given) and the goal's rate among those visitors, the flag's rollout and split, and
         the same sequential test the results use. Each row is the visitors per version, and weeks, until the result is
         typically safe to stop if the change truly moves the goal by that much. Nothing is stored.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/plan. This workspace route stays until the brands contract step.
 
         Needs: the analytics.read scope.
         POST /v1/workspaces/{ws}/ab-tests/plan
@@ -28046,37 +29803,78 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def plan_ad_account_tracking(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+    ) -> Any:
+        """See what adding the tracking template to an ad account would change.
+
+        Scope: analytics.read. Reads the account's URL suffixes from the
+        platform, with the workspace's own sign-in, and lists every one
+        that needs Outflare's tracking template (listAdTrackingTemplates)
+        so each ad's clicks carry its campaign, ad group and ad ids: the
+        account's own suffix, and each campaign, ad group or ad suffix
+        that would override it without the template. Each change keeps the
+        parameters already there and adds only the keys missing. Nothing
+        changes until addAdAccountTracking. Google Ads only for now; other
+        platforms answer `connector_invalid`, and their template is pasted
+        in by hand.
+
+        Needs: the analytics.read scope.
+        GET /v1/workspaces/{ws}/ads/accounts/{id}/tracking
+        """
+        return self._call(
+            "GET",
+            "/v1/workspaces/{ws}/ads/accounts/{id}/tracking",
+            path={"id": id, "ws": ws},
+        )
+
+    def plan_brand_ab_test(
+        self,
+        brand: str,
+        *,
+        flag: str,
+        goal: dict[str, Any],
+        min_effect: float | None = None,
+        page: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Plan an A/B test.
+
+        Scope: analytics.read. How long a test of a flag is likely to take, before it starts: from the last 28 days of
+        page views (on page, when given) and the goal's rate among those visitors, the flag's rollout and split, and
+        the same sequential test the results use. Each row is the visitors per version, and weeks, until the result is
+        typically safe to stop if the change truly moves the goal by that much. Nothing is stored.
+
+        Needs: the analytics.read scope.
+        POST /v1/brands/{brand}/ab-tests/plan
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/plan",
+            path={"brand": brand},
+            body={"flag": flag, "goal": goal, "min_effect": min_effect, "page": page},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def plan_mission(
         self,
         *,
         ws: str | None = None,
-        goal: str,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Plan a mission from a goal (deprecated).
+        """Plan a mission from a goal (retired).
 
-        Deprecated: missions are being retired for agent runs on the action
-        layer. Start a playbook as an agent run instead
-        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`). The web app
-        and MCP no longer plan missions; this route still does until a
-        later release answers 410 `mission_retired`.
-
-        Scope: missions.run. Type a goal in plain words ("book 10 meetings
-        with fintech CFOs in Australia by 30 November") and the workspace's
-        AI model drafts the mission: a measurable goal, steps, instructions for the agent,
-        limits sized to your mailboxes, and the connectors it needs. The
-        draft is saved as a mission in status draft, with a connect request
-        for each missing connector and any questions for you. Nothing runs
-        until a person approves it.
-
-        Uses the model chosen in `GET /ai-settings`: Claude, OpenAI, Gemini or
-        Mistral, connected under Connectors with your own API key. Without
-        one the call fails with 409 `connector_needed`; with a provider but
-        no model or price chosen, 409 `ai_model_needed`; past the
-        workspace's monthly AI limit, 409 `ai_budget_reached`. The model is
-        sent the goal, the company context and a summary of the workspace,
-        never lead lists, email addresses or keys.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/plan
@@ -28085,8 +29883,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/plan",
             path={"ws": ws},
-            body={"goal": goal},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -28095,21 +29891,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        body: str,
-        connector: str | None = None,
-        kind: Literal["note", "progress", "question", "instruction", "connect_request"] | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Post a note, question, instruction or connect request.
+        """Post a note, question, instruction or connect request (retired).
 
-        Scope: missions.run. kind connect_request asks a person to connect
-        a tool the agent needs (they paste the key or sign in with OAuth);
-        give connector as the connector id. The request closes by itself,
-        with a note in the mission, once the workspace has a working
-        connection to that connector; Outflare's agent then takes a turn
-        straight away. A connector that is already connected answers 409
-        `already_connected`: use the connection instead.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/updates
@@ -28118,8 +29909,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/updates",
             path={"id": id, "ws": ws},
-            body={"body": body, "connector": connector, "kind": kind},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -29264,6 +31053,29 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def reask_brand_consent_banner(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ask a site's visitors again.
+
+        Scope: customers.manage. Raises consent_version, such as after the site starts using a new kind of cookie: visitors
+        whose choice was made on an older version see the banner again where their region's rule is opt_in. Records
+        consent_banner.reasked.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/site-keys/{id}/consent-banner/reask
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/site-keys/{id}/consent-banner/reask",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def reask_consent_banner(
         self,
         id: str,
@@ -29276,6 +31088,7 @@ class Operations(_Mixin):
         Scope: customers.manage. Raises consent_version, such as after the site starts using a new kind of cookie: visitors
         whose choice was made on an older version see the banner again where their region's rule is opt_in. Records
         consent_banner.reasked.
+        Deprecated: use POST /v1/brands/{brand}/site-keys/{id}/consent-banner/reask. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/site-keys/{id}/consent-banner/reask
@@ -29845,13 +31658,16 @@ class Operations(_Mixin):
         action: str,
         *,
         ws: str | None = None,
-        note: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Reject a held write.
+        """Reject a held write (retired).
 
-        Scope: missions.approve. A note is passed to the agent as an instruction.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.approve scope.
         POST /v1/workspaces/{ws}/missions/{id}/actions/{action}/reject
@@ -29860,8 +31676,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/actions/{action}/reject",
             path={"id": id, "action": action, "ws": ws},
-            body={"note": note},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -30033,6 +31847,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def remove_brand_site_proxy_secret(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a site key's proxy secret.
+
+        Scope: customers.manage. Stops trusting the proxy's X-Outflare-Client-IP: visits get the connecting address again.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/brands/{brand}/site-keys/{id}/proxy-secret
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/site-keys/{id}/proxy-secret",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def remove_brand_static_list_members(
         self,
         brand: str,
@@ -30075,6 +31910,27 @@ class Operations(_Mixin):
         return self._call(
             "DELETE",
             "/v1/brands/{brand}/suppressions/{id}",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
+    def remove_brand_tracking_domain(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Remove a tracking domain.
+
+        Scope: mailboxes.manage. Links already sent keep working only while the domain still points here.
+
+        Needs: the mailboxes.manage scope.
+        DELETE /v1/brands/{brand}/tracking-domains/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/tracking-domains/{id}",
             path={"brand": brand, "id": id},
             idempotency_key=idempotency_key,
         )
@@ -30233,7 +32089,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Remove a site key's proxy secret.
 
-        Scope: customers.manage. Stops trusting the proxy's X-Outflare-Client-IP: visits get the connecting address again.
+        Scope: customers.manage. Stops trusting the proxy's X-Outflare-Client-IP: visits get the connecting address again. Deprecated: use DELETE /v1/brands/{brand}/site-keys/{id}/proxy-secret. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         DELETE /v1/workspaces/{ws}/site-keys/{id}/proxy-secret
@@ -30323,7 +32179,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Remove a tracking domain.
 
-        Scope: mailboxes.manage. Links already sent keep working only while the domain still points here.
+        Scope: mailboxes.manage. Links already sent keep working only while the domain still points here. Deprecated: use DELETE /v1/brands/{brand}/tracking-domains/{id}. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         DELETE /v1/workspaces/{ws}/tracking-domains/{id}
@@ -30576,6 +32432,32 @@ class Operations(_Mixin):
             },
         )
 
+    def report_brand_tracking_domain_dns_approved(
+        self,
+        brand: str,
+        id: str,
+        *,
+        error: str | None = None,
+        provider: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Report coming back from the DNS provider's approval.
+
+        Scope: mailboxes.manage. Call it when the provider sends the browser back. Without `error` Outflare starts looking for the records (it trusts DNS, not the redirect) and `dns_install` shows `provider`; with one nothing changes.
+
+        Needs: the mailboxes.manage scope.
+        POST /v1/brands/{brand}/tracking-domains/{id}/dns/approved
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracking-domains/{id}/dns/approved",
+            path={"brand": brand, "id": id},
+            body={"error": error, "provider": provider},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def report_email_provider_domain_dns_approved(
         self,
         id: str,
@@ -30666,7 +32548,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Report coming back from the DNS provider's approval.
 
-        Scope: mailboxes.manage. Call it when the provider sends the browser back. Without `error` Outflare starts looking for the records (it trusts DNS, not the redirect) and `dns_install` shows `provider`; with one nothing changes.
+        Scope: mailboxes.manage. Call it when the provider sends the browser back. Without `error` Outflare starts looking for the records (it trusts DNS, not the redirect) and `dns_install` shows `provider`; with one nothing changes. Deprecated: use POST /v1/brands/{brand}/tracking-domains/{id}/dns/approved. This workspace route stays until the brands contract step.
 
         Needs: the mailboxes.manage scope.
         POST /v1/workspaces/{ws}/tracking-domains/{id}/dns/approved
@@ -30868,13 +32750,16 @@ class Operations(_Mixin):
         update: str,
         *,
         ws: str | None = None,
-        note: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Close a connect request.
+        """Close a connect request (retired).
 
-        Scope: missions.run. The tool was connected, or a person decided not to.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/updates/{update}/resolve
@@ -30883,8 +32768,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/updates/{update}/resolve",
             path={"id": id, "update": update, "ws": ws},
-            body={"note": note},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -31086,9 +32969,14 @@ class Operations(_Mixin):
         ws: str | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Resume a paused mission.
+        """Resume a paused mission (retired).
 
-        Scope: missions.approve, and not the mission's own agent.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.approve scope.
         POST /v1/workspaces/{ws}/missions/{id}/resume
@@ -31321,6 +33209,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def revoke_brand_site_key(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Revoke a site key.
+
+        Scope: customers.manage. It, and its value before a rotation, stop working at once. Events already taken stay.
+
+        Needs: the customers.manage scope.
+        DELETE /v1/brands/{brand}/site-keys/{id}
+        """
+        return self._call(
+            "DELETE",
+            "/v1/brands/{brand}/site-keys/{id}",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def revoke_invite(
         self,
         id: str,
@@ -31351,7 +33260,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Revoke a site key.
 
-        Scope: customers.manage. It, and its value before a rotation, stop working at once. Events already taken stay.
+        Scope: customers.manage. It, and its value before a rotation, stop working at once. Events already taken stay. Deprecated: use DELETE /v1/brands/{brand}/site-keys/{id}. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         DELETE /v1/workspaces/{ws}/site-keys/{id}
@@ -31360,6 +33269,27 @@ class Operations(_Mixin):
             "DELETE",
             "/v1/workspaces/{ws}/site-keys/{id}",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def rotate_brand_site_key(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rotate a site key.
+
+        Scope: customers.manage. Gives the key a new value. The old one keeps working for seven days (previous_expires_at), so the site can be updated without losing visits.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/site-keys/{id}/rotate
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/site-keys/{id}/rotate",
+            path={"brand": brand, "id": id},
             idempotency_key=idempotency_key,
         )
 
@@ -31467,7 +33397,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Rotate a site key.
 
-        Scope: customers.manage. Gives the key a new value. The old one keeps working for seven days (previous_expires_at), so the site can be updated without losing visits.
+        Scope: customers.manage. Gives the key a new value. The old one keeps working for seven days (previous_expires_at), so the site can be updated without losing visits. Deprecated: use POST /v1/brands/{brand}/site-keys/{id}/rotate. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/site-keys/{id}/rotate
@@ -32544,6 +34474,64 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_ad_account_target(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        cost_per_conversion_micros: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set the target cost per conversion for an ad account's campaigns.
+
+        Scope: analytics.manage. The cost per conversion the brand wants from
+        every campaign of this account that has no target of its own, in
+        micros of the account's currency; null clears it. Outflare only uses
+        it to say whether a campaign is over or under (`target_status` on
+        listAdCampaigns); nothing changes on the platform.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/workspaces/{ws}/ads/accounts/{id}/target
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/ads/accounts/{id}/target",
+            path={"id": id, "ws": ws},
+            body={"cost_per_conversion_micros": cost_per_conversion_micros},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_ad_campaign_target(
+        self,
+        id: str,
+        *,
+        ws: str | None = None,
+        cost_per_conversion_micros: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a campaign's target cost per conversion.
+
+        Scope: analytics.manage. The cost per conversion the brand wants from
+        this campaign, in micros of its account's currency; null clears it,
+        and the account's target applies again. Outflare only uses it to say
+        whether the campaign is over or under; nothing changes on the
+        platform, which bids to its own target (`platform_target_cpa_micros`).
+
+        Needs: the analytics.manage scope.
+        PUT /v1/workspaces/{ws}/ads/campaigns/{id}/target
+        """
+        return self._call(
+            "PUT",
+            "/v1/workspaces/{ws}/ads/campaigns/{id}/target",
+            path={"id": id, "ws": ws},
+            body={"cost_per_conversion_micros": cost_per_conversion_micros},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_ad_connection_setup(
         self,
         id: str,
@@ -32766,6 +34754,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_brand_flag_group(
+        self,
+        brand: str,
+        group: str,
+        *,
+        holdout: int,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set an exclusion group's holdout.
+
+        Scope: analytics.manage. The holdout is the percent of the group's visitors (the top slice) kept out of every flag
+        in it, so they see the default experience wherever its tests run; compare them with everyone else on a goal
+        (getFlagGroupHoldout) to see what the group's changes did together. 409 when a flag's slice reaches into it.
+        Needs access to every brand, since a group spans them.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/flag-groups/{group}
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/flag-groups/{group}",
+            path={"brand": brand, "group": group},
+            body={"holdout": holdout},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_brand_journey_step_secret(
         self,
         brand: str,
@@ -32860,6 +34876,7 @@ class Operations(_Mixin):
         in it, so they see the default experience wherever its tests run; compare them with everyone else on a goal
         (getFlagGroupHoldout) to see what the group's changes did together. 409 when a flag's slice reaches into it.
         Needs access to every brand, since a group spans them.
+        Deprecated: use PUT /v1/brands/{brand}/flag-groups/{group}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         PUT /v1/workspaces/{ws}/flag-groups/{group}
@@ -33204,6 +35221,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. Shows the chosen version to everyone: the flag gives it all the traffic (weight 100,
         the others 0) at full rollout and is turned on. A running test ends with it as the decision, keeping its
         results; a finished test's decision changes. 409 for a draft.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/ship. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/ship
@@ -33212,6 +35230,33 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/ship",
             path={"test": test, "ws": ws},
+            body={"variant": variant},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def ship_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        variant: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Ship a version of an A/B test.
+
+        Scope: analytics.manage. Shows the chosen version to everyone: the flag gives it all the traffic (weight 100,
+        the others 0) at full rollout and is turned on. A running test ends with it as the decision, keeping its
+        results; a finished test's decision changes. 409 for a draft.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/ship
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/ship",
+            path={"brand": brand, "test": test},
             body={"variant": variant},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -33420,6 +35465,7 @@ class Operations(_Mixin):
 
         Scope: analytics.manage. Starts measuring from now. The flag must be live with at least two variants, the
         control among them, and no other running test; a flag that is off is turned on. 409 otherwise.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/start. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/start
@@ -33490,6 +35536,52 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def start_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start an A/B test.
+
+        Scope: analytics.manage. Starts measuring from now. The flag must be live with at least two variants, the
+        control among them, and no other running test; a flag that is off is turned on. 409 otherwise.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/start
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/start",
+            path={"brand": brand, "test": test},
+            idempotency_key=idempotency_key,
+        )
+
+    def start_brand_cookie_scan(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Scan a site for cookies.
+
+        Scope: customers.manage. Reads up to 20 of the site's pages as OutflareBot (each origin's home page, then the pages visits
+        land on most), following robots.txt, and records the cookies its server sets and the third-party scripts, embeds and
+        pixels in its HTML. Cookies that scripts set come from visitors' browsers instead. Sites with the consent banner on are
+        scanned every week. Answers 201 with the new scan, or 200 with one already waiting or running. Records cookie_scan.started.
+
+        Needs: the customers.manage scope.
+        POST /v1/brands/{brand}/site-keys/{id}/cookie-scans
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/site-keys/{id}/cookie-scans",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def start_brand_crm_import(
         self,
         brand: str,
@@ -33514,6 +35606,31 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/crm-imports",
             path={"brand": brand},
             body={"integration_id": integration_id, "objects": objects},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def start_brand_experiment(
+        self,
+        brand: str,
+        id: str,
+        *,
+        changed_at: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Start measuring an experiment.
+
+        Scope: seo.manage. With changed_at, it measures from when the change went live. Without it, an experiment that starts on a deploy waits for the site's next production deploy, and a manual one starts now.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/experiments/{id}/start
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/experiments/{id}/start",
+            path={"brand": brand, "id": id},
+            body={"changed_at": changed_at},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -33558,6 +35675,7 @@ class Operations(_Mixin):
         land on most), following robots.txt, and records the cookies its server sets and the third-party scripts, embeds and
         pixels in its HTML. Cookies that scripts set come from visitors' browsers instead. Sites with the consent banner on are
         scanned every week. Answers 201 with the new scan, or 200 with one already waiting or running. Records cookie_scan.started.
+        Deprecated: use POST /v1/brands/{brand}/site-keys/{id}/cookie-scans. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         POST /v1/workspaces/{ws}/site-keys/{id}/cookie-scans
@@ -33645,7 +35763,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Start measuring an experiment.
 
-        Scope: seo.manage. With changed_at, it measures from when the change went live. Without it, an experiment that starts on a deploy waits for the site's next production deploy, and a manual one starts now.
+        Scope: seo.manage. With changed_at, it measures from when the change went live. Without it, an experiment that starts on a deploy waits for the site's next production deploy, and a manual one starts now. Deprecated: use POST /v1/brands/{brand}/experiments/{id}/start. This workspace route stays until the brands contract step.
 
         Needs: the seo.manage scope.
         POST /v1/workspaces/{ws}/experiments/{id}/start
@@ -34093,6 +36211,27 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def stop_brand_experiment(
+        self,
+        brand: str,
+        id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """End an experiment early.
+
+        Scope: seo.manage. One that is measuring ends with its result so far; any other is stopped.
+
+        Needs: the seo.manage scope.
+        POST /v1/brands/{brand}/experiments/{id}/stop
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/experiments/{id}/stop",
+            path={"brand": brand, "id": id},
+            idempotency_key=idempotency_key,
+        )
+
     def stop_crawl(
         self,
         crawl: str,
@@ -34146,7 +36285,7 @@ class Operations(_Mixin):
     ) -> Any:
         """End an experiment early.
 
-        Scope: seo.manage. One that is measuring ends with its result so far; any other is stopped.
+        Scope: seo.manage. One that is measuring ends with its result so far; any other is stopped. Deprecated: use POST /v1/brands/{brand}/experiments/{id}/stop. This workspace route stays until the brands contract step.
 
         Needs: the seo.manage scope.
         POST /v1/workspaces/{ws}/experiments/{id}/stop
@@ -34163,13 +36302,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        reason: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Stop a mission now.
+        """Stop a mission now (retired).
 
-        Scope: missions.run. Ends it: held writes are canceled, its campaigns are paused, and further calls in it are refused.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/stop
@@ -34178,8 +36320,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/stop",
             path={"id": id, "ws": ws},
-            body={"reason": reason},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -34211,13 +36351,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        plan: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Submit the plan for approval.
+        """Submit the plan for approval (retired).
 
-        Scope: missions.run. From draft. Writes stay dry runs until approved.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         POST /v1/workspaces/{ws}/missions/{id}/submit
@@ -34226,8 +36369,6 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/missions/{id}/submit",
             path={"id": id, "ws": ws},
-            body={"plan": plan},
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -34249,6 +36390,7 @@ class Operations(_Mixin):
         goals visitors reach over the last 28 days, the brand's context and the tests already run. Each suggestion
         comes with the engine's own plan for its page and goal (weeks, the lift findable in 8 weeks, a warning).
         Nothing is created: a person makes the flag and the test. 409 connector_needed without an AI model.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/suggestions. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/suggestions
@@ -34257,6 +36399,37 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/suggestions",
             path={"ws": ws},
+            body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def suggest_brand_ab_tests(
+        self,
+        brand: str,
+        *,
+        brand_id: str | None = None,
+        count: int | None = None,
+        goal: dict[str, Any] | None = None,
+        notes: str | None = None,
+        page: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Suggest A/B tests with AI.
+
+        Scope: analytics.manage. The workspace's own AI model proposes tests from the site's busiest pages and the
+        goals visitors reach over the last 28 days, the brand's context and the tests already run. Each suggestion
+        comes with the engine's own plan for its page and goal (weeks, the lift findable in 8 weeks, a warning).
+        Nothing is created: a person makes the flag and the test. 409 connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/suggestions
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/suggestions",
+            path={"brand": brand},
             body={"brand_id": brand_id, "count": count, "goal": goal, "notes": notes, "page": page},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -34332,6 +36505,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. The workspace's own AI model puts a running or finished test's results into plain
         English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) and its reason
         come from the engine, not the AI. 409 for a draft, or connector_needed without an AI model.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/summary. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/summary
@@ -34340,6 +36514,29 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/{test}/summary",
             path={"test": test, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def summarize_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Summarise a test with AI.
+
+        Scope: analytics.manage. The workspace's own AI model puts a running or finished test's results into plain
+        English with next steps. The recommendation (ship, keep_control, fix_split, extend, stop, wait) and its reason
+        come from the engine, not the AI. 409 for a draft, or connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/summary
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/summary",
+            path={"brand": brand, "test": test},
             idempotency_key=idempotency_key,
         )
 
@@ -35154,6 +37351,7 @@ class Operations(_Mixin):
 
         Scope: analytics.manage. Its name at any time; its hypothesis, control, goals, guardrails and min_effect only while it
         is a draft, so results can't be reshaped after the fact (starting registers them). The flag can't change.
+        Deprecated: use PATCH /v1/brands/{brand}/ab-tests/{test}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         PATCH /v1/workspaces/{ws}/ab-tests/{test}
@@ -35881,6 +38079,108 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_brand_ab_test(
+        self,
+        brand: str,
+        test: str,
+        *,
+        control: str | None = None,
+        factors: list[dict[str, Any]] | None = None,
+        flag: str | None = None,
+        goals: list[dict[str, Any]] | None = None,
+        guardrails: list[dict[str, Any]] | None = None,
+        hypothesis: str | None = None,
+        min_effect: float | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change an A/B test.
+
+        Scope: analytics.manage. Its name at any time; its hypothesis, control, goals, guardrails and min_effect only while it
+        is a draft, so results can't be reshaped after the fact (starting registers them). The flag can't change.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/ab-tests/{test}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/ab-tests/{test}",
+            path={"brand": brand, "test": test},
+            body={
+                "control": control,
+                "factors": factors,
+                "flag": flag,
+                "goals": goals,
+                "guardrails": guardrails,
+                "hypothesis": hypothesis,
+                "min_effect": min_effect,
+                "name": name,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_consent_banner(
+        self,
+        brand: str,
+        id: str,
+        *,
+        categories: dict[str, Any] | None = None,
+        colors: dict[str, Any] | None = None,
+        custom_css: str | None = None,
+        custom_html: str | None = None,
+        enabled: bool | None = None,
+        frameworks: dict[str, Any] | None = None,
+        layout: Literal["bar", "box", "modal"] | None = None,
+        logo_url: str | None = None,
+        policy_url: str | None = None,
+        position: Literal["bottom", "top", "bottom_left", "bottom_right", "center"] | None = None,
+        reask_after_days: int | None = None,
+        regions: dict[str, Any] | None = None,
+        reopen_button: bool | None = None,
+        show_logo: bool | None = None,
+        texts: dict[str, Any] | None = None,
+        theme: Literal["light", "dark", "brand"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a site's consent banner.
+
+        Scope: customers.manage. Fields left out keep their value (the defaults, on a banner never saved); texts is
+        replaced language by language. Set enabled true to show it. Changing custom_html or custom_css also needs
+        workspace.manage, since they run on the website. Asking about a category the banner didn't ask about before
+        raises consent_version, so visitors are asked again. Records consent_banner.updated (or .enabled, .disabled).
+
+        Needs: the customers.manage scope.
+        PUT /v1/brands/{brand}/site-keys/{id}/consent-banner
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/site-keys/{id}/consent-banner",
+            path={"brand": brand, "id": id},
+            body={
+                "categories": categories,
+                "colors": colors,
+                "custom_css": custom_css,
+                "custom_html": custom_html,
+                "enabled": enabled,
+                "frameworks": frameworks,
+                "layout": layout,
+                "logo_url": logo_url,
+                "policy_url": policy_url,
+                "position": position,
+                "reask_after_days": reask_after_days,
+                "regions": regions,
+                "reopen_button": reopen_button,
+                "show_logo": show_logo,
+                "texts": texts,
+                "theme": theme,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_brand_context(
         self,
         brand: str,
@@ -36113,9 +38413,12 @@ class Operations(_Mixin):
         event: str,
         *,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         label: str | None = None,
         name: str | None = None,
+        owner_id: str | None = None,
         properties: list[dict[str, Any]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         status: Literal["quarantined", "approved", "deprecated"] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -36134,12 +38437,41 @@ class Operations(_Mixin):
             path={"brand": brand, "event": event},
             body={
                 "description": description,
+                "destinations": destinations,
                 "label": label,
                 "name": name,
+                "owner_id": owner_id,
                 "properties": properties,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "status": status,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_experiment(
+        self,
+        brand: str,
+        id: str,
+        *,
+        hypothesis: str | None = None,
+        name: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rename an experiment or change its hypothesis.
+
+        Scope: seo.manage.
+
+        Needs: the seo.manage scope.
+        PATCH /v1/brands/{brand}/experiments/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/experiments/{id}",
+            path={"brand": brand, "id": id},
+            body={"hypothesis": hypothesis, "name": name},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -36152,13 +38484,16 @@ class Operations(_Mixin):
         *,
         archived: bool | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
         manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
+        owner_id: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         target_type: str | None = None,
         value_type: str | None = None,
@@ -36168,9 +38503,10 @@ class Operations(_Mixin):
     ) -> Any:
         """Change or archive a brand's field.
 
-        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable and archived.
-        Archiving is how a field is deleted (records keep their values; it can be restored). Built-in fields never
-        change.
+        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable, archived, and the
+        labels owner_id, retention_days and destinations (labels only: nothing is blocked or deleted because of them).
+        Archiving is how a field is deleted (records keep their values; it can be restored). Of a built-in field, only
+        sensitivity and those labels change.
 
         Needs: the catalog.manage scope.
         PATCH /v1/brands/{brand}/catalog/types/{type}/fields/{field}
@@ -36182,17 +38518,69 @@ class Operations(_Mixin):
             body={
                 "archived": archived,
                 "description": description,
+                "destinations": destinations,
                 "filterable": filterable,
                 "key": key,
                 "label": label,
                 "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
+                "owner_id": owner_id,
                 "precedence": precedence,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "target_type": target_type,
                 "value_type": value_type,
                 "write_policy": write_policy,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_flag(
+        self,
+        brand: str,
+        flag: str,
+        *,
+        brand_id: str | None = None,
+        description: str | None = None,
+        exclusion_group: str | None = None,
+        group_share: int | None = None,
+        key: str | None = None,
+        name: str | None = None,
+        on_site: bool | None = None,
+        rollout: int | None = None,
+        rules: list[dict[str, Any]] | None = None,
+        status: Literal["on", "off"] | None = None,
+        variants: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a feature flag.
+
+        Scope: analytics.manage. Turn it on or off, or change its variants, rollout, rules, brand or name. The key
+        can't change. Visitors keep their variant unless the weights move them: changing a split moves only those
+        near the boundaries it shifts, and growing a rollout only adds visitors. Reaches visitors within 10 seconds.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/flags/{flag}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/flags/{flag}",
+            path={"brand": brand, "flag": flag},
+            body={
+                "brand_id": brand_id,
+                "description": description,
+                "exclusion_group": exclusion_group,
+                "group_share": group_share,
+                "key": key,
+                "name": name,
+                "on_site": on_site,
+                "rollout": rollout,
+                "rules": rules,
+                "status": status,
+                "variants": variants,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -36759,6 +39147,65 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_brand_site_cookie(
+        self,
+        brand: str,
+        id: str,
+        cookie: str,
+        *,
+        category: Literal["necessary", "analytics", "marketing", "preferences"] | None = None,
+        purpose: str | None = None,
+        retention: str | None = None,
+        status: Literal["listed", "ignored"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Classify a cookie or script.
+
+        Scope: customers.manage. Say what it is: its category, purpose and how long it is kept, and status listed (in the
+        policy) or ignored (never listed, such as a test cookie). A person's word stands over the catalogue's from then on.
+        The policy is published again when it changes. Records site_cookie.classified.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/site-keys/{id}/cookies/{cookie}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/site-keys/{id}/cookies/{cookie}",
+            path={"brand": brand, "id": id, "cookie": cookie},
+            body={"category": category, "purpose": purpose, "retention": retention, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_site_key(
+        self,
+        brand: str,
+        id: str,
+        *,
+        brand_id: str | None = None,
+        excluded_params: list[str] | None = None,
+        name: str | None = None,
+        origins: list[str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change a site key.
+
+        Scope: customers.manage. Its name, brand or origins.
+
+        Needs: the customers.manage scope.
+        PATCH /v1/brands/{brand}/site-keys/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/site-keys/{id}",
+            path={"brand": brand, "id": id},
+            body={"brand_id": brand_id, "excluded_params": excluded_params, "name": name, "origins": origins},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_brand_smart_list(
         self,
         brand: str,
@@ -36796,6 +39243,45 @@ class Operations(_Mixin):
                 "record_type": record_type,
                 "rules": rules,
                 "saved_query_id": saved_query_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_brand_tracking_campaign(
+        self,
+        brand: str,
+        id: str,
+        *,
+        channel: str | None = None,
+        landing_url: str | None = None,
+        name: str | None = None,
+        redirect_links: bool | None = None,
+        slug: str | None = None,
+        source: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rename, rebrand, change the landing page of, archive or restore a campaign.
+
+        Scope: analytics.manage. Slug, channel and source can't change: make another campaign instead. Archived campaigns take no new links; links already shared keep working.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/tracking-campaigns/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/tracking-campaigns/{id}",
+            path={"brand": brand, "id": id},
+            body={
+                "channel": channel,
+                "landing_url": landing_url,
+                "name": name,
+                "redirect_links": redirect_links,
+                "slug": slug,
+                "source": source,
+                "status": status,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -36907,6 +39393,7 @@ class Operations(_Mixin):
         replaced language by language. Set enabled true to show it. Changing custom_html or custom_css also needs
         workspace.manage, since they run on the website. Asking about a category the banner didn't ask about before
         raises consent_version, so visitors are asked again. Records consent_banner.updated (or .enabled, .disabled).
+        Deprecated: use PUT /v1/brands/{brand}/site-keys/{id}/consent-banner. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         PUT /v1/workspaces/{ws}/site-keys/{id}/consent-banner
@@ -36967,9 +39454,15 @@ class Operations(_Mixin):
         id: str,
         *,
         body: str | None = None,
+        brief: dict[str, Any] | None = None,
         canonical_url: str | None = None,
         excerpt: str | None = None,
+        language: str | None = None,
+        links: dict[str, Any] | None = None,
+        media: list[dict[str, Any]] | None = None,
         notes: str | None = None,
+        placement: dict[str, Any] | None = None,
+        seo: dict[str, Any] | None = None,
         slug: str | None = None,
         status: Literal["draft", "approved", "archived"] | None = None,
         tags: list[str] | None = None,
@@ -36994,9 +39487,15 @@ class Operations(_Mixin):
             path={"brand": brand, "id": id},
             body={
                 "body": body,
+                "brief": brief,
                 "canonical_url": canonical_url,
                 "excerpt": excerpt,
+                "language": language,
+                "links": links,
+                "media": media,
                 "notes": notes,
+                "placement": placement,
+                "seo": seo,
                 "slug": slug,
                 "status": status,
                 "tags": tags,
@@ -38249,9 +40748,12 @@ class Operations(_Mixin):
         *,
         ws: str | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         label: str | None = None,
         name: str | None = None,
+        owner_id: str | None = None,
         properties: list[dict[str, Any]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         status: Literal["quarantined", "approved", "deprecated"] | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -38270,9 +40772,12 @@ class Operations(_Mixin):
             path={"event": event, "ws": ws},
             body={
                 "description": description,
+                "destinations": destinations,
                 "label": label,
                 "name": name,
+                "owner_id": owner_id,
                 "properties": properties,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "status": status,
             },
@@ -38292,7 +40797,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Rename an experiment or change its hypothesis.
 
-        Scope: seo.manage.
+        Scope: seo.manage. Deprecated: use PATCH /v1/brands/{brand}/experiments/{id}. This workspace route stays until the brands contract step.
 
         Needs: the seo.manage scope.
         PATCH /v1/workspaces/{ws}/experiments/{id}
@@ -38314,13 +40819,16 @@ class Operations(_Mixin):
         ws: str | None = None,
         archived: bool | None = None,
         description: str | None = None,
+        destinations: list[Literal["webhooks", "exports", "ai", "published_queries", "email"]] | None = None,
         filterable: bool | None = None,
         key: str | None = None,
         label: str | None = None,
         manual_edit_days: int | None = None,
         multiple: bool | None = None,
         option_set: str | None = None,
+        owner_id: str | None = None,
         precedence: list[Literal["manual", "first_party", "crm_sync", "enrichment", "import"]] | None = None,
+        retention_days: int | None = None,
         sensitivity: Literal["public", "internal", "confidential", "restricted"] | None = None,
         target_type: str | None = None,
         value_type: str | None = None,
@@ -38330,7 +40838,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Change or archive a field.
 
-        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable and archived. Built-in fields never change.
+        Scope: catalog.manage. Label, description, write policy, precedence, sensitivity, filterable, archived, and the labels owner_id, retention_days and destinations. Of a built-in field, only sensitivity and those labels change.
 
         Needs: the catalog.manage scope.
         PATCH /v1/workspaces/{ws}/catalog/types/{type}/fields/{field}
@@ -38342,13 +40850,16 @@ class Operations(_Mixin):
             body={
                 "archived": archived,
                 "description": description,
+                "destinations": destinations,
                 "filterable": filterable,
                 "key": key,
                 "label": label,
                 "manual_edit_days": manual_edit_days,
                 "multiple": multiple,
                 "option_set": option_set,
+                "owner_id": owner_id,
                 "precedence": precedence,
+                "retention_days": retention_days,
                 "sensitivity": sensitivity,
                 "target_type": target_type,
                 "value_type": value_type,
@@ -38479,6 +40990,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. Turn it on or off, or change its variants, rollout, rules, brand or name. The key
         can't change. Visitors keep their variant unless the weights move them: changing a split moves only those
         near the boundaries it shifts, and growing a rollout only adds visitors. Reaches visitors within 10 seconds.
+        Deprecated: use PATCH /v1/brands/{brand}/flags/{flag}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         PATCH /v1/workspaces/{ws}/flags/{flag}
@@ -38705,15 +41217,16 @@ class Operations(_Mixin):
         ws: str | None = None,
         brand_id: str | None = None,
         brand_ids: list[str] | None = None,
+        brand_kind: Literal["brand", "split", "shared"] | None = None,
         config: dict[str, Any] | None = None,
         credentials: dict[str, Any] | None = None,
         name: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Rename, replace the API key, change settings, or share with brands.
+        """Rename, replace the API key, change settings, or assign to brands.
 
-        Scope: integrations.manage. New credentials are tested before they replace the old ones. brand_id moves the connection to one brand (null: back to the workspace); brand_ids picks the brands a workspace connection is shared with (empty: every brand).
+        Scope: integrations.manage. New credentials are tested before they replace the old ones. brand_kind changes who its data belongs to (brand, split or shared); brand_id assigns a brand connection to its brand (null: unassigned, its data shows in no brand); brand_ids picks the brands a shared connection serves (empty: every brand). A split connection's accounts are assigned with PUT .../integrations/{id}/accounts/{account}.
 
         Needs: the integrations.manage scope.
         PATCH /v1/workspaces/{ws}/integrations/{id}
@@ -38725,6 +41238,7 @@ class Operations(_Mixin):
             body={
                 "brand_id": brand_id,
                 "brand_ids": brand_ids,
+                "brand_kind": brand_kind,
                 "config": config,
                 "credentials": credentials,
                 "name": name,
@@ -39154,13 +41668,14 @@ class Operations(_Mixin):
         sequence: str,
         *,
         ws: str | None = None,
-        approve_pitches: bool,
+        approve_pitches: bool | None = None,
+        auto_send_per_day: int | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
         """Turn approval of a sequence's link pitches on or off.
 
-        Scope: sequences.manage. On (the default), each pitch waits for a person to approve it; off, a pitch is enrolled once its opener is written.
+        Scope: sequences.manage. On (the default), each pitch waits for a person to approve it. Off, a pitch is enrolled once its opener is written, at most `auto_send_per_day` a day (10 by default); pitches past that wait (reason `daily_cap`) and go out on a later day. Pitches the AI was unsure about (reason `unsure: ...`) or to a site with a spam score of 30 or more (`spammy_site`) still wait for a person. Send at least one of the two fields.
 
         Needs: the sequences.manage scope.
         PATCH /v1/workspaces/{ws}/link-building/sequences/{sequence}
@@ -39169,7 +41684,7 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/link-building/sequences/{sequence}",
             path={"sequence": sequence, "ws": ws},
-            body={"approve_pitches": approve_pitches},
+            body={"approve_pitches": approve_pitches, "auto_send_per_day": auto_send_per_day},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -39397,25 +41912,16 @@ class Operations(_Mixin):
         id: str,
         *,
         ws: str | None = None,
-        ends_at: str | None = None,
-        goal: str | None = None,
-        goal_metric: str | None = None,
-        goal_target: int | None = None,
-        instructions: str | None = None,
-        max_sends: int | None = None,
-        max_spend_cents: int | None = None,
-        mode: Literal["dry_run", "approve_writes", "autonomous"] | None = None,
-        name: str | None = None,
-        plan: str | None = None,
-        token_id: str | None = None,
-        extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
-        """Change a mission.
+        """Change a mission (retired).
 
-        Scope: missions.run. Once a mission is approved, changing its mode,
-        limits or token also needs missions.approve, and an agent
-        cannot change its own. An ended mission cannot change.
+        Retired: missions are retired (ADR 13), so this answers 410
+        `mission_retired` and changes nothing. What missions did stays
+        readable (`GET /v1/workspaces/{ws}/missions` and the routes under
+        it). Make changes as your own API token on the action layer, or
+        start a playbook as an agent run
+        (`POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs`).
 
         Needs: the missions.run scope.
         PATCH /v1/workspaces/{ws}/missions/{id}
@@ -39424,20 +41930,6 @@ class Operations(_Mixin):
             "PATCH",
             "/v1/workspaces/{ws}/missions/{id}",
             path={"id": id, "ws": ws},
-            body={
-                "ends_at": ends_at,
-                "goal": goal,
-                "goal_metric": goal_metric,
-                "goal_target": goal_target,
-                "instructions": instructions,
-                "max_sends": max_sends,
-                "max_spend_cents": max_spend_cents,
-                "mode": mode,
-                "name": name,
-                "plan": plan,
-                "token_id": token_id,
-            },
-            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -40827,6 +43319,7 @@ class Operations(_Mixin):
         Scope: customers.manage. Say what it is: its category, purpose and how long it is kept, and status listed (in the
         policy) or ignored (never listed, such as a test cookie). A person's word stands over the catalogue's from then on.
         The policy is published again when it changes. Records site_cookie.classified.
+        Deprecated: use PATCH /v1/brands/{brand}/site-keys/{id}/cookies/{cookie}. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         PATCH /v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}
@@ -40881,7 +43374,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Change a site key.
 
-        Scope: customers.manage. Its name, brand or origins.
+        Scope: customers.manage. Its name, brand or origins. Deprecated: use PATCH /v1/brands/{brand}/site-keys/{id}. This workspace route stays until the brands contract step.
 
         Needs: the customers.manage scope.
         PATCH /v1/workspaces/{ws}/site-keys/{id}
@@ -41458,7 +43951,7 @@ class Operations(_Mixin):
     ) -> Any:
         """Rename, rebrand, change the landing page of, archive or restore a campaign.
 
-        Scope: analytics.manage. Slug, channel and source can't change: make another campaign instead. Archived campaigns take no new links; links already shared keep working.
+        Scope: analytics.manage. Slug, channel and source can't change: make another campaign instead. Archived campaigns take no new links; links already shared keep working. Deprecated: use PATCH /v1/brands/{brand}/tracking-campaigns/{id}. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         PATCH /v1/workspaces/{ws}/tracking-campaigns/{id}
@@ -41896,6 +44389,7 @@ class Operations(_Mixin):
         headline, the learning and a few tags, kept on the test for the library. It is written on its own when a test
         ends, if the workspace has an AI model. Returns a queued AI run (kind learning). 409 unless the test is done;
         409 connector_needed without an AI model.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/{test}/learning. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/{test}/learning
@@ -41923,6 +44417,7 @@ class Operations(_Mixin):
         Scope: analytics.manage. The workspace's own AI model writes new versions of a flag's content from a prompt,
         in the brand's voice, with a key and a one-line rationale each. They are proposals: a person reviews them and
         adds them to the flag (PATCH .../flags/{flag}). 409 connector_needed without an AI model.
+        Deprecated: use POST /v1/brands/{brand}/ab-tests/versions. This workspace route stays until the brands contract step.
 
         Needs: the analytics.manage scope.
         POST /v1/workspaces/{ws}/ab-tests/versions
@@ -41931,6 +44426,59 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/ab-tests/versions",
             path={"ws": ws},
+            body={"count": count, "fields": fields, "flag": flag, "prompt": prompt},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def write_brand_ab_test_learning(
+        self,
+        brand: str,
+        test: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Write a finished A/B test's learning.
+
+        Scope: analytics.manage. The workspace's own AI model writes (or rewrites) what a finished test taught: a
+        headline, the learning and a few tags, kept on the test for the library. It is written on its own when a test
+        ends, if the workspace has an AI model. Returns a queued AI run (kind learning). 409 unless the test is done;
+        409 connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/{test}/learning
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/{test}/learning",
+            path={"brand": brand, "test": test},
+            idempotency_key=idempotency_key,
+        )
+
+    def write_brand_ab_test_versions(
+        self,
+        brand: str,
+        *,
+        count: int | None = None,
+        fields: list[str] | None = None,
+        flag: str,
+        prompt: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Write test versions with AI.
+
+        Scope: analytics.manage. The workspace's own AI model writes new versions of a flag's content from a prompt,
+        in the brand's voice, with a key and a one-line rationale each. They are proposals: a person reviews them and
+        adds them to the flag (PATCH .../flags/{flag}). 409 connector_needed without an AI model.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/ab-tests/versions
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/ab-tests/versions",
+            path={"brand": brand},
             body={"count": count, "fields": fields, "flag": flag, "prompt": prompt},
             extra_body=extra_body,
             idempotency_key=idempotency_key,

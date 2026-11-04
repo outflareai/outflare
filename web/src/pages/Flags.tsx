@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 // Feature flags: switch something on for some visitors, or split them
 // between versions to see which works better. The website script and the
 // workspace's servers read them; each visitor keeps their variant.
@@ -57,7 +59,7 @@ function GroupsSheet({ ws, canManage, onClose }: { ws: string; canManage: boolea
   const [groups, setGroups] = useState<Group[] | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(() => {
-    api.GET("/v1/workspaces/{ws}/flag-groups", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/flag-groups", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setGroups((data?.data as Group[] | undefined) ?? []);
     });
@@ -79,13 +81,13 @@ function GroupsSheet({ ws, canManage, onClose }: { ws: string; canManage: boolea
   );
 }
 
-function GroupCard({ ws, group, canManage, onChanged }: { ws: string; group: Group; canManage: boolean; onChanged: () => void }) {
+function GroupCard({ group, canManage, onChanged }: { ws: string; group: Group; canManage: boolean; onChanged: () => void }) {
   const [holdout, setHoldout] = useState(group.holdout);
   const [event, setEvent] = useState("");
   const [report, setReport] = useState<{ lift: number; chance: number; holdout: number; rest: number } | null>(null);
   const [error, setError] = useState("");
   const save = async () => {
-    const { error } = await api.PUT("/v1/workspaces/{ws}/flag-groups/{group}", { params: { path: { ws, group: group.name } }, body: { holdout } });
+    const { error } = await api.PUT("/v1/brands/{brand}/flag-groups/{group}", { params: { path: { brand: pickedBrandId(), group: group.name } }, body: { holdout } });
     if (error) return setError(errorMessage(error));
     setError("");
     toast(holdout ? `${holdout}% of ${group.name}'s visitors are now held out.` : `${group.name} has no holdout.`);
@@ -93,7 +95,7 @@ function GroupCard({ ws, group, canManage, onChanged }: { ws: string; group: Gro
   };
   const compare = async (e: FormEvent) => {
     e.preventDefault();
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/flag-groups/{group}/holdout", { params: { path: { ws, group: group.name }, query: { event: event.trim() } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/flag-groups/{group}/holdout", { params: { path: { brand: pickedBrandId(), group: group.name }, query: { event: event.trim() } } });
     if (error || !data) return setError(error ? errorMessage(error) : "");
     setError("");
     setReport({ lift: data.comparison?.lift ?? 0, chance: data.comparison?.chance_to_beat ?? 0.5, holdout: data.arms[0]?.visitors ?? 0, rest: data.arms[1]?.visitors ?? 0 });
@@ -131,7 +133,15 @@ function GroupCard({ ws, group, canManage, onChanged }: { ws: string; group: Gro
   );
 }
 
-export function Flags({ ws, canManage, go }: Props) {
+// Flags belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Flags(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Flags" brands={active.length} />;
+  return <FlagsPage key={brand.id} {...props} />;
+}
+
+function FlagsPage({ ws, canManage, go }: Props) {
   const { query } = useBrand(ws);
   const [flags, setFlags] = useState<Flag[] | null>(null);
   const [editing, setEditing] = useState<Flag | "new" | null>(null);
@@ -139,7 +149,7 @@ export function Flags({ ws, canManage, go }: Props) {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/flags", { params: { path: { ws }, query } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/flags", { params: { path: { brand: pickedBrandId() } } });
     if (error) setError(errorMessage(error));
     setFlags(data?.data ?? []);
   }, [ws, query.brand]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -149,7 +159,7 @@ export function Flags({ ws, canManage, go }: Props) {
 
   async function toggle(f: Flag, on: boolean) {
     setFlags((list) => list?.map((x) => (x.id === f.id ? { ...x, status: on ? "on" : "off" } : x)) ?? null);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ws, flag: f.id } }, body: { status: on ? "on" : "off" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: pickedBrandId(), flag: f.id } }, body: { status: on ? "on" : "off" } });
     if (error) {
       toast(errorMessage(error), "error");
       return load();
@@ -159,7 +169,7 @@ export function Flags({ ws, canManage, go }: Props) {
 
   async function archive(f: Flag) {
     if (!(await confirmAction(`Archive ${f.name}?`, "It turns off for good, and its key is free to use again. Code that still asks for it gets false.", "Archive flag"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ws, flag: f.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: pickedBrandId(), flag: f.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Archived ${f.name}.`);
     load();
@@ -300,7 +310,7 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
     setError("");
     if (!/^https?:\/\/[^/\s]+/i.test(editPage.trim())) return setError("Enter the address of a page on your site to edit, starting with https://.");
     const win = window.open("about:blank", "_blank");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/flags/{flag}/edit-link", { params: { path: { ws, flag: flag.id } }, body: { variant, url: editPage.trim() } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/flags/{flag}/edit-link", { params: { path: { brand: pickedBrandId(), flag: flag.id } }, body: { variant, url: editPage.trim() } });
     if (error || !data) {
       win?.close();
       return setError(errorMessage(error));
@@ -331,8 +341,8 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
     const g = split ? group.trim() : "";
     const body = { name, description, brand_id: brandID || null, variants: vs, rollout, rules, on_site: onSite, exclusion_group: g, ...(g ? { group_share: groupShare } : {}) };
     const res = flag
-      ? await api.PATCH("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ws, flag: flag.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/flags", { params: { path: { ws } }, body: { ...body, key } });
+      ? await api.PATCH("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: pickedBrandId(), flag: flag.id } }, body })
+      : await api.POST("/v1/brands/{brand}/flags", { params: { path: { brand: pickedBrandId() } }, body: { ...body, key } });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
     toast(flag ? "Saved. Visitors get the change within 10 seconds." : `Added ${res.data?.name}. It's off until you turn it on.`);

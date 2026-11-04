@@ -139,6 +139,14 @@ func (p *productEventSink) messages(events []track.Event) ([]eventMessage, []str
 			"properties": raw(props),
 			"context":    raw(map[string]any{"library": map[string]string{"name": "outflare-engine", "version": Version}}),
 		}
+		if e.UserID != "" && e.AnonymousID != "" && !seen[e.UserID+" "+e.AnonymousID] {
+			// The browser the person signed up or in with: identify joins
+			// the visits it made on the operator's own website, and the ad
+			// click ids on them, to the person.
+			seen[e.UserID+" "+e.AnonymousID] = true
+			msgs = append(msgs, eventMessage{"type": raw("identify"), "userId": raw(e.UserID), "anonymousId": raw(e.AnonymousID),
+				"timestamp": raw(e.At.UTC().Format(time.RFC3339Nano))})
+		}
 		switch {
 		case e.UserID != "":
 			m["userId"] = raw(e.UserID)

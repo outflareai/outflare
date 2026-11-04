@@ -3,9 +3,11 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -364,12 +366,118 @@ func TestReapCountsExpiredLeases(t *testing.T) {
 	}
 	var reaped bool
 	for _, e := range events() {
-		if e.Name == "job.reaped" && e.Props["count"] == 1 {
+		if e.Name == "job.reaped" && e.Props["count"] == 1 && slices.Equal(e.Props["kinds"].([]string), []string{"reap.test"}) {
 			reaped = true
 		}
 	}
 	if !reaped {
 		t.Fatal("no job.reaped event")
+	}
+}
+
+func TestShutdownRequeuesWithoutUsingAnAttempt(t *testing.T) {
+	pool := testPool(t)
+	events := track.Capture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started := make(chan struct{})
+	q := newQueue(pool)
+	q.Handle("stops", func(ctx context.Context, j jobs.Job) error {
+		close(started)
+		<-ctx.Done()
+		return fmt.Errorf("fetch page: %w", ctx.Err())
+	})
+	id, err := jobs.Enqueue(context.Background(), pool, jobs.NewJob{Kind: "stops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned := make(chan struct{})
+	go func() { q.Run(ctx, 1); close(returned) }() //nolint:errcheck
+	<-started
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after the shutdown")
+	}
+
+	var status, lastErr string
+	var attempts int
+	var due bool
+	if err := pool.QueryRow(context.Background(), `SELECT status, attempts, last_error, run_at <= now() FROM jobs WHERE id = $1`, id).Scan(&status, &attempts, &lastErr, &due); err != nil {
+		t.Fatal(err)
+	}
+	if status != "queued" || attempts != 0 || lastErr != "interrupted by shutdown" || !due {
+		t.Fatalf("job = %s, %d attempts, %q, due %v; want queued now with no attempt used", status, attempts, lastErr, due)
+	}
+	var interrupted bool
+	for _, e := range events() {
+		if e.Name == "job.failed" || e.Name == "job.dead" {
+			t.Fatalf("a shutdown recorded %s", e.Name)
+		}
+		if e.Name == "job.interrupted" && e.Props["kind"] == "stops" && e.Outcome == track.Failure {
+			interrupted = true
+		}
+	}
+	if !interrupted {
+		t.Fatal("no job.interrupted event")
+	}
+}
+
+func TestShutdownGraceHandsBackAStuckJob(t *testing.T) {
+	pool := testPool(t)
+	events := track.Capture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	started, unblock := make(chan struct{}), make(chan struct{})
+	finished := make(chan struct{})
+	q := newQueue(pool)
+	q.ShutdownGrace = 100 * time.Millisecond
+	q.Handle("stuck", func(context.Context, jobs.Job) error {
+		defer close(finished)
+		close(started)
+		<-unblock // ignores the shutdown
+		return nil
+	})
+	id, err := jobs.Enqueue(context.Background(), pool, jobs.NewJob{Kind: "stuck"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned := make(chan struct{})
+	go func() { q.Run(ctx, 1); close(returned) }() //nolint:errcheck
+	<-started
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run waited for a handler that ignores the shutdown")
+	}
+
+	status := func() (s string) {
+		pool.QueryRow(context.Background(), `SELECT status FROM jobs WHERE id = $1`, id).Scan(&s) //nolint:errcheck
+		return s
+	}
+	if got := status(); got != "queued" {
+		t.Fatalf("stuck job is %s, want queued for another worker", got)
+	}
+	var released bool
+	for _, e := range events() {
+		if e.Name == "job.released" && e.Props["kind"] == "stuck" && e.ErrorCode == "shutdown_timeout" {
+			released = true
+		}
+	}
+	if !released {
+		t.Fatal("no job.released event")
+	}
+
+	// The handler finishing late doesn't touch the row it no longer holds.
+	close(unblock)
+	<-finished
+	time.Sleep(100 * time.Millisecond)
+	if got := status(); got != "queued" {
+		t.Fatalf("late finish changed the job to %s", got)
 	}
 }
 

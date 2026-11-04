@@ -3,6 +3,10 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"unicode/utf8"
+
+	"github.com/outflareai/outflare/engine/internal/auth"
 )
 
 // MenuLink is an extra item an extension adds to one person's sidebar, such
@@ -37,4 +41,35 @@ func (s *Server) menuLinksFor(ctx context.Context, userID string) []MenuLink {
 		out = append(out, links...)
 	}
 	return out
+}
+
+// MenuBadges returns short texts an extension shows next to its own sidebar
+// links for one workspace, by link id, such as {"billing": "$50.00"}.
+type MenuBadges func(ctx context.Context, workspaceID string) (map[string]string, error)
+
+// maxBadge is the longest badge the sidebar shows; longer ones are left out.
+const maxBadge = 16
+
+func (s *Server) routesMenuBadges(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/workspaces/{ws}/menu-badges", s.inWorkspace(auth.ScopeWorkspaceRead, s.menuBadgesFor))
+}
+
+// menuBadgesFor answers GET /v1/workspaces/{ws}/menu-badges. A failing
+// extension is logged and left out, like menu links.
+func (s *Server) menuBadgesFor(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	out := map[string]string{}
+	for _, fn := range s.menuBadges {
+		badges, err := fn(r.Context(), a.WorkspaceID)
+		if err != nil {
+			s.log.Error("extension menu badges", slog.String("workspace_id", a.WorkspaceID), slog.Any("err", err))
+			continue
+		}
+		for id, text := range badges {
+			if id != "" && text != "" && utf8.RuneCountInString(text) <= maxBadge {
+				out[id] = text
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"badges": out})
 }

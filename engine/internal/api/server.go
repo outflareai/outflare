@@ -110,6 +110,7 @@ type Server struct {
 	routes          func(*http.ServeMux)
 	workspaceRoutes []WorkspaceRoute
 	menuLinks       []MenuLinks
+	menuBadges      []MenuBadges
 	aiTools         []AITool
 	supportAuto     func(ctx context.Context, workspaceID string) bool
 	middleware      []func(http.Handler) http.Handler
@@ -282,6 +283,9 @@ type Options struct {
 	Capabilities    []string                          // added to /v1/meta
 	// MenuLinks add per-person sidebar items, in /v1/me.
 	MenuLinks []MenuLinks
+	// MenuBadges add short per-workspace texts next to extension links
+	// (GET /v1/workspaces/{ws}/menu-badges).
+	MenuBadges []MenuBadges
 	// AITools name extensions' own AI calls on the usage page.
 	AITools []AITool
 	// SupportAuto says which workspaces the support assistant may answer
@@ -419,6 +423,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		routes:           opts.Routes,
 		workspaceRoutes:  opts.WorkspaceRoutes,
 		menuLinks:        opts.MenuLinks,
+		menuBadges:       opts.MenuBadges,
 		aiTools:          opts.AITools,
 		supportAuto:      opts.SupportAuto,
 		middleware:       opts.Middleware,
@@ -501,14 +506,18 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesRecords(mux)
 	s.routesCRM(mux)
 	s.routesCustomerEvents(mux)
+	s.routesMenuBadges(mux)
 	s.routesMerges(mux)
 	s.routesQuery(mux)
 	s.routesSavedQueries(mux)
 	s.routesSearch(mux)
 	s.routesSemanticSearch(mux)
 	s.routesAnalyticsBrands(mux)
+	s.routesConnectionBrands(mux)
 	s.routesAds(mux)
 	s.routesAdChanges(mux)
+	s.routesAdTargets(mux)
+	s.routesAdTrackingFix(mux)
 	s.routesFindings(mux)
 	s.routesContent(mux)
 	s.routesAccounts(mux)
@@ -737,7 +746,15 @@ func spaHandler(dir string) http.Handler {
 
 type ctxKey int
 
-const requestIDKey ctxKey = 0
+const (
+	requestIDKey ctxKey = 0
+	visitorIDKey ctxKey = 1
+)
+
+// visitorCookie is the visitor id cookie site.js sets on the widest
+// domain it can (of_aid), so a request to the app from a browser that
+// visited the operator's own website carries it.
+const visitorCookie = "of_aid"
 
 func requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -748,8 +765,21 @@ func requestID(next http.Handler) http.Handler {
 			id = hex.EncodeToString(b)
 		}
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDKey, id)))
+		ctx := context.WithValue(r.Context(), requestIDKey, id)
+		if c, err := r.Cookie(visitorCookie); err == nil && siteCookieRe.MatchString(c.Value) {
+			ctx = context.WithValue(ctx, visitorIDKey, c.Value)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// visitorID is the website visitor id the request's browser carries
+// (site.js's of_aid cookie), or "". Sign-up and sign-in pass it on, so
+// the operator's own events workspace joins the person to the visits
+// that brought them, ad click ids included.
+func visitorID(ctx context.Context) string {
+	id, _ := ctx.Value(visitorIDKey).(string)
+	return id
 }
 
 // RequestID returns the request's id, for logs and audit events.

@@ -5,11 +5,11 @@
 // and Google Ads read below campaigns; other platforms show the campaign's
 // trend only.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AdCampaign, AdConversionAction, AdItem, AdKeyword, AdSearchTerm, AdSummaryRow, AttributionAdRow } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
-import { Badge, Button, Card, ErrorText } from "../ui";
+import { Badge, Card, ErrorText, Stat, Stats } from "../ui";
 import { deliveryColumns, metricColumns, money, n, platformName } from "./Ads";
 
 const metrics = [
@@ -91,7 +91,7 @@ const cents = (list: { amount_cents: number; currency: string }[] | undefined) =
 
 // outflareColumns are what Outflare's own attribution credits to each row,
 // found by the platform's id in the visits its tracking template marked.
-function outflareColumns<T extends { external_id: string }>(by: Record<string, AttributionAdRow>) {
+export function outflareColumns<T extends { external_id: string }>(by: Record<string, AttributionAdRow>) {
   const mono = (s: string) => <span className="font-mono tabular-nums">{s}</span>;
   return [
     { id: "of_visits", header: "Visits", accessorFn: (r: T) => by[r.external_id]?.visits ?? 0, cell: ({ row: { original: r } }: { row: { original: T } }) => mono(n(by[r.external_id]?.visits ?? 0)) },
@@ -147,11 +147,13 @@ const host = (u: string) => {
   }
 };
 
-export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string; campaign: AdCampaign; from: string; to: string; onClose: () => void }) {
+// CampaignDetail is a campaign's own page, or one of its ad groups' when
+// groupId is set: the level's numbers, its trend by day, and the level
+// below it, each row opening the next level the way the ad platforms do.
+export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: { ws: string; campaign: AdCampaign; groupId?: string; from: string; to: string; open: (groupId?: string) => void; back: () => void }) {
   const [trend, setTrend] = useState<AdSummaryRow[] | null>(null);
   const [groups, setGroups] = useState<AdItem[]>([]);
   const [ads, setAds] = useState<AdItem[]>([]);
-  const [group, setGroup] = useState<AdItem | null>(null);
   const [setsBy, setSetsBy] = useState<Record<string, AttributionAdRow>>({});
   const [adsBy, setAdsBy] = useState<Record<string, AttributionAdRow>>({});
   const [keywords, setKeywords] = useState<AdKeyword[]>([]);
@@ -163,30 +165,31 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
   const hidden = campaign.connector === "meta_ads" ? [] : deliveryColumns;
   const below = campaign.connector === "meta_ads" || campaign.connector === "google_ads";
   const groupWord = campaign.connector === "meta_ads" ? "Ad sets" : "Ad groups";
-  const ref = useRef<HTMLDivElement>(null);
-  // Braces: newer browsers return a promise from scrollIntoView, which
-  // React would take for a cleanup function.
+  const group = groupId ? groups.find((g) => g.id === groupId) ?? null : null;
   useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [campaign.id]);
+    window.scrollTo({ top: 0 });
+  }, [campaign.id, groupId]);
+
+  // The trend of the level open: the ad group's, else the campaign's.
+  useEffect(() => {
+    setTrend(null);
+    api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path: { ws }, query: { from, to, group: "day", entity_id: groupId ?? campaign.id } } }).then(({ data }) => setTrend(data?.data ?? []));
+  }, [ws, campaign.id, groupId, from, to]);
 
   useEffect(() => {
     const path = { ws };
     const range = { from, to };
-    setGroup(null);
     const byId = (rows: AttributionAdRow[] | undefined) => Object.fromEntries((rows ?? []).map((r) => [r.id, r]));
     Promise.all([
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...range, group: "day", entity_id: campaign.id } } }),
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad_group", campaign_id: campaign.id, limit: 500 } } }) : null,
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad", campaign_id: campaign.id, limit: 1000 } } }) : null,
       below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "adset" } } }) : null,
       below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "ad" } } }) : null,
       google ? api.GET("/v1/workspaces/{ws}/ads/keywords", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 500 } } }) : null,
       google ? api.GET("/v1/workspaces/{ws}/ads/search-terms", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 1000 } } }) : null,
-    ]).then(([s, g, a, os, oa, k, t]) => {
-      const err = s.error ?? g?.error ?? a?.error ?? os?.error ?? oa?.error ?? k?.error ?? t?.error;
+    ]).then(([g, a, os, oa, k, t]) => {
+      const err = g?.error ?? a?.error ?? os?.error ?? oa?.error ?? k?.error ?? t?.error;
       setError(err ? errorMessage(err) : "");
-      setTrend(s.data?.data ?? []);
       setGroups(g?.data?.data ?? []);
       setAds(a?.data?.data ?? []);
       setSetsBy(byId(os?.data?.data));
@@ -196,55 +199,86 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
     });
   }, [ws, campaign.id, from, to, below, google]);
 
-  const shown = group ? ads.filter((a) => a.parent_id === group.id) : ads;
+  const shown = groupId ? ads.filter((a) => a.parent_id === groupId) : ads;
+  const level = group ?? campaign;
+  const t = level.totals;
+  const of = group ? setsBy[group.external_id] : undefined;
+  const crumb = "text-blue-700 underline-offset-2 hover:underline dark:text-blue-400";
   return (
-    <div ref={ref} className="scroll-mt-16">
-      <Card
-        title={campaign.name}
-        description={`${platformName(campaign.connector)} · ${campaign.account_name}. Its numbers by day, ${below ? `its ${groupWord.toLowerCase()} and its ads, ` : ""}as the platform reports them.`}
-        action={<Button variant="ghost" onClick={onClose}>Close</Button>}
-      >
-        <ErrorText>{error}</ErrorText>
+    <div className="space-y-6">
+      <div className="space-y-1">
+        <nav aria-label="Where you are" className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+          <button type="button" className={crumb} onClick={back}>All campaigns</button>
+          <span aria-hidden>›</span>
+          {groupId ? <button type="button" className={crumb} onClick={() => open()}>{campaign.name}</button> : <span className="text-foreground">{campaign.name}</span>}
+          {groupId && (
+            <>
+              <span aria-hidden>›</span>
+              <span className="text-foreground">{group ? group.name || group.external_id : "…"}</span>
+            </>
+          )}
+        </nav>
+        <h2 className="text-lg font-semibold">{group ? group.name || group.external_id : campaign.name}</h2>
+        <p className="text-[13px] text-muted-foreground">
+          {group ? `${groupWord.slice(0, -1)} in ${campaign.name}` : `${platformName(campaign.connector)} · ${campaign.account_name}`}
+          {!group && campaign.objective && ` · ${campaign.objective.replace(/_/g, " ")}`}
+          {!group && campaign.bidding_strategy && campaign.bidding_strategy !== "unknown" && ` · bids ${campaign.bidding_strategy.replace(/_/g, " ")}`}
+          {group && " "}{group && status(group.status, group.provider_status)}
+        </p>
+      </div>
+      <ErrorText>{error}</ErrorText>
+      <Stats cols={5}>
+        <Stat label="Spend" value={money(t.spend_micros, level.currency)} sub={!group && campaign.spend_change != null ? `${campaign.spend_change > 0 ? "+" : ""}${Math.round(campaign.spend_change * 100)}% on the period before` : undefined} />
+        <Stat label="Clicks" value={n(t.clicks)} sub={`${n(t.impressions)} impressions`} />
+        <Stat label="Conversions" value={n(t.conversions)} sub={of ? `${n(of.conversions)} by Outflare's count` : "as the platform counts them"} />
+        <Stat
+          label="Cost per conversion"
+          value={money(t.cost_per_conversion_micros, level.currency)}
+          sub={!group && campaign.target_cost_per_conversion_micros != null ? `target ${money(campaign.target_cost_per_conversion_micros, campaign.currency)}` : undefined}
+          tone={!group ? (campaign.target_status === "over" ? "red" : campaign.target_status === "under" ? "green" : undefined) : undefined}
+        />
+        <Stat label="Cost per click" value={money(t.cpc_micros, level.currency)} sub={`CTR ${t.ctr == null ? "—" : `${(t.ctr * 100).toFixed(2)}%`}`} />
+      </Stats>
+
+      <Card title="By day" description={`${groupId ? `This ${groupWord.toLowerCase().slice(0, -1)}'s` : "This campaign's"} numbers each day, as ${platformName(campaign.connector)} reports them.`}>
         {trend && <AdTrend rows={trend} from={from} to={to} />}
-        <div className="mt-4">
-          <ConversionActions ws={ws} from={from} to={to} entity={campaign.id} />
-        </div>
-        {below && (
-          <div className="mt-6 space-y-6">
-            <div>
-              <h3 className="mb-2 text-[13px] font-medium">{groupWord}</h3>
-              <DataTable
-                data={groups}
-                rowId={(g) => g.id}
-                onRowClick={(g) => setGroup(group?.id === g.id ? null : g)}
-                hidden={hidden}
-                searchPlaceholder={`Search ${groupWord.toLowerCase()}`}
-                empty={`No ${groupWord.toLowerCase()} spent or ran in this range.`}
-                initialSort={[{ id: "spend", desc: true }]}
-                columns={[
-                  {
-                    id: "name",
-                    header: groupWord.slice(0, -1),
-                    accessorFn: (g) => g.name,
-                    cell: ({ row: { original: g } }) => (
-                      <div className={`space-y-0.5 ${group?.id === g.id ? "font-semibold" : ""}`}>
-                        <div className="font-medium">{g.name || g.external_id}</div>
-                        <div className="text-[12px] text-muted-foreground">
-                          {((k) => (k === 1 ? "1 ad" : `${k} ads`))(ads.filter((a) => a.parent_id === g.id).length)}{g.daily_budget_micros !== null && <> · {money(g.daily_budget_micros, g.currency)} a day</>} {status(g.status, g.provider_status)}
-                        </div>
-                      </div>
-                    ),
-                  },
-                  ...metricColumns<AdItem>((g) => g.totals, (g) => g.currency),
-                  ...outflareColumns<AdItem>(setsBy),
-                ]}
-              />
-            </div>
-            <div>
-              <h3 className="mb-2 flex items-center gap-2 text-[13px] font-medium">
-                {group ? <>Ads in {group.name || group.external_id}</> : "Ads"}
-                {group && <Button variant="ghost" onClick={() => setGroup(null)}>Show every ad</Button>}
-              </h3>
+      </Card>
+
+      <ConversionActions ws={ws} from={from} to={to} entity={groupId ?? campaign.id} card />
+
+      {below && !groupId && (
+        <Card title={groupWord} description={`Open one for its ads${google ? ", keywords and searches" : ""}.`}>
+          <DataTable
+            data={groups}
+            rowId={(g) => g.id}
+            onRowClick={(g) => open(g.id)}
+            hidden={hidden}
+            searchPlaceholder={`Search ${groupWord.toLowerCase()}`}
+            empty={`No ${groupWord.toLowerCase()} spent or ran in this range.`}
+            initialSort={[{ id: "spend", desc: true }]}
+            columns={[
+              {
+                id: "name",
+                header: groupWord.slice(0, -1),
+                accessorFn: (g) => g.name,
+                cell: ({ row: { original: g } }) => (
+                  <div className="space-y-0.5">
+                    <div className="font-medium text-blue-700 underline-offset-2 hover:underline dark:text-blue-400">{g.name || g.external_id}</div>
+                    <div className="text-[12px] text-muted-foreground">
+                      {((k) => (k === 1 ? "1 ad" : `${k} ads`))(ads.filter((a) => a.parent_id === g.id).length)}{g.daily_budget_micros !== null && <> · {money(g.daily_budget_micros, g.currency)} a day</>} {status(g.status, g.provider_status)}
+                    </div>
+                  </div>
+                ),
+              },
+              ...metricColumns<AdItem>((g) => g.totals, (g) => g.currency),
+              ...outflareColumns<AdItem>(setsBy),
+            ]}
+          />
+        </Card>
+      )}
+
+      {below && (
+        <Card title={groupId ? "Ads" : "Every ad in this campaign"}>
               <DataTable
                 data={shown}
                 rowId={(a) => a.id}
@@ -262,9 +296,9 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                         {a.details.thumbnail_url && <img src={a.details.thumbnail_url} alt="" className="size-10 shrink-0 rounded object-cover" loading="lazy" referrerPolicy="no-referrer" />}
                         <div className="min-w-0 space-y-0.5">
                           <div className="truncate font-medium">{a.name || a.details.headline || a.external_id}</div>
-                          {a.details.headline && a.details.headline !== a.name && <div className="truncate text-[12px]">{a.details.headline}</div>}
+                          {a.name && a.details.headline && a.details.headline !== a.name && <div className="truncate text-[12px]">{a.details.headline}</div>}
                           <div className="truncate text-[12px] text-muted-foreground">
-                            {!group && <>{a.parent_name} · </>}
+                            {!groupId && <>{a.parent_name} · </>}
                             {a.details.url ? <a href={a.details.url} target="_blank" rel="noreferrer" className="underline">{host(a.details.url)}</a> : `id ${a.external_id}`} {status(a.status, a.provider_status)}
                           </div>
                           {a.details.templated === "false" && <Badge tone="amber" title="Its links don't carry Outflare's tracking template, so its clicks can't be tied to it. Add the template under Tracking templates.">No tracking template</Badge>}
@@ -282,8 +316,11 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                   </span>
                 )}
               />
-            </div>
-            {google && (
+        </Card>
+      )}
+
+      {google && (
+        <Card title="Search">
               <div>
                 <div className="mb-2 flex rounded-md border w-fit" role="group" aria-label="Search">
                   {(["keywords", "terms"] as const).map((k) => (
@@ -294,7 +331,7 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                 </div>
                 {search === "keywords" ? (
                   <DataTable
-                    data={group ? keywords.filter((k) => k.ad_group_id === group.id) : keywords}
+                    data={groupId ? keywords.filter((k) => k.ad_group_id === groupId) : keywords}
                     rowId={(k) => k.id}
                     searchPlaceholder="Search keywords"
                     hidden={deliveryColumns}
@@ -317,7 +354,7 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                   />
                 ) : (
                   <DataTable
-                    data={group ? terms.filter((t) => t.ad_group_id === group.id) : terms}
+                    data={groupId ? terms.filter((t) => t.ad_group_id === groupId) : terms}
                     rowId={(t) => `${t.ad_group_id}|${t.term}|${t.keyword_text}|${t.keyword_match_type}`}
                     searchPlaceholder="Search what people searched"
                     hidden={deliveryColumns}
@@ -340,10 +377,8 @@ export function CampaignDetail({ ws, campaign, from, to, onClose }: { ws: string
                   />
                 )}
               </div>
-            )}
-          </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }

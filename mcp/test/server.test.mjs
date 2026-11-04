@@ -117,17 +117,18 @@ test("analytics tools put the integration and report in the path", async () => {
 });
 
 test("stored analytics tools read history and sync", async () => {
+  const BRAND = "33333333-3333-4333-8333-333333333333";
   const { client, calls } = await connect(() => [200, { sites: [], rows: [] }]);
-  let res = await client.callTool({ name: "get_analytics_overview", arguments: { from: "2026-10-01" } });
+  let res = await client.callTool({ name: "get_analytics_overview", arguments: { brand: BRAND, from: "2026-10-01" } });
   assert.equal(res.isError, undefined);
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/analytics/overview`);
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/analytics/overview`);
   assert.equal(calls[0].url.searchParams.get("from"), "2026-10-01");
 
-  await client.callTool({ name: "query_analytics_history", arguments: { report: "pages", group: "key", host: "example.com" } });
-  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/analytics/history`);
+  await client.callTool({ name: "query_analytics_history", arguments: { brand: BRAND, report: "pages", group: "key", host: "example.com" } });
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/analytics/history`);
   assert.equal(calls[1].url.searchParams.get("group"), "key");
 
-  await client.callTool({ name: "compare_analytics_tools", arguments: { host: "example.com" } });
+  await client.callTool({ name: "compare_analytics_tools", arguments: { brand: BRAND, host: "example.com" } });
   assert.equal(calls[2].url.searchParams.get("host"), "example.com");
 
   await client.callTool({ name: "sync_analytics", arguments: { integration_id: SEQ } });
@@ -254,41 +255,27 @@ test("infrastructure tools: read-only mode leaves out approving and moving", asy
   assert.ok(!names.includes("approve_infra_plan") && !names.includes("move_mailboxes"));
 });
 
-test("acts inside a mission once use_mission is called", async () => {
+test("missions are retired: history only, and no mission header", async () => {
   const MISSION = "44444444-4444-4444-8444-444444444444";
-  const held = { mission_action: { id: "55555555-5555-4555-8555-555555555555", status: "pending" }, approval_required: true, dry_run: false, message: "Held for approval" };
+  const held = { action: { id: "55555555-5555-4555-8555-555555555555", status: "held" }, approval_required: true, message: "Held for approval" };
   const { client, calls } = await connect((req) => (req.method === "POST" ? [202, held] : [200, { data: [] }]));
+  const names = (await client.listTools()).tools.map((t) => t.name);
+  for (const gone of ["use_mission", "update_mission", "submit_mission_plan", "post_mission_update", "pause_mission", "stop_mission", "complete_mission", "approve_mission", "resume_mission", "decide_mission_action", "request_connector"]) {
+    assert.ok(!names.includes(gone), gone);
+  }
 
-  // Without a mission, mission tools ask for one and calls carry no header.
+  // A mission's history needs its id.
   const none = await client.callTool({ name: "get_mission", arguments: {} });
   assert.equal(none.isError, true);
-  assert.match(none.content[0].text, /use_mission/);
-  await client.callTool({ name: "list_mailboxes", arguments: {} });
-  assert.equal(calls.at(-1).headers.get("outflare-mission"), null);
-
-  await client.callTool({ name: "use_mission", arguments: { mission_id: MISSION } });
-  await client.callTool({ name: "get_mission", arguments: {} });
+  await client.callTool({ name: "get_mission", arguments: { mission_id: MISSION } });
   assert.equal(calls.at(-1).url.pathname, `/v1/workspaces/${WS}/missions/${MISSION}`);
 
-  // A held write comes back as a normal result with the action to poll.
-  const res = await client.callTool({ name: "create_sequence", arguments: { brand: BRAND, name: "In mission" } });
+  // A held change comes back as a normal result with the action to poll,
+  // and no call carries the mission header.
+  const res = await client.callTool({ name: "create_sequence", arguments: { brand: BRAND, name: "Held" } });
   assert.equal(res.isError, undefined);
   assert.equal(JSON.parse(res.content[0].text).approval_required, true);
-  assert.equal(calls.at(-1).headers.get("outflare-mission"), MISSION);
-
-  await client.callTool({ name: "request_connector", arguments: { connector: "zerobounce", why: "Verify the list before sending" } });
-  assert.deepEqual(JSON.parse(calls.at(-1).body), { kind: "connect_request", connector: "zerobounce", body: "Verify the list before sending" });
-
-  await client.callTool({ name: "use_mission", arguments: { mission_id: null } });
-  await client.callTool({ name: "list_mailboxes", arguments: {} });
-  assert.equal(calls.at(-1).headers.get("outflare-mission"), null);
-});
-
-test("starts in a mission from the option", async () => {
-  const MISSION = "44444444-4444-4444-8444-444444444444";
-  const { client, calls } = await connect(() => [200, { data: [] }], { mission: MISSION });
-  await client.callTool({ name: "list_mailboxes", arguments: {} });
-  assert.equal(calls[0].headers.get("outflare-mission"), MISSION);
+  assert.ok(calls.every((c) => c.headers.get("outflare-mission") === null));
 });
 
 test("projects were removed: no project tools", async () => {
@@ -300,9 +287,10 @@ test("projects were removed: no project tools", async () => {
 });
 
 test("analytics for agents: changes, catalog resource, prompts and compact answers", async () => {
+  const BRAND = "33333333-3333-4333-8333-333333333333";
   const { client, calls } = await connect(() => [200, { websites: [{ host: "example.com", tools: [{ metrics: [{ metric: "ctr", now: 0.0345678, before: null }] }] }], units: {} }]);
-  const res = await client.callTool({ name: "get_analytics_changes", arguments: { host: "example.com", days: 28 } });
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/analytics/changes`);
+  const res = await client.callTool({ name: "get_analytics_changes", arguments: { brand: BRAND, host: "example.com", days: 28 } });
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/analytics/changes`);
   assert.equal(calls[0].url.searchParams.get("days"), "28");
   const text = res.content[0].text;
   assert.ok(!text.includes("\n") && !text.includes("null") && text.includes('"now":0.0346'), text);

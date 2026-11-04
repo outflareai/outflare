@@ -14,6 +14,7 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/chromedp"
 )
 
@@ -225,6 +226,48 @@ func withDeadline[T any](ctx context.Context, d *chromeDriver, f func(context.Co
 		var zero T
 		return zero, ctx.Err()
 	}
+}
+
+// Cookies reads every cookie the task's browser holds.
+func (d *chromeDriver) Cookies(ctx context.Context) ([]Cookie, error) {
+	res, err := withDeadline(ctx, d, func(tctx context.Context) (storage.GetCookiesResult, error) {
+		return cdp.Call(tctx, chromedp.FromContext(d.ctx).Target, storage.GetCookies, storage.GetCookiesParams{})
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Cookie, 0, len(res.Cookies))
+	for _, c := range res.Cookies {
+		if c == nil {
+			continue
+		}
+		k := Cookie{Name: c.Name, Value: c.Value, Domain: c.Domain, Path: c.Path, Secure: c.Secure, HTTPOnly: c.HTTPOnly, SameSite: string(c.SameSite)}
+		if !c.Session && c.Expires > 0 {
+			k.Expires = c.Expires
+		}
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+// SetCookies puts a saved session's cookies into the browser before the
+// task's first page.
+func (d *chromeDriver) SetCookies(ctx context.Context, cookies []Cookie) error {
+	params := make([]*network.CookieParam, 0, len(cookies))
+	for _, c := range cookies {
+		p := &network.CookieParam{Name: c.Name, Value: c.Value, Domain: c.Domain, Path: c.Path, Secure: c.Secure, HTTPOnly: c.HTTPOnly, SameSite: network.CookieSameSite(c.SameSite)}
+		if p.Path == "" {
+			p.Path = "/"
+		}
+		if c.Expires > 0 {
+			p.Expires = cdp.TimeSinceEpoch(c.Expires)
+		}
+		params = append(params, p)
+	}
+	_, err := withDeadline(ctx, d, func(tctx context.Context) (cdp.Empty, error) {
+		return cdp.Call(tctx, chromedp.FromContext(d.ctx).Target, network.SetCookies, network.SetCookiesParams{Cookies: params})
+	})
+	return err
 }
 
 func (d *chromeDriver) Close() error {

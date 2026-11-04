@@ -126,3 +126,11 @@ export function useBrand(ws?: string) {
     reload: () => loadBrands(ws ?? s.ws),
   };
 }
+
+// pickedBrandId is the picked brand's id ("" for all brands), for calls to
+// /v1/brands/{brand}/ routes made outside render. Pages that use it show
+// PickBrand while all brands are picked and are keyed on the brand, so it
+// is always the brand the page shows.
+export function pickedBrandId(): string {
+  return state.brands.find((b) => b.handle === state.brand)?.id ?? "";
+}

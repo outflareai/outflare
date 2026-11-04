@@ -306,7 +306,7 @@ func Ensure(ctx context.Context, tx Querier, ws string, s Spec) (c Campaign, cre
 		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, object_kind, object_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			VALUES ($1, COALESCE($2::uuid, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT DO NOTHING
 			RETURNING id::text, slug, code, channel, source, medium`,
 			ws, s.BrandID, name, slug, NewCode(), ch.ID, source, ch.Medium, s.ObjectKind, s.ObjectID).

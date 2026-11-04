@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,9 +85,10 @@ func TestAttribution(t *testing.T) {
 
 	byChannel := func(model string) map[string]map[string]any {
 		t.Helper()
-		path := base + "/attribution/channels"
+		// Sessions made here have no brand: read every brand's.
+		path := base + "/attribution/channels?brand=all"
 		if model != "" {
-			path += "?model=" + model
+			path += "&model=" + model
 		}
 		out := map[string]map[string]any{}
 		for _, x := range owner.must(200, "GET", path, nil)["data"].([]any) {
@@ -111,7 +113,7 @@ func TestAttribution(t *testing.T) {
 		t.Fatalf("first touch seo = %v", ch["seo"])
 	}
 	owner.must(400, "GET", base+"/attribution/channels?model=nope", nil)
-	all := owner.must(200, "GET", base+"/attribution/channels", nil)
+	all := owner.must(200, "GET", base+"/attribution/channels?brand=all", nil)
 	if u := all["unallocated_cost"].([]any); len(u) != 1 || u[0].(map[string]any)["amount_cents"] != float64(3000) {
 		t.Fatalf("unallocated = %v", all["unallocated_cost"])
 	}
@@ -185,7 +187,7 @@ func TestAttributionCampaignsByContent(t *testing.T) {
 		VALUES ($1, $2, 'last_non_direct', 0, $3, 'outbound_email', 'outflare', 'outbound', $4, 1) RETURNING event_id::text`, ev, ws, s2, camp)
 	_ = s1
 
-	rows := owner.must(200, "GET", base+"/attribution/campaigns?split=content&tracking_campaign="+camp, nil)["data"].([]any)
+	rows := owner.must(200, "GET", base+"/attribution/campaigns?brand=all&split=content&tracking_campaign="+camp, nil)["data"].([]any)
 	got := map[string][2]float64{}
 	for _, r := range rows {
 		m := r.(map[string]any)
@@ -195,7 +197,7 @@ func TestAttributionCampaignsByContent(t *testing.T) {
 		t.Fatalf("by content = %v", rows)
 	}
 	// Without the split, one row for the campaign.
-	if rows := owner.must(200, "GET", base+"/attribution/campaigns?tracking_campaign="+camp, nil)["data"].([]any); len(rows) != 1 ||
+	if rows := owner.must(200, "GET", base+"/attribution/campaigns?brand=all&tracking_campaign="+camp, nil)["data"].([]any); len(rows) != 1 ||
 		rows[0].(map[string]any)["visits"] != 3.0 || rows[0].(map[string]any)["content"] != "" {
 		t.Fatalf("whole campaign = %v", rows)
 	}
@@ -242,7 +244,12 @@ func TestAttributionIdentifiedOnly(t *testing.T) {
 	channels := func(q string) map[string][2]float64 {
 		t.Helper()
 		out := map[string][2]float64{}
-		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q, nil)["data"].([]any) {
+		// Conversions and sessions made here have no brand: read every brand's.
+		sep := "?"
+		if strings.Contains(q, "?") {
+			sep = "&"
+		}
+		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q+sep+"brand=all", nil)["data"].([]any) {
 			m := r.(map[string]any)
 			out[m["channel"].(string)] = [2]float64{m["visits"].(float64), m["conversions"].(float64)}
 		}
@@ -256,7 +263,7 @@ func TestAttributionIdentifiedOnly(t *testing.T) {
 	}
 	owner.must(400, "GET", base+"/attribution/channels?match=probable", nil)
 
-	list := owner.must(200, "GET", base+"/attribution/conversions?match=identified", nil)["data"].([]any)
+	list := owner.must(200, "GET", base+"/attribution/conversions?brand=all&match=identified", nil)["data"].([]any)
 	if len(list) != 1 || list[0].(map[string]any)["event_id"] != both {
 		t.Fatalf("identified conversions = %v", list)
 	}
@@ -268,7 +275,7 @@ func TestAttributionIdentifiedOnly(t *testing.T) {
 	if how["seo"] != "record" || how["paid_ads"] != "browser" {
 		t.Fatalf("credit matches = %v", how)
 	}
-	if n := len(owner.must(200, "GET", base+"/attribution/conversions", nil)["data"].([]any)); n != 2 {
+	if n := len(owner.must(200, "GET", base+"/attribution/conversions?brand=all", nil)["data"].([]any)); n != 2 {
 		t.Fatalf("all conversions = %d", n)
 	}
 }
@@ -502,7 +509,8 @@ func TestAttributionSignedInOnly(t *testing.T) {
 	channels := func(q string) map[string][2]float64 {
 		t.Helper()
 		out := map[string][2]float64{}
-		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q, nil)["data"].([]any) {
+		// The rows above were written without a brand: every brand's view.
+		for _, r := range owner.must(200, "GET", base+"/attribution/channels"+q+"&brand=all", nil)["data"].([]any) {
 			m := r.(map[string]any)
 			out[m["channel"].(string)] = [2]float64{m["visits"].(float64), m["conversions"].(float64)}
 		}
@@ -515,7 +523,7 @@ func TestAttributionSignedInOnly(t *testing.T) {
 		t.Fatalf("signed in = %v", own)
 	}
 	how := map[string]string{}
-	for _, c := range owner.must(200, "GET", base+"/attribution/conversions", nil)["data"].([]any)[0].(map[string]any)["credits"].([]any) {
+	for _, c := range owner.must(200, "GET", base+"/attribution/conversions?brand=all", nil)["data"].([]any)[0].(map[string]any)["credits"].([]any) {
 		m := c.(map[string]any)
 		how[m["channel"].(string)] = m["matched_by"].(string) + "/" + m["identified_by"].(string)
 	}

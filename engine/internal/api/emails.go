@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1728,6 +1729,7 @@ func (s *Server) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metaJSON, _ := json.Marshal(req.Metadata)
+	dataJSON, _ := json.Marshal(req.Data)
 	switch {
 	case len(to) == 0:
 		bad("to is required: one email address or a list of them")
@@ -1770,6 +1772,14 @@ func (s *Server) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	case len(deref(req.HTML)) > 512<<10 || len(deref(req.Text)) > 256<<10:
 		bad("html must be at most 512 KB and text at most 256 KB")
+		return
+	// Postgres can't store a NUL character in text or JSON, so one would
+	// fail the insert with a 500 on every retry.
+	case strings.ContainsRune(deref(req.Subject)+deref(req.HTML)+deref(req.Text)+strings.Join(req.Tags, ""), 0):
+		bad("subject, html, text and tags cannot contain a NUL character (\\u0000)")
+		return
+	case bytes.Contains(metaJSON, []byte(`\u0000`)) || bytes.Contains(dataJSON, []byte(`\u0000`)):
+		bad("metadata and data cannot contain a NUL character (\\u0000)")
 		return
 	}
 	ctx := r.Context()

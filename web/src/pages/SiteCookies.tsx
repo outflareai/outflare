@@ -1,3 +1,4 @@
+import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useState } from "react";
 import type { components } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -44,7 +45,7 @@ export function SiteCookies({ ws, keyID, name, canManage, onDone }: { ws: string
   const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/site-keys/{id}/cookies", { params: { path: { ws, id: keyID } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/site-keys/{id}/cookies", { params: { path: { brand: pickedBrandId(), id: keyID } } });
     if (error || !data) return setError(errorMessage(error));
     setList(data as Listing);
   }, [ws, keyID]);
@@ -61,14 +62,14 @@ export function SiteCookies({ ws, keyID, name, canManage, onDone }: { ws: string
   }, [running, load]);
 
   async function scan() {
-    const { error } = await api.POST("/v1/workspaces/{ws}/site-keys/{id}/cookie-scans", { params: { path: { ws, id: keyID } } });
+    const { error } = await api.POST("/v1/brands/{brand}/site-keys/{id}/cookie-scans", { params: { path: { brand: pickedBrandId(), id: keyID } } });
     if (error) return setError(errorMessage(error));
     toast("Scanning the site. This takes a minute.");
     void load();
   }
 
   async function classify(it: Item, body: components["schemas"]["SiteCookieInput"]) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/site-keys/{id}/cookies/{cookie}", { params: { path: { ws, id: keyID, cookie: it.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/site-keys/{id}/cookies/{cookie}", { params: { path: { brand: pickedBrandId(), id: keyID, cookie: it.id } }, body });
     if (error) return setError(errorMessage(error));
     toast(body.status === "ignored" ? "Left out of the policy." : "Saved. The cookie policy is updated.");
     void load();

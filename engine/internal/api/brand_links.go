@@ -237,7 +237,14 @@ func (s *Server) listBrandLinkSuggestions(w http.ResponseWriter, r *http.Request
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "gaps": gaps, "can_discover": len(readers) > 0 && b.Website != ""})
+	var readAt *time.Time
+	var readError string
+	if err := s.pool.QueryRow(ctx, `SELECT links_read_at, links_read_error FROM brands WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, b.ID).Scan(&readAt, &readError); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "gaps": gaps, "can_discover": len(readers) > 0 && b.Website != "",
+		"last_read_at": readAt, "last_read_error": readError})
 }
 
 // decideLinkSuggestion loads one waiting suggestion of the brand.
@@ -408,7 +415,10 @@ func (s *Server) discoverBrandLinksJob(ctx context.Context, job jobs.Job) error 
 
 // DiscoverBrandLinks reads a brand's homepage through the workspace's page
 // reader and stores the profiles and listings it links to as suggestions.
-// A page built in the browser is read again with JavaScript on.
+// A page built in the browser, or one that turned the first read away, is
+// read again with JavaScript on. A bot check or a slow page is the site's
+// own refusal (blocked, slow_page): it is kept on the brand for the Links
+// panel to show, and never retried, since it would only fail the same way.
 func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) error {
 	start := time.Now()
 	ev := track.Event{Name: "brand.links_discovered", WorkspaceID: ws, ActorType: "system", Surface: "job", Props: map[string]any{"brand_id": brandID}}
@@ -421,9 +431,20 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 	if err != nil {
 		return err
 	}
+	readDone := func(code string) error {
+		_, err := s.pool.Exec(ctx, `UPDATE brands SET links_read_at = now(), links_read_error = $3 WHERE workspace_id = $1 AND id = $2`, ws, brandID, code)
+		return err
+	}
 	fail := func(code string, err error) error {
 		ev.Name = "brand.links_discovery_failed"
+		var page *readFailure
+		if errors.As(err, &page) {
+			ev.Outcome = track.Failure // the site's refusal, not something broken
+		}
 		track.Fail(ctx, s.log, ev, code, err)
+		if err := readDone(code); err != nil {
+			return err
+		}
 		if k := connectors.KindOf(err); k == connectors.ErrUnavailable || k == connectors.ErrQuota {
 			return err
 		}
@@ -447,13 +468,23 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 	pageURL := "https://" + website + "/"
 	var found []sociallinks.Link
 	tokens := 0.0
+	var refused error
 	for _, js := range []bool{false, true} {
 		p, err := f.FetchPage(ctx, o.Client, o.Creds, pageURL, js)
 		tokens += p.Cost.Units
 		if err != nil {
-			ev.Props["tokens"] = tokens
-			return fail("connector_"+connectors.KindOf(err), err)
+			err = pageFailed(err)
+			var page *readFailure
+			if !errors.As(err, &page) {
+				ev.Props["tokens"] = tokens
+				return fail(readCode(err), err)
+			}
+			// The site turned this read away: the read with JavaScript
+			// may still get through.
+			refused = err
+			continue
 		}
+		refused = nil
 		if p.URL != "" {
 			pageURL = p.URL
 		}
@@ -461,6 +492,10 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 		if len(found) > 0 {
 			break
 		}
+	}
+	if refused != nil {
+		ev.Props["tokens"] = tokens
+		return fail(readCode(refused), refused)
 	}
 	added := 0
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -478,6 +513,9 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 		return nil
 	})
 	if err != nil {
+		return err
+	}
+	if err := readDone(""); err != nil {
 		return err
 	}
 	ev.Props["found"], ev.Props["suggested"], ev.Props["tokens"] = len(found), added, tokens

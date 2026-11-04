@@ -178,15 +178,22 @@ func TestErrorsAndHeldWrites(t *testing.T) {
 		if r.Method == "DELETE" {
 			return 404, `{"error":{"code":"not_found","message":"lead not found","request_id":"req_9"}}`
 		}
-		return 202, `{"mission_action":{"id":"a1"},"dry_run":false,"approval_required":true,"message":"held"}`
+		if r.Header.Get("Outflare-Mission") != "" {
+			t.Errorf("a call carried the mission header")
+		}
+		return 202, `{"action":{"id":"a1"},"approval_required":true,"message":"held"}`
 	})
 	code, _, errs := run(t, srv, t.TempDir(), "", "delete-lead", "--id", "33333333-3333-4333-8333-333333333333")
 	if code != 1 || !strings.Contains(errs, "not_found: lead not found (request req_9)") {
 		t.Fatalf("error: %d %q", code, errs)
 	}
-	code, _, errs = run(t, srv, t.TempDir(), "", "upsert-lead", "--email", "a@b-co.example", "--mission", "m1")
-	if code != 0 || !strings.Contains(errs, "Held by the mission") {
+	code, _, errs = run(t, srv, t.TempDir(), "", "upsert-lead", "--email", "a@b-co.example")
+	if code != 0 || !strings.Contains(errs, "Held for a person") {
 		t.Fatalf("held: %d %q", code, errs)
+	}
+	// Missions are retired: the CLI no longer takes --mission.
+	if code, _, _ = run(t, srv, t.TempDir(), "", "upsert-lead", "--email", "a@b-co.example", "--mission", "m1"); code != 2 {
+		t.Fatalf("--mission: %d", code)
 	}
 }
 

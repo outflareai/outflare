@@ -49,9 +49,10 @@ func TestAttributionCustomModels(t *testing.T) {
 	tick()
 	winner := func(model string) (string, any) {
 		t.Helper()
-		path := base + "/attribution/channels"
+		// Sessions made here have no brand: read every brand's.
+		path := base + "/attribution/channels?brand=all"
 		if model != "" {
-			path += "?model=" + model
+			path += "&model=" + model
 		}
 		res := owner.must(200, "GET", path, nil)
 		for _, x := range res["data"].([]any) {

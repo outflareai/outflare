@@ -48,6 +48,23 @@ How to work:
 // Turns that fail in a row before the run pauses.
 const maxRunTurnFailures = 3
 
+// RunAgentRuns takes the due turns of agent runs until ctx ends,
+// looking every interval.
+func (s *Server) RunAgentRuns(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if _, err := s.RunDueAgentTurns(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "agent_run.runner_failed", ActorType: "system", Surface: "agent"}, "internal", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
 // RunDueAgentTurns runs every agent run turn that is due now, a few at a
 // time, and reports how many ran.
 func (s *Server) RunDueAgentTurns(ctx context.Context) (int, error) {

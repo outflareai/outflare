@@ -58,7 +58,7 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	links := func() string {
-		u, err := tracking.BaseURL(ctx, e.pool, ws, "https://app.outflare.test")
+		u, err := tracking.BaseURL(ctx, e.pool, ws, nil, "https://app.outflare.test")
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -484,7 +484,7 @@ export function SmartListDetail({ ws, list: initial, canManage, onBack, onEdit, 
         )}
         {next && <div className="mt-3"><Button variant="ghost" onClick={more}>Show more</Button></div>}
       </Card>
-      {bulk && <BulkEditSheet ws={ws} brand={brand} list={list} onClose={() => setBulk(false)} onDone={load} />}
+      {bulk && <BulkEditSheet ws={ws} brand={brand} source={{ kind: "list", list }} onClose={() => setBulk(false)} onDone={load} />}
     </div>
   );
 }

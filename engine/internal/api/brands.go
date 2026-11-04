@@ -395,7 +395,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "ab-tests", "support", "help-centre"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "ab-tests", "support", "help-centre", "agent-mail"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -1146,7 +1146,7 @@ func (s *Server) needHostInBrand(w http.ResponseWriter, r *http.Request, ws, hos
 	if err == nil {
 		args := []any{ws, host}
 		err = s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM analytics_syncs a WHERE a.workspace_id = $1 AND a.host = $2`+
-			sel.sql(`analytics_site_brand(a.workspace_id, a.integration_id, a.site, a.host)`, &args)+`)`, args...).Scan(&mapped)
+			sel.sql(`outflare_site_brand(a.integration_id, a.site)`, &args)+`)`, args...).Scan(&mapped)
 	}
 	if err != nil {
 		s.internal(w, r, err)

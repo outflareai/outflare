@@ -555,6 +555,7 @@ func (s *Sender) build(ctx context.Context, ws string, r rule, mode string, q qu
 			switch ns {
 			case "email":
 				cv.Emails = append(cv.Emails, connectors.HashID(v))
+				cv.GoogleEmails = append(cv.GoogleEmails, connectors.HashGoogleEmail(v))
 			case "phone":
 				// E.164 with the plus; Meta wants digits only.
 				cv.Phones = append(cv.Phones, connectors.HashID(v))

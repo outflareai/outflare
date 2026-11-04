@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { ArrowUpRight, List, Plus } from "lucide-react";
-import { api, errorMessage } from "@/api";
+import { errorMessage } from "@/api";
 import { Button, Empty, ErrorText, field, toast } from "@/ui";
-import type { CatalogInfo } from "@/lib/records";
+import { type CatalogInfo, useCatalogWrite } from "@/lib/records";
 import {
   Dialog,
   DialogContent,
@@ -103,6 +103,7 @@ function CreateList({
   onClose: () => void;
   onSaved: (type: string) => void;
 }) {
+  const write = useCatalogWrite(ws);
   const [name, setName] = useState("");
   const [parent, setParent] = useState("person");
   const [busy, setBusy] = useState(false);
@@ -135,19 +136,13 @@ function CreateList({
           setError("A list with this name already exists.");
           return;
         }
-        const { data, error } = await api.POST(
-          "/v1/workspaces/{ws}/catalog/types",
-          {
-            params: { path: { ws } },
-            body: {
-              key,
-              name: `${name.trim()} entry`,
-              plural: `${name.trim()} entries`,
-              description:
-                "CRM list entries, each linked to its original record with independent attributes.",
-            },
-          },
-        );
+        const { data, error } = await write.createType({
+          key,
+          name: `${name.trim()} entry`,
+          plural: `${name.trim()} entries`,
+          description:
+            "CRM list entries, each linked to its original record with independent attributes.",
+        });
         if (error) {
           setError(errorMessage(error));
           return;
@@ -157,21 +152,15 @@ function CreateList({
         setProgress({ ...state });
       }
       if (!state.options) {
-        const { data, error } = await api.POST(
-          "/v1/workspaces/{ws}/catalog/option-sets",
-          {
-            params: { path: { ws } },
-            body: {
-              key: `${state.key}_stages`,
-              name: `${name.trim()} stages`,
-              options: [
-                { key: "new", label: "New" },
-                { key: "in_progress", label: "In progress" },
-                { key: "done", label: "Done" },
-              ],
-            },
-          },
-        );
+        const { data, error } = await write.createOptionSet({
+          key: `${state.key}_stages`,
+          name: `${name.trim()} stages`,
+          options: [
+            { key: "new", label: "New" },
+            { key: "in_progress", label: "In progress" },
+            { key: "done", label: "Done" },
+          ],
+        });
         if (error) {
           setError(errorMessage(error));
           return;
@@ -201,13 +190,10 @@ function CreateList({
       ];
       for (const f of fields) {
         if (state.fields.includes(f.key)) continue;
-        const { data, error } = await api.POST(
-          "/v1/workspaces/{ws}/catalog/types/{type}/fields",
-          {
-            params: { path: { ws, type: state.key } },
-            body: { ...f, filterable: true },
-          },
-        );
+        const { data, error } = await write.createField(state.key, {
+          ...f,
+          filterable: true,
+        });
         if (error) {
           setError(errorMessage(error));
           return;

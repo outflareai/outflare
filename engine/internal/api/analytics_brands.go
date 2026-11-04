@@ -33,7 +33,7 @@ type siteOwner struct {
 // siteOwners says who owns each of a connection's sites, by site id.
 func (s *Server) siteOwners(ctx context.Context, ws, integration string, sites, hosts []string) (map[string]siteOwner, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT x.site, analytics_site_brand($1, $2, x.site, x.host)::text, o.site IS NOT NULL
+		SELECT x.site, outflare_site_brand($2, x.site)::text, o.site IS NOT NULL
 		FROM unnest($3::text[], $4::text[]) AS x (site, host)
 		LEFT JOIN analytics_site_brands o ON o.workspace_id = $1 AND o.integration_id = $2 AND o.site = x.site`,
 		ws, integration, sites, hosts)
@@ -90,7 +90,7 @@ const siteBrandSQL = `
 		LEFT JOIN daily d ON d.integration_id = k.integration_id AND d.site = k.site
 		LEFT JOIN analytics_syncs s ON s.integration_id = k.integration_id AND s.site = k.site
 	)
-	SELECT x.integration_id::text, x.site, x.host, analytics_site_brand($1, x.integration_id, x.site, x.host)::text,
+	SELECT x.integration_id::text, x.site, x.host, outflare_site_brand(x.integration_id, x.site)::text,
 		o.integration_id IS NOT NULL, o.updated_at
 	FROM sites x
 	LEFT JOIN analytics_site_brands o ON o.integration_id = x.integration_id AND o.site = x.site`
@@ -226,12 +226,7 @@ func (s *Server) setSiteBrand(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		for _, table := range []string{"search_segments", "search_ga4_outcomes"} {
-			if _, e := tx.Exec(r.Context(), `UPDATE `+table+` SET brand_id=analytics_site_brand($1,$2,$3,host) WHERE workspace_id=$1 AND integration_id=$2 AND site=$3`, a.WorkspaceID, id, req.Site); e != nil {
-				return e
-			}
-		}
-		if _, e := tx.Exec(r.Context(), `UPDATE search_completeness SET brand_id=analytics_site_brand($1,$2,$3,COALESCE((SELECT host FROM search_syncs WHERE workspace_id=$1 AND integration_id=$2 AND site=$3),'')) WHERE workspace_id=$1 AND integration_id=$2 AND site=$3`, a.WorkspaceID, id, req.Site); e != nil {
+		if e := rebrandSite(r.Context(), tx, a.WorkspaceID, id, req.Site); e != nil {
 			return e
 		}
 		mode := ref
@@ -287,6 +282,11 @@ func (s *Server) hostBrandFilter(ctx context.Context, ws string, brand brandSel)
 					owner, best = b[0].(string), len(d)
 				}
 			}
+		}
+		// In a workspace with one brand, everything is that brand's, as
+		// in outflare_site_brand.
+		if owner == "" && len(byBrand) == 1 {
+			owner = byBrand[0][0].(string)
 		}
 		if owner == "" {
 			return brand.matches(nil)

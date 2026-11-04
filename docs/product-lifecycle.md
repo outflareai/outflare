@@ -13,7 +13,7 @@ A product is something the brand sells, such as "Residential proxies" or "Datace
 - **a churn mode.** `cancellation` (the default): a customer churns when they cancel. `inactivity`: a customer churns after no usage for `churn_days` (default 30), which suits pay-as-you-go products nobody ever "cancels".
 - **`at_risk_days`** (default 14): no usage for this long moves an active customer to *at risk*.
 
-`POST /v1/brands/{brand}/products` adds one (scope `catalog.manage`, MCP `create_product`). `PATCH .../products/{product}` changes its name, churn mode, days and aliases. `POST .../archive` archives it: it keeps its history, but its events no longer move anyone and it leaves companies' overall status. `POST .../restore` brings it back.
+`POST /v1/brands/{brand}/products` adds one (scope `catalog.manage`, MCP `create_product`). `PATCH .../products/{product}` changes its name, churn mode, days and aliases (in the app: Edit on its row in People → Products). `POST .../archive` archives it: it keeps its history, but its events no longer move anyone and it leaves companies' overall status. `POST .../restore` brings it back.
 
 ### Which product an event is about
 

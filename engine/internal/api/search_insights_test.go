@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -51,6 +52,9 @@ func TestSearchInsightReportsAndBrandIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// No brand, no data: the Search Console site is the brand's once
+	// assigned to it; its stored rows move with it.
+	owner.must(200, "PUT", base+"/integrations/"+sc+"/accounts/"+url.PathEscape("sc-domain:example.com"), map[string]any{"brand_id": brand})
 	for i := 0; i < 100; i++ {
 		day := newest.AddDate(0, 0, -i)
 		clicks := 20

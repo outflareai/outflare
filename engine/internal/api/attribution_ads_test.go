@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,7 +53,12 @@ func TestAttributionAds(t *testing.T) {
 
 	byID := func(path string) map[string]map[string]any {
 		t.Helper()
-		res := owner.must(200, "GET", path, nil)
+		// Sessions made here have no brand: read every brand's.
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		res := owner.must(200, "GET", path+sep+"brand=all", nil)
 		out := map[string]map[string]any{}
 		for _, x := range res["data"].([]any) {
 			m := x.(map[string]any)

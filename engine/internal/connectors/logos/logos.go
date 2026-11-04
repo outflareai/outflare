@@ -32,6 +32,9 @@ var aliases = map[string]string{
 	"cheapverifier":            "cheapinboxes",
 	"slack_knowledge":          "slack",
 	"outlook_mail":             "outlook_calendar", // the Outlook mark
+	"linkedin_ads":             "linkedin",
+	"reddit_ads":               "reddit",
+	"x_ads":                    "x",
 }
 
 // Get returns the logo for a connector and whether it is the company's

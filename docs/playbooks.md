@@ -22,7 +22,7 @@ Runs started from a playbook carry `playbook_id` and `playbook_version`, so resu
 
 ### As an agent run on the action layer
 
-**Start** on a playbook in the web app starts it as an **agent run**, with a mode picker (copilot, autonomous with a budget, or dry run); the run opens on the Agents page, under **Runs**. Over the API, `POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs` (`agents.run`) starts the playbook as an agent run instead of a mission: Outflare's agent carries it out in turns as an agent token of its own, and the mode (`copilot`, `autonomous` with `max_spend_cents`, or `dry_run`) sets the token's grants, so every change it makes runs, waits for a person or is refused by the action layer and shows on the Agents page ([actions.md](actions.md), "Outflare's agent on the action layer"). `GET .../agent-runs` lists runs; people write to one with `POST .../agent-runs/{id}/updates`. Missions made before keep working until they end.
+**Start** on a playbook in the web app starts it as an **agent run**, with a mode picker (copilot, autonomous with a budget, or dry run); the run opens on the Agents page, under **Runs**. Over the API, `POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs` (`agents.run`) starts the playbook as an agent run instead of a mission: Outflare's agent carries it out in turns as an agent token of its own, and the mode (`copilot`, `autonomous` with `max_spend_cents`, or `dry_run`) sets the token's grants, so every change it makes runs, waits for a person or is refused by the action layer and shows on the Agents page ([actions.md](actions.md), "Outflare's agent on the action layer"). `GET .../agent-runs` lists runs; people write to one with `POST .../agent-runs/{id}/updates`. Missions are retired; what the ones made before did stays readable on the Missions page.
 
 ## Running one by itself
 
@@ -68,7 +68,7 @@ The runs carry `automation_id`; the automation shows `last_run_id` or `last_miss
 
 ## Setup kits
 
-Some playbooks need things set up before their first run, such as a pipeline in the CRM, fields on people and email drafts. Such a playbook names a setup kit (`playbooks/kits/<id>.yaml`). When you open it, **What it sets up** lists each part: **Adds**, **Extends** (an option list of your own gains missing options), **Have** (already there) or **Conflict** (there under the same key but set up differently). Tick **Set up what it needs when I start** and the kit is applied in the same step as the mission draft.
+Some playbooks need things set up before their first run, such as a pipeline in the CRM, fields on people and email drafts. Such a playbook names a setup kit (`playbooks/kits/<id>.yaml`). When you open it, **What it sets up** lists each part: **Adds**, **Extends** (an option list of your own gains missing options), **Have** (already there) or **Conflict** (there under the same key but set up differently). Tick **Set up what it needs when I start** and the kit is applied in the same step as the run starts.
 
 A kit only adds. Nothing you already have changes, email drafts are added unpublished so you read and publish them first, and while anything conflicts it changes nothing. Applying it again changes nothing. Applying needs `catalog.manage`, and `emails.manage` when it adds email drafts.
 

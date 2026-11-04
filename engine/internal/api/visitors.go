@@ -38,7 +38,12 @@ const (
 
 func (s *Server) routesVisitors(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors", s.inBrand(read, s.listVisitors))
+	// Who is on a brand's site is the brand's (brand_website.go). The
+	// settings stay the workspace's, held by its first brand, until the
+	// contract step keys them by brand.
+	for _, t := range s.twins("visitors") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inBrand)(read, s.listVisitors))
+	}
 	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(read, s.getVisitorSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(manage, s.updateVisitorSettings))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/visitors/companies", s.inWorkspace(manage, s.addVisitorCompany))
@@ -345,7 +350,7 @@ func (s *Server) listVisitors(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	hotOnly := q.Get("hot") == "true"
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

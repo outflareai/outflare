@@ -140,8 +140,14 @@ sync shows why its last run failed, and **Sync now** runs it straight away.
   properties and Vercel projects do not show one, so set it on the Analytics
   page or with `PATCH .../analytics/$ID/sites/$SITE` and `"domain"`. Stored
   history moves with it.
-- **Sites belong to brands.** A site reports for the brand whose domains
-  include its domain. Right after an analytics tool is connected, the app
+- **Sites belong to brands.** No brand, no data: a site's numbers belong
+  to the brand it is assigned to, else to its connection's brand (a
+  connection of kind `brand`), else to the workspace's only brand. A
+  site nobody assigned is stored with no brand and shows in none; a
+  matching domain is only a suggestion. `GET .../connections/unassigned`
+  lists such sites and `PUT .../integrations/{id}/accounts/{site}` assigns
+  one ([connectors.md](connectors.md#connections-and-brands)); a brand's
+  numbers are read under `/v1/brands/{brand}/analytics/...`. Right after an analytics tool is connected, the app
   asks what to import: every site the sign-in sees, with a tick for the ones
   to store and a brand for each. Brands are guessed from the site's address
   or name ("zenshield-4fe59" is Zenshield) and test copies (staging, dev)
@@ -150,8 +156,8 @@ sync shows why its last run failed, and **Sync now** runs it straight away.
   `docs.example.com`. The same list is under "N sites in {tool}" on the
   Analytics page. Through the API, `PATCH .../analytics/$ID/sites/$SITE` sets
   the domain and `PUT .../analytics/$ID/site-brand` with `{"site", "brand"}`
-  (a handle, `none` for shared, or `auto` to follow the domain again) picks a
-  brand outright.
+  (a handle; `none` or `auto` take the assignment away) picks a brand
+  outright.
 - **Every site gets a decision.** Each row says why its brand was suggested
   ("Matches trailcast.example", "Name matches"), and Save waits until every
   ticked site has a brand, is shared by all brands, or is set to "Don't

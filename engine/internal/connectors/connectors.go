@@ -174,6 +174,41 @@ type Definition struct {
 	// publisher, and integrations/publishers.yaml says who is verified.
 	Publisher *Publisher `json:"publisher,omitempty"`
 	Trust     string     `json:"trust"`
+	// BrandKind is the kind a new connection gets unless the person picks
+	// another (plans/brands/README.md, "Connections and brands"): brand
+	// (the whole connection is one brand's), split (its accounts or
+	// properties are assigned to brands one by one) or shared (a tool
+	// every brand uses). Empty takes the category's default (KindFor).
+	BrandKind string `json:"brand_kind"`
+}
+
+// Connection kinds: who a connection's data belongs to.
+const (
+	KindBrand  = "brand"
+	KindSplit  = "split"
+	KindShared = "shared"
+)
+
+// BrandKinds are the kinds a connection can have.
+var BrandKinds = []string{KindBrand, KindSplit, KindShared}
+
+// KindFor is a connector's default kind: its own BrandKind, else by
+// category. Analytics and ads read many sites or accounts with one
+// sign-in, so they are split; models, notifications, data, verification,
+// DNS and SEO data tools (DataForSEO, Ahrefs) serve every brand, and so do
+// mailbox sign-ins, whose mailboxes each carry their own brand (none is
+// shared); the rest carry one brand's data.
+func KindFor(d Definition) string {
+	if d.BrandKind != "" {
+		return d.BrandKind
+	}
+	switch d.Category {
+	case CategoryAnalytics, CategoryAds:
+		return KindSplit
+	case CategoryModel, CategoryNotification, CategoryData, CategorySignals, CategoryVerification, CategoryDNS, CategoryRegistrar, CategorySEO, CategoryMailbox:
+		return KindShared
+	}
+	return KindBrand
 }
 
 // Tag is a label on a connector's catalog card.
@@ -463,6 +498,7 @@ func (r *Registry) Definition(id string) (Definition, bool) {
 // marks connectors with no publisher as Outflare's own.
 func (d Definition) normal() Definition {
 	d.AuthMethods = d.Methods()
+	d.BrandKind = KindFor(d)
 	if d.Trust == "" {
 		d.Trust = TrustOutflare
 	}

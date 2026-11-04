@@ -133,7 +133,14 @@ jobs:
           if [ "$DRAFT" = true ] || ! grep -qE '^added[[:space:]]engine/internal/db/migrations/' <<<"$listed"; then
             echo 'migration_parts=[{"name":"check","part":""}]' >> "$GITHUB_OUTPUT"
           elif [ "$batch" != true ]; then
-            echo 'migration_parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
+            # Split like the engine job's light set when it holds the API
+            # package: on its own, the previous version's API tests on the new
+            # schema ran past go test's 25 minutes (2026-11-03).
+            if has '^(api/|engine/internal/api/)'; then
+              echo 'migration_parts=[{"name":"light 1/2","part":"light 1 2"},{"name":"light 2/2","part":"light 2 2"}]' >> "$GITHUB_OUTPUT"
+            else
+              echo 'migration_parts=[{"name":"light","part":"light"}]' >> "$GITHUB_OUTPUT"
+            fi
           fi
           if [ "$batch" = true ]; then
             echo "::notice::A merge queue batch: everything runs."

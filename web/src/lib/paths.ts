@@ -9,7 +9,7 @@
 // Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
 // and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
 
-export const appTabs = ["crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre"] as const;
+export const appTabs = ["crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "channels", "analytics", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "brand-accounts", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre", "agent-mail"] as const;
 export type Tab = (typeof appTabs)[number];
 
 export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
@@ -40,7 +40,11 @@ export function parsePath(path: string): Place {
   if (!ws) return {};
   if (!legacy && !parts.length && ws.includes(".")) return {};
   let brand: string | undefined;
-  if (!legacy && parts.length && !isTab(parts[0])) {
+  // Agent Mail has no item-path routes (its views use a query). Before that
+  // page existed, agent-mail was a valid brand handle; preserve those older
+  // /workspace/agent-mail/page links instead of choosing another brand.
+  const oldAgentMailBrand = parts[0] === "agent-mail" && isTab(parts[1]);
+  if (!legacy && parts.length && (!isTab(parts[0]) || oldAgentMailBrand)) {
     brand = decodeURIComponent(parts.shift()!).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]*$/.test(brand)) return {};
   }

@@ -22,8 +22,10 @@ import (
 
 func (s *Server) routesAnalyticsAgents(mux *http.ServeMux) {
 	read := auth.ScopeAnalyticsRead
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/changes", s.inWorkspace(read, s.analyticsChanges))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/analytics/catalog", s.inWorkspace(read, s.analyticsCatalog))
+	for _, t := range s.twins("analytics") {
+		mux.HandleFunc("GET "+t.path+"/changes", t.on(s.inWorkspace)(read, s.analyticsChanges))
+		mux.HandleFunc("GET "+t.path+"/catalog", t.on(s.inWorkspace)(read, s.analyticsCatalog))
+	}
 }
 
 // metricUnits names what each metric counts, once per answer.
@@ -300,7 +302,7 @@ func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host strin
 		args = append(args, host)
 		sql += ` AND d.host = $5`
 	}
-	sql += sel.sql(`analytics_site_brand(d.workspace_id, d.integration_id, d.site, d.host)`, &args)
+	sql += sel.sql(`d.brand_id`, &args)
 	rows, err := s.pool.Query(ctx, sql+` ORDER BY d.day`, args...)
 	if err != nil {
 		return nil, err
@@ -319,7 +321,7 @@ func (s *Server) dailyRows(ctx context.Context, ws, report, from, to, host strin
 
 func (s *Server) analyticsChanges(w http.ResponseWriter, r *http.Request) {
 	ws := accessFrom(r.Context()).WorkspaceID
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}
@@ -1082,7 +1084,7 @@ type catalogSite struct {
 func (s *Server) analyticsCatalog(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ws := accessFrom(ctx).WorkspaceID
-	sel, ok := s.brandFilter(w, r)
+	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
 	}

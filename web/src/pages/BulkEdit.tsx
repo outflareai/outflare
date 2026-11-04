@@ -5,7 +5,8 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, field, toast } from "../ui";
 import { plural } from "../format";
 
-// Bulk edits (docs/bulk-edits.md): change everyone in a list at once.
+// Bulk edits (docs/bulk-edits.md): change everyone in a list, the records
+// picked on People or Companies, or a saved query's records at once.
 // Anyone who may change records previews; only owners run one, which the
 // preview's can_run says. Every change lands in each record's history.
 
@@ -21,8 +22,15 @@ function show(v: unknown): string {
   return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
 
-export function BulkEditSheet({ ws, brand, list, onClose, onDone }: { ws: string; brand: string; list: SmartList; onClose: () => void; onDone: () => void }) {
-  const people = list.record_type !== "account";
+// BulkSource is which records a bulk edit changes: a list's members, ids
+// picked by hand, or a saved query's record_id (or id) column.
+export type BulkSource =
+  | { kind: "list"; list: SmartList }
+  | { kind: "records"; ids: string[]; type: "person" | "account" }
+  | { kind: "query"; id: string; name: string };
+
+export function BulkEditSheet({ ws, brand, source, onClose, onDone }: { ws: string; brand: string; source: BulkSource; onClose: () => void; onDone: () => void }) {
+  const list = source.kind === "list" ? source.list : null;
   const [members, setMembers] = useState<Member[]>([]);
   const [statics, setStatics] = useState<SmartList[]>([]);
   const [owner, setOwner] = useState("");
@@ -35,13 +43,17 @@ export function BulkEditSheet({ ws, brand, list, onClose, onDone }: { ws: string
   const [run, setRun] = useState<BulkEdit | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // A saved query's records are known once the preview has run it.
+  const people = list ? list.record_type !== "account" : source.kind === "records" ? source.type !== "account" : (preview?.record_type ?? "person") !== "account";
+  const title = source.kind === "list" ? source.list.name : source.kind === "records" ? plural(source.ids.length, source.type === "account" ? "company" : "person", source.type === "account" ? "companies" : "people") : source.name;
+  const what = list ? "everyone in this list" : source.kind === "records" ? "these records" : "the records this query returns (its record_id or id column, up to 10,000)";
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/members", { params: { path: { ws } } }).then(({ data }) => setMembers((data?.data ?? []) as Member[]));
     api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand } } }).then(({ data }) =>
-      setStatics((data?.data ?? []).filter((l) => l.kind === "static" && l.id !== list.id)),
+      setStatics((data?.data ?? []).filter((l) => l.kind === "static" && l.id !== list?.id)),
     );
-  }, [ws, brand, list.id]);
+  }, [ws, brand, list?.id]);
 
   const changes: Changes = {
     ...(owner ? { set: { owner: owner === "none" ? null : owner } } : {}),
@@ -52,7 +64,7 @@ export function BulkEditSheet({ ws, brand, list, onClose, onDone }: { ws: string
     ...(archive ? { archive: true } : {}),
   };
   const empty = Object.keys(changes).length === 0;
-  const body = { smart_list_id: list.id, changes };
+  const body = source.kind === "list" ? { smart_list_id: source.list.id, changes } : source.kind === "records" ? { record_ids: source.ids, changes } : { saved_query_id: source.id, changes };
 
   // A changed form needs a new preview.
   useEffect(() => setPreview(null), [owner, addTags, removeTags, addTo, removeFrom, archive]);
@@ -121,9 +133,9 @@ export function BulkEditSheet({ ws, brand, list, onClose, onDone }: { ws: string
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
-          <SheetTitle>Bulk edit {list.name}</SheetTitle>
+          <SheetTitle>Bulk edit {title}</SheetTitle>
           <SheetDescription>
-            Change everyone in this list at once. Each change is kept in each {people ? "person's" : "company's"} history, and you can undo it for 7 days. Only owners can run a bulk edit.
+            Change {what} at once. Each change is kept in each {people ? "person's" : "company's"} history, and you can undo it for 7 days. Only owners can run a bulk edit.
           </SheetDescription>
         </SheetHeader>
         <form onSubmit={check} className="space-y-5 px-4 pb-6 text-[13px]">
@@ -182,7 +194,7 @@ export function BulkEditSheet({ ws, brand, list, onClose, onDone }: { ws: string
                   </li>
                 ))}
               </ul>
-              {!preview.can_run && <p className="text-[12px]">Only the workspace's owners can run a bulk edit: ask one to run it from this list.</p>}
+              {!preview.can_run && <p className="text-[12px]">Only the workspace's owners can run a bulk edit: ask one to run it.</p>}
             </div>
           )}
 

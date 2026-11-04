@@ -1041,16 +1041,23 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
     if (q) setList((l) => [...(l ?? []), q]);
   };
   const toggle = async (q: LinkSequence, on: boolean) => {
-    if (!on && !(await confirmAction(`Send ${q.name}'s pitches without approval?`, "Each pitch goes out as soon as your AI writes its opener, without a person reading it first.", "Send without approval"))) return;
+    if (!on && !(await confirmAction(`Send ${q.name}'s pitches without approval?`, `Each pitch goes out as soon as your AI writes its opener, without a person reading it first, at most ${q.auto_send_per_day} a day. Pitches your AI is unsure about, or to spammy sites, still wait for you.`, "Send without approval"))) return;
     const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { approve_pitches: on } });
     if (error) return setError(errorMessage(error));
     setError("");
     setList((l) => l?.map((x) => (x.sequence_id === q.sequence_id ? { ...x, approve_pitches: on } : x)) ?? null);
   };
+  const setPerDay = async (q: LinkSequence, n: number) => {
+    if (!Number.isInteger(n) || n < 1 || n > 200 || n === q.auto_send_per_day) return;
+    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { auto_send_per_day: n } });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    setList((l) => l?.map((x) => (x.sequence_id === q.sequence_id ? { ...x, auto_send_per_day: n } : x)) ?? null);
+  };
   return (
     <section className="space-y-2 border-t pt-4">
       <h3 className="text-[13px] font-medium">Approving pitches</h3>
-      <p className="text-[12px] text-muted-foreground">Pitches go out through your sequences, with your AI's opener as {"{{custom.opener}}"} in the first step. Each waits for approval unless you turn that off for its sequence.</p>
+      <p className="text-[12px] text-muted-foreground">Pitches go out through your sequences, with your AI's opener as {"{{custom.opener}}"} in the first step. Each waits for approval unless you turn that off for its sequence; then up to a daily limit go out on their own, and any your AI is unsure about, or to spammy sites, still wait for you.</p>
       {error && <ErrorText>{error}</ErrorText>}
       {!list ? (
         <Loading />
@@ -1066,6 +1073,22 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
               </label>
               <button type="button" className="underline-offset-2 hover:underline" onClick={() => go("sequences", q.sequence_id)}>{q.name}</button>
               {!q.uses_opener && <span className="text-[12px] text-muted-foreground">(no {"{{custom.opener}}"} in its steps)</span>}
+              {!q.approve_pitches && (
+                <label className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                  <span>at most</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    defaultValue={q.auto_send_per_day}
+                    disabled={!canManage}
+                    aria-label={`Pitches a day through ${q.name} without approval`}
+                    className="w-14 rounded border bg-background px-1 py-0.5 text-[12px]"
+                    onBlur={(e) => setPerDay(q, Number(e.target.value))}
+                  />
+                  <span>a day ({q.sent_today} sent in the last 24 hours)</span>
+                </label>
+              )}
             </li>
           ))}
         </ul>

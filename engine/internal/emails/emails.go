@@ -395,7 +395,7 @@ func (s *Service) Queue(ctx context.Context, tx pgx.Tx, who Who, e NewEmail) (st
 	}
 	var tracked map[string]string
 	if e.TrackOpens || e.TrackClicks {
-		base, err := tracking.BaseURL(ctx, tx, e.WorkspaceID, s.PublicURL)
+		base, err := tracking.BaseURL(ctx, tx, e.WorkspaceID, e.BrandID, s.PublicURL)
 		if err != nil {
 			return "", err
 		}

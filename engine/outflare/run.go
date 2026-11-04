@@ -224,6 +224,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go resealSecrets(ctx, box, pool, log)
 	}
 	queue := jobs.New(pool, log)
+	queue.ShutdownGrace = cfg.ShutdownGrace
 	tokens := &oauth.Tokens{
 		Box: box, Endpoints: oauth.DefaultEndpoints,
 		Google: oauth.Client{ID: cfg.GoogleClientID, Secret: cfg.GoogleClientSecret},
@@ -303,6 +304,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// they wait in the queue (outflare_browser_tasks_queued says so).
 	browserSvc := &browser.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.BrowserAllowPrivate}
 	browserQueue := jobs.New(pool, log)
+	browserQueue.ShutdownGrace = cfg.ShutdownGrace
 	browses := false
 	if cfg.Role.Browses(cfg.Browser) {
 		path := cfg.Browser
@@ -371,6 +373,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	lifecycle.Register(queue)
 	queue.Skip = emails.SendKinds
 	sendQueue := jobs.New(pool, log)
+	sendQueue.ShutdownGrace = cfg.ShutdownGrace
 	sendQueue.Only = emails.SendKinds
 	lifecycle.Register(sendQueue)
 	// Journeys start runs from customer events and move them through their
@@ -438,7 +441,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, Quota: host.quota, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain, EventArchive: archive,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
-		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, AITools: host.aiTools, SupportAuto: host.supportAuto,
+		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, MenuBadges: host.menuBadges, AITools: host.aiTools, SupportAuto: host.supportAuto,
 	})
 	// Smart lists from a saved query run it through Query's own role.
 	smart.Query = apiServer.SmartListQueryIDs
@@ -620,10 +623,11 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			plat.Loop(ctx, time.Minute)
 		}()
+		// Outflare's agent takes the due turns of agent runs.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			apiServer.RunMissions(ctx, 30*time.Second)
+			apiServer.RunAgentRuns(ctx, 30*time.Second)
 		}()
 		// Playbooks that start by themselves, on a schedule or on events.
 		wg.Add(1)
@@ -804,6 +808,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunRecoveryWindow(ctx)
+		}()
+		// Unassigned connections and accounts are counted for the dashboard.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunConnectionBrands(ctx)
 		}()
 		wg.Add(1)
 		go func() {

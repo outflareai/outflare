@@ -417,7 +417,8 @@ function Domain({ ws, hc, canManage, onPatch, go }: { ws: string; hc: HelpCentre
     const domain = name.trim().toLowerCase();
     if (!domain) return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } }, body: { domain } });
+    // The domain is the help centre's brand's, like the help centre.
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } }, body: { domain, ...(hc.brand_id ? { brand_id: hc.brand_id } : {}) } });
     if (error) {
       setBusy(false);
       return toast(errorMessage(error), "error");

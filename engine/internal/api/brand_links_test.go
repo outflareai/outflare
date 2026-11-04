@@ -240,3 +240,100 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 		t.Fatalf("events: %v", names)
 	}
 }
+
+// A website that shows the page reader a bot check, or loads too slowly,
+// is the site's own refusal: the read with JavaScript on is still tried,
+// the failure gets its own code (blocked, slow_page) and the job is not
+// retried, and the Links panel says why nothing was found.
+func TestBrandLinkDiscoveryBlockedOrSlow(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	reads := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/usage/concurrency" {
+			io.WriteString(w, `{"work_concurrency_in_use": 0, "work_concurrency_limit": 5}`)
+			return
+		}
+		var req struct {
+			URL      string `json:"url"`
+			RenderJS bool   `json:"render_js"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		reads[req.URL]++
+		switch {
+		case req.URL == "https://blocked.example/":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			io.WriteString(w, `{"error": {"code": "UNPROCESSABLE_CONTENT", "message": "Cloudflare challenge"}}`)
+		case req.URL == "https://slow.example/" && !req.RenderJS:
+			w.WriteHeader(http.StatusGatewayTimeout)
+			io.WriteString(w, `{"code": "TIMEOUT"}`)
+		case req.URL == "https://slow.example/":
+			json.NewEncoder(w).Encode(map[string]any{
+				"data":           map[string]any{"html": `<a href="https://www.linkedin.com/company/slowpeak/">LinkedIn</a>`},
+				"metadata":       map[string]any{"http_status": 200, "url": req.URL},
+				"tokens_charged": 1,
+			})
+		case req.URL == "https://slower.example/":
+			w.WriteHeader(http.StatusGatewayTimeout)
+			io.WriteString(w, `{"code": "TIMEOUT"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["geonode"] = srv.URL
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})
+
+	brand := func(name, site string) (string, string) {
+		b := owner.must(201, "POST", base+"/brands", map[string]any{"name": name, "handle": strings.ToLower(name), "website": site})
+		return b["id"].(string), base + "/brands/" + strings.ToLower(name) + "/link-suggestions"
+	}
+
+	// A bot check on both reads: blocked, not an outage, and not retried.
+	bid, sug := brand("Blockpeak", "https://blocked.example")
+	if list := owner.must(200, "GET", sug, nil); list["last_read_at"] != nil || list["last_read_error"] != "" {
+		t.Fatalf("before reading: %v", list)
+	}
+	if err := e.srv.DiscoverBrandLinks(ctx, ws, bid); err != nil {
+		t.Fatalf("a blocked site should not be retried: %v", err)
+	}
+	if reads["https://blocked.example/"] != 2 {
+		t.Fatalf("reads of the blocked site: %d, want one without and one with JavaScript", reads["https://blocked.example/"])
+	}
+	if list := owner.must(200, "GET", sug, nil); list["last_read_at"] == nil || list["last_read_error"] != "blocked" || len(list["data"].([]any)) != 0 {
+		t.Fatalf("after a bot check: %v", list)
+	}
+
+	// Too slow without JavaScript, read with it: the links are found and
+	// the panel shows no error.
+	bid, sug = brand("Slowpeak", "https://slow.example")
+	if err := e.srv.DiscoverBrandLinks(ctx, ws, bid); err != nil {
+		t.Fatal(err)
+	}
+	if list := owner.must(200, "GET", sug, nil); list["last_read_error"] != "" || len(list["data"].([]any)) != 1 {
+		t.Fatalf("slow then read: %v", list)
+	}
+
+	// Too slow both times: slow_page.
+	bid, sug = brand("Slowerpeak", "https://slower.example")
+	if err := e.srv.DiscoverBrandLinks(ctx, ws, bid); err != nil {
+		t.Fatalf("a slow site should not be retried: %v", err)
+	}
+	if list := owner.must(200, "GET", sug, nil); list["last_read_error"] != "slow_page" {
+		t.Fatalf("slow both times: %v", list)
+	}
+
+	codes := map[string]int{}
+	for _, ev := range got() {
+		if ev.Name == "brand.links_discovery_failed" {
+			codes[ev.ErrorCode]++
+		}
+	}
+	if codes["blocked"] < 1 || codes["slow_page"] < 1 || codes["connector_unavailable"] != 0 {
+		t.Fatalf("failure codes: %v", codes)
+	}
+}

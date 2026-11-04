@@ -13,7 +13,7 @@ import (
 func (s *Server) insightAttribution(ctx context.Context, ws, brand string, site *seoSite, win searchWindow, report, integration string, out *seointel.InsightReport) error {
 	// Pick one source to avoid adding the same visits from two GA4 properties.
 	var id, property string
-	e := s.pool.QueryRow(ctx, `SELECT integration_id::text,site FROM search_ga4_outcomes o WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND EXISTS(SELECT 1 FROM integrations i WHERE i.workspace_id=$1 AND i.id=o.integration_id AND integration_serves(i,$2::uuid)) AND lower(host)=ANY($3) AND day BETWEEN $4 AND $5 AND ($6='' OR integration_id::text=$6) GROUP BY integration_id,site ORDER BY sum(sessions) DESC,integration_id LIMIT 1`, ws, brand, seointel.PageHosts(site.Host), win.from, win.to, integration).Scan(&id, &property)
+	e := s.pool.QueryRow(ctx, `SELECT integration_id::text,site FROM search_ga4_outcomes o WHERE workspace_id=$1 AND brand_id=$2 AND EXISTS(SELECT 1 FROM integrations i WHERE i.workspace_id=$1 AND i.id=o.integration_id AND integration_serves(i,$2::uuid)) AND lower(host)=ANY($3) AND day BETWEEN $4 AND $5 AND ($6='' OR integration_id::text=$6) GROUP BY integration_id,site ORDER BY sum(sessions) DESC,integration_id LIMIT 1`, ws, brand, seointel.PageHosts(site.Host), win.from, win.to, integration).Scan(&id, &property)
 	if e == pgx.ErrNoRows {
 		out.Status = "not_connected"
 		out.Notes = append(out.Notes, "Connect GA4, assign its property to this brand, and sync landing-page outcomes.")
@@ -22,7 +22,7 @@ func (s *Server) insightAttribution(ctx context.Context, ws, brand string, site 
 	if e != nil {
 		return e
 	}
-	rows, e := s.pool.Query(ctx, `SELECT path,source,currency,sum(sessions)::float8,sum(conversions)::float8,sum(revenue_micros)::bigint FROM search_ga4_outcomes WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND lower(host)=ANY($3) AND integration_id=$4 AND site=$5 AND day BETWEEN $6 AND $7 GROUP BY path,source,currency ORDER BY sum(sessions) DESC LIMIT 100000`, ws, brand, seointel.PageHosts(site.Host), id, property, win.from, win.to)
+	rows, e := s.pool.Query(ctx, `SELECT path,source,currency,sum(sessions)::float8,sum(conversions)::float8,sum(revenue_micros)::bigint FROM search_ga4_outcomes WHERE workspace_id=$1 AND brand_id=$2 AND lower(host)=ANY($3) AND integration_id=$4 AND site=$5 AND day BETWEEN $6 AND $7 GROUP BY path,source,currency ORDER BY sum(sessions) DESC LIMIT 100000`, ws, brand, seointel.PageHosts(site.Host), id, property, win.from, win.to)
 	if e != nil {
 		return e
 	}

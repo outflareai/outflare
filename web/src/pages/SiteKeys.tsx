@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { components } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -44,7 +46,15 @@ function mainKeys(keys: SiteKey[], picked: boolean): Set<string> {
  * and the rare settings (rotate, proxy, delete). One script per brand is
  * enough; a second one only splits the brand's visits, so the page says so.
  */
-export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty = false }: { ws: string; canManage: boolean; version?: number; onChange?: () => void; hideEmpty?: boolean }) {
+// Website scripts belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function SiteKeysCard(props: { ws: string; canManage: boolean; version?: number; onChange?: () => void; hideEmpty?: boolean }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Website scripts" brands={active.length} />;
+  return <SiteKeysList key={brand.id} {...props} />;
+}
+
+function SiteKeysList({ ws, canManage, version = 0, onChange, hideEmpty = false }: { ws: string; canManage: boolean; version?: number; onChange?: () => void; hideEmpty?: boolean }) {
   const [keys, setKeys] = useState<SiteKey[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -58,7 +68,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
 
   const { query: brandQuery, brand, byId } = useBrand(ws);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws }, query: brandQuery } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: pickedBrandId() } } });
     if (error) return setError(errorMessage(error));
     setKeys(data.data);
   }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -107,7 +117,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
 
   async function rotate(k: SiteKey) {
     if (!(await confirmAction(`Rotate ${k.name}'s script?`, <p>It gets a new key. The old one keeps working for seven days, so paste the new script into the site before then.</p>, "Rotate", false))) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/site-keys/{id}/rotate", { params: { path: { ws, id: k.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/site-keys/{id}/rotate", { params: { path: { brand: pickedBrandId(), id: k.id } } });
     if (error) return setError(errorMessage(error));
     toast("Rotated. Paste the new script into the site.");
     reload();
@@ -115,7 +125,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
 
   async function makeProxySecret(k: SiteKey) {
     if (k.proxy_secret_at && !(await confirmAction(`New proxy secret for ${k.name}?`, <p>The current secret stops working at once. Put the new one in your proxy straight away.</p>, "Make new secret", false))) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/site-keys/{id}/proxy-secret", { params: { path: { ws, id: k.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/site-keys/{id}/proxy-secret", { params: { path: { brand: pickedBrandId(), id: k.id } } });
     if (error) return setError(errorMessage(error));
     setProxy({ id: k.id, secret: data.secret });
     reload();
@@ -129,7 +139,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
       <p>Visits to {k.name} stop being recorded straight away, until a new script is on the site. Visits already recorded stay.</p>
     );
     if (!(await confirmAction(`Delete ${k.name}'s script?`, body, "Delete script"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/site-keys/{id}", { params: { path: { ws, id: k.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/site-keys/{id}", { params: { path: { brand: pickedBrandId(), id: k.id } } });
     if (error) return setError(errorMessage(error));
     toast("Deleted.");
     reload();
@@ -216,7 +226,7 @@ export function SiteKeysCard({ ws, canManage, version = 0, onChange, hideEmpty =
 
 // Change a script's name, allowed sites and left-out query parameters in place. The script stays the
 // same unless the sites now span another domain, when the tag lists them.
-function EditKey({ ws, k, onDone }: { ws: string; k: SiteKey; onDone: (saved: boolean) => void }) {
+function EditKey({ k, onDone }: { ws: string; k: SiteKey; onDone: (saved: boolean) => void }) {
   const [name, setName] = useState(k.name);
   const [origins, setOrigins] = useState(k.origins.map(originText).join(", "));
   const [excluded, setExcluded] = useState(k.excluded_params.join(", "));
@@ -226,7 +236,7 @@ function EditKey({ ws, k, onDone }: { ws: string; k: SiteKey; onDone: (saved: bo
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/site-keys/{id}", { params: { path: { ws, id: k.id } }, body: { name: name.trim(), origins: parseOrigins(origins), excluded_params: parseOrigins(excluded) } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/site-keys/{id}", { params: { path: { brand: pickedBrandId(), id: k.id } }, body: { name: name.trim(), origins: parseOrigins(origins), excluded_params: parseOrigins(excluded) } });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     toast(data.snippet === k.snippet ? "Saved. The script on your site stays the same." : "Saved. The script changed: paste the new one into your site.");
@@ -255,7 +265,7 @@ function EditKey({ ws, k, onDone }: { ws: string; k: SiteKey; onDone: (saved: bo
   );
 }
 
-function AddKey({ ws, brandID, first, onDone }: { ws: string; brandID?: string; first: boolean; onDone: (saved: boolean) => void }) {
+function AddKey({ brandID, first, onDone }: { ws: string; brandID?: string; first: boolean; onDone: (saved: boolean) => void }) {
   const [name, setName] = useState("");
   const [origins, setOrigins] = useState("");
   const [busy, setBusy] = useState(false);
@@ -265,7 +275,7 @@ function AddKey({ ws, brandID, first, onDone }: { ws: string; brandID?: string; 
     e.preventDefault();
     setBusy(true);
     const list = parseOrigins(origins);
-    const { error } = await api.POST("/v1/workspaces/{ws}/site-keys", { params: { path: { ws } }, body: { name: name.trim(), origins: list, ...(brandID ? { brand_id: brandID } : {}) } });
+    const { error } = await api.POST("/v1/brands/{brand}/site-keys", { params: { path: { brand: pickedBrandId() } }, body: { name: name.trim(), origins: list, ...(brandID ? { brand_id: brandID } : {}) } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast("Script made. Paste it into your site's <head>.");
@@ -293,7 +303,7 @@ export function useSiteTracking(ws: string): boolean | null {
   const { query } = useBrand(ws);
   const [sending, setSending] = useState<boolean | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws }, query } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => {
       setSending(data ? data.data.some((k) => !!k.last_used_at) : null);
     });
   }, [ws, query.brand]); // eslint-disable-line react-hooks/exhaustive-deps

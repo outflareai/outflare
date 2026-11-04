@@ -402,7 +402,7 @@ func creditRefund(ctx context.Context, tx pgx.Tx, ws string, c conversion) (bool
 	}
 	value, cur := c.value()
 	if _, err := tx.Exec(ctx, `INSERT INTO attribution_conversions (event_id, workspace_id, record_id, brand_id, name, occurred_at, value_minor, currency, touches, matched_by)
-		SELECT $1, $2, $3, $4, $5, $6, $7, CASE WHEN $8 = '' THEN a.currency ELSE $8 END, a.touches, a.matched_by
+		SELECT $1, $2, $3, COALESCE($4::uuid, outflare_first_brand($2)), $5, $6, $7, CASE WHEN $8 = '' THEN a.currency ELSE $8 END, a.touches, a.matched_by
 		FROM attribution_conversions a WHERE a.event_id = $9`,
 		c.id, ws, c.recordID, c.brandID, c.name, c.at, value, cur, orig); err != nil {
 		return false, err
@@ -490,7 +490,7 @@ func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []strin
 		defID = &def.ID
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO attribution_conversions (event_id, workspace_id, record_id, brand_id, name, occurred_at, value_minor, currency, touches, matched_by, definition_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`, c.id, ws, c.recordID, c.brandID, c.name, c.at, value, cur, touches, matched, defID); err != nil {
+		VALUES ($1, $2, $3, COALESCE($4::uuid, outflare_first_brand($2)), $5, $6, $7, $8, $9, $10, $11)`, c.id, ws, c.recordID, c.brandID, c.name, c.at, value, cur, touches, matched, defID); err != nil {
 		return err
 	}
 	batch := &pgx.Batch{}

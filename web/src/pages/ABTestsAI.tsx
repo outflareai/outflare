@@ -1,3 +1,4 @@
+import { pickedBrandId } from "@/lib/brand";
 // Planning and AI for A/B tests: how long a test will take, test ideas,
 // versions written from a prompt, and a results summary. The AI runs on the
 // workspace's own model; everything it returns is a proposal a person
@@ -20,7 +21,7 @@ const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n * 
 const weeksText = (w: number) => (w <= 0 ? "over a year" : w < 1 ? "under a week" : `${w.toFixed(w < 10 ? 1 : 0)} weeks`);
 
 // useAIRun starts an AI run and follows it until it is ready or failed.
-export function useAIRun(ws: string) {
+export function useAIRun(_ws: string) {
   const [run, setRun] = useState<ABTestAIRun | null>(null);
   const [error, setError] = useState("");
   const timer = useRef<number | undefined>(undefined);
@@ -28,7 +29,7 @@ export function useAIRun(ws: string) {
   const follow = (id: string) => {
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(async () => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/ab-test-ai-runs/{run}", { params: { path: { ws, run: id } } });
+      const { data, error } = await api.GET("/v1/brands/{brand}/ab-test-ai-runs/{run}", { params: { path: { brand: pickedBrandId(), run: id } } });
       if (error) return setError(errorMessage(error));
       setRun(data);
       if (data.status === "queued" || data.status === "running") follow(id);
@@ -56,8 +57,8 @@ export function PlanPanel({ ws, flag, goal, minEffect }: { ws: string; flag: str
   useEffect(() => {
     if (!usable) return setPlan(null);
     const t = window.setTimeout(async () => {
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/ab-tests/plan", {
-        params: { path: { ws } },
+      const { data, error } = await api.POST("/v1/brands/{brand}/ab-tests/plan", {
+        params: { path: { brand: pickedBrandId() } },
         body: { flag, goal: goal!, min_effect: minEffect, ...(page.startsWith("/") ? { page } : {}) },
       });
       setError(error ? errorMessage(error) : "");
@@ -137,7 +138,7 @@ export function SuggestPanel({ ws, onUse }: { ws: string; onUse: (s: { name: str
       <textarea aria-label="What to focus on" className={`${field} w-full`} rows={2} maxLength={2000} placeholder="What to focus on (optional), e.g. more demo requests from agencies" value={notes} onChange={(e) => setNotes(e.target.value)} />
       <div className="flex flex-wrap items-center gap-2">
         <input aria-label="Only pages under" className={`${field} w-48 font-mono`} placeholder="/pricing (optional)" value={page} onChange={(e) => setPage(e.target.value.trim())} />
-        <Button disabled={ai.busy} onClick={() => ai.start(() => api.POST("/v1/workspaces/{ws}/ab-tests/suggestions", { params: { path: { ws } }, body: { notes, ...(page.startsWith("/") ? { page } : {}) } }))}>
+        <Button disabled={ai.busy} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/suggestions", { params: { path: { brand: pickedBrandId() } }, body: { notes, ...(page.startsWith("/") ? { page } : {}) } }))}>
           {ai.busy ? "Thinking…" : list.length ? "Suggest again" : "Suggest tests"}
         </Button>
       </div>
@@ -172,7 +173,7 @@ export function VersionsPanel({ ws, flag, onAdded }: { ws: string; flag: Flag; o
   async function add(v: AIVersion) {
     const weight = Math.min(...flag.variants.map((x) => x.weight).filter((w) => w > 0), 50);
     const variants: FlagVariant[] = [...flag.variants, { key: v.key, weight, payload: v.content }];
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ws, flag: flag.id } }, body: { variants } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: pickedBrandId(), flag: flag.id } }, body: { variants } });
     if (error) return toast(errorMessage(error), "error");
     setAdded((a) => [...a, v.key]);
     toast(`Added ${v.key} to ${flag.name}.`);
@@ -181,7 +182,7 @@ export function VersionsPanel({ ws, flag, onAdded }: { ws: string; flag: Flag; o
   return (
     <div className="space-y-3 text-[13px]">
       <textarea aria-label="What to change" className={`${field} w-full`} rows={2} maxLength={2000} placeholder="What to change and for whom, e.g. a shorter, more urgent headline for agencies" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <Button disabled={ai.busy || !prompt.trim()} onClick={() => ai.start(() => api.POST("/v1/workspaces/{ws}/ab-tests/versions", { params: { path: { ws } }, body: { flag: flag.id, prompt } }))}>
+      <Button disabled={ai.busy || !prompt.trim()} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/versions", { params: { path: { brand: pickedBrandId() } }, body: { flag: flag.id, prompt } }))}>
         {ai.busy ? "Writing…" : "Write versions"}
       </Button>
       <ErrorText>{ai.error}</ErrorText>
@@ -218,7 +219,7 @@ export function SummaryPanel({ ws, testID }: { ws: string; testID: string }) {
   const out = ai.ready?.output as { recommendation: string; reason: string; headline: string; summary: string; next_steps: string[] } | null;
   return (
     <div className="space-y-2 text-[13px]">
-      <Button variant="ghost" disabled={ai.busy} onClick={() => ai.start(() => api.POST("/v1/workspaces/{ws}/ab-tests/{test}/summary", { params: { path: { ws, test: testID } } }))}>
+      <Button variant="ghost" disabled={ai.busy} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/{test}/summary", { params: { path: { brand: pickedBrandId(), test: testID } } }))}>
         {ai.busy ? "Summarising…" : out ? "Summarise again" : "Summarise with AI"}
       </Button>
       <ErrorText>{ai.error}</ErrorText>
@@ -330,7 +331,7 @@ export function LearningsPanel({ ws, canAsk }: { ws: string; canAsk: boolean }) 
   useEffect(() => {
     let live = true;
     const t = window.setTimeout(async () => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/ab-tests/learnings", { params: { path: { ws }, query: q ? { q } : {} } });
+      const { data, error } = await api.GET("/v1/brands/{brand}/ab-tests/learnings", { params: { path: { brand: pickedBrandId() }, query: q ? { q } : {} } });
       if (!live) return;
       setError(error ? errorMessage(error) : "");
       setItems((data?.data as LibraryItem[] | undefined) ?? []);
@@ -348,7 +349,7 @@ export function LearningsPanel({ ws, canAsk }: { ws: string; canAsk: boolean }) 
         <div className="space-y-2 rounded-md border p-3">
           <span className="block font-medium">Ask about past tests</span>
           <textarea aria-label="Question" className={`${field} w-full`} rows={2} maxLength={2000} placeholder="What have we learned about headlines on the pricing page?" value={question} onChange={(e) => setQuestion(e.target.value)} />
-          <Button disabled={ai.busy || !question.trim()} onClick={() => ai.start(() => api.POST("/v1/workspaces/{ws}/ab-tests/ask", { params: { path: { ws } }, body: { question: question.trim() } }))}>
+          <Button disabled={ai.busy || !question.trim()} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/ask", { params: { path: { brand: pickedBrandId() } }, body: { question: question.trim() } }))}>
             {ai.busy ? "Thinking…" : "Ask"}
           </Button>
           <ErrorText>{ai.error}</ErrorText>

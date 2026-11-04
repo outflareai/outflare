@@ -1,9 +1,6 @@
-// What each ad campaign brought, by Outflare's own count: the visits that
-// arrived through it (joined by the ids its tracking template put on the
-// landing page), and the conversions and revenue credited to them under the
-// workspace's attribution model, beside what the platform says it spent and
-// converted. A campaign that spent with no tracked visits usually has no
-// tracking template yet.
+// Paid visits whose campaign id matches no campaign in a connected ad
+// account: the campaigns table already shows what Outflare credits each
+// campaign it knows, so this lists only the rest, with why that happens.
 
 import { useEffect, useState } from "react";
 import type { AttributionAdRow } from "@outflare/sdk";
@@ -11,12 +8,6 @@ import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
 import { Card, ErrorText } from "../ui";
 import { money, num } from "./Channels";
-
-const platforms: Record<string, string> = {
-  google_ads: "Google Ads", meta_ads: "Meta Ads", microsoft_ads: "Microsoft Advertising", reddit_ads: "Reddit Ads", x_ads: "X Ads",
-  linkedin_ads: "LinkedIn Ads", tiktok_ads: "TikTok Ads", snapchat_ads: "Snapchat Ads", taboola_ads: "Taboola Ads", outbrain_ads: "Outbrain Ads",
-  apple_ads: "Apple Ads", amazon_ads: "Amazon Ads", pinterest_ads: "Pinterest Ads",
-};
 
 // ret is revenue over spend when both are in one currency.
 function ret(r: AttributionAdRow) {
@@ -35,26 +26,22 @@ export function AdResults({ ws, from, to, brand, go }: { ws: string; from: strin
     });
   }, [ws, from, to, brand]);
   if (rows === null) return null;
-  const untracked = rows.filter((r) => r.visits === 0 && r.cost.length > 0).length;
+  const unknown = rows.filter((r) => !r.ad_entity_id);
+  if (unknown.length === 0 && !error) return null;
 
   return (
     <Card
-      title="What each campaign brought"
+      title="Visits from campaigns Outflare can't name"
       description={
         <>
-          Outflare's own count: visits that came through each campaign, and the conversions and revenue credited to them under your attribution model, beside what the platform says.{" "}
-          {untracked > 0 && (
-            <>
-              {untracked === 1 ? "One campaign" : `${untracked} campaigns`} spent with no tracked visits: add the tracking template below so its clicks carry its ids, or{" "}
-              <button type="button" className="underline" onClick={() => go("tracking")}>check website tracking</button>.
-            </>
-          )}
+          These visits came from an ad whose campaign id isn't in any connected ad account, so there's no name or spend to show. Usually the campaign runs in an account that isn't connected or is switched off below, or the account hasn't synced since it was connected: press Sync now. Campaigns Outflare does know show their visits, conversions and revenue in the Campaigns table.{" "}
+          <button type="button" className="underline" onClick={() => go("tracking")}>Check website tracking</button>.
         </>
       }
     >
       <ErrorText>{error}</ErrorText>
       <DataTable
-        data={rows}
+        data={unknown}
         rowId={(r) => r.id}
         searchPlaceholder="Search campaigns"
         empty="Nothing yet. Paid visits show up here once your ads carry Outflare's tracking template and the website snippet is installed."
@@ -65,8 +52,8 @@ export function AdResults({ ws, from, to, brand, go }: { ws: string; from: strin
             accessorFn: (r) => `${r.name} ${r.id}`,
             cell: ({ row: { original: r } }) => (
               <div className="space-y-0.5">
-                <div className="font-medium">{r.name || <span className="font-mono text-[12px]">{r.id}</span>}</div>
-                <div className="text-[12px] text-muted-foreground">{r.connector ? platforms[r.connector] ?? r.connector : "Not in a connected ad account"}</div>
+                <div className="font-medium">Campaign <span className="font-mono text-[12px]">{r.id}</span></div>
+                <div className="text-[12px] text-muted-foreground">Not in a connected ad account</div>
               </div>
             ),
           },

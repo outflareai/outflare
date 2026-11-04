@@ -110,25 +110,51 @@ func TestPostgres(t *testing.T) {
 	if url == "" {
 		t.Skip("TEST_DATABASE_URL not set")
 	}
-	ctx := context.Background()
-	pool, err := db.Connect(ctx, url)
+	// The database is shared with the packages tested before this one, so
+	// a session they left running can hold a lock this test waits on. Fail
+	// with what the database is waiting on rather than hang until CI's own
+	// timeout, which shows nothing.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool, err := db.Connect(context.Background(), url)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	t.Cleanup(func() {
+		if ctx.Err() != context.DeadlineExceeded {
+			return
+		}
+		rows, err := pool.Query(context.Background(), `SELECT pid, state, coalesce(wait_event_type, ''), coalesce(wait_event, ''),
+			now() - query_start, left(query, 200) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()`)
+		if err != nil {
+			t.Logf("sessions: %v", err)
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var pid int
+			var state, waitType, wait, query string
+			var age time.Duration
+			if err := rows.Scan(&pid, &state, &waitType, &wait, &age, &query); err == nil {
+				t.Logf("session %d %s %s/%s for %s: %s", pid, state, waitType, wait, age, query)
+			}
+		}
+	})
 	if _, err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE jobs`); err != nil {
+	// Only this test's jobs: emptying the whole queue would need a lock
+	// that any other session reading it blocks.
+	if _, err := pool.Exec(ctx, `DELETE FROM jobs WHERE kind = 'metrics.test'`); err != nil {
 		t.Fatal(err)
 	}
-	// More tables than the size series cover, each bigger than the
-	// emptied job queue: jobs is still reported, however many tables
-	// outgrow it.
+	// More tables than the size series cover, each bigger than a small
+	// job queue: jobs is still reported, however many tables outgrow it.
 	if _, err := pool.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS metrics_test_big`); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DROP SCHEMA metrics_test_big CASCADE`) })
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DROP SCHEMA metrics_test_big CASCADE`) })
 	for i := range 26 {
 		if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TABLE IF NOT EXISTS metrics_test_big.t%d AS
 			SELECT g, repeat('x', 200) AS pad FROM generate_series(1, 2000) g`, i)); err != nil {

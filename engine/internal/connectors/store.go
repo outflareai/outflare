@@ -38,7 +38,11 @@ type Integration struct {
 	BrandID *string `json:"brand_id"`
 	// The brands a workspace connection is shared with; empty is every
 	// brand.
-	BrandIDs      []string   `json:"brand_ids"`
+	BrandIDs []string `json:"brand_ids"`
+	// BrandKind is brand, split or shared (KindFor): who its data belongs
+	// to. Empty as stored means the connector's default; Store.List and
+	// Get fill it in.
+	BrandKind     string     `json:"brand_kind"`
 	LastCheckedAt *time.Time `json:"last_checked_at"`
 	LastError     *string    `json:"last_error"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -104,13 +108,13 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-const integrationCols = `id, workspace_id, connector, auth_method, name, status, account, config, brand_id, brand_ids::text[], last_checked_at, last_error, created_at, updated_at`
+const integrationCols = `id, workspace_id, connector, auth_method, name, status, account, config, brand_id, brand_ids::text[], COALESCE(brand_kind, ''), last_checked_at, last_error, created_at, updated_at`
 
 func scanIntegration(row pgx.Row) (Integration, error) {
 	var i Integration
 	var account []byte
 	err := row.Scan(&i.ID, &i.WorkspaceID, &i.Connector, &i.AuthMethod, &i.Name, &i.Status, &account, &i.Config,
-		&i.BrandID, &i.BrandIDs, &i.LastCheckedAt, &i.LastError, &i.CreatedAt, &i.UpdatedAt)
+		&i.BrandID, &i.BrandIDs, &i.BrandKind, &i.LastCheckedAt, &i.LastError, &i.CreatedAt, &i.UpdatedAt)
 	if err == nil {
 		_ = json.Unmarshal(account, &i.Account)
 	}
@@ -131,7 +135,7 @@ func (s *Store) List(ctx context.Context, q Querier, ws, connector string) ([]In
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, i)
+		out = append(out, s.kinded(i))
 	}
 	return out, rows.Err()
 }
@@ -179,7 +183,21 @@ func (s *Store) Get(ctx context.Context, q Querier, ws, id string) (Integration,
 	if errors.Is(err, pgx.ErrNoRows) {
 		return i, ErrNotFound
 	}
-	return i, err
+	return s.kinded(i), err
+}
+
+// kinded fills a connection's kind from its connector's default when none
+// was chosen.
+func (s *Store) kinded(i Integration) Integration {
+	if i.BrandKind == "" {
+		i.BrandKind = KindBrand
+		if s.Registry != nil {
+			if d, ok := s.Registry.Definition(i.Connector); ok {
+				i.BrandKind = d.BrandKind
+			}
+		}
+	}
+	return i
 }
 
 // Test checks creds against the connector without saving anything.
@@ -229,10 +247,11 @@ func (s *Store) Insert(ctx context.Context, tx pgx.Tx, ws, connector, method, na
 	if actorID != "" {
 		actor = &actorID
 	}
-	return scanIntegration(tx.QueryRow(ctx, `
+	i, err := scanIntegration(tx.QueryRow(ctx, `
 		INSERT INTO integrations (id, workspace_id, connector, auth_method, name, status, credentials, account, last_checked_at, created_by)
 		VALUES ($1, $2, $3, $4, $5, 'connected', $6, $7, now(), $8)
 		RETURNING `+integrationCols, id, ws, connector, method, name, sealed, acct, actor))
+	return s.kinded(i), err
 }
 
 // UpdateCreds replaces an integration's credentials, e.g. a refreshed
@@ -392,7 +411,7 @@ func scanIntegrationWith(row pgx.Row, sealed *[]byte) (Integration, error) {
 	var i Integration
 	var account []byte
 	err := row.Scan(&i.ID, &i.WorkspaceID, &i.Connector, &i.AuthMethod, &i.Name, &i.Status, &account, &i.Config,
-		&i.BrandID, &i.BrandIDs, &i.LastCheckedAt, &i.LastError, &i.CreatedAt, &i.UpdatedAt, sealed)
+		&i.BrandID, &i.BrandIDs, &i.BrandKind, &i.LastCheckedAt, &i.LastError, &i.CreatedAt, &i.UpdatedAt, sealed)
 	if err == nil {
 		_ = json.Unmarshal(account, &i.Account)
 	}

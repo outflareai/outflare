@@ -2,6 +2,8 @@ package api_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/outflareai/outflare/engine/internal/api"
+	"github.com/outflareai/outflare/engine/internal/journeys"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -46,22 +49,43 @@ func TestAIUsage(t *testing.T) {
 	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": cid, "model": "gpt-test",
 		"input_cents_per_million": 250, "output_cents_per_million": 1000, "monthly_limit_cents": 5000})
 
-	// A plan is a call by the planning tool: 2000 tokens in at 250, 500
-	// out at 1000, 1 cent.
-	owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Book 5 meetings with fintech CFOs"})
+	// A journey's AI step is a call by its tool: 2000 tokens in at 250,
+	// 500 out at 1000, 1 cent. ask returns the error code when the call
+	// was refused. Each call has its own ref, as each journey step does.
+	asked := 0
+	ask := func() string {
+		asked++
+		_, err := e.srv.JourneyAI().Ask(ctx, ws, journeys.AIQuestion{Prompt: "Is Acme a fintech?", MaxWords: 20, Ref: fmt.Sprintf("journey-test-%d", asked)})
+		var ae *journeys.AIError
+		if errors.As(err, &ae) {
+			return ae.Code
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ""
+	}
+	if code := ask(); code != "" {
+		t.Fatalf("first call: %s", code)
+	}
 	u = owner.must(200, "GET", base+"/ai-usage", nil)
 	tot := u["total"].(map[string]any)
 	if tot["calls"].(float64) != 1 || tot["input_tokens"].(float64) != 2000 || tot["output_tokens"].(float64) != 500 || tot["cost_cents"].(float64) != 1 || u["spent_cents"].(float64) != 1 {
-		t.Fatalf("usage after a plan = %v", u)
+		t.Fatalf("usage after a call = %v", u)
 	}
-	first := u["tools"].([]any)[0].(map[string]any)
-	if first["task"] != "plan" || first["name"] != "Planning" || first["calls"].(float64) != 1 {
+	var first map[string]any
+	for _, x := range u["tools"].([]any) {
+		if x.(map[string]any)["task"] == "journeys" {
+			first = x.(map[string]any)
+		}
+	}
+	if first["name"] != "Journey AI steps" || first["calls"].(float64) != 1 {
 		t.Errorf("tools = %v", u["tools"])
 	}
 	if m := u["models"].([]any); len(m) != 1 || m[0].(map[string]any)["provider"] != "openai" || m[0].(map[string]any)["model"] != "gpt-test" {
 		t.Errorf("models = %v", m)
 	}
-	if r := u["recent"].([]any); len(r) != 1 || r[0].(map[string]any)["tool_name"] != "Planning" || r[0].(map[string]any)["cost_reported"] != false {
+	if r := u["recent"].([]any); len(r) != 1 || r[0].(map[string]any)["tool_name"] != "Journey AI steps" || r[0].(map[string]any)["cost_reported"] != false {
 		t.Errorf("recent = %v", r)
 	}
 	if d := u["days"].([]any); len(d) != 1 || d[0].(map[string]any)["cost_cents"].(float64) != 1 {
@@ -73,21 +97,20 @@ func TestAIUsage(t *testing.T) {
 		t.Errorf("other workspace usage = %v", u2["total"])
 	}
 
-	// A limit per tool. Planning's own limit stops it even under the
+	// A limit per tool. A tool's own limit stops it even under the
 	// workspace's limit; other tools carry on.
 	owner.must(400, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"Bad Tool": 100}})
 	owner.must(400, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": -1}})
-	u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5, "lead_finder": 300, "check_in": nil}})
+	u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"journeys": 1, "lead_finder": 300, "check_in": nil}})
 	limits := map[string]any{}
 	for _, x := range u["tools"].([]any) {
 		limits[x.(map[string]any)["task"].(string)] = x.(map[string]any)["monthly_limit_cents"]
 	}
-	if limits["plan"] != float64(5) || limits["lead_finder"] != float64(300) || limits["check_in"] != nil {
+	if limits["journeys"] != float64(1) || limits["lead_finder"] != float64(300) || limits["check_in"] != nil {
 		t.Errorf("limits = %v", limits)
 	}
-	code, out := owner.do("POST", base+"/missions/plan", map[string]any{"goal": "Another goal"})
-	if code != 409 || out["error"].(map[string]any)["code"] != "ai_budget_reached" || !strings.Contains(out["error"].(map[string]any)["message"].(string), "Planning") {
-		t.Errorf("plan over its tool limit = %d %v", code, out)
+	if code := ask(); code != "ai_budget_reached" {
+		t.Errorf("a call over its tool limit = %s", code)
 	}
 	// The workspace settings keep the limits.
 	if s := owner.must(200, "GET", base+"/ai-settings", nil); s["monthly_limit_cents"].(float64) != 5000 {
@@ -96,27 +119,30 @@ func TestAIUsage(t *testing.T) {
 
 	// A call that takes the month to 80% of a limit warns once; reaching
 	// it says so once, and owners are emailed each time. At these prices a
-	// plan costs 100 cents.
+	// call costs 100 cents.
 	e.runCRMImports(t) // works the server's jobs, the warning emails among them
 	before := e.outbox.count()
 	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": cid, "model": "gpt-test",
 		"input_cents_per_million": 25000, "output_cents_per_million": 100000, "monthly_limit_cents": 5000})
-	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 125}})
-	owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Goal two"}) // planning: 101 of 125, past 80%
+	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"journeys": 125}})
+	if code := ask(); code != "" { // the tool: 101 of 125, past 80%
+		t.Errorf("the call to 80%% = %s", code)
+	}
 	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{}})
 	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": cid, "model": "gpt-test",
 		"input_cents_per_million": 25000, "output_cents_per_million": 100000, "monthly_limit_cents": 200})
-	owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Goal three"}) // workspace: 201 of 200
-	code, out = owner.do("POST", base+"/missions/plan", map[string]any{"goal": "One too many"})
-	if code != 409 || out["error"].(map[string]any)["code"] != "ai_budget_reached" {
-		t.Errorf("plan over the workspace limit = %d %v", code, out)
+	if code := ask(); code != "" { // workspace: 201 of 200
+		t.Errorf("the call to the limit = %s", code)
+	}
+	if code := ask(); code != "ai_budget_reached" {
+		t.Errorf("a call over the workspace limit = %s", code)
 	}
 	var warned, reached int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE action = 'ai_budget.warned'), count(*) FILTER (WHERE action = 'ai_budget.reached')
 		FROM audit_events WHERE workspace_id = $1`, ws).Scan(&warned, &reached); err != nil {
 		t.Fatal(err)
 	}
-	// Planning reached 80% of 12; the workspace jumped past 80% to 100%
+	// The tool reached 80% of 125; the workspace jumped past 80% to 100%
 	// of 11, which also counts as its warning, without a second event.
 	if warned != 1 || reached != 1 {
 		t.Errorf("warned %d, reached %d", warned, reached)
@@ -156,27 +182,29 @@ func TestAIUsage(t *testing.T) {
 	}
 
 	// A limit can warn only: calls go on past it. The workspace's limit
-	// (201 of 200 spent) stops plans until it is set to warn only.
+	// (201 of 200 spent) stops calls until it is set to warn only.
 	if u["hard_stop"] != true {
 		t.Errorf("hard_stop by default = %v", u["hard_stop"])
 	}
 	owner.must(400, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{}, "hard_stops": map[string]any{"Bad Tool": false}})
-	u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}, "hard_stop": false, "hard_stops": map[string]any{"plan": false}})
+	u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"journeys": 5}, "hard_stop": false, "hard_stops": map[string]any{"journeys": false}})
 	stops := map[string]any{}
 	for _, x := range u["tools"].([]any) {
 		stops[x.(map[string]any)["task"].(string)] = x.(map[string]any)["hard_stop"]
 	}
-	if u["hard_stop"] != false || stops["plan"] != false || stops["check_in"] != true {
+	if u["hard_stop"] != false || stops["journeys"] != false || stops["check_in"] != true {
 		t.Errorf("after warn only: hard_stop %v, tools %v", u["hard_stop"], stops)
 	}
-	owner.must(201, "POST", base+"/missions/plan", map[string]any{"goal": "Past both limits"})
+	if code := ask(); code != "" {
+		t.Errorf("a call past both warn-only limits = %s", code)
+	}
 	// Leaving the switches out keeps them; setting them back stops calls.
-	if u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}}); u["hard_stop"] != false {
+	if u = owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"journeys": 5}}); u["hard_stop"] != false {
 		t.Errorf("hard_stop after a PUT without it = %v", u["hard_stop"])
 	}
-	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"plan": 5}, "hard_stop": true, "hard_stops": map[string]any{}})
-	if code, _ := owner.do("POST", base+"/missions/plan", map[string]any{"goal": "Stopped again"}); code != 409 {
-		t.Errorf("plan after hard stop is back = %d", code)
+	owner.must(200, "PUT", base+"/ai-usage/limits", map[string]any{"limits": map[string]any{"journeys": 5}, "hard_stop": true, "hard_stops": map[string]any{}})
+	if code := ask(); code != "ai_budget_reached" {
+		t.Errorf("a call after the hard stop is back = %s", code)
 	}
 	var ws2Limits int
 	e.pool.QueryRow(ctx, `SELECT count(*) FROM workspace_ai_settings WHERE workspace_id = $1 AND (limit_warn_only OR warn_only_tasks <> '{}')`, ws2).Scan(&ws2Limits)

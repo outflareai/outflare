@@ -334,6 +334,9 @@ func healthIssues(nets []*trackingHealthNetwork, campaigns []trackingHealthCampa
 			msg = "One " + label + " campaign spent with no tracked visit, so its sales can't be credited to it."
 			fix = "Add the " + label + " tracking template to that campaign, and check that its landing page runs the website snippet."
 		}
+		if c == "google_ads" {
+			fix += " Fix tracking links, above, adds the template for you."
+		}
 		out = append(out, trackingHealthIssue{Code: "campaigns_without_visits", Severity: "warning", Subject: c, Message: msg, Fix: fix})
 	}
 	adsBy := map[string]int{}
@@ -357,8 +360,11 @@ func healthIssues(nets []*trackingHealthNetwork, campaigns []trackingHealthCampa
 		if count == 1 {
 			msg = "One " + label + " ad links without Outflare's tracking template, so its clicks can't be tied to the ad."
 		}
-		out = append(out, trackingHealthIssue{Code: "ads_without_template", Severity: "warning", Subject: c, Message: msg,
-			Fix: "Paste the " + label + " tracking template into " + field + " on each ad listed in the tracking health report."})
+		fix := "Paste the " + label + " tracking template into " + field + " on each ad listed in the tracking health report."
+		if c == "google_ads" {
+			fix = "Press See what changes under Fix tracking links, above: Outflare adds the template to each URL suffix that needs it."
+		}
+		out = append(out, trackingHealthIssue{Code: "ads_without_template", Severity: "warning", Subject: c, Message: msg, Fix: fix})
 	}
 	for _, x := range sends {
 		total := x.Sent + x.Failed

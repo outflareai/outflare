@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AnalyticsMetrics, AnalyticsOverviewSite, AnalyticsPoint, AnalyticsReport, AnalyticsReportName, AnalyticsSitePlan, AnalyticsSource, AnalyticsSummaryItem, AnalyticsSync, SEOSource } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
@@ -89,7 +91,15 @@ const remember = (key: string, value?: string) => {
 // Visitors, pages, sources, searches and conversions from the analytics
 // tools a workspace already uses. The sync stores each tool's daily numbers
 // so websites can be compared across tools; nothing changes at the provider.
-export function Analytics({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+// Analytics belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Analytics(props: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Analytics" brands={active.length} />;
+  return <AnalyticsPage key={brand.id} {...props} />;
+}
+
+function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
   const [sources, setSources] = useState<AnalyticsSource[] | null>(null);
   const [seo, setSEO] = useState<SEOSource[] | null>(null);
   const [error, setError] = useState("");
@@ -99,7 +109,7 @@ export function Analytics({ ws, canManage, go }: { ws: string; canManage: boolea
 
   const load = useCallback(async () => {
     const seoReq = api.GET("/v1/workspaces/{ws}/seo", { params: { path: { ws } } });
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/analytics", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/analytics", { params: { path: { brand: pickedBrandId() } } });
     if (error || !data) return setError(errorMessage(error));
     setSources(data.data);
     setSEO((await seoReq).data?.data ?? []);
@@ -228,7 +238,7 @@ function Websites({ ws, days, sources, seo, selected, onPick, canManage }: { ws:
   );
   const dialog = settingUp && <SiteSetupDialog ws={ws} source={settingUp} from={focused ? "brand" : "analytics"} focus={focused ? picked : undefined} onClose={(saved) => { setSettingUp(null); setFocused(false); if (saved) setReload((n) => n + 1); }} />;
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/analytics/overview", { params: { path: { ws }, query: { ...storedRange(days), ...(brand ? { brand } : {}) } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/analytics/overview", { params: { path: { brand: pickedBrandId() }, query: { ...storedRange(days), ...(brand ? { brand } : {}) } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setData({ sites: data.data, syncs: data.syncs, notes: data.notes });
@@ -362,7 +372,7 @@ function Compare({ ws, host, days }: { ws: string; host: string; days: number })
   const [error, setError] = useState("");
   const [metric, setMetric] = useState<Metric>("visitors");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/analytics/compare", { params: { path: { ws }, query: { host, ...storedRange(days) } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/analytics/compare", { params: { path: { brand: pickedBrandId() }, query: { host, ...storedRange(days) } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setData(data.data);
     });
@@ -461,7 +471,7 @@ function Summary({ ws, days, sources, selected, onPick }: { ws: string; days: nu
   const [items, setItems] = useState<AnalyticsSummaryItem[] | null>(null);
   useEffect(() => {
     setItems(null);
-    api.GET("/v1/workspaces/{ws}/analytics/summary", { params: { path: { ws }, query: range(days) } }).then(({ data }) => setItems(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/analytics/summary", { params: { path: { brand: pickedBrandId() }, query: range(days) } }).then(({ data }) => setItems(data?.data ?? []));
   }, [ws, days, sources]);
   if (!items) return null;
   // Only the columns some tool measures: a site with no search console has

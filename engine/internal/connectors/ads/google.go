@@ -10,9 +10,11 @@ import (
 	c "github.com/outflareai/outflare/engine/internal/connectors"
 )
 
-// GoogleAds reads Google Ads accounts through the Google Ads API. Every
-// call needs a developer token as well as the sign-in; the workspace adds
-// its own, from its own Google Ads manager account.
+// GoogleAds reads Google Ads accounts through the Google Ads API with the
+// workspace's own Google sign-in. Google retired developer tokens on
+// 9 September 2026: API access now belongs to the Google Cloud project of
+// the sign-in's OAuth app, and Google ignores a token sent anyway. A token
+// a workspace added before then is still sent, and none is asked for.
 type GoogleAds struct{}
 
 const (
@@ -25,8 +27,8 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. Google also asks for a developer token: create one in your own Google Ads manager account (Admin, API Center) and add it after signing in. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage)
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget, and adds Outflare's tracking parameters to URL suffixes only when you press Add the template; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage, c.CapAdsTracking)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
@@ -37,16 +39,12 @@ func (GoogleAds) Definition() c.Definition {
 }
 
 func (GoogleAds) SetupFields() []c.Field {
-	return []c.Field{{Name: "developer_token", Label: "Developer token", Secret: true,
-		Help: "From your own Google Ads manager account: Admin, API Center. Basic access is enough."}}
+	return []c.Field{{Name: "developer_token", Label: "Developer token (no longer needed)", Secret: true, Optional: true,
+		Help: "Google stopped requiring developer tokens in September 2026. Leave this empty."}}
 }
 
 func (g GoogleAds) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
 	acct := c.Account{Details: map[string]string{}}
-	if creds["developer_token"] == "" {
-		acct.Details["setup"] = "add your developer token"
-		return acct, nil
-	}
 	ids, err := g.accessible(ctx, cl, creds)
 	if err != nil {
 		return acct, err
@@ -109,6 +107,20 @@ type gaqlRow struct {
 		Status                 string  `json:"status"`
 		AdvertisingChannelType string  `json:"advertisingChannelType"`
 		CampaignBudget         string  `json:"campaignBudget"`
+		// How Google bids, and the target it bids to when it has one.
+		BiddingStrategyType string `json:"biddingStrategyType"`
+		TargetCpa           struct {
+			TargetCpaMicros flexInt `json:"targetCpaMicros"`
+		} `json:"targetCpa"`
+		MaximizeConversions struct {
+			TargetCpaMicros flexInt `json:"targetCpaMicros"`
+		} `json:"maximizeConversions"`
+		TargetRoas struct {
+			TargetRoas float64 `json:"targetRoas"`
+		} `json:"targetRoas"`
+		MaximizeConversionValue struct {
+			TargetRoas float64 `json:"targetRoas"`
+		} `json:"maximizeConversionValue"`
 		googleTracking
 	} `json:"campaign"`
 	ConversionAction struct {
@@ -201,9 +213,6 @@ func (g GoogleAds) search(ctx context.Context, cl *c.Client, creds c.Creds, cust
 }
 
 func (g GoogleAds) AdAccounts(ctx context.Context, cl *c.Client, creds c.Creds) ([]c.AdAccount, error) {
-	if creds["developer_token"] == "" {
-		return nil, c.Errf(c.ErrAuth, "Google Ads needs your developer token: add it on the connection")
-	}
 	ids, err := g.accessible(ctx, cl, creds)
 	if err != nil {
 		return nil, err
@@ -252,7 +261,9 @@ func (g GoogleAds) AdAccounts(ctx context.Context, cl *c.Client, creds c.Creds) 
 
 func (g GoogleAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount) ([]c.AdCampaign, error) {
 	rows, err := g.search(ctx, cl, creds, acct.ID, acct.Meta["login_customer_id"],
-		"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros FROM campaign")
+		"SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros, "+
+			"campaign.bidding_strategy_type, campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros, "+
+			"campaign.target_roas.target_roas, campaign.maximize_conversion_value.target_roas FROM campaign")
 	if err != nil {
 		return nil, err
 	}
@@ -263,9 +274,32 @@ func (g GoogleAds) AdCampaigns(ctx context.Context, cl *c.Client, creds c.Creds,
 		if b := int64(r.CampaignBudget.AmountMicros); b > 0 {
 			cp.DailyBudgetMicros = ptrI(b)
 		}
+		googleBidding(&cp, r)
 		out = append(out, cp)
 	}
 	return out, nil
+}
+
+// googleBidding reads a campaign's bid strategy and the cost per
+// conversion or return it bids to. A portfolio strategy keeps its target on
+// the strategy itself, so only its type is known here.
+func googleBidding(cp *c.AdCampaign, r gaqlRow) {
+	cp.BiddingStrategy = strings.ToLower(r.Campaign.BiddingStrategyType)
+	if cp.BiddingStrategy == "" {
+		cp.BiddingStrategy = "unknown"
+	}
+	for _, v := range []flexInt{r.Campaign.TargetCpa.TargetCpaMicros, r.Campaign.MaximizeConversions.TargetCpaMicros} {
+		if v > 0 {
+			cp.TargetCPAMicros = ptrI(int64(v))
+			break
+		}
+	}
+	for _, v := range []float64{r.Campaign.TargetRoas.TargetRoas, r.Campaign.MaximizeConversionValue.TargetRoas} {
+		if v > 0 {
+			cp.TargetROAS = &v
+			break
+		}
+	}
 }
 
 // ---- managing campaigns ----
@@ -579,11 +613,23 @@ func (g GoogleAds) SendConversions(ctx context.Context, cl *c.Client, creds c.Cr
 				break
 			}
 		}
+		if len(keys) == 0 {
+			// The Google tag's own cookie keeps the click's gclid when the
+			// landing URL lost it (a redirect, a later visit).
+			if v := gclidFromCookie(cv.ClickIDs["gcl_aw"]); v != "" {
+				row["gclid"] = v
+				keys = append(keys, "gclid")
+			}
+		}
+		emails := cv.GoogleEmails
+		if len(emails) == 0 {
+			emails = cv.Emails
+		}
 		var ids []map[string]string
-		for _, e := range cv.Emails {
+		for _, e := range emails {
 			ids = append(ids, map[string]string{"hashedEmail": e})
 		}
-		if len(cv.Emails) > 0 {
+		if len(emails) > 0 {
 			keys = append(keys, "email")
 		}
 		for _, p := range cv.Phones {
@@ -683,8 +729,12 @@ func (g GoogleAds) Audiences(ctx context.Context, cl *c.Client, creds c.Creds, a
 // run it. Google processes the job on its own time, and matches the
 // hashed identifiers on its side.
 func (g GoogleAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, audienceID, change string, p c.AudienceMember) error {
+	emails := p.GoogleEmails
+	if len(emails) == 0 {
+		emails = p.Emails
+	}
 	var ids []map[string]string
-	for _, e := range p.Emails {
+	for _, e := range emails {
 		ids = append(ids, map[string]string{"hashedEmail": e})
 	}
 	for _, ph := range p.Phones {
@@ -718,4 +768,14 @@ func (g GoogleAds) SyncAudience(ctx context.Context, cl *c.Client, creds c.Creds
 		return err
 	}
 	return k.post(ctx, g.base(cl)+"/"+job.ResourceName+":run", map[string]any{}, nil)
+}
+
+// gclidFromCookie reads the gclid from the Google tag's _gcl_aw cookie,
+// which holds GCL.<seconds>.<gclid>.
+func gclidFromCookie(v string) string {
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) != 3 || parts[0] != "GCL" || parts[2] == "" {
+		return ""
+	}
+	return parts[2]
 }

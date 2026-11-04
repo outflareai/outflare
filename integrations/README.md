@@ -39,6 +39,7 @@ Manifests support these capabilities today. More are coming (enrichment, email f
 id: acmeverify
 name: AcmeVerify
 category: email_verification
+brand_kind: shared             # optional: brand, split or shared (the category's default otherwise)
 summary: Email verification with catch-all detection.   # one sentence, at most 160 characters
 description: Checks each address before it is emailed.  # optional, at most 600 characters
 website: https://acme.example

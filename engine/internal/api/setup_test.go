@@ -109,7 +109,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 	if setupSteps(again)["site_script"]["install"].(map[string]any)["site_key_id"] != in["site_key_id"] {
 		t.Fatal("preparing twice made a second key")
 	}
-	if keys := owner.must(200, "GET", base+"/site-keys", nil)["data"].([]any); len(keys) != 1 || keys[0].(map[string]any)["brand_id"] != b["id"] {
+	if keys := owner.must(200, "GET", base+"/site-keys?brand=all", nil)["data"].([]any); len(keys) != 1 || keys[0].(map[string]any)["brand_id"] != b["id"] {
 		t.Fatalf("site keys: %v", keys)
 	}
 
@@ -378,7 +378,8 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 	if _, err := e.pool.Exec(ctx, `
 		INSERT INTO request_logs (workspace_id, request_id, method, route, operation, path, status, duration_ms, surface, client)
 		VALUES ($1, 'r1', 'GET', 'x', 'listMailboxes', '/x', 200, 1, 'mcp', 'mcp/0.0.9'),
-		       ($1, 'r2', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', '')`, ws); err != nil {
+		       ($1, 'r2', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', ''),
+		       ($1, 'r3', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', 'mcp/0.0.9')`, ws); err != nil {
 		t.Fatal(err)
 	}
 
@@ -393,6 +394,10 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 		if kinds[k] != sev {
 			t.Errorf("%s: %q, want %q (%v)", k, kinds[k], sev, h["checks"])
 		}
+	}
+	// The same deprecated route from two clients is one check, not two.
+	if n := len(h["checks"].([]any)); n != 5 {
+		t.Errorf("%d checks, want 5: %v", n, h["checks"])
 	}
 	if h["checks"].([]any)[0].(map[string]any)["severity"] != "critical" || h["checks"].([]any)[4].(map[string]any)["severity"] != "warning" {
 		t.Errorf("worst first: %v", h["checks"])

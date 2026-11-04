@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,6 +129,14 @@ type Queue struct {
 	LeaseTimeout time.Duration
 	// Backoff returns the delay before retry number attempt (1-based).
 	Backoff func(attempt int) time.Duration
+	// ShutdownGrace is how long Run waits, once ctx ends, for running
+	// handlers to return. A handler that stops for the shutdown has its
+	// job put straight back in the queue, without using up an attempt.
+	// One still running when the grace ends is handed back to the queue
+	// as it is, so another worker can start it at once instead of after
+	// LeaseTimeout. Keep it shorter than the time the platform allows
+	// between SIGTERM and SIGKILL. Default 10s.
+	ShutdownGrace time.Duration
 	// Only, when set, limits this queue to these kinds; Skip leaves these
 	// kinds to another queue. A second queue with its own workers keeps
 	// urgent work (password resets) from waiting behind bulk work.
@@ -138,13 +147,14 @@ type Queue struct {
 func New(pool *pgxpool.Pool, log *slog.Logger) *Queue {
 	host, _ := os.Hostname()
 	return &Queue{
-		pool:         pool,
-		log:          log,
-		handlers:     map[string]Handler{},
-		workerID:     fmt.Sprintf("%s-%d", host, os.Getpid()),
-		PollInterval: time.Second,
-		LeaseTimeout: 5 * time.Minute,
-		Backoff:      DefaultBackoff,
+		pool:          pool,
+		log:           log,
+		handlers:      map[string]Handler{},
+		workerID:      fmt.Sprintf("%s-%d", host, os.Getpid()),
+		PollInterval:  time.Second,
+		LeaseTimeout:  5 * time.Minute,
+		Backoff:       DefaultBackoff,
+		ShutdownGrace: 10 * time.Second,
 	}
 }
 
@@ -166,7 +176,8 @@ var Retired = map[string]bool{}
 func (q *Queue) Handle(kind string, h Handler) { q.handlers[kind] = h }
 
 // Run processes jobs with up to concurrency handlers at once until ctx ends.
-// It returns after in-flight jobs finish.
+// It returns once in-flight jobs finish, or after ShutdownGrace, handing
+// back the jobs still running then.
 func (q *Queue) Run(ctx context.Context, concurrency int) error {
 	if concurrency <= 0 {
 		return nil
@@ -176,7 +187,8 @@ func (q *Queue) Run(ctx context.Context, concurrency int) error {
 
 	slots := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
-	defer wg.Wait()
+	inFlight := &running{jobs: map[int64]Job{}}
+	defer q.drain(&wg, inFlight)
 
 	lastReap := time.Time{}
 	for {
@@ -200,9 +212,11 @@ func (q *Queue) Run(ctx context.Context, concurrency int) error {
 		for _, job := range claimed {
 			slots <- struct{}{}
 			wg.Add(1)
+			inFlight.add(job)
 			go func(job Job) {
 				defer wg.Done()
 				defer func() { <-slots; signal(wake) }()
+				defer inFlight.remove(job.ID)
 				q.execute(ctx, job)
 			}(job)
 		}
@@ -219,6 +233,82 @@ func (q *Queue) Run(ctx context.Context, concurrency int) error {
 		case <-timer.C:
 		}
 		timer.Stop()
+	}
+}
+
+// running is the jobs this queue's handlers are running.
+type running struct {
+	mu   sync.Mutex
+	jobs map[int64]Job
+}
+
+func (r *running) add(j Job) {
+	r.mu.Lock()
+	r.jobs[j.ID] = j
+	r.mu.Unlock()
+}
+
+func (r *running) remove(id int64) {
+	r.mu.Lock()
+	delete(r.jobs, id)
+	r.mu.Unlock()
+}
+
+func (r *running) list() []Job {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Job, 0, len(r.jobs))
+	for _, j := range r.jobs {
+		out = append(out, j)
+	}
+	return out
+}
+
+// drain waits up to ShutdownGrace for running handlers to return. Then it
+// hands the jobs still running back to the queue, so a worker elsewhere
+// can start them now rather than after their lease runs out (a platform
+// kills this process soon after SIGTERM). Their handlers are left to the
+// process's exit; whatever they write afterwards about the job is ignored
+// (ownLease), and their lease renewal stops them if they are still going.
+func (q *Queue) drain(wg *sync.WaitGroup, inFlight *running) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	grace := q.ShutdownGrace
+	if grace <= 0 {
+		<-done
+		return
+	}
+	t := time.NewTimer(grace)
+	defer t.Stop()
+	select {
+	case <-done:
+		return
+	case <-t.C:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, job := range inFlight.list() {
+		log := q.log.With("job_id", job.ID, "kind", job.Kind, "attempt", job.Attempt)
+		tag, err := q.pool.Exec(ctx, `UPDATE jobs SET status = 'queued', locked_by = NULL, locked_at = NULL,
+			last_error = 'still running at shutdown', run_at = now(), updated_at = now()
+			WHERE id = $1 AND `+ownLease, job.ID, job.Attempt)
+		ev := track.Event{Name: "job.released", Surface: "job", ActorType: "system", Outcome: track.Error, ErrorCode: "shutdown_timeout",
+			Props: map[string]any{"kind": job.Kind, "job_id": job.ID, "attempt": job.Attempt, "grace_ms": grace.Milliseconds()}}
+		if job.WorkspaceID != nil {
+			ev.WorkspaceID = *job.WorkspaceID
+		}
+		switch {
+		case err != nil:
+			// The row stays running; the reaper puts it back after LeaseTimeout.
+			track.Fail(ctx, log, track.Event{Name: "job.release_failed", Surface: "job", ActorType: "system", Props: map[string]any{"kind": job.Kind}}, "unavailable", err)
+		case tag.RowsAffected() > 0:
+			metrics.JobReleased(job.Kind)
+			track.Emit(ctx, ev)
+			log.Error("job still running at shutdown, handed back to the queue", "grace", grace)
+		}
 	}
 }
 
@@ -336,7 +426,8 @@ func (q *Queue) execute(ctx context.Context, job Job) {
 	} else {
 		err = runHandler(hctx, h, job)
 	}
-	if stopRenew() && err == nil {
+	lost := stopRenew()
+	if lost && err == nil {
 		err = errLeaseLost
 	}
 	ev := track.Event{Surface: "job", ActorType: "system", Props: map[string]any{"kind": job.Kind, "job_id": job.ID, "attempt": job.Attempt}}
@@ -353,6 +444,21 @@ func (q *Queue) execute(ctx context.Context, job Job) {
 		done(metrics.JobSucceeded)
 		if _, err := q.pool.Exec(fctx, `UPDATE jobs SET status = 'succeeded', locked_by = NULL, locked_at = NULL, last_error = NULL, updated_at = now() WHERE id = $1 AND `+ownLease, job.ID, job.Attempt); err != nil {
 			log.Error("mark job succeeded", "err", err)
+		}
+		return
+	}
+
+	// Stopped by the shutdown: back in the queue now, and the attempt
+	// doesn't count, so deploys don't use up a job's retries.
+	if ctx.Err() != nil && !lost && !errors.Is(err, ErrPermanent) {
+		ev.Name, ev.Outcome, ev.ErrorCode = "job.interrupted", track.Failure, "shutdown"
+		done(metrics.JobInterrupted)
+		track.Emit(fctx, ev)
+		log.Info("job stopped by shutdown, requeued", "err", err)
+		_, uerr := q.pool.Exec(fctx, `UPDATE jobs SET status = 'queued', attempts = attempts - 1, locked_by = NULL, locked_at = NULL, last_error = 'interrupted by shutdown', run_at = now(), updated_at = now() WHERE id = $1 AND `+ownLease,
+			job.ID, job.Attempt)
+		if uerr != nil {
+			log.Error("requeue interrupted job", "err", uerr)
 		}
 		return
 	}
@@ -482,6 +588,8 @@ func (q *Queue) reap(ctx context.Context) {
 	}
 	if n := len(kinds); n > 0 {
 		q.log.Warn("requeued stale jobs", "count", n)
-		track.Emit(ctx, track.Event{Name: "job.reaped", Surface: "job", ActorType: "system", Outcome: track.Error, ErrorCode: "internal", Props: map[string]any{"count": n}})
+		// The kinds (a bounded set) say which features were hit.
+		distinct := slices.Compact(slices.Sorted(slices.Values(kinds)))
+		track.Emit(ctx, track.Event{Name: "job.reaped", Surface: "job", ActorType: "system", Outcome: track.Error, ErrorCode: "internal", Props: map[string]any{"count": n, "kinds": distinct}})
 	}
 }

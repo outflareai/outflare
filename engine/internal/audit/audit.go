@@ -30,6 +30,11 @@ type Event struct {
 	// Props are extra product event properties (not stored): ids, enums
 	// and counts only, never names, addresses or text.
 	Props map[string]any
+	// WebhookData, when set, is what webhooks deliver as the event's data
+	// in place of Data, for an event whose subscribers need more than the
+	// audit log keeps (an approved content item's whole body). It is not
+	// stored.
+	WebhookData map[string]any
 	// BrandID is the brand the change belongs to. Left empty, it is the
 	// target's brand when the target has one (see brandOf), or data's
 	// brand_id.
@@ -168,6 +173,9 @@ func Record(ctx context.Context, q jobs.Querier, e Event) error {
 	}
 	ev := webhooks.FromAudit(id, at, e.WorkspaceID, e.ActorType, nullable(e.ActorID), e.Action,
 		nullable(e.TargetType), nullable(e.TargetID), nullable(e.RequestID), e.Data)
+	if e.WebhookData != nil {
+		ev.Data = e.WebhookData
+	}
 	ev.BrandID = nullable(e.BrandID)
 	return webhooks.Enqueue(ctx, q, ev)
 }

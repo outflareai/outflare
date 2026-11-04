@@ -401,7 +401,15 @@ your sequences with `uses_opener`.
   it and approve it (`POST /link-pitches/{id}/approve`) or reject it. Turn
   approval off per sequence (`PATCH /link-building/sequences/{id}` with
   `approve_pitches: false`, or in the settings) and pitches through it go
-  out as soon as their opener is written. A pitch without AI waits for a
+  out as soon as their opener is written, at most `auto_send_per_day` in
+  24 hours (10 unless you change it, up to 200). Pitches past the limit
+  wait as drafts (reason `daily_cap`) and go out on a later day, oldest
+  first, unless you approve them sooner. Even with approval off, a pitch
+  waits for a person when the AI writing its opener is unsure about it
+  (reason `unsure:` and why: the page doesn't fit, it couldn't tell what
+  the page is about, or the site looks spammy or sells links) or the site's
+  spam score is 30 or more (`spammy_site`). `GET /link-building/sequences`
+  shows each sequence's `auto_send_per_day` and `sent_today`. A pitch without AI waits for a
   person to write the opener. Pitches waiting show as a count on Link building
   in the sidebar and on the Pitches tab, in the workspace stats
   (`link_pitches_waiting`) and as a `link_pitches_waiting` item in the
@@ -491,7 +499,7 @@ connection, it answers `409 connector_needed`.
 ### Link building playbooks
 
 One [playbook](../playbooks/README.md) per way of earning links, each
-from find to pitch. Starting one creates a mission; every paid search or
+from find to pitch. Starting one starts an agent run; every paid search or
 read shows its cost first, and every pitch waits for approval unless its
 sequence skips it.
 

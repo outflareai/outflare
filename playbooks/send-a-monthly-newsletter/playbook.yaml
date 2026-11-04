@@ -1,0 +1,65 @@
+id: send-a-monthly-newsletter
+version: 1
+title: Send a newsletter people open
+summary: Draft a monthly newsletter from what the brand shipped and learned, send it to people who agreed to hear from it, and measure the lift against a holdout.
+description: |
+  A newsletter keeps customers and prospects close between purchases,
+  but only if it is worth opening and you can tell whether it moved
+  anything. This playbook drafts one issue a month from the brand's own
+  news, product updates and knowledge, sends it only to people who agreed
+  to email, through the marketing email guardrails (consent, frequency
+  cap, quiet hours), and keeps a holdout so the team sees what the
+  newsletter itself changed.
+tier: obvious
+goals: [retention, revenue]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: records, label: People with consent to email }
+  connections:
+    - capability: email.send
+      label: An email provider for marketing email
+      recommended: [resend, postmark, amazon_ses]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: news
+    label: What happened this month
+    help: Leave it empty and the agent drafts from the brand's knowledge and recent updates.
+    example: Launched the timeline view; new customer story from a design agency
+    optional: true
+steps:
+  - say: Read the brand's context and voice, and how the last issues did.
+    tools: [getBrandContext, listBrandEmailBroadcasts, getBrandEmailBroadcastLift]
+  - say: Gather this month's news from the brand's knowledge.
+    tools: [listKnowledgeItems, findKnowledgePassages]
+  - say: Draft the issue with a holdout, addressed to people with consent to email.
+    tools: [createBrandEmailBroadcast, updateBrandEmailBroadcast, listBrandEmailBroadcastRecipients]
+  - say: Send it once a person approves the draft.
+    tools: [sendBrandEmailBroadcast]
+  - say: A week later, read its lift against the holdout and note what to change next time.
+    tools: [getBrandEmailBroadcastLift]
+automation:
+  schedule: monthly
+guardrails:
+  - Every issue waits for a person's approval before it is sent.
+  - Only people with consent to email, through the marketing email guardrails.
+  - Never more than one issue a month, and never claims a feature or result the brand's knowledge doesn't support.
+measure:
+  - { metric: Lift against the holdout, how: "Conversions from people who got the issue against those held out." }
+  - { metric: Subscribers, how: "People with consent to email, gained and lost." }
+prompt: |
+  Draft {{brand}}'s newsletter for this month in the brand's voice,
+  from what it shipped and learned (start from "{{news}}" if I gave it). Send it to people who agreed
+  to email, with a holdout, once I approve it, and tell me its lift a
+  week later.
+example: |
+  Northpeak's October issue led with the timeline launch. It went to
+  3,800 people with consent; a week later, people who got it started 9%
+  more projects than the holdout.

@@ -589,7 +589,7 @@ func Domains(ctx context.Context, q *pgxpool.Pool, i connectors.Integration) ([]
 		UNION ALL
 		SELECT a.host, 2, NULL FROM integrations i, analytics_syncs a
 		WHERE i.id = $2 AND a.workspace_id = $1 AND a.host <> ''
-		  AND (analytics_site_brand($1, a.integration_id, a.site, a.host) IS NULL OR integration_serves(i, analytics_site_brand($1, a.integration_id, a.site, a.host)))
+		  AND (outflare_site_brand(a.integration_id, a.site) IS NULL OR integration_serves(i, outflare_site_brand(a.integration_id, a.site)))
 		ORDER BY 2, 3, 1`, i.WorkspaceID, i.ID)
 	if err != nil {
 		return nil, false, err

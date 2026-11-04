@@ -1,0 +1,62 @@
+id: help-in-communities
+version: 1
+title: Help people in the communities where buyers ask
+summary: Watch the forums and communities where the brand's buyers ask questions, and draft helpful answers from what the brand knows, for a person to approve.
+description: |
+  People ask for advice on Hacker News, Indie Hackers, Stack Overflow,
+  Quora and niche forums long before they talk to a vendor. A useful
+  answer there earns trust and visits for years; a pushy one costs the
+  brand its account. This playbook reads the threads in the communities
+  the team picks, finds the questions the brand can genuinely help with,
+  and drafts an answer from the brand's own knowledge. Every answer waits
+  for a person, and posting happens in a browser signed in as the brand's
+  own account.
+tier: clever
+goals: [customers, search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: communities
+    label: Communities to watch
+    help: Forums, subforums or tags, one per line.
+    example: Indie Hackers, Stack Overflow tag project-management
+  - name: per_week
+    label: Most answers a week
+    example: "5"
+steps:
+  - say: Read the brand's context and voice, and the brand's accounts on each community.
+    tools: [getBrandContext, listAccounts, listAccountIncidents]
+  - say: Read recent threads in each community in a browser, without posting.
+    tools: [createBrowserTask, getBrowserTask]
+  - say: Pick the questions the brand can genuinely help with, and draft an answer from what the brand knows.
+    tools: [findKnowledgePassages, askKnowledge]
+  - say: Post each answer a person approved, in a browser signed in as the brand's own account.
+    tools: [createBrowserTask, getBrowserTask]
+  - say: Keep each answer in Coverage and check it stays up.
+    tools: [createCoveragePlacements, checkCoveragePlacement]
+guardrails:
+  - Every answer waits for a person's approval.
+  - Answers help first; the brand is mentioned only where it is the honest answer, and always as the brand's own account.
+  - Follows each community's rules on self-promotion, and stays within the weekly limit.
+  - Never votes, asks for votes, or posts from more than one account.
+measure:
+  - { metric: Answers kept up, how: "Coverage placements of the community kind that are live." }
+  - { metric: Visits from communities, how: "Visits and sign-ups traced back to each answer." }
+prompt: |
+  Watch {{communities}} for questions {{brand}} can genuinely help with.
+  Draft at most {{per_week}} answers a week from what the brand knows,
+  helpful first, and post each one I approve from the brand's own
+  account.
+example: |
+  In two weeks the agent read 140 threads, drafted six answers, and the
+  team approved four. One answer on Stack Overflow brought 60 visits and
+  three trial sign-ups in its first month.

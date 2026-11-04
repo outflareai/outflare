@@ -27,7 +27,7 @@ export function CloudLocked({ feature }: { feature: CloudFeature }) {
           </a>
         }
       >
-        This server doesn't run it. It works the same way as the rest of Outflare, on your own connected accounts and AI key.
+        {feature.capability === "agent_mail" ? "This server does not run managed agent inboxes. Open Outflare Cloud to use Agent Mail in your workspace." : "This server doesn't run it. It works the same way as the rest of Outflare, on your own connected accounts and AI key."}
       </Empty>
     </div>
   );

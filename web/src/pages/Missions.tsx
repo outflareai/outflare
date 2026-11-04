@@ -1,22 +1,18 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import type { APIToken, BrandContext, Mission, MissionAction, MissionCall, MissionMode, MissionUpdate } from "@outflare/sdk";
+import { useCallback, useEffect, useState } from "react";
+import type { BrandContext, Mission, MissionAction, MissionCall, MissionUpdate } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
-import { api, errorMessage } from "../api";
-import { ask, Badge, Button, Card, confirmAction, CopyButton, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, Status, toast } from "../ui";
-import { ago, plural, stamp, when } from "../format";
+import { api } from "../api";
+import { Badge, Button, Card, Empty, field, Loading, PageHeader, Stat, Stats } from "../ui";
+import { ago, plural, stamp } from "../format";
 import { DataTable, type ColumnDef } from "@/components/data-table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ConnectorLogo } from "@/components/connector-logo";
-import { appPath } from "../lib/paths";
 import type { Tab } from "../App";
 
 // Missions: goals agents worked toward before agent runs on the action
-// layer. They are being retired: nothing starts a new one here. This page
-// is where a person sees what an agent did and why in a mission made
-// before, approves its plan and its writes, answers its questions, and
-// stops it.
+// layer. Missions are retired: nothing changes one any more. This page is
+// the record of what each one did: its goal and progress, every call an
+// agent made and why, the changes it held, and the notes on it.
 
 const statusLabel: Record<Mission["status"], string> = {
   draft: "Draft",
@@ -29,20 +25,6 @@ const statusLabel: Record<Mission["status"], string> = {
 };
 const statusTone = { draft: "grey", pending_approval: "amber", running: "green", paused: "grey", completed: "blue", stopped: "grey", failed: "red" } as const;
 
-const modes: { value: MissionMode; label: string; help: string }[] = [
-  { value: "dry_run", label: "Dry run", help: "The agent can read everything. Its writes are recorded so you can review them, and nothing changes." },
-  { value: "approve_writes", label: "Approve each change", help: "Every change the agent asks for waits here until someone approves it." },
-  { value: "autonomous", label: "Autonomous", help: "Changes run straight away, within the mission's limits and the agent's token limits." },
-];
-const modeLabel = (m: MissionMode) => modes.find((x) => x.value === m)?.label ?? m;
-
-const writesText: Record<Mission["writes"], string> = {
-  run: "Changes run straight away, within the limits below.",
-  wait_for_approval: "Every change waits for your approval.",
-  dry_run: "Changes are dry runs: recorded for review, never run.",
-  refused: "Changes are refused. Reads still work while paused.",
-};
-
 const metricLabel = { meetings: "meetings", replies: "replies", sends: "emails sent", leads: "leads contacted", revenue_attributed: "USD revenue from its sequences", revenue_deals: "USD in won deals", revenue_referred: "USD referred by partners" } as const;
 const money = (cents: number) => (cents / 100).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cents % 100 ? 2 : 0 });
 // The end date in the viewer's time zone, with the zone named.
@@ -51,19 +33,12 @@ const isLive = (m: Mission) => !["completed", "stopped", "failed"].includes(m.st
 
 type Detail = { mission: Mission; brand?: BrandContext | null; updates: MissionUpdate[]; open_connect_requests: MissionUpdate[]; how_to_act: { header: string; writes: string } };
 
-export function Missions({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go: (tab: Tab) => void }) {
-  if (open) return <MissionDetail key={open} ws={ws} id={open} canManage={canManage} onBack={() => setOpen(undefined)} />;
+export function Missions({ ws, open, setOpen, go }: { ws: string; open?: string; setOpen: (id?: string) => void; go: (tab: Tab) => void }) {
+  if (open) return <MissionDetail key={open} ws={ws} id={open} onBack={() => setOpen(undefined)} go={go} />;
   return <MissionList ws={ws} onOpen={setOpen} go={go} />;
 }
 
 // ---- List ----
-
-function needsYou(m: Mission): string[] {
-  const out: string[] = [];
-  if (m.status === "pending_approval") out.push("Plan to approve");
-  if (m.pending_actions > 0) out.push(plural(m.pending_actions, "change") + " to approve");
-  return out;
-}
 
 function GoalBar({ m, compact = false }: { m: Mission; compact?: boolean }) {
   if (!m.goal.metric || !m.goal.target) return <span className="text-muted-foreground">{compact ? "—" : "No number set"}</span>;
@@ -93,18 +68,8 @@ const columns: ColumnDef<Mission, unknown>[] = [
     ),
   },
   { id: "status", header: "Status", accessorFn: (m) => m.status, cell: ({ row: { original: m } }) => <Badge tone={statusTone[m.status]}>{statusLabel[m.status]}</Badge> },
-  { id: "mode", header: "Changes", accessorFn: (m) => m.mode, cell: ({ row: { original: m } }) => <span className="whitespace-nowrap text-[12px]">{modeLabel(m.mode)}</span> },
   { id: "goal", header: "Goal", accessorFn: (m) => m.goal.current, enableSorting: false, cell: ({ row: { original: m } }) => <GoalBar m={m} compact /> },
   { id: "agent", header: "Agent", accessorFn: (m) => m.token_name ?? m.created_by_name ?? "", cell: ({ row: { original: m } }) => <span className="whitespace-nowrap">{m.token_name ?? <span className="text-muted-foreground">Any agent</span>}</span> },
-  {
-    id: "needs",
-    header: "Needs you",
-    accessorFn: (m) => needsYou(m).length,
-    cell: ({ row: { original: m } }) => {
-      const n = needsYou(m);
-      return n.length ? <div className="flex flex-wrap gap-1">{n.map((x) => <Badge key={x} tone="amber">{x}</Badge>)}</div> : <span className="text-muted-foreground">—</span>;
-    },
-  },
   { id: "last", header: "Last call", accessorFn: (m) => m.last_call_at ?? "", meta: { mono: true }, cell: ({ row: { original: m } }) => <span className="whitespace-nowrap text-muted-foreground">{m.last_call_at ? ago(m.last_call_at) : "never"}</span> },
 ];
 
@@ -124,50 +89,33 @@ function MissionList({ ws, onOpen, go }: { ws: string; onOpen: (id: string) => v
   }, [load]);
 
   if (!list) return <Loading />;
-  const waiting = list.filter((m) => needsYou(m).length > 0);
   const shown = list.filter((m) => filter === "all" || (filter === "live") === isLive(m));
-  const running = list.filter((m) => m.status === "running").length;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Missions"
-        description="Goals your agents worked toward before agent runs. See every call an agent made and why, approve a plan or a change, and stop a mission at any time."
+        description="Goals your agents worked toward before agent runs: what each one did, every call an agent made and why, and the changes it held."
       />
       <Retired go={go} />
       {list.length === 0 ? (
-        <Empty title="No missions">Missions are retired: work runs on the Agents page now. Missions made before keep working here until they end.</Empty>
+        <Empty title="No missions">Missions are retired, and this workspace had none. Work runs on the Agents page.</Empty>
       ) : (
         <>
-          <Stats cols={4}>
-            <Stat label="Running" value={running} />
-            <Stat label="Needs you" value={waiting.length} tone={waiting.length ? "amber" : undefined} sub={waiting.length ? "plans or changes to approve" : "nothing waiting"} />
+          <Stats cols={3}>
             <Stat label="Sent by missions" value={list.reduce((n, m) => n + m.progress.sends, 0).toLocaleString()} />
             <Stat label="Meetings from missions" value={list.reduce((n, m) => n + m.progress.meetings, 0).toLocaleString()} />
           </Stats>
-          {waiting.length > 0 && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px]">
-              <p className="font-medium text-amber-800 dark:text-amber-300">Waiting for you</p>
-              <ul className="mt-1 space-y-0.5">
-                {waiting.map((m) => (
-                  <li key={m.id}>
-                    <button className="underline-offset-2 hover:underline" onClick={() => onOpen(m.id)}>{m.name}</button>
-                    <span className="text-muted-foreground">: {needsYou(m).join(", ")}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
           <DataTable
             data={shown}
             rowId={(m) => m.id}
             onRowClick={(m) => onOpen(m.id)}
             columns={columns}
             searchPlaceholder="Filter missions"
-            empty={filter === "live" ? "No running or draft missions. Ended ones are under All." : "No missions here."}
+            empty={filter === "live" ? "No missions were left running or in draft. Ended ones are under All." : "No missions here."}
             toolbar={
               <select className={field} aria-label="Show" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
-                <option value="live">Active and drafts</option>
+                <option value="live">Left running and drafts</option>
                 <option value="ended">Ended</option>
                 <option value="all">All</option>
               </select>
@@ -179,7 +127,6 @@ function MissionList({ ws, onOpen, go }: { ws: string; onOpen: (id: string) => v
                   <Badge tone={statusTone[m.status]}>{statusLabel[m.status]}</Badge>
                 </div>
                 <GoalBar m={m} compact />
-                {needsYou(m).length > 0 && <div className="text-[12px] text-amber-700 dark:text-amber-400">{needsYou(m).join(", ")}</div>}
               </div>
             )}
           />
@@ -189,232 +136,18 @@ function MissionList({ ws, onOpen, go }: { ws: string; onOpen: (id: string) => v
   );
 }
 
-// Retired says where the work went: missions are being retired for agent
-// runs on the action layer, and nothing starts a new one from here.
+// Retired says where the work went: missions are retired for agent runs
+// on the action layer, and nothing changes one from here.
 function Retired({ go }: { go: (tab: Tab) => void }) {
   return (
     <div className="rounded-lg border bg-muted/40 px-4 py-3 text-[13px]">
-      <p className="font-medium">Missions are being retired.</p>
+      <p className="font-medium">Missions are retired.</p>
       <p className="mt-1 text-muted-foreground">
         New work runs as an <button type="button" className="underline underline-offset-2" onClick={() => go("agents")}>agent run</button>: start a playbook from the{" "}
         <button type="button" className="underline underline-offset-2" onClick={() => go("playbooks")}>Playbooks</button> page and Outflare's agent carries it out on your AI model, with every change through the action layer.
-        Your own agent works as an API token with the action layer on, with no mission. Missions already made keep working here until they end.
+        Your own agent works as an API token with the action layer on, with no mission. What missions did stays here as a record; none of them acts or changes any more, including ones left running.
       </p>
     </div>
-  );
-}
-
-// What stops the AI model being used, when the server says so.
-const aiCodes = ["connector_needed", "ai_model_needed", "ai_budget_reached"];
-type AIBlock = { code: string; message: string } | null;
-function aiBlock(status: number, error: unknown): AIBlock {
-  const e = (error as { error?: { code?: string; message?: string } })?.error;
-  return status === 409 && e?.code && aiCodes.includes(e.code) ? { code: e.code, message: e.message ?? "" } : null;
-}
-
-function AINeeded({ ws, block }: { ws: string; block: AIBlock }) {
-  if (!block) return null;
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px]">
-      <span>{block.code === "connector_needed" ? "Connect an AI model with your own API key first: Claude, OpenAI, Gemini or Mistral. Usage is billed to your account with them." : block.message}</span>
-      <a href={appPath(ws, "workspace")}><Button type="button">{block.code === "connector_needed" ? "Choose an AI model" : "Open AI settings"}</Button></a>
-    </div>
-  );
-}
-
-// The model in use, under the goal box.
-
-// Type a goal, and the workspace's AI model drafts the mission: steps,
-// limits and the connectors it needs. The draft waits for a person to
-// approve it.
-// ---- Create and edit ----
-
-function MissionForm({ ws, mission, canApprove = true, onClose, onSaved }: { ws: string; mission?: Mission; canApprove?: boolean; onClose: () => void; onSaved: (m: Mission) => void }) {
-  const [name, setName] = useState(mission?.name ?? "");
-  const [goal, setGoal] = useState(mission?.goal.text ?? "");
-  const [metric, setMetric] = useState<string>(mission?.goal.metric ?? "meetings");
-  const [target, setTarget] = useState(mission?.goal.target ? String(mission.goal.target) : "");
-  const [instructions, setInstructions] = useState(mission?.instructions ?? "");
-  const [tokenId, setTokenId] = useState(mission?.token_id ?? "");
-  const [maxSends, setMaxSends] = useState(mission?.limits.max_sends ? String(mission.limits.max_sends) : "");
-  const [maxSpend, setMaxSpend] = useState(mission?.limits.max_spend_cents != null ? String(mission.limits.max_spend_cents / 100) : "");
-  const [endsAt, setEndsAt] = useState(mission?.limits.ends_at ? mission.limits.ends_at.slice(0, 10) : "");
-  const [tokens, setTokens] = useState<APIToken[]>([]);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const approved = mission && (mission.status === "running" || mission.status === "paused");
-  const limitsLocked = approved && !canApprove;
-
-  useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/api-tokens", { params: { path: { ws } } }).then(({ data }) => setTokens(data?.data ?? []));
-  }, [ws]);
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setError("");
-    const n = target.trim() ? Number(target) : null;
-    if (n !== null && (!Number.isInteger(n) || n < 1)) return setError("The target must be a whole number, 1 or more.");
-    const body = {
-      name: name.trim(),
-      goal: goal.trim(),
-      goal_metric: n ? (metric as "meetings") : null,
-      goal_target: n,
-      instructions,
-      ...(limitsLocked
-        ? {}
-        : {
-            token_id: tokenId || null,
-            max_sends: maxSends.trim() ? Number(maxSends) : null,
-            max_spend_cents: maxSpend.trim() ? Math.round(Number(maxSpend) * 100) : null,
-            ends_at: endsAt ? new Date(`${endsAt}T23:59:00`).toISOString() : null,
-          }),
-    };
-    setBusy(true);
-    const res = mission
-      ? await api.PATCH("/v1/workspaces/{ws}/missions/{id}", { params: { path: { ws, id: mission.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/missions", { params: { path: { ws } }, body });
-    setBusy(false);
-    if (res.error || !res.data) return setError(errorMessage(res.error));
-    toast(mission ? "Mission saved." : "Mission created as a draft.");
-    onSaved(res.data);
-  }
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{mission ? "Edit mission" : "New mission"}</DialogTitle>
-          <DialogDescription>{mission ? "Changes apply to the agent's next check-in." : "It starts as a draft. An agent can rehearse it in a dry run, then send you its plan."}</DialogDescription>
-        </DialogHeader>
-        <form id="mission-form" onSubmit={save} className="space-y-4 text-[13px]">
-          <Labeled label="Name">
-            <input className={`${field} w-full`} required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} placeholder="Fintech CFOs, Australia, Q4" autoFocus />
-          </Labeled>
-          <Labeled label="Goal" hint="What success looks like, in words the agent will read.">
-            <textarea className={`${field} w-full`} rows={2} value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="Book 10 meetings with CFOs at Australian fintechs with 50 to 500 staff." />
-          </Labeled>
-          <Labeled label="Track a number" hint="Optional. Progress shows on this page and to the agent. Revenue counts in whole US dollars: from its sequences counts payments credited to the campaign links in its emails; won deals counts deals tagged with the mission.">
-            <div className="flex gap-2">
-              <input className={`${field} w-24`} inputMode="numeric" aria-label="Target" placeholder="10" value={target} onChange={(e) => setTarget(e.target.value.replace(/\D/g, ""))} />
-              <select className={field} aria-label="Metric" value={metric} onChange={(e) => setMetric(e.target.value)}>
-                {Object.entries(metricLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-          </Labeled>
-          <Labeled label="Instructions" hint="On top of your company and brand context: what to avoid, who to exclude, tone. Markdown.">
-            <textarea className={`${field} w-full font-mono text-[12px]`} rows={4} value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="- Skip anyone we emailed in the last 90 days&#10;- No more than 3 steps" />
-          </Labeled>
-          <fieldset className="space-y-3 rounded-lg border p-3" disabled={limitsLocked}>
-            <legend className="px-1 text-[12px] font-medium">Limits {limitsLocked && <span className="font-normal text-muted-foreground">(need approval rights to change)</span>}</legend>
-            <Labeled label="Agent" hint="Only this API token may act in the mission. Leave empty to allow any token with missions.run.">
-              <select className={`${field} w-full`} value={tokenId} onChange={(e) => setTokenId(e.target.value)}>
-                <option value="">Any agent token</option>
-                {tokens.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </Labeled>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <Labeled label="Most emails">
-                <input className={`${field} w-full`} inputMode="numeric" placeholder="No limit" value={maxSends} onChange={(e) => setMaxSends(e.target.value.replace(/\D/g, ""))} />
-              </Labeled>
-              <Labeled label="Most spend (USD)">
-                <input className={`${field} w-full`} inputMode="decimal" placeholder="No limit" value={maxSpend} onChange={(e) => setMaxSpend(e.target.value.replace(/[^\d.]/g, ""))} />
-              </Labeled>
-              <Labeled label="Ends on">
-                <input className={`${field} w-full`} type="date" value={endsAt} min={new Date().toISOString().slice(0, 10)} onChange={(e) => setEndsAt(e.target.value)} />
-              </Labeled>
-            </div>
-            <p className="text-[12px] text-muted-foreground">These apply on top of the token's own daily send budget. Spend counts what paid connectors record in the spend ledger.</p>
-          </fieldset>
-          <ErrorText>{error}</ErrorText>
-        </form>
-        <DialogFooter>
-          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" form="mission-form" disabled={busy || !name.trim()}>{busy ? "Saving…" : mission ? "Save" : "Create draft"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Labeled({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[13px] font-medium">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[12px] text-muted-foreground">{hint}</span>}
-    </label>
-  );
-}
-
-type Runner = Mission["runner"];
-
-const runners: { value: Runner; label: string; help: string }[] = [
-  { value: "builtin", label: "Outflare's agent", help: "Your AI model carries out the plan with your key, in turns. It answers your notes within a minute and looks again when it says it will. Email replies it writes always wait for you." },
-  { value: "external", label: "Your own agent", help: "An agent you run, such as Claude Code over MCP or a script, acts in the mission by sending its header." },
-];
-
-function ApproveDialog({ ws, m, onClose, onDone }: { ws: string; m: Mission; onClose: () => void; onDone: (m: Mission) => void }) {
-  const [mode, setMode] = useState<MissionMode>(m.mode === "dry_run" ? "approve_writes" : m.mode);
-  // A mission an outside agent started stays with it; one a person started goes to Outflare's agent.
-  const [runner, setRunner] = useState<Runner>(m.runner === "builtin" || (!m.started_by_agent && !m.token_id) ? "builtin" : "external");
-  const [note, setNote] = useState("");
-  const [error, setError] = useState("");
-  const [block, setBlock] = useState<AIBlock>(null);
-  const [busy, setBusy] = useState(false);
-  async function approve() {
-    setBusy(true);
-    setError("");
-    setBlock(null);
-    const { data, error, response } = await api.POST("/v1/workspaces/{ws}/missions/{id}/approve", { params: { path: { ws, id: m.id } }, body: { mode, runner, note: note.trim() || undefined } });
-    setBusy(false);
-    const b = aiBlock(response.status, error);
-    if (b) return setBlock(b);
-    if (error || !data) return setError(errorMessage(error));
-    toast(runner === "builtin" ? "Mission approved. Outflare's agent is starting on it." : "Mission approved and running.");
-    onDone(data);
-  }
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Approve “{m.name}”</DialogTitle>
-          <DialogDescription>Choose who runs it and how its changes run. You can pause or stop it at any time.</DialogDescription>
-        </DialogHeader>
-        <p className="text-[12px] font-medium text-muted-foreground">Who runs it</p>
-        <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Who runs it">
-          {runners.map((o) => (
-            <label key={o.value} className={`flex cursor-pointer gap-3 rounded-lg border p-3 text-[13px] ${runner === o.value ? "border-ring bg-accent/50" : ""}`}>
-              <input type="radio" name="runner" className="mt-0.5" checked={runner === o.value} onChange={() => setRunner(o.value)} />
-              <span>
-                <span className="font-medium">{o.label}</span>
-                <span className="block text-muted-foreground">{o.help}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <AINeeded ws={ws} block={block} />
-        <p className="text-[12px] font-medium text-muted-foreground">How its changes run</p>
-        <div className="space-y-2" role="radiogroup" aria-label="How changes run">
-          {modes.map((o) => (
-            <label key={o.value} className={`flex cursor-pointer gap-3 rounded-lg border p-3 text-[13px] ${mode === o.value ? "border-ring bg-accent/50" : ""}`}>
-              <input type="radio" name="mode" className="mt-0.5" checked={mode === o.value} onChange={() => setMode(o.value)} />
-              <span>
-                <span className="font-medium">{o.label}</span>
-                {o.value === "approve_writes" && <span className="ml-1.5 text-[11px] text-muted-foreground">recommended to start</span>}
-                <span className="block text-muted-foreground">{o.help}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <Limits m={m} />
-        <textarea className={`${field} w-full`} rows={2} placeholder="Note for the agent (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-        <ErrorText>{error}</ErrorText>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={approve} disabled={busy}>{busy ? "Approving…" : "Approve and start"}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -439,11 +172,9 @@ function Limits({ m }: { m: Mission }) {
 
 // ---- Detail ----
 
-function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; canManage: boolean; onBack: () => void }) {
+function MissionDetail({ ws, id, onBack, go }: { ws: string; id: string; onBack: () => void; go: (tab: Tab) => void }) {
   const [d, setD] = useState<Detail | null>(null);
   const [missing, setMissing] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [approving, setApproving] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const path = { ws, id };
 
@@ -470,48 +201,21 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
   if (!d) return <Loading />;
   const m = d.mission;
 
-  async function act(path_: "/pause" | "/resume" | "/stop", label: string, body?: Record<string, string>) {
-    const url = `/v1/workspaces/{ws}/missions/{id}${path_}` as "/v1/workspaces/{ws}/missions/{id}/pause";
-    const { error } = await api.POST(url, { params: { path }, body: body as { reason?: string } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(label);
-    load();
-  }
-  async function stop() {
-    if (!(await confirmAction(`Stop “${m.name}”?`, "The mission ends now. Changes waiting for approval are canceled and its sequences are paused. You can restart a sequence yourself, but not the mission.", "Stop mission"))) return;
-    act("/stop", "Mission stopped.", { reason: "Stopped from the dashboard." });
-  }
-
-  const live = isLive(m);
-  const actions = canManage && (
-    <>
-      {(m.status === "pending_approval" || m.status === "draft") && <Button onClick={() => setApproving(true)}>{m.status === "draft" ? "Approve without a plan" : "Review and approve"}</Button>}
-      {m.status === "running" && <Button variant="ghost" onClick={() => act("/pause", "Mission paused. Its sequences stop sending.", { reason: "Paused from the dashboard." })}>Pause</Button>}
-      {m.status === "paused" && <Button onClick={() => act("/resume", "Mission resumed.")}>Resume</Button>}
-      {live && <Button variant="ghost" onClick={() => setEditing(true)}>Edit</Button>}
-      {live && <Button variant="danger" onClick={stop}>Stop</Button>}
-    </>
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
         back={{ label: "All missions", onClick: onBack }}
         title={<>{m.name} <Badge tone={statusTone[m.status]}>{statusLabel[m.status]}</Badge></>}
         description={m.goal.text || undefined}
-        action={actions}
       />
+      <Retired go={go} />
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-card px-4 py-2.5 text-[13px] shadow-xs">
-        <Status tone={m.writes === "run" ? "green" : m.writes === "refused" ? "red" : "amber"}>{writesText[m.writes]}</Status>
-        {m.status_reason && m.status !== "running" && <span className="text-muted-foreground">{statusLabel[m.status]}: {m.status_reason}</span>}
-        {m.started_by_agent && <Badge tone="blue">started by agent</Badge>}
-        {m.runner === "builtin" && m.status === "running" && (
-          <span className="text-muted-foreground">
-            Outflare's agent {m.turns.next_at ? (new Date(m.turns.next_at).getTime() <= Date.now() + 60000 ? "is working on it now" : `looks again ${when(m.turns.next_at)}`) : "is waiting for you"}
-          </span>
-        )}
-      </div>
+      {(m.status_reason || m.started_by_agent) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-card px-4 py-2.5 text-[13px] shadow-xs">
+          {m.status_reason && <span className="text-muted-foreground">{statusLabel[m.status]}: {m.status_reason}</span>}
+          {m.started_by_agent && <Badge tone="blue">started by agent</Badge>}
+        </div>
+      )}
 
       <Stats cols={5}>
         <Stat label="Goal" value={m.goal.target ? `${m.goal.current}/${m.goal.target}` : "—"} sub={m.goal.metric ? metricLabel[m.goal.metric] : "no number set"} tone={m.goal.reached ? "green" : undefined} />
@@ -520,8 +224,6 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
         <Stat label="Meetings" value={m.progress.meetings.toLocaleString()} sub={`${plural(m.progress.leads, "lead")} in its campaigns`} />
         <Stat label="Spend" value={money(m.progress.spend_cents)} sub={m.limits.max_spend_cents != null ? `limit ${money(m.limits.max_spend_cents)}` : "no mission limit"} />
       </Stats>
-
-      <NeedsYou ws={ws} d={d} canManage={canManage} refresh={refresh} onChange={load} />
 
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <Tabs defaultValue="activity" className="min-w-0">
@@ -532,11 +234,11 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
             <TabsTrigger value="changes">Changes</TabsTrigger>
           </TabsList>
           <TabsContent value="activity" className="mt-4">
-            <Activity ws={ws} m={m} updates={d.updates} canManage={canManage && live} onPosted={load} />
+            <Activity updates={d.updates} />
           </TabsContent>
           <TabsContent value="plan" className="mt-4 space-y-4">
             <Card title="Plan" description={m.plan_updated_at ? `Updated ${ago(m.plan_updated_at)}` : "The agent has not written one yet."}>
-              {m.plan ? <Prose text={m.plan} /> : <p className="text-[13px] text-muted-foreground">An agent submits its plan with submit_mission_plan before you approve.</p>}
+              {m.plan ? <Prose text={m.plan} /> : <p className="text-[13px] text-muted-foreground">No plan was written.</p>}
             </Card>
             {m.instructions && <Card title="Instructions"><Prose text={m.instructions} /></Card>}
             {d.brand && (
@@ -561,30 +263,17 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
           <Card title="Limits">
             <Limits m={m} />
           </Card>
-          {m.runner === "builtin" ? (
+          {m.runner === "builtin" && (
             <Card title="Outflare's agent">
               <div className="space-y-2 text-[13px]">
                 {m.turns.error && <p className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-300">The last turn failed: {m.turns.error}</p>}
-                {m.turns.summary ? <p>{m.turns.summary}</p> : <p className="text-muted-foreground">It hasn't taken a turn yet.</p>}
+                {m.turns.summary ? <p>{m.turns.summary}</p> : <p className="text-muted-foreground">It never took a turn.</p>}
                 <dl className="space-y-1 text-[12px]">
                   <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Turns</dt><dd>{m.turns.count.toLocaleString()}</dd></div>
                   {m.turns.last_at && <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Last turn</dt><dd title={stamp(m.turns.last_at)}>{ago(m.turns.last_at)}</dd></div>}
-                  {m.turns.next_at && m.status === "running" && <div className="flex justify-between gap-2"><dt className="text-muted-foreground">Next turn</dt><dd>{when(m.turns.next_at)}</dd></div>}
                 </dl>
-                <p className="text-[12px] text-muted-foreground">Write to it under Activity and it answers within a minute.</p>
               </div>
             </Card>
-          ) : (
-          <Card title="For the agent">
-            <div className="space-y-2 text-[12px]">
-              <p className="text-muted-foreground">Calls with this header act in the mission:</p>
-              <div className="flex items-center gap-1 rounded border bg-muted/40 px-2 py-1 font-mono">
-                <span className="truncate">{d.how_to_act.header}</span>
-                <CopyButton text={d.how_to_act.header} label="Copy header" />
-              </div>
-              <p className="text-muted-foreground">Over MCP: <span className="font-mono">use_mission</span> with id <span className="font-mono">{m.id.slice(0, 8)}…</span></p>
-            </div>
-          </Card>
           )}
           <Card title="History">
             <dl className="space-y-1 text-[12px]">
@@ -600,8 +289,6 @@ function MissionDetail({ ws, id, canManage, onBack }: { ws: string; id: string; 
           <Prose text={m.report} />
         </Card>
       )}
-      {editing && <MissionForm ws={ws} mission={m} canApprove={canManage} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />}
-      {approving && <ApproveDialog ws={ws} m={m} onClose={() => setApproving(false)} onDone={() => { setApproving(false); load(); }} />}
     </div>
   );
 }
@@ -629,248 +316,13 @@ function Prose({ text }: { text: string }) {
   );
 }
 
-// What the person needs to do now: held changes and connect requests.
-function NeedsYou({ ws, d, canManage, refresh, onChange }: { ws: string; d: Detail; canManage: boolean; refresh: number; onChange: () => void }) {
-  const m = d.mission;
-  const [pending, setPending] = useState<MissionAction[]>([]);
-  useEffect(() => {
-    if (m.pending_actions === 0) return setPending([]);
-    api.GET("/v1/workspaces/{ws}/missions/{id}/actions", { params: { path: { ws, id: m.id }, query: { status: "pending" } } }).then(({ data }) => setPending(data?.data ?? []));
-  }, [ws, m.id, m.pending_actions, refresh]);
-
-  const requests = d.open_connect_requests;
-  // The agent's latest question, unless a person wrote after it.
-  const lastPerson = d.updates.find((u) => u.author === "person");
-  const question = d.updates.find((u) => u.author === "agent" && u.kind === "question" && (!lastPerson || u.id > lastPerson.id));
-  if (pending.length === 0 && requests.length === 0 && !question && m.status !== "pending_approval") return null;
-  return (
-    <Card title="Needs you" description="The agent is waiting on these.">
-      <div className="space-y-3">
-        {m.status === "pending_approval" && (
-          <p className="text-[13px]">The plan is waiting for your approval. Read it under <span className="font-medium">Plan and context</span>, then use <span className="font-medium">Review and approve</span> above.</p>
-        )}
-        {question && <Question ws={ws} missionId={m.id} q={question} canAnswer={canManage && isLive(m)} onAnswered={onChange} />}
-        {requests.map((r) => (
-          <ConnectRequest key={r.id} ws={ws} missionId={m.id} r={r} canManage={canManage} onDone={onChange} />
-        ))}
-        {pending.map((a) => (
-          <HeldChange key={a.id} ws={ws} a={a} canManage={canManage} onDone={onChange} />
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-function Question({ ws, missionId, q, canAnswer, onAnswered }: { ws: string; missionId: string; q: MissionUpdate; canAnswer: boolean; onAnswered: () => void }) {
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function answer(e: FormEvent) {
-    e.preventDefault();
-    if (!body.trim()) return;
-    setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/missions/{id}/updates", { params: { path: { ws, id: missionId } }, body: { kind: "instruction", body: body.trim() } });
-    setBusy(false);
-    if (error) return toast(errorMessage(error), "error");
-    setBody("");
-    toast("Answer sent. The agent reads it at its next check-in.");
-    onAnswered();
-  }
-  return (
-    <div className="rounded-lg border p-3 text-[13px]">
-      <div className="font-medium">The agent asked</div>
-      <p>{q.body}</p>
-      <p className="mt-0.5 text-[12px] text-muted-foreground">{ago(q.created_at)}</p>
-      {canAnswer && (
-        <form onSubmit={answer} className="mt-2 flex flex-col gap-2 sm:flex-row">
-          <input className={`${field} min-w-0 flex-1`} placeholder="Your answer" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Answer to the agent" />
-          <Button type="submit" disabled={busy || !body.trim()}>Answer</Button>
-        </form>
-      )}
-    </div>
-  );
-}
-
-function ConnectRequest({ ws, missionId, r, canManage, onDone }: { ws: string; missionId: string; r: MissionUpdate; canManage: boolean; onDone: () => void }) {
-  const data = (r.data ?? {}) as Record<string, unknown>;
-  const connector = String(data.connector ?? "");
-  const connectorName = String(data.connector_name ?? connector.replace(/^./, (c) => c.toUpperCase()));
-  const [link, setLink] = useState("");
-  async function resolve() {
-    const { error } = await api.POST("/v1/workspaces/{ws}/missions/{id}/updates/{update}/resolve", { params: { path: { ws, id: missionId, update: r.id } }, body: { note: "Not needed." } });
-    if (error) return toast(errorMessage(error), "error");
-    toast("Closed. The agent will carry on without it.");
-    onDone();
-  }
-  // A one-time link for whoever holds the key: no Outflare account needed.
-  async function sendLink() {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/connect-requests", { params: { path: { ws } }, body: { connector, reason: r.body.slice(0, 500) } });
-    if (error || !data?.url) return toast(errorMessage(error), "error");
-    setLink(data.url);
-    try {
-      await navigator.clipboard.writeText(data.url);
-      toast("Link copied. Send it to whoever has the key.");
-    } catch {
-      toast("Link ready. Copy it below.");
-    }
-  }
-  return (
-    <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-3">
-      <div className="flex min-w-0 gap-3 text-[13px]">
-        {connector && <ConnectorLogo id={connector} />}
-        <div className="min-w-0">
-          <div className="font-medium">Connect {connectorName}</div>
-          <p className="text-muted-foreground">{r.body}</p>
-          <p className="mt-0.5 text-[12px] text-muted-foreground">Asked {ago(r.created_at)}. Closes by itself once {connectorName} is connected.</p>
-          {link && (
-            <div className="mt-2 flex items-center gap-1 rounded border bg-muted/40 px-2 py-1 font-mono text-[12px]">
-              <span className="truncate">{link}</span>
-              <CopyButton text={link} label="Copy link" />
-            </div>
-          )}
-          {link && <p className="mt-1 text-[12px] text-muted-foreground">Works once, for 24 hours, without an Outflare account.</p>}
-        </div>
-      </div>
-      {canManage && (
-        <div className="flex flex-wrap gap-2">
-          <a href={appPath(ws, "connectors", connector)} target="_blank" rel="noreferrer">
-            <Button type="button">Connect</Button>
-          </a>
-          <Button variant="ghost" onClick={sendLink}>Send a link</Button>
-          <Button variant="ghost" onClick={resolve}>Not needed</Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HeldChange({ ws, a, canManage, onDone }: { ws: string; a: MissionAction; canManage: boolean; onDone: () => void }) {
-  const [busy, setBusy] = useState(false);
-  async function decide(approve: boolean) {
-    let note = "";
-    if (!approve) {
-      const r = await ask({ title: "Reject this change?", body: "The agent sees your reason as an instruction.", input: { label: "Reason", placeholder: "e.g. Use a softer subject line" }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Reject", value: "ok", variant: "danger-solid" }] });
-      if (r?.choice !== "ok") return;
-      note = r.value;
-    }
-    setBusy(true);
-    const p = { params: { path: { ws, id: a.mission_id, action: a.id } }, body: { note } };
-    const { data, error } = approve
-      ? await api.POST("/v1/workspaces/{ws}/missions/{id}/actions/{action}/approve", p)
-      : await api.POST("/v1/workspaces/{ws}/missions/{id}/actions/{action}/reject", p);
-    setBusy(false);
-    if (error) return toast(errorMessage(error), "error");
-    if (approve) toast(data?.status === "executed" ? "Approved and done." : `Approved, but it failed: ${resultMessage(data)}`, data?.status === "executed" ? "ok" : "error");
-    else toast("Rejected. The agent will see your reason.");
-    onDone();
-  }
-  return (
-    <div className="rounded-lg border p-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 text-[13px]">
-          <div className="font-medium">{a.summary}</div>
-          {a.reason && <p className="text-muted-foreground">“{a.reason}”</p>}
-          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{a.method} {a.path.replace(/^\/v1\/workspaces\/[^/]+/, "")} · {ago(a.created_at)}{a.actor_name && ` · ${a.actor_name}`}</p>
-        </div>
-        {canManage && (
-          <div className="flex gap-2">
-            <Button disabled={busy} onClick={() => decide(true)}>Approve</Button>
-            <Button disabled={busy} variant="ghost" onClick={() => decide(false)}>Reject</Button>
-          </div>
-        )}
-      </div>
-      {a.body !== undefined && a.body !== null && (
-        <>
-          <ChangePreview body={a.body} />
-          <details className="mt-2">
-            <summary className="cursor-pointer text-[12px] text-muted-foreground">Exact request</summary>
-            <pre className="mt-1 max-h-72 overflow-auto rounded border bg-muted/40 p-2 text-[11px]"><code>{JSON.stringify(a.body, null, 2)}</code></pre>
-          </details>
-        </>
-      )}
-    </div>
-  );
-}
-
-type StepBody = { subject?: string; body?: string; delay_days?: number };
-
-// A readable view of what a held change will do: the emails of a sequence,
-// how many leads it adds, and its other settings.
-export function ChangePreview({ body }: { body: unknown }) {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
-  const b = body as Record<string, unknown>;
-  const steps = Array.isArray(b.steps) ? (b.steps as StepBody[]) : [];
-  const lists = Object.entries(b).filter(([, v]) => Array.isArray(v) && v !== b.steps) as [string, unknown[]][];
-  const fields = Object.entries(b).filter(([, v]) => v !== null && ["string", "number", "boolean"].includes(typeof v));
-  if (steps.length === 0 && lists.length === 0 && fields.length === 0) return null;
-  const label = (k: string) => k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
-  return (
-    <div className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3 text-[13px]">
-      {(fields.length > 0 || lists.length > 0) && (
-        <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[9rem_1fr]">
-          {fields.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted-foreground">{label(k)}</dt>
-              <dd className="min-w-0 break-words">{String(v)}</dd>
-            </div>
-          ))}
-          {lists.map(([k, v]) => (
-            <div key={k} className="contents">
-              <dt className="text-muted-foreground">{label(k)}</dt>
-              <dd>{plural(v.length, "item")}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {steps.length > 0 && (
-        <ol className="space-y-2">
-          {steps.map((st, i) => (
-            <li key={i} className="rounded border bg-background p-2">
-              <div className="text-[12px] text-muted-foreground">
-                Email {i + 1}
-                {i > 0 && ` · ${st.delay_days ? `${plural(st.delay_days, "day")} after the last` : "same day"}`}
-                {i > 0 && !st.subject && " · replies in the same thread"}
-              </div>
-              {st.subject && <div className="font-medium">{st.subject}</div>}
-              {st.body && <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{st.body}</p>}
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function resultMessage(a?: MissionAction): string {
-  const r = a?.result as { error?: { message?: string } } | undefined;
-  return r?.error?.message ?? `status ${a?.result_status ?? "unknown"}`;
-}
-
-function Activity({ ws, m, updates, canManage, onPosted }: { ws: string; m: Mission; updates: MissionUpdate[]; canManage: boolean; onPosted: () => void }) {
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function post(e: FormEvent) {
-    e.preventDefault();
-    if (!body.trim()) return;
-    setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/missions/{id}/updates", { params: { path: { ws, id: m.id } }, body: { kind: "instruction", body: body.trim() } });
-    setBusy(false);
-    if (error) return toast(errorMessage(error), "error");
-    setBody("");
-    toast("Sent. The agent reads it at its next check-in.");
-    onPosted();
-  }
+function Activity({ updates }: { updates: MissionUpdate[] }) {
   const kindTone = { question: "amber", instruction: "blue", report: "green", connect_request: "amber", progress: "grey", note: "grey" } as const;
   const kindLabel = { question: "question", instruction: "instruction", report: "report", connect_request: "connect request", progress: "progress", note: "note" } as const;
   return (
     <div className="space-y-4">
-      {canManage && (
-        <form onSubmit={post} className="space-y-2">
-          <textarea className={`${field} w-full`} rows={2} placeholder="Answer a question or tell the agent something, e.g. Focus on Sydney first" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Message to the agent" />
-          <div className="flex justify-end"><Button type="submit" disabled={busy || !body.trim()}>Send to agent</Button></div>
-        </form>
-      )}
       {updates.length === 0 ? (
-        <p className="py-6 text-center text-[13px] text-muted-foreground">No updates yet. The agent posts progress and questions here.</p>
+        <p className="py-6 text-center text-[13px] text-muted-foreground">No updates.</p>
       ) : (
         <ol className="space-y-3">
           {updates.map((u) => (
@@ -963,7 +415,7 @@ function Changes({ ws, id, refresh }: { ws: string; id: string; refresh: number 
             {a.decided_by_name && ` · decided by ${a.decided_by_name}`}
           </p>
           {a.decision_note && <p className="mt-1 text-[12px]">Note: {a.decision_note}</p>}
-          {a.status === "failed" && <p className="mt-1 text-[12px] text-red-600 dark:text-red-400">{resultMessage(a)}</p>}
+          {a.status === "failed" && <p className="mt-1 text-[12px] text-red-600 dark:text-red-400">{(a.result as { error?: { message?: string } } | null | undefined)?.error?.message ?? `Failed (status ${a.result_status ?? "unknown"})`}</p>}
         </li>
       ))}
     </ol>

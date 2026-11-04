@@ -121,6 +121,9 @@ func Glance(ctx context.Context, f Fetcher, wait func(context.Context, time.Dura
 		maps = []string{base + "/sitemap.xml"}
 	}
 	seen := map[string]bool{}
+	// A page listed twice (in two sitemaps, twice in one, or two long URLs
+	// that clip to the same one) is one page, and counts once toward the cap.
+	listed := map[string]bool{}
 	for len(maps) > 0 && look.Sitemaps < glanceSitemaps && len(look.Pages) < glancePages {
 		m := maps[0]
 		maps = maps[1:]
@@ -141,6 +144,10 @@ func Glance(ctx context.Context, f Fetcher, wait func(context.Context, time.Dura
 		for _, p := range pages {
 			if _, mine := own(p.URL); mine && len(look.Pages) < glancePages {
 				p.URL = clip(p.URL, 2000)
+				if listed[p.URL] {
+					continue
+				}
+				listed[p.URL] = true
 				p.Lastmod = clip(p.Lastmod, 40)
 				look.Pages = append(look.Pages, p)
 			}
@@ -233,7 +240,7 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 		}
 		rows, err := tx.Query(ctx, `
 			INSERT INTO competitor_pages (competitor_id, workspace_id, url, lastmod)
-			SELECT $1, $2, u, m FROM unnest($3::text[], $4::text[]) AS t(u, m)
+			SELECT DISTINCT ON (u) $1, $2, u, m FROM unnest($3::text[], $4::text[]) AS t(u, m)
 			ON CONFLICT (competitor_id, url) DO UPDATE SET lastmod = EXCLUDED.lastmod, last_seen_at = now(), gone_at = NULL
 			RETURNING url, (xmax = 0) AS inserted`, p.CompetitorID, ws, urls, mods)
 		if err != nil {
@@ -321,7 +328,12 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return err
+		}
+		// A save that fails is recorded on the competitor and tried again
+		// soon, like a site that didn't answer, never a bare job error.
+		return fail("internal", "Saving the site's pages failed. It's tried again soon.", err)
 	}
 	ev.Props["pages"], ev.Props["sitemaps"], ev.Props["baseline"] = len(look.Pages), look.Sitemaps, baseline
 	ev.Outcome = track.Success

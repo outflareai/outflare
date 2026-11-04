@@ -696,10 +696,27 @@ function LinksEditor({ value, onChange, readOnly }: { value: Link[]; onChange: (
 // brand's website (read through the workspace's own Geonode connection),
 // each to add, correct or dismiss, and the common places it has no link
 // for yet, to fill in by hand.
+// linkReadFailed says, in plain words, why reading a brand's website for
+// links found nothing.
+function linkReadFailed(code: string, website: string): string {
+  switch (code) {
+    case "blocked":
+      return `${website} showed Geonode a bot check instead of the page, so Outflare couldn't read it. The site blocks automated reads: add the links yourself, or try again later.`;
+    case "slow_page":
+      return `${website} took longer to load than Geonode allows, so Outflare couldn't read it. Try again later, or add the links yourself.`;
+    case "connector_auth":
+      return "Geonode turned the key down. Check the Geonode connection under Connectors, then try again.";
+    case "connector_quota":
+      return "Your Geonode account is out of tokens or over its limit. Top it up in Geonode, then try again.";
+    default:
+      return "Geonode couldn't read the website just now. Try again in a few minutes.";
+  }
+}
+
 function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }: {
   ws: string; brand: Brand; links: Link[]; readOnly: boolean; go: (t: Tab, item?: string) => void; onFill: (kind: LinkKind) => void; onAdded: (links: Link[]) => void;
 }) {
-  const [list, setList] = useState<{ data: BrandLinkSuggestion[]; gaps: string[]; can_discover: boolean }>();
+  const [list, setList] = useState<{ data: BrandLinkSuggestion[]; gaps: string[]; can_discover: boolean; last_read_at: string | null; last_read_error: string }>();
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [looking, setLooking] = useState(false);
@@ -720,12 +737,14 @@ function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }:
       setLooking(false);
       return setError(errorMessage(error));
     }
-    // Reading the page takes a few seconds; check until something shows.
-    const before = list?.data.length ?? 0;
-    for (let i = 0; i < 8; i++) {
+    // Reading the page takes a few seconds; check until the read is done.
+    // Review pages found by search can show up first, so a new suggestion
+    // alone doesn't mean the website was read.
+    const readBefore = list?.last_read_at ?? null;
+    for (let i = 0; i < 16; i++) {
       await new Promise((r) => setTimeout(r, 2500));
       const d = await load();
-      if (d && d.data.length > before) break;
+      if (d && d.last_read_at !== readBefore) break;
     }
     setLooking(false);
   }
@@ -770,6 +789,9 @@ function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }:
           To find its links, Outflare reads the website with your own Geonode account (a token or two per brand).
           <span className="mt-2 block"><ConnectFor connector="geonode" name="Geonode" back="brands" item={b.id} why={geonodeWhy.brands} go={go} variant="ghost" /></span>
         </p>
+      )}
+      {!readOnly && b.website && list.last_read_error && (
+        <p className="mt-2 text-xs text-muted-foreground" role="status">{linkReadFailed(list.last_read_error, b.website)}</p>
       )}
       {waiting.length > 0 && (
         <ul className="mt-3 space-y-2">

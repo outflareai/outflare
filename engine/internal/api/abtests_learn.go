@@ -157,6 +157,10 @@ func (s *Server) listABLearnings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is at most 200 characters")
 		return
 	}
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.loadABLibrary(r.Context(), a.WorkspaceID, q, 200)
 	if err != nil {
 		s.internal(w, r, err)
@@ -164,7 +168,7 @@ func (s *Server) listABLearnings(w http.ResponseWriter, r *http.Request) {
 	}
 	out := list[:0]
 	for _, item := range list {
-		if a.sees(item.BrandID) {
+		if a.sees(item.BrandID) && sel.matches(item.BrandID) {
 			out = append(out, item)
 		}
 	}
@@ -188,15 +192,13 @@ func (s *Server) askABTests(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "question is required, up to 2,000 characters, such as \"what have we learned about headlines on the pricing page?\"")
 		return
 	}
-	if in.BrandID != nil {
-		if err := s.siteKeyBrand(r.Context(), a.WorkspaceID, in.BrandID); s.allocError(w, r, err) {
-			return
-		}
-	}
-	if !a.sees(in.BrandID) {
-		writeError(w, r, http.StatusForbidden, "forbidden", "you are limited to some brands: pick one of your brands")
+	// A question is about one brand's tests: the route's, the one named,
+	// or the workspace's first.
+	brand, err := s.activationBrand(r.Context(), a, in.BrandID)
+	if s.allocError(w, r, err) {
 		return
 	}
+	in.BrandID = &brand
 	s.startABAIRun(w, r, "ask", in.BrandID, nil, nil, in)
 }
 
@@ -280,8 +282,8 @@ func (s *Server) abAskPrompt(ctx context.Context, ws string, run abAIRun) (strin
 	}
 	var tests []abLibraryItem
 	for _, item := range all {
-		// A brand's question draws on its tests and those of shared flags.
-		if run.brandID == nil || item.BrandID == nil || *item.BrandID == *run.brandID {
+		// A brand's question draws on its own tests only.
+		if run.brandID == nil || (item.BrandID != nil && *item.BrandID == *run.brandID) {
 			tests = append(tests, item)
 		}
 		if len(tests) == maxAskTests {

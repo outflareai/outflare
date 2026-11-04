@@ -49,7 +49,7 @@ steps:
   - say: Draft a short, personal pitch for each vetted creator as a sequence, held until a person approves the sends.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Watch for replies and move partnerships to Negotiating or Declined. For each agreed deal, make its own tracked link and promo code, save them on the partnership, and record the fee as spend.
-    tools: [listBrandInbox, updateRecord, createTrackingLink, recordSpend]
+    tools: [listBrandInbox, updateRecord, createBrandTrackingLink, recordSpend]
   - say: When a post goes live, save its link and move it to Live; after two weeks, report visits, sign-ups and cost per sign-up for each, and move it to Measured.
     tools: [updateRecord, getAnalyticsReport, outcomesReport]
 guardrails:

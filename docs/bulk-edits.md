@@ -12,6 +12,8 @@ Pick exactly one:
 - **A saved query** (`saved_query_id`): its current version runs, and its `record_id` column (or `id`) picks the records, up to 10,000 rows. Write it in [Query Studio](query.md), for example `SELECT id FROM people WHERE country = 'DE'`.
 - **Records by id** (`record_ids`): up to 10,000, picked by hand.
 
+In the app, start one from a list's menu, from a saved query's menu in Query (Bulk edit its records), or on the People or Companies page: tick the records you want, or tick none to change every record shown.
+
 The records are the brand's live people or companies of one kind: merged and deleted records are left out, and one bulk edit changes people or companies, not both. A bulk edit changes up to 50,000 records. The records are fixed when the bulk edit is made, so it changes exactly what the preview counted.
 
 ## What it changes

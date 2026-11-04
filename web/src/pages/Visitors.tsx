@@ -1,3 +1,5 @@
+import { PickBrand } from "@/components/pick-brand";
+import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { components } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
@@ -53,7 +55,15 @@ function ScoreBadge({ v }: { v: Visitor }) {
   );
 }
 
-export function Visitors({ ws, canManage, go }: Props) {
+// Visitors belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function Visitors(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Visitors" brands={active.length} />;
+  return <VisitorsPage key={brand.id} {...props} />;
+}
+
+function VisitorsPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [view, setView] = useState<(typeof views)[number]["id"]>("companies");
@@ -69,8 +79,8 @@ export function Visitors({ ws, canManage, go }: Props) {
   const load = useCallback(async () => {
     const query = { view, days, ...(hotOnly ? { hot: true } : {}), limit: 200, ...(brandKey ? { brand: brandKey } : {}) };
     const [v, k] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/visitors", { params: { path: { ws }, query } }),
-      api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/visitors", { params: { path: { brand: pickedBrandId() }, query } }),
+      api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: pickedBrandId() } } }),
     ]);
     if (v.error || !v.data) return setError(errorMessage(v.error));
     setError("");

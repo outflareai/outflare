@@ -22,7 +22,7 @@ import { CRMImportDialog } from "./CRMImportDialog";
 import { DeploysDialog } from "./DeploysDialog";
 import { connection } from "@/lib/status";
 import { useBrand } from "@/lib/brand";
-import { ConnectionBrandsDialog, UsedByBadge } from "@/components/connection-brands";
+import { ConnectionBrandsDialog, UnassignedConnections, UsedByBadge } from "@/components/connection-brands";
 import { clearConnectIntent, connectIntent } from "@/components/connect-for";
 import type { Tab } from "@/lib/paths";
 
@@ -249,6 +249,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
         <Loading />
       ) : (
         <>
+          <UnassignedConnections key={integrations.map((i) => i.id + (i.brand_id ?? "") + i.brand_kind).join()} ws={ws} brands={brands} canManage={canManage} onOpen={(id) => { const i = integrations.find((x) => x.id === id); if (i) setSharing(i); }} />
           <section className="space-y-3">
             <h2 className="flex items-baseline gap-2 text-[13px] font-semibold">Connected {integrations.length > 0 && <span className="font-mono text-[12px] font-normal text-muted-foreground">{integrations.length}</span>}</h2>
             {integrations.length === 0 ? (
@@ -320,7 +321,7 @@ export function Connectors({ ws, canManage, canVerify, canImport, open, setOpen,
                           <Menu
                             items={[
                               { label: "Rename", onClick: () => rename(i) },
-                              brands.length > 0 && { label: "Choose who uses it", onClick: () => setSharing(i) },
+                              brands.length > 0 && { label: "Choose its brand", onClick: () => setSharing(i) },
                               i.auth_method === "oauth2" && !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "oauth2")?.available && { label: "Sign in again", onClick: () => startOAuth(byId.get(i.connector)!) },
                               !!byId.get(i.connector) && !!authOption(byId.get(i.connector)!, "api_key") && { label: i.auth_method === "oauth2" ? "Use an API key instead" : "Replace API key", onClick: () => setConnecting({ def: byId.get(i.connector)!, replace: i }) },
                               { label: "Disconnect", onClick: () => disconnect(i), danger: true },

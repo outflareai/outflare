@@ -213,7 +213,7 @@ groups:
         for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "A running agent run's next turn is over 15 minutes overdue: the runner (RunMissions in the engine) isn't taking agent run turns. Check the engine log for agent run turns errors."
+          summary: "A running agent run's next turn is over 15 minutes overdue: the runner (RunAgentRuns in the engine) isn't taking agent run turns. Check the engine log for agent run turns errors."
 
       - alert: OutflareAgentRunTurnsFailing
         expr: sum(increase(outflare_agent_runs_turns_total{outcome="failed"}[1h])) > sum(increase(outflare_agent_runs_turns_total{outcome="done"}[1h])) and sum(increase(outflare_agent_runs_turns_total{outcome="failed"}[1h])) >= 3
@@ -454,6 +454,12 @@ groups:
         annotations:
           summary: "Jobs of kind {{ $labels.kind }} ran past their lease and were put back in the queue, so they may run twice."
 
+      - alert: OutflareJobsReleasedAtShutdown
+        expr: sum by (kind) (increase(outflare_jobs_processed_total{outcome="released"}[1h])) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "Jobs of kind {{ $labels.kind }} were still running when a shutdown's grace ended and were handed back to the queue: their handler ignores cancellation (job.released in the logs)."
+
       - alert: OutflareDBPoolSaturated
         expr: max(outflare_db_pool_acquired_conns / outflare_db_pool_max_conns) > 0.9
         for: 5m
@@ -657,6 +663,23 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Deleted customer data has stayed over 6 hours past its 7 days in Recently deleted: the purge is failing or can't keep up (deletion.purge_failed in the engine log; Recovery window purge panel in the event inbox row). Data people deleted is kept longer than promised until it catches up."
+
+      - alert: OutflareConnectionsUnassigned
+        # No brand, no data: a brand connection with no brand, or a site or
+        # ad account nobody assigned, keeps its data out of every brand.
+        expr: sum(outflare_connections_unassigned) > 0
+        for: 3d
+        labels: { severity: info }
+        annotations:
+          summary: "Connections or their sites and ad accounts have had no brand for 3 days, so their data shows in no brand (Connections and brands row; GET /v1/workspaces/{ws}/connections/unassigned lists them per workspace). Someone with integrations.manage assigns them on the Connectors page."
+
+      - alert: OutflareConnectionsUnassignedCountMissing
+        # The count runs every ten minutes on the server that serves the API.
+        expr: absent(outflare_connections_unassigned)
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "The count of connections and accounts with no brand hasn't been reported for an hour: the count is failing (integration.unassigned_count_failed in the engine log) or no server runs it. The Connections and brands panel shows no data meanwhile."
 
       - alert: OutflareBatchUndoFailing
         # A large batch undo runs in a job; when it fails it changes
@@ -1162,6 +1185,15 @@ groups:
         annotations:
           summary: "Over half of link pitch openers fail to be written: check the link_pitches.write jobs and the AI usage page's link_pitches tool for a model or prompt change."
 
+      - alert: OutflareLinkPitchesHeldByCap
+        # Pitches past a sequence's daily limit go out on later days; this
+        # fires when far more wait than go out, so they pile up.
+        expr: sum(increase(outflare_seo_link_pitches_auto_total{outcome="daily_cap"}[24h])) > 3 * sum(increase(outflare_seo_link_pitches_auto_total{outcome="sent"}[24h])) and sum(increase(outflare_seo_link_pitches_auto_total{outcome="daily_cap"}[24h])) > 50
+        for: 6h
+        labels: { severity: info }
+        annotations:
+          summary: "Link pitches wait behind sequences' daily limits three times faster than they go out: playbooks find more than the limits send. Nothing is lost; the workspace may want a higher auto_send_per_day or fewer link playbooks."
+
       - alert: OutflareLinkRepliesFailing
         expr: sum(rate(outflare_seo_link_replies_read_total{kind="ai_failed"}[6h])) / sum(rate(outflare_seo_link_replies_read_total[6h])) > 0.5 and sum(increase(outflare_seo_link_replies_read_total[6h])) > 10
         for: 1h
@@ -1190,7 +1222,7 @@ groups:
         for: 30m
         labels: { severity: warning }
         annotations:
-          summary: "Playbook automations keep failing to start runs and none started in the last hour: check playbook_automation.run_failed in the engine log (usually the database or the missions table)."
+          summary: "Playbook automations keep failing to start runs and none started in the last hour: check playbook_automation.run_failed in the engine log (usually the database or the agent_runs table)."
 
       - alert: OutflarePlaybookAutomationsBehind
         expr: max(outflare_playbooks_automation_lag_seconds) > 900

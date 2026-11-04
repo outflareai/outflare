@@ -1,0 +1,62 @@
+id: move-ad-budget-to-what-works
+version: 1
+title: Move ad budget to the campaigns that bring customers
+summary: Each week, judge every campaign by cost per sign-up from Outflare's attribution, pause the wasteful ones and move budget to the winners.
+description: |
+  Ad platforms report their own conversions generously. This playbook
+  judges each campaign by what Outflare's attribution traced back to it
+  (sign-ups and revenue from the brand's own data), pauses the campaigns
+  that spend without results, and moves their budget to the ones that
+  bring customers. Every change stays inside the run's spend grant: the
+  largest automatic change, and the daily and monthly caps. Anything
+  bigger, and any new campaign, waits for a person.
+tier: obvious
+goals: [customers, revenue]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: ads.manage
+      label: An ad platform that can be managed
+      recommended: [google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+  - name: target
+    label: Most you'll pay for a sign-up
+    example: 40 USD
+steps:
+  - say: Read the brand's ad accounts, campaigns and the changes made recently, so nothing is changed twice in a week.
+    tools: [getAdsSummary, listAdCampaigns, listAdChanges]
+  - say: For each campaign, compare its spend with the sign-ups and revenue Outflare's attribution traced to it.
+    tools: [getBrandAttributionCampaigns, getAttributionAds]
+  - say: Pause campaigns well above the target with enough spend to judge.
+    tools: [pauseAdCampaign]
+  - say: Raise the daily budget of campaigns under the target, within the spend grant.
+    tools: [updateAdCampaign]
+  - say: A week later, check each change against the platform and the results.
+    tools: [listAdChanges, getBrandAttributionCampaigns]
+automation:
+  schedule: weekly
+guardrails:
+  - Every change stays within the run's spend grant; bigger changes wait for a person.
+  - Never creates a campaign, an audience or new creative.
+  - A campaign is judged only once it has spent enough to tell, and changed at most once a week.
+measure:
+  - { metric: Cost per sign-up, how: "Across the brand's campaigns, from Outflare's attribution, this week against last." }
+  - { metric: Share of spend on winners, how: "Spend on campaigns under the target divided by all spend." }
+prompt: |
+  Review {{brand}}'s ad campaigns by cost per sign-up from Outflare's
+  attribution. Pause the ones well above {{target}} that have spent
+  enough to judge, and move budget to the ones under it, within my spend
+  grant. Tell me what you changed and why.
+example: |
+  Northpeak had nine campaigns. Two broad-match search campaigns cost
+  110 USD per sign-up and were paused; their budget went to the brand
+  campaign and one LinkedIn audience, and cost per sign-up fell from 52
+  to 37 USD in three weeks.

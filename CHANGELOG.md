@@ -6,6 +6,58 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.83.0] - 2026-11-04
+
+### Added
+
+- Eight new playbooks, one for each channel that had none: test your best page, get listed where buyers look, help in communities, send a monthly newsletter, move ad budget to what works, post what the brand learned, answer Reddit questions, and answer every review. Every change they make waits for a person or stays within the run's grants.
+- Approved posts and pages can now go to any website through a webhook, so your own code, automation tool or coding agent can put them in place. The webhook sends the page in Markdown and HTML, plus where it goes, its language, SEO, links, images and why it was written. Your site then reports the live address back.
+- A new Content page lists your brand's posts and pages. You can approve one, copy it as Markdown or HTML, download it, and mark where it went live.
+- Field labels: every field, built in or your own, and every product event now says how sensitive it is, who on your team owns it, how long its data is meant to be kept and where it may be sent. They're labels for your team and block nothing. Set them from Edit labels in the CRM settings, the API or MCP.
+- Paid ads: Outflare can add the tracking template to every Google Ads ad for you. Tracking health shows each URL suffix it would change (the account's, and any campaign, ad group or ad suffix that overrides it without the template), then changes them when you confirm, keeping the parameters already there. Also by API and with the `plan_ad_tracking` and `add_ad_tracking` agent tools.
+
+### Changed
+
+- Company → Accounts: see your brand's external accounts and their health, fill the vault, resolve incidents, take an account over when a sign-in needs a person and hand it back, watch browser tasks, and offboard a brand's accounts.
+- Paid ads: click a campaign to open it as its own page, then an ad group for its ads, keywords and searches, with a trail back to every campaign. The campaigns table now shows Outflare's own visits, conversions and revenue per campaign, and paid visits from campaigns Outflare can't match are listed apart with why.
+- Paid ads: campaigns show their type, how Google bids and to what target, your own target cost per conversion with over, on target or under, and whether spend is scaling up or down against the days before. Set a target per campaign or per ad account on the page, by API or with the `set_ad_target` agent tool.
+- Paid ads is split into tabs: Overview, Campaigns, Tracking, Send conversions and Accounts, each with its own address, so each part is one click away instead of one long page.
+- Website and analytics now belong to one brand: site scripts, consent banners, flags, A/B tests, visitors, analytics, and tracking domains, so each brand's emails use its own (move one from the Domains page). Each connection is one brand's, split by site or ad account, or shared; anything unassigned shows in no brand until you assign it.
+- Browser tasks now stay signed in to a brand's accounts between runs, like a person's browser, so they don't sign in and meet MFA every time. A session is saved only after the task confirms the right account, holds only that site's cookies, lasts at most 30 days, and is cleared when the site shows the wrong account. Remove the account's session secret to sign the agent out.
+- Five more channels for your brand's agent: newsletters (broadcasts to your subscribers), website conversion (A/B tests, experiments, flags), competitor watch, and, through accounts and browser workers, listings and marketplaces and forums and launch sites. Each shows what it needs before it is ready.
+- CRM settings now list your product events, so you can give each one a label, a description, a sensitivity, an owner, how long it's kept and where it may be sent, the same way as for fields.
+- Google Ads: a sign-up on your own app now joins the visit whose ad click brought them, so the click is credited and sent back to Google; Google clicks know their campaign even without a tracking template, the Google tag's cookie fills in a lost click id, and Gmail addresses match better in enhanced conversions.
+- Google Ads: connecting no longer asks for a developer token, which Google retired in September 2026; signing in with Google is enough.
+- Hosted page implementations can use the main app shell and selected workspace and brand. Agent Mail has a module location below Company when its page implementation is supplied.
+- Link pitches sent without approval now go out at most 10 a day per sequence (1 to 200, in Link building's settings); the rest go out on later days. Pitches your AI is unsure about, or to sites with a spam score of 30 or more, still wait for you.
+- Extensions can show a short badge next to their own sidebar links for the workspace you have open, such as an account balance next to a billing link (`GET /v1/workspaces/{ws}/menu-badges`).
+- Metrics have their own tab under People: turn them on, add your own, change what one counts, refill it from stored events, or archive it. Products can now be edited after they're added, including their name, aliases and when a customer counts as at risk or churned.
+- Missions are retired. What each mission did stays readable on the Missions page, and changing one, or sending a change with the `Outflare-Mission` header, now answers that missions are retired. Agents make changes with their own token on the action layer, and playbooks run as agent runs on the Agents page.
+- A rule's page lists who it fired for. On a record you can delete one field value, email or id, or link, and find it under Recently deleted. Bulk edits now start from picked people on the People page, every person shown, or a saved query, as well as from a list.
+- Transactions can now be deleted and restored: a wrong or test payment goes to Recently deleted for 7 days, hidden from lists, Query and the person's page, and a billing sync won't add it back. Restoring it puts it back without sending its webhook again.
+
+### Fixed
+
+- Paid ads: an ad account connected for one brand now shows under that brand with its campaigns, spend and clicks, and the page lists each account's name, id and a link to open it in Google Ads or Meta.
+- Find links no longer gives up silently on a brand website that shows a bot check or loads slowly: Outflare tries once more with JavaScript on, then tells you under Links why it couldn't read the site, without retrying and spending more Geonode tokens.
+- Find links now waits for the website read to finish, and says why it couldn't read the site even when review page suggestions are already showing.
+- CRM settings now save new objects, attributes, choices and field labels to the brand picked in the switcher. Before, they always went to the workspace's first brand.
+- Competitor checks no longer fail when a competitor's sitemaps list the same page more than once. Each page is counted once, and a check that can't be saved now shows why and is tried again soon.
+- Connectors: Google Ads, Gmail, Slack, Meta, TikTok, Pinterest, Snapchat, Apple, Amazon, Microsoft, LinkedIn, Reddit and X Ads, Ghost, WordPress, Chrome UX Report, Tolt, Postmark, Requesty, Engain, Outbrain, Taboola, Snitcher, Vector, Warmly and others now show the company's own logo instead of initials.
+- Sending an email through the API no longer fails with a server error when a link is very long or the content holds a NUL character. Links over 2,000 characters are sent as written without click tracking, and a NUL character in the subject, body, tags, metadata or data is refused with a clear message.
+- Setup health now opens its alerts for workspaces where more than one app or token calls the same deprecated API route. Before, the check failed for those workspaces and no install problems, including broken connections and silent website scripts, reached the status page.
+- Background jobs no longer stall for up to five minutes when the server restarts or deploys: running jobs are stopped and handed straight back to the queue, and a restart no longer uses up one of a job's retries.
+
+### Security
+
+- Security improvements to the container images.
+
+### Upgrading
+
+- runs migration 0412.
+- `OUTFLARE_SHUTDOWN_GRACE` (default `10s`) sets how long running jobs get to stop on `SIGTERM`. Keep it under your platform's stop timeout (docs/scaling.md, "Restarts and deploys").
+- agents or scripts that still send the `Outflare-Mission` header, or use the mission tools in MCP or `--mission` in the CLI, need to drop them; their changes then go through the token's own grants.
+
 ## [0.82.0] - 2026-11-03
 
 ### Added

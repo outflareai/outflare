@@ -360,16 +360,12 @@ func TestActionLayerEdges(t *testing.T) {
 		}
 	}
 
-	// A mission route is a change like any other for an agent token, and
-	// deciding a mission's held change always needs a person.
-	missions, _ := gatedAgent(t, owner, base, "Mission agent", "missions.read", "missions.run", "missions.approve", "actions.read")
+	// Missions are retired: a change to one is refused, never held for a
+	// person to approve something that can't run.
+	missions, _ := gatedAgent(t, owner, base, "Mission agent", "missions.read", "missions.run", "actions.read")
 	st, res = missions.do("POST", base+"/missions", map[string]any{"name": "M", "goal": "Book meetings"})
-	if st != 202 {
+	if st != 410 || res["error"].(map[string]any)["code"] != "mission_retired" {
 		t.Fatalf("a mission write by an agent token: %d %v", st, res)
-	}
-	st, res = missions.do("POST", base+"/missions/00000000-0000-0000-0000-000000000002/actions/00000000-0000-0000-0000-000000000003/approve", nil)
-	if st != 202 || res["action"].(map[string]any)["decided_by_rule"] != "always_person" {
-		t.Fatalf("a mission decision by an agent token: %d %v", st, res)
 	}
 
 	// A refusal isn't replayed for an idempotency key once a person

@@ -43,7 +43,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_http_request_duration_seconds` | `route` | Request time histogram. `GET /mcp` is the hosted MCP server's event stream and stays open, so leave it out of latency. |
 | `outflare_http_requests_in_flight` | | Requests being served now. |
 | `outflare_http_rate_limited_total` | `limit` (`api`, `register`, `site_ip`, `site_key`, `site_visitor`, `site_flags`, `site_consent`) | Requests a rate limit refused with 429. |
-| `outflare_jobs_processed_total` | `kind`, `outcome` (`succeeded`, `retried`, `dead`) | Jobs this server ran. |
+| `outflare_jobs_processed_total` | `kind`, `outcome` (`succeeded`, `retried`, `dead`, `interrupted`, `released`) | Jobs this server ran. `interrupted` stopped for a shutdown and went back in the queue at once; `released` was still running when the shutdown grace ended and was handed back (its handler ignores cancellation). |
 | `outflare_jobs_duration_seconds`, `outflare_jobs_wait_seconds` | `kind` | How long a job ran, and how long it waited after it was due before a worker took it. |
 | `outflare_jobs_reaped_total` | `kind` | Running jobs put back in the queue because their worker stopped holding them (a crash, or a job longer than the lease). Such a job may run twice. |
 | `outflare_jobs_active`, `outflare_jobs_workers` | | Jobs running in this process, and how many workers it has (`WORKERS` plus the send queue's). |
@@ -179,6 +179,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_seo_link_page_checks_total` | `status` (`up`, `gone`, `redirected`, `blocked`, `opted_out`, `unreachable`, `failed`) | OutflareBot's checks of link prospects' pages. |
 | `outflare_seo_archive_lookups_total` | `outcome` (`found`, `none`, `error`) | Internet Archive lookups of broken links found by page checks. |
 | `outflare_seo_link_pitches_written_total` | `outcome` (`written`, `no_ai`, `ai_unavailable`, `ai_failed`) | Openers the workspace's AI wrote for link pitches. |
+| `outflare_seo_link_pitches_auto_total` | `outcome` (`sent`, `unsure`, `spammy_site`, `daily_cap`, `site_in_outreach`, `opted_out`, `not_pitchable`, `sequence_archived`) | Link pitches through sequences that skip approval: sent, or why they wait. |
 | `outflare_seo_link_replies_read_total` | `kind` (`agreed`, `declined`, `wants_payment`, `wants_content`, `other`, `no_ai`, `ai_unavailable`, `ai_failed`) | Replies to link pitches the workspace's AI read. |
 | `outflare_seo_link_live_checks_total` | `outcome` (`live`, `not_yet`, `removed`, `still_live`, `unreachable`) | Checks of agreed and live links. |
 | `outflare_seo_web_searches_total` | `outcome` (`done`, `budget_reached`, `connector_invalid`, `connector_auth`, `connector_quota`, `connector_unavailable`) | Searches on workspaces' own SERP connections (`POST /search-results`). |
@@ -199,6 +200,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_transactions_saved_total` | `from` (`api`, `connector`), `outcome` (`created`, `duplicate`, `invalid`, `error`) | Payments, refunds, chargebacks and credits sent to Outflare ([transactions.md](transactions.md)). |
 | `outflare_transactions_save_seconds` | | Time to save one transaction. |
 | `outflare_transactions_unconverted` | | Transactions over 2 days old still without an amount in their brand's currency. |
+| `outflare_connections_unassigned` | `kind` (`connection`, `account`) | Brand connections with no brand, and analytics or Search Console sites and ad accounts nobody assigned, across every workspace, counted every ten minutes. Their data shows in no brand ([connectors.md](connectors.md#connections-and-brands)). |
 | `go_*`, `process_*` | | Go runtime and process: CPU seconds, resident memory, heap, goroutines, garbage collection, open files. |
 
 The database numbers are read when Prometheus scrapes, at most once every 10 seconds whatever the number of scrapers, with a 5-second limit, using the partial indexes on queued and running jobs.
@@ -214,6 +216,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareJobsReaped`: jobs ran past their lease (their worker died mid-job) and were put back in the queue, so they may run twice.
+- `OutflareJobsReleasedAtShutdown`: jobs of one kind were still running when a shutdown's grace ended, so their handler ignores cancellation; make it return when its context ends.
 - `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
 - `OutflareCoverageChecksFailing`: a Coverage check exhausted its retries.
 - `OutflareCoveragePagesUnreachable`: most recent Coverage page reads could not reach their site.
@@ -319,6 +323,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - social accounts that keep failing after retries with an error Outflare has to fix (`slow_page`, `no_follower_count`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
 - over half of social account reads failing
 - over half of link pitch openers or of replies to pitches failing to be read by the AI
+- link pitches waiting behind sequences' daily limits three times faster than they go out (info)
 - over half of checks of agreed and live links unable to reach the page (info)
 - a connection's analytics, Search Console, conversions, ads or SEO sync failing 3 runs in a row with Outflare's own error or the provider down
 - any sync run failing on Outflare's side
@@ -346,6 +351,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - CSV downloads of query results failing on Outflare's side (`OutflareQueryExportsFailing`)
 - deleted customer data staying over 6 hours past its 7 days in Recently deleted (`OutflareRecoveryPurgeBehind`: the purge is failing)
 - a batch undo failing in the background (`OutflareBatchUndoFailing`)
+- connections or their sites and ad accounts with no brand for 3 days (`OutflareConnectionsUnassigned`, info), or their count not reported for an hour (`OutflareConnectionsUnassignedCountMissing`)
 - adjust them in your copy
 
 For product events sent to brands (the event inbox), alerts fire when an event has waited over 5 minutes to be processed (warning), when over half of the events processed in an hour were rejected (info: a sender broke; the rejected-by-code panel and each brand's Events page say what to fix), and when rows stay over 6 hours past their retention (info: the sweep is failing).

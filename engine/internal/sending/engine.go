@@ -576,7 +576,7 @@ func (e *Engine) prepare(ctx context.Context, tx pgx.Tx, enrollmentID string, sk
 	if err := tx.QueryRow(ctx, `SELECT track_clicks, unsubscribe_header FROM sequences WHERE id = $1`, en.SequenceID).Scan(&trackClicks, &unsubHeader); err != nil {
 		return nil, en, err
 	}
-	base, err := tracking.BaseURL(ctx, tx, en.WorkspaceID, e.PublicURL)
+	base, err := tracking.BaseURL(ctx, tx, en.WorkspaceID, en.BrandID, e.PublicURL)
 	if err != nil {
 		return nil, en, err
 	}

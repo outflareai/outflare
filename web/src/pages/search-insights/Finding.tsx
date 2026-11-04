@@ -1,3 +1,4 @@
+import { pickedBrandId } from "@/lib/brand";
 import { useState } from "react";
 import type { SearchInsightRow } from "@outflare/sdk";
 import { api, errorMessage } from "../../api";
@@ -111,8 +112,8 @@ export function Finding({
     setMessage("Target saved. Internal link suggestions now use this keyword.");
   }
   async function experiment() {
-    const { error } = await api.POST("/v1/workspaces/{ws}/experiments", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/experiments", {
+      params: { path: { brand: pickedBrandId() } },
       body: {
         site_id: path.site,
         name: advice.title.slice(0, 120),

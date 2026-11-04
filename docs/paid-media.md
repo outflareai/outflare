@@ -15,11 +15,21 @@ where the platform needs one, adds its own developer token. Outflare never
 provides an ad account, an API token or a developer token, and an ad platform
 stays off until the workspace connects it.
 
+Google Ads no longer takes a developer token (Google retired them on
+9 September 2026, and ignores one sent anyway). Its API access level now
+belongs to the Google Cloud project of the server's Google sign-in app
+(`GOOGLE_OAUTH_CLIENT_ID`, or `CONNECTOR_GOOGLE_ADS_CLIENT_ID`), so whoever
+runs the server applies for it once, for every workspace: in the Google Cloud
+console, open that project, then the Google Ads API, and apply for Basic
+access (it needs a project whose branding Google verified). The data stays the
+workspace's own: each one signs in to its own Google Ads accounts. A token a
+workspace added before is still sent and does no harm.
+
 ## Platforms
 
 | Platform | Connect with | Also needs |
 | --- | --- | --- |
-| Google Ads (`google_ads`) | Sign in with Google (read-only Google Ads access). Manager accounts list the accounts under them. | The workspace's own developer token, from its Google Ads manager account (API Center). |
+| Google Ads (`google_ads`) | Sign in with Google (read-only Google Ads access). Manager accounts list the accounts under them. | Nothing: Google retired developer tokens in September 2026 (see below). |
 | Meta Ads (`meta_ads`) | A system user access token from your own Business Manager with `ads_read` (and `ads_management` for journeys to fill audiences), or sign in with Facebook | Nothing |
 | Microsoft Advertising (`microsoft_ads`) | Sign in with Microsoft | The workspace's own developer token, from the Microsoft Advertising Developer Portal. |
 | Reddit Ads (`reddit_ads`) | Sign in with Reddit (read-only ads access) | Nothing |
@@ -66,7 +76,10 @@ numbers. Each run stores:
 
 - **Ad accounts**, with currency and time zone. Each account can belong to a
   brand (`PATCH /v1/workspaces/{ws}/ads/accounts/{id}`) or be shared, and can be
-  switched off.
+  switched off. A new account takes the brand of the connection that sees it
+  (a brand's own sign-in, or a shared one used by a single brand) until you
+  set another. The page shows each account's name, its id as the platform
+  writes it and, for Google Ads and Meta, a link that opens it there.
 - **Campaigns**, with status, objective and daily budget.
 - **Ad sets and ads** (Meta Ads and Google Ads, where Google calls ad sets ad
   groups): each one under its campaign, with its status, a Meta ad set's own
@@ -104,12 +117,14 @@ are not added up across platforms as if they were.
 
 ## Reading it
 
-In the app, open **Paid ads** in the sidebar: spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by day, platform and campaign, with each account's brand and sync switch. Open a campaign for its numbers by day, its conversions by type, its ad sets and its ads, each beside the visits, conversions and revenue Outflare's own attribution credits to it, and for Google its keywords and search terms; open an ad set to see only its ads. An ad whose links lack the tracking template is marked. A connection that still needs a developer token asks for it at the top.
+In the app, open **Paid ads** in the sidebar. Its tabs are **Overview** (totals, by day, by platform and conversion actions), **Campaigns**, **Tracking** (fix tracking links, tracking health and the templates), **Send conversions** and **Accounts** (ad accounts and connections), each with its own address. It shows spend, clicks, CTR, cost per click and platform conversions for 7, 28 or 90 days, by day, platform and campaign, with each account's brand and sync switch. Each campaign shows the visits, conversions and revenue Outflare's own attribution credits to it beside what the platform reports. Click a campaign and it opens as a page of its own, like a level in the ad platform, with a trail back (All campaigns, then the campaign, then the ad group): its numbers and trend by day, its conversions by type, its ad groups or ad sets and its ads, and for Google its keywords and search terms. Click an ad group or ad set for its own page with only its ads. Each page has its own address, so the browser's back button and shared links work. Paid visits whose campaign id matches no campaign in a connected account are listed on their own, with why that happens. An ad whose links lack the tracking template is marked. A connection that still needs a developer token asks for it at the top.
 
 | Call | What it answers |
 | --- | --- |
 | `GET /v1/workspaces/{ws}/ads/accounts` | Every account, its brand and sync status |
-| `GET /v1/workspaces/{ws}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS |
+| `GET /v1/workspaces/{ws}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS, their type, how the platform bids, the brand's target with over or under, and the trend against the days before |
+| `PUT /v1/workspaces/{ws}/ads/campaigns/{id}/target` | Set a campaign's target cost per conversion (`analytics.manage`) |
+| `PUT /v1/workspaces/{ws}/ads/accounts/{id}/target` | Set the target for every campaign of an account without its own (`analytics.manage`) |
 | `GET /v1/workspaces/{ws}/ads/items` | Ad sets and ad groups (`level=ad_group`) or ads (`level=ad`), ranked by spend, with their campaign; `campaign_id` or `parent_id` narrows them |
 | `GET /v1/workspaces/{ws}/ads/conversion-actions` | Platform conversions by action, per connector and currency; `entity_id` gives one campaign's, ad set's or ad's |
 | `GET /v1/workspaces/{ws}/ads/keywords` | Google search keywords ranked by spend; `campaign_id` or `ad_group_id` narrows them |
@@ -121,11 +136,44 @@ All of them take `brand`. Money is in micros of the account's currency
 (1,000,000 = one unit); totals are given per currency, never converted. The MCP
 server has a tool for each (`list_ad_accounts`, `list_ad_campaigns`, `list_ad_items`,
 `list_ad_conversion_actions`, `list_ad_keywords`, `list_ad_search_terms`,
-`get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`).
+`get_ads_summary`, `sync_ads`, `list_ad_connections`, `update_ad_account`,
+`set_ad_target`).
+
+### Targets and trends
+
+Each campaign comes with what an agent or a person needs to judge it, not only
+its numbers:
+
+- **Type** (`objective`): the platform's own word, such as Google's `search`,
+  `performance_max`, `display`, `video` or `demand_gen`.
+- **How the platform bids** (`bidding_strategy`) and the cost per conversion or
+  return it bids to (`platform_target_cpa_micros`, `platform_target_roas`), as
+  set in Google Ads. A portfolio bid strategy keeps its target on the strategy,
+  so only its type shows.
+- **The brand's own target cost per conversion**, set on the campaign or, for
+  every campaign without one, on its ad account. It is Outflare's alone and is
+  never sent to the platform. `target_status` compares the range's cost per
+  conversion with it: `on_target` within a tenth either way, `under` below that,
+  `over` above it, and `over` too when the campaign spent with no conversions.
+- **Trend**: `previous_totals` holds the same numbers for the same number of
+  days just before the range, and `trend` says which way spend moved:
+  `scaling_up` or `scaling_down` past 15% either way, `steady` inside it, `new`
+  with no spend before and `stopped` with none now. `spend_change` is the move
+  as a fraction.
+
+The Paid ads page shows them in the Campaigns table, with a Target button on
+each campaign and on each ad account. Day-by-day charts are on the page and on
+each campaign.
 
 To credit sales to each ad by its id, paste the network's tracking template
 into it ([website tracking](website-tracking.md#ad-tracking-templates)): every
 paid click then lands with the network's own campaign, ad set and ad ids.
+Google Ads clicks know their campaign even without it: with auto-tagging on,
+Google adds `gad_campaignid` to the landing page, and the website script keeps
+it as the visit's campaign. Ad group and ad ids still need the template.
+On Google Ads, Outflare can add it for you: **Paid ads → Tracking → Fix tracking
+links** shows every URL suffix it would change, then adds the template when
+you confirm ([how it works](website-tracking.md#adding-the-template-to-google-ads-for-you)).
 
 ### What each campaign brought
 
@@ -166,7 +214,7 @@ definitions first.
 
 | Platform | Where it goes | Matched on | Also needs |
 | --- | --- | --- | --- |
-| Google Ads | A conversion action that takes uploaded clicks (Upload clicks) | `gclid`, `gbraid` or `wbraid`; hashed email and phone (enhanced conversions for leads) | The developer token above; the sign-in needs Google Ads access that can upload |
+| Google Ads | A conversion action that takes uploaded clicks (Upload clicks) | `gclid`, `gbraid` or `wbraid`; hashed email and phone (enhanced conversions for leads) | The sign-in needs Google Ads access that can upload |
 | Meta Ads | A pixel (dataset), as a standard event such as Purchase or Lead | `fbc` (from `fbclid`), `fbp`, hashed email, phone and record id | The system user assigned to the pixel |
 | Microsoft Advertising | An offline conversion goal | `msclkid`; hashed email and phone | The developer token above |
 | Reddit Ads | The Conversions API, as SignUp, Lead, Purchase and so on | `rdt_cid`, hashed email and record id | The workspace's own Conversions API access token, from Reddit Ads Manager → Events Manager |
@@ -196,7 +244,11 @@ How it works:
   them, up to 500 per call. Only events that arrive after the rule was made are
   sent, never older ones, and only within a week of arriving.
 - The ad click comes from the event itself (`click_ids`) or from the person's
-  latest visit with that platform's click id in the 90 days before it. Email and
+  latest visit with that platform's click id in the 90 days before it. For
+  Google, when no visit kept a `gclid`, `gbraid` or `wbraid`, the `gclid` in
+  the Google tag's `_gcl_aw` cookie (read with marketing consent) is used.
+  Gmail addresses are sent to Google without the dots before the `@`, as
+  Google asks, so they match the Google account. Email and
   phone come from the person's record, hashed with SHA-256 before they leave;
   nothing is sent in the clear and nothing is copied into the send log.
 - The event's message id is the conversion's id (Google's order id, Meta's,

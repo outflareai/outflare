@@ -1,3 +1,6 @@
+import { PickBrand } from "@/components/pick-brand";
+import { useBrand } from "@/lib/brand";
+import { pickedBrandId } from "@/lib/brand";
 // Campaign links: the workspace's one tagging scheme. A campaign fixes the
 // tags every link in it carries (channel, source, medium, utm_campaign and
 // the short ofc code), and a link is one page in it. Links go straight to
@@ -17,7 +20,15 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 
 type Props = { ws: string; canManage: boolean };
 
-export function CampaignLinks({ ws, canManage }: Props) {
+// Campaign links belong to one brand (plans/brands/README.md): with all brands
+// picked the page asks for one, and switching brands opens it afresh.
+export function CampaignLinks(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Campaign links" brands={active.length} />;
+  return <CampaignLinksPage key={brand.id} {...props} />;
+}
+
+function CampaignLinksPage({ ws, canManage }: Props) {
   const [campaigns, setCampaigns] = useState<TrackingCampaign[] | null>(null);
   const [channels, setChannels] = useState<TrackingChannel[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -28,7 +39,7 @@ export function CampaignLinks({ ws, canManage }: Props) {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/tracking-campaigns", { params: { path: { ws }, query: { status, ...(channel ? { channel } : {}) } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/tracking-campaigns", { params: { path: { brand: pickedBrandId() }, query: { status, ...(channel ? { channel } : {}) } } });
     if (error) setError(errorMessage(error));
     setCampaigns(data?.data ?? []);
   }, [ws, status, channel]);
@@ -36,7 +47,7 @@ export function CampaignLinks({ ws, canManage }: Props) {
     load();
   }, [load]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/tracking-taxonomy", { params: { path: { ws } } }).then(({ data }) => setChannels(data?.channels ?? []));
+    api.GET("/v1/brands/{brand}/tracking-taxonomy", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setChannels(data?.channels ?? []));
     api.GET("/v1/workspaces/{ws}/brands", { params: { path: { ws } } }).then(({ data }) => setBrands(data?.data ?? []));
   }, [ws]);
 
@@ -44,7 +55,7 @@ export function CampaignLinks({ ws, canManage }: Props) {
   const brandName = useMemo(() => Object.fromEntries(brands.map((b) => [b.id, b.name])) as Record<string, string>, [brands]);
 
   async function setArchived(c: TrackingCampaign, archived: boolean) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/tracking-campaigns/{id}", { params: { path: { ws, id: c.id } }, body: { status: archived ? "archived" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/tracking-campaigns/{id}", { params: { path: { brand: pickedBrandId(), id: c.id } }, body: { status: archived ? "archived" : "active" } });
     if (error) return toast(errorMessage(error), "error");
     toast(archived ? `Archived ${c.name}. Links already shared keep working.` : `Restored ${c.name}.`);
     load();
@@ -130,7 +141,7 @@ export function CampaignLinks({ ws, canManage }: Props) {
   );
 }
 
-function NewCampaign({ ws, channels, brands, onClose, onSaved }: { ws: string; channels: TrackingChannel[]; brands: Brand[]; onClose: () => void; onSaved: (c: TrackingCampaign) => void }) {
+function NewCampaign({ channels, brands, onClose, onSaved }: { ws: string; channels: TrackingChannel[]; brands: Brand[]; onClose: () => void; onSaved: (c: TrackingCampaign) => void }) {
   const [name, setName] = useState("");
   const [channel, setChannel] = useState<TrackingChannelID>("paid_ads");
   const [source, setSource] = useState("");
@@ -145,8 +156,8 @@ function NewCampaign({ ws, channels, brands, onClose, onSaved }: { ws: string; c
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-campaigns", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/tracking-campaigns", {
+      params: { path: { brand: pickedBrandId() } },
       body: { name: name.trim(), channel, source: source.trim() || undefined, brand: brand || undefined, landing_url: landing.trim() || undefined, redirect_links: redirects || undefined },
     });
     setBusy(false);
@@ -217,7 +228,7 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/tracking-campaigns/{id}/links", { params: { path: { ws, id: c.id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/tracking-campaigns/{id}/links", { params: { path: { brand: pickedBrandId(), id: c.id } } });
     setLinks(data?.data ?? []);
   }, [ws, c.id]);
   useEffect(() => {
@@ -228,8 +239,8 @@ function CampaignSheet({ ws, campaign: c, channelLabel, canManage, onClose }: { 
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-campaigns/{id}/links", {
-      params: { path: { ws, id: c.id } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/tracking-campaigns/{id}/links", {
+      params: { path: { brand: pickedBrandId(), id: c.id } },
       body: { url: url.trim() || undefined, content: content.trim() || undefined, term: term.trim() || undefined, redirect },
     });
     setBusy(false);

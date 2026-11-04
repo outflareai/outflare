@@ -44,6 +44,9 @@ type Task struct {
 	MaxCents   int64
 	// Resumed says a person handled a takeover since the last run.
 	Resumed bool
+	// SessionRestored says the browser starts with the account's saved
+	// session from an earlier run.
+	SessionRestored bool
 }
 
 // Step is one tool call of a run, as the task's log keeps it: the tool,
@@ -74,6 +77,9 @@ type Outcome struct {
 	Usage    llm.Usage
 	// TakeoverID is the takeover the task waits for, with waiting_person.
 	TakeoverID string
+	// SignIns are the sign-in outcomes the run reported, in order; they
+	// decide what happens to the account's saved session (SessionAfter).
+	SignIns []string
 }
 
 // Deps is what a run needs from the rest of the engine.
@@ -188,7 +194,10 @@ func Run(ctx context.Context, t Task, d Deps) (out Outcome) {
 		brief.WriteString("Approved content, by name: " + strings.Join(contentNames(t), ", ") + "\n")
 	}
 	if t.Resumed {
-		brief.WriteString("A person has just handled the step that needed them (a code, a CAPTCHA or a consent screen) and handed the account back; the browser session starts fresh, so sign in again if the goal needs it.\n")
+		brief.WriteString("A person has just handled the step that needed them (a code, a CAPTCHA or a consent screen) and handed the account back; the browser starts again, so check whether you're signed in and sign in again if the goal needs it.\n")
+	}
+	if t.SessionRestored {
+		brief.WriteString("The browser starts with the account's saved session from an earlier task, so you may already be signed in. Check which account the site shows before you act, report_sign_in authenticated once it matches account_identity (or wrong_identity if it doesn't), and sign in only if you're signed out.\n")
 	}
 	fmt.Fprintf(&brief, "Ceilings: %d steps, %d minutes.\n</task>\n\nStart with navigate.", t.MaxSteps, t.MaxMinutes)
 	req := llm.Request{System: system, Tools: tools(t), MaxTokens: 8000, Messages: []llm.Message{{Role: "user", Text: brief.String()}}}
@@ -354,6 +363,7 @@ func (r *run) do(ctx context.Context, name string, in map[string]any) (content s
 			return "Recording failed: " + err.Error(), false, true
 		}
 		r.out.Evidence["sign_in"] = outcome
+		r.out.SignIns = append(r.out.SignIns, outcome)
 		if outcome == accounts.WrongIdentity || outcome == accounts.Locked || outcome == accounts.CredentialFailed {
 			return "Recorded. The account can't be used by this task now (" + outcome + "): finish failed and say so.", false, false
 		}

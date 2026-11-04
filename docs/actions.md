@@ -29,7 +29,7 @@ A grant that runs changes can have a **daily limit**: once it has run that many 
 
 **Always a person.** These wait for a person whatever the grants say: mailboxes, sending servers, senders, sign-ins, API tokens, webhooks, connections, email providers, suppressions, company context, one-off emails, and the fixes [fix autonomy](fix-autonomy.md) holds.
 
-Each action carries the brand it is about: the agent's brand when its token is kept to one, else the brand route's, `?brand=`, or the body's `brand_id`; none for a change about shared records. A person kept to some brands sees and decides only changes about one of them. A mission's approval or resumption, and a decision on one of its held changes, always need a person, on the action layer as on the mission gate. A change that ran and failed keeps the API's answer in `result`.
+Each action carries the brand it is about: the agent's brand when its token is kept to one, else the brand route's, `?brand=`, or the body's `brand_id`; none for a change about shared records. A person kept to some brands sees and decides only changes about one of them. A change that ran and failed keeps the API's answer in `result`.
 
 ## Grants
 
@@ -102,7 +102,7 @@ A playbook can run as an **agent run**: Outflare's own agent carries its steps o
 
 The Agents page's **Runs** view lists runs and opens one: what each turn did, its changes (held ones to decide there), a box to write to it, and pause, resume and stop. The run (`GET .../agent-runs/{id}`) is the agent's check-in: the goal, plan and instructions, the brand's and the company's context, what its changes came to (`actions`, `held_actions`, `spend_cents`) and the latest updates. People write instructions to it (`POST .../agent-runs/{id}/updates`), which bring its next turn forward; the agent posts progress, questions and a report, and completes the run (`POST .../complete`). Pausing stops turns until a person resumes; stopping or completing revokes the run's token, so nothing more can act as it. Its held changes stay on the Agents page for a person to decide or expire. A run that can't carry on (no AI model, its token gone, three failed turns) pauses with the reason.
 
-Runs replace missions for playbooks; nothing starts a new mission any more, and the ones made before keep working until they end.
+Runs replace missions, which are retired: what a mission did stays readable, and a change to one, or one sent with the `Outflare-Mission` header, answers `410 mission_retired`.
 
 ## Loops in extensions
 

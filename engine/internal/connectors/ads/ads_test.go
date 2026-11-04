@@ -82,7 +82,8 @@ func TestDefinitions(t *testing.T) {
 }
 
 func TestMissingSetup(t *testing.T) {
-	if got := c.MissingSetup(GoogleAds{}, c.Creds{"access_token": "t"}); len(got) != 1 || got[0].Name != "developer_token" {
+	// Google retired developer tokens: the field is optional.
+	if got := c.MissingSetup(GoogleAds{}, c.Creds{"access_token": "t"}); len(got) != 0 {
 		t.Fatalf("google ads without a developer token: %+v", got)
 	}
 	if got := c.MissingSetup(GoogleAds{}, c.Creds{"developer_token": "d"}); len(got) != 0 {
@@ -148,8 +149,11 @@ func TestGoogleAds(t *testing.T) {
 	if d.CampaignID != "7" || d.SpendMicros != 12_500_000 || d.Clicks != 40 || *d.Conversions != 3 || *d.ConversionValueMicros != 450_500_000 {
 		t.Fatalf("day %+v", d)
 	}
-	if _, err := g.AdAccounts(ctx, cl, c.Creds{"access_token": "tok"}); c.KindOf(err) != c.ErrAuth {
+	if _, err := g.AdAccounts(ctx, cl, c.Creds{"access_token": "tok"}); err != nil {
 		t.Fatalf("without a developer token: %v", err)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.header.Get("developer-token") != "" {
+		t.Fatalf("an empty developer token was sent: %v", last.header)
 	}
 
 	// Managing: one campaign read by id, paused, and its budget set, each
@@ -1102,5 +1106,29 @@ func TestGoogleAdTemplate(t *testing.T) {
 	if ads[0].Details[c.AdDetailTemplated] != "true" || ads[0].Details[c.AdDetailURLTags] != "of_campaign={campaignid}" ||
 		ads[1].Details[c.AdDetailTemplated] != "false" || ads[2].Details[c.AdDetailTemplated] != "" {
 		t.Fatalf("templated: %v / %v / %v", ads[0].Details, ads[1].Details, ads[2].Details)
+	}
+}
+
+// A conversion whose visit kept only the Google tag's _gcl_aw cookie is
+// sent with the cookie's gclid, and Gmail addresses are hashed without
+// their dots, as Google asks.
+func TestGoogleAdsConversionsCookieAndGmail(t *testing.T) {
+	cl, reqs, _ := fake(t, map[string]any{
+		"POST /v23/customers/111:uploadClickConversions": map[string]any{},
+	})
+	g, creds, acct := GoogleAds{}, c.Creds{"access_token": "tok", "developer_token": "dev"}, c.AdAccount{ID: "111"}
+	cv := c.AdConversion{EventID: "msg-1", Time: time.Now(), ClickIDs: map[string]string{"gcl_aw": "GCL.1700000000.Cj0KCQ-test"},
+		Emails: []string{c.HashID("ana.lee@gmail.com")}, GoogleEmails: []string{c.HashGoogleEmail("Ana.Lee@Gmail.com")}}
+	bad := c.AdConversion{EventID: "msg-2", Time: time.Now(), Index: 1, ClickIDs: map[string]string{"gcl_aw": "nonsense"}}
+	res, err := g.SendConversions(ctx, cl, creds, acct, c.ConversionTarget{ID: "42"}, []c.AdConversion{cv, bad})
+	if err != nil || !res[0].OK || !res[1].Skipped {
+		t.Fatalf("send %+v %v", res, err)
+	}
+	body := (*reqs)[len(*reqs)-1].body
+	if !strings.Contains(body, `"gclid":"Cj0KCQ-test"`) || !strings.Contains(body, c.HashID("analee@gmail.com")) || strings.Contains(body, c.HashID("ana.lee@gmail.com")) {
+		t.Fatalf("upload body %s", body)
+	}
+	if c.HashGoogleEmail("ana.lee@acme.example") != c.HashID("ana.lee@acme.example") {
+		t.Fatal("only Gmail addresses lose their dots")
 	}
 }

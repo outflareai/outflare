@@ -29,10 +29,9 @@ The server is now at `mcp/dist/index.js`. It needs Node 18 or later.
 | `OUTFLARE_TOKEN` | An API token (`oft_...`) created in the web app under API tokens |
 | `OUTFLARE_WORKSPACE` | Optional: the token already says which workspace it belongs to |
 | `OUTFLARE_MCP_READ_ONLY` | Optional. `1` registers only the tools that change nothing |
-| `OUTFLARE_MISSION` | Optional. A mission id: every call acts inside that mission (the `use_mission` tool changes it) |
 | `OUTFLARE_BRAND` | Optional. A brand's handle: `get_context` and the list tools default to that brand. The agent can still pass another brand, or `all` |
 
-Give the token only the scopes the agent needs. A reporting agent needs `workspace.read`, `mailboxes.read`, `leads.read`, `sequences.read` and `inbox.read`. An agent that runs outreach also needs `leads.manage`, `sequences.manage` and `inbox.manage`, and `mailboxes.manage` to pause domains or change their limits. An agent that runs missions needs `missions.read` and `missions.run`; never give it `missions.approve`, which is for people and approver bots (and never works on a mission's own agent anyway). An agent that plans sending infrastructure needs `infrastructure.read` and `infrastructure.manage`; give it `infrastructure.approve` only if it may spend the customer's money on domains and mailboxes without a person approving. A tool whose scope is missing returns a `403` error to the agent. A token with the action layer on (`action_gate`, [docs/actions.md](../docs/actions.md)) needs no mission: each change it makes runs, waits for a person (`202` with an `action`; poll `get_action`) or is refused, by the grants a person set for it.
+Give the token only the scopes the agent needs. A reporting agent needs `workspace.read`, `mailboxes.read`, `leads.read`, `sequences.read` and `inbox.read`. An agent that runs outreach also needs `leads.manage`, `sequences.manage` and `inbox.manage`, and `mailboxes.manage` to pause domains or change their limits. An agent that plans sending infrastructure needs `infrastructure.read` and `infrastructure.manage`; give it `infrastructure.approve` only if it may spend the customer's money on domains and mailboxes without a person approving. A tool whose scope is missing returns a `403` error to the agent. A token with the action layer on (`action_gate`, [docs/actions.md](../docs/actions.md)): each change it makes runs, waits for a person (`202` with an `action`; poll `get_action`) or is refused, by the grants a person set for it.
 
 ### Claude Code
 
@@ -164,10 +163,10 @@ Read (always available):
 | `list_ai_devices` | Computers running Outflare for desktop, when each last reported and any AI tool it couldn't read |
 | `list_ai_receipts`, `get_receipt_forwarding` | AI receipts people forwarded and how each was matched, and where to forward them (Outflare Cloud) |
 | `list_ai_accounts`, `get_ai_account`, `get_outflare_ai_account` | AI Accounts: the AI subscriptions and API accounts people pay for (Claude, ChatGPT, Cursor, Copilot, the Anthropic and OpenAI APIs), with plan, price, renewal, who pays, resets available and who they belong to. Your own, or everyone's with `ai_accounts.read`; and what Outflare's own AI spent this month (`ai_spend.read`) |
-| `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why |
+| `list_flags`, `get_flag`, `evaluate_flags` | Feature flags: switches and splits (A/B tests) the website script and servers read, and which version a given visitor gets and why. Take `brand`: they belong to one brand |
 | `list_flag_groups`, `get_flag_group_holdout`, `set_flag_group_holdout` | Exclusion groups: which flags share a group's visitors, its holdout, and what the group's changes did together against the holdout |
 | `get_reddit_guide`, `get_reddit_budget`, `list_reddit_settings`, `list_reddit_experiments`, `get_reddit_experiment`, `list_reddit_actions`, `get_reddit_action`, `get_reddit_report`, `get_reddit_subreddit`, `find_reddit_threads`, `preflight_reddit_drafts` | Reddit campaigns through Engain: the guide to read first, the brand's budget and limits, experiments, every action with its status and lifespan, mentions, links, cost and days live by tactic, how strict a subreddit is, threads worth answering, and a free rule check of drafts |
-| `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown`, `get_ab_test_interactions`, `get_ab_test_factorial` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, the results by device, source, country or new and returning visitors, whether another test running at the same time changes the effect, and multivariate tests cell by cell |
+| `list_ab_tests`, `get_ab_test`, `get_ab_test_results`, `get_ab_test_breakdown`, `get_ab_test_interactions`, `get_ab_test_factorial` | A/B tests of feature flags, and how each version is doing on conversion, count or revenue per visitor: chance to beat the control, lift with its range, whether it is safe to stop, the winner, the results by device, source, country or new and returning visitors, whether another test running at the same time changes the effect, and multivariate tests cell by cell. Take `brand`: they belong to one brand |
 | `plan_ab_test`, `get_ab_test_ai_run`, `list_ab_test_learnings` | How long a test would take from the site's real traffic, the answer of an AI run, and the library of what past tests taught |
 | `list_data_providers` | Connected data providers that search, find emails or enrich, and the filters each understands |
 | `list_list_runs`, `get_list_run` | Builds, refreshes and enrichments: found, added, skipped by reason, credits spent |
@@ -196,11 +195,11 @@ Read (always available):
 | `get_payment_sync`, `run_payment_sync` | How a payment connection (Stripe) is syncing customers, subscriptions, payments and refunds into customer records, and a sync now |
 | `get_connection_hook`, `set_up_connection_hook`, `rotate_connection_hook`, `remove_connection_hook` | A connection's live updates: its own webhook address, which Outflare registers at the tool when it can (Geonode), whether events arrive, a new address, and turning them off |
 | `list_hook_events`, `replay_hook_event` | The events connectors sent by webhook, with what happened to each, and handling one again |
-| `list_site_keys`, `create_site_key`, `update_site_key`, `rotate_site_key`, `revoke_site_key`, `create_site_proxy_secret` | Website tracking keys (ofk_) and their snippet: anonymous page views with the landing page's campaign tags, click ids and referral code; a proxy secret (ofp_) for sites that forward tracking through their own domain |
+| `list_site_keys`, `create_site_key`, `update_site_key`, `rotate_site_key`, `revoke_site_key`, `create_site_proxy_secret` | Website tracking keys (ofk_) and their snippet: anonymous page views with the landing page's campaign tags, click ids and referral code; a proxy secret (ofp_) for sites that forward tracking through their own domain. Take `brand`: they belong to one brand |
 | `get_consent_banner`, `update_consent_banner`, `reask_consent_banner` | The cookie consent banner a site key's script shows: region rules (EEA opt-in, US opt-out), Global Privacy Control, Google Consent Mode v2, the Meta, TikTok and Microsoft signals, categories, look and words; visitors' choices are consents on their records |
 | `list_site_cookies`, `scan_site_cookies`, `classify_site_cookie`, `get_cookie_policy` | The cookie policy that keeps itself up to date: every cookie, storage key and third-party script found on a site (scans and visitors' browsers, names only), matched to a vendor catalogue, with unknown ones to classify, and the published policy as Markdown, text or HTML |
 | `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key, or by name from the workspace's own RB2B, Vector or Warmly; key pages, hot score, lookups, people reveal and who is left out; add a looked-up company to the CRM |
-| `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway, Requesty) plans missions and runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
+| `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway, Requesty) runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
 | `get_ai_usage` | Where the workspace's AI spend goes in a month: by tool, provider, model and day, each tool's own limit, and the latest calls with tokens and cost |
 | `list_connection_usage` | What each paid connection (SEO data, lead data, email verification, page reads) used today and this month, with its daily and monthly limits |
 | `get_connection_usage` | One paid connection's usage per day, its limits and the 80% and 100% warnings sent |
@@ -213,19 +212,18 @@ Read (always available):
 | `list_allocation_changes` | Mailbox assignment history with reasons |
 | `list_allocation_declines` | Mailboxes kept from a sequence until someone clears it: declined suggestions, undone automatic choices, platform refusals |
 | `list_senders`, `list_teams` | Who mailboxes send as, and the teams that own sequences and senders |
-| `use_mission` | Act inside a mission from now on, or stop (null) |
 | `list_playbooks`, `get_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing). Needs `agents.read`; `run_playbook` below starts one |
 | `list_playbook_automations`, `create_playbook_automation`, `update_playbook_automation`, `pause_playbook_automation`, `run_playbook_automation`, `list_playbook_automation_runs`, `delete_playbook_automation` | Run a playbook by itself on a schedule or when an event happens. An agent sets one up as a draft; a person approves it in Outflare, then each run is an agent run of Outflare's agent inside the approved mode and spend limits. Needs `agents.read`, and `agents.run` to change |
 | `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
 | `export_kit` | Journeys written out as a flow kit file, with the journeys, lists, emails and rules they use. Ids become placeholders, sequences and chosen events become inputs, and the file is checked as a shipped kit is. Changes nothing. Needs `emails.read` and `customers.read` |
 | `preview_kit_file`, `apply_kit_file` | The same as `preview_kit` and `apply_kit`, for a kit file sent with the call, such as one exported from another workspace. Same scopes |
-| `list_missions`, `get_mission` | Missions; check in on one: its brand's context, what writes do now, limits, progress, open connect requests, notes from people |
-| `list_mission_actions`, `get_mission_action` | Writes held or dry-run in a mission, and their decisions and results |
+| `list_missions`, `get_mission` | Retired missions, as history: goal, progress, limits and the notes on each |
+| `list_mission_actions`, `get_mission_action` | Writes a retired mission held or dry-ran, and their decisions and results (history) |
 | `run_playbook`, `list_agent_runs`, `get_agent_run`, `write_to_agent_run`, `pause_agent_run`, `stop_agent_run` | Run a playbook with Outflare's agent as an agent of its own on the action layer (copilot, autonomous with a spend cap, or dry run), follow its runs, write to one, pause or stop it. Needs `agents.read`, and `agents.run` to start or change |
 | `list_actions`, `get_action` | Changes an agent token made through the action layer: run, held for a person, refused, and what people decided; poll `get_action` after a 202 |
 | `list_action_grants` | What each agent token may change on its own, what waits for a person and what is refused |
 | `list_mission_calls` | Every call made in a mission |
-| `list_pending_approvals` | Held writes waiting for a person, across missions |
+| `list_pending_approvals` | What the retired missions held for a person, as history (changes waiting now: `list_actions`) |
 | `get_outcomes_report` | Cost per reply, meeting and deal for the workspace or per sequence or brand, with caveats |
 | `list_analytics` | Connected analytics tools (Google Analytics, Search Console, Bing, PostHog, Plausible and more), their reports and default site |
 | `get_analytics_summary` | Traffic totals from every analytics connection over one range, in one call |
@@ -233,7 +231,7 @@ Read (always available):
 | `list_analytics_sites` | The properties, sites or projects an analytics connection can read |
 | `get_analytics_changes` | Start here: per website, headline sentences, this period against the one before per tool, top movers, unusual days, SEO moves, and gaps with the connector that fills each |
 | `get_analytics_catalog` | Per website: the analytics and SEO tools, the metrics each has stored, history stored, budget left and gaps (also the resource `outflare://analytics/catalog`) |
-| `get_analytics_overview` | Every website lined up by domain: each analytics tool side by side, search clicks added up, latest SEO figures |
+| `get_analytics_overview` | Every website lined up by domain: each analytics tool side by side, search clicks added up, latest SEO figures. Take `brand`: they belong to one brand |
 | `query_analytics_history`, `compare_analytics_tools` | Stored daily analytics: grouped by day, tool or key, and each tool's daily series for one website |
 | `list_seo` | DataForSEO and Ahrefs connections: domains, country, budget left this month, snapshot status |
 | `get_seo_overview` | Each brand's search growth: weekly branded search, clicks and visitors, domain rating, backlinks and referring domains with trends, site health and open fixes; free |
@@ -287,7 +285,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
 | `delete_record` | Erase a person or company for good, with their activity, for an erasure request; optionally never contact them again |
-| `soft_delete_record`, `delete_field_value`, `delete_record_identity`, `delete_record_link`, `delete_customer_event` | Delete a person or company (with their identities, links and events), a wrong field value, identity or link, or a product event such as a test payment: hidden everywhere at once and restorable for 7 days, then purged |
+| `soft_delete_record`, `delete_field_value`, `delete_record_identity`, `delete_record_link`, `delete_customer_event`, `delete_transaction` | Delete a person or company (with their identities, links and events), a wrong field value, identity or link, a product event, or a transaction such as a test payment: hidden everywhere at once and restorable for 7 days, then purged |
 | `list_recently_deleted`, `get_deletion`, `restore_deletion` | See what was deleted in the last 7 days and restore it as it was, without firing rules, journeys, webhooks or emails again |
 | `list_merges`, `undo_merge` | See a brand's merges and undo one: every row the merge moved goes back to the merged record, without firing anything |
 | `list_batches`, `preview_batch_undo`, `undo_batch` | See a brand's import and ingest batches, preview what undoing one would remove and what changed since, and undo it (only what's untouched, or everything), restorable for 7 days |
@@ -310,6 +308,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `update_sending_server` | Pause or resume a sending server, cap its daily sends, set its IPs, or turn off the automatic blocklist pause |
 | `check_sending_server` | Re-check a server's IPs against blocklists, e.g. after a delisting request |
 | `add_tracking_domain`, `check_tracking_domain`, `add_tracking_domain_dns`, `get_tracking_domain_dns_approval` | Use the user's own domain for unsubscribe and click links, check its CNAME, and add it through the workspace's Cloudflare in one click or with a link the user approves once at their DNS provider |
+| `move_tracking_domain` | Move a tracking domain to another brand, whose emails then use it for their links |
 | `create_lead` | Add or update a lead by email, with custom fields |
 | `import_leads_csv` | Bulk upsert from CSV text, optionally into a named list |
 | `update_lead`, `delete_lead` | Change a lead's fields; delete a lead, optionally suppressing the address (erasure requests) |
@@ -352,7 +351,9 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `connect_integration` | Connect a service with a key the agent already holds; the key is tested first |
 | `get_oauth_link` | A sign-in link for an OAuth connector, for the user to open; for `google_mail` and `outlook_mail` the sign-in adds the mailbox |
 | `add_connection_mailboxes` | Add mailboxes by address through a Gmail or Outlook admin connection (service account or Entra app), no passwords |
-| `test_integration`, `update_integration`, `disconnect_integration` | Re-test, rename, replace the key or choose which brands use it, or disconnect an account |
+| `test_integration`, `update_integration`, `disconnect_integration` | Re-test, rename, replace the key, set its kind (brand, split or shared) and brands, or disconnect an account |
+| `list_unassigned_connections` | List connections, sites and ad accounts that belong to no brand, so their data shows nowhere |
+| `list_connection_accounts`, `assign_connection_account` | List a connection's sites and ad accounts with their brands, and assign one to a brand |
 | `update_mailbox_health_settings` | Turn automatic pausing on bounce spikes on or off, or change its threshold |
 | `start_import` | Bring campaigns (as drafts), leads and sending accounts over from Instantly or Smartlead |
 | `update_ai_settings` | Choose the AI model, its price, a model per task (plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, review_replies, email_verification) and the monthly AI limit |
@@ -369,12 +370,6 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `clear_allocation_decline` | Let the allocator give a declined mailbox to that sequence again |
 | `create_sender`, `confirm_mailbox_sender` | Add a sender and confirm which mailboxes send as it |
 | `resolve_orphaned_follow_ups` | Cancel, or hand off, follow-ups whose mailbox is gone |
-| `update_mission` | Change a mission's goal, plan or instructions (missions are retired: nothing starts a new one, and the ones made before keep working until they end) |
-| `submit_mission_plan` | Send the plan to a person for approval |
-| `post_mission_update` | Progress notes and questions for people |
-| `request_connector` | Ask a person to connect a tool the mission needs (API key or OAuth) |
-| `pause_mission`, `stop_mission`, `complete_mission` | Pause, end now, or finish with a report |
-| `approve_mission`, `resume_mission`, `decide_mission_action` | For approver tokens only: start a mission (with `runner: "builtin"` Outflare's own agent runs it), resume it, approve or reject a held write |
 | `log_meeting`, `update_meeting` | Record a meeting no calendar saw; mark held, no-show or qualified; fix which sequence it counts for |
 | `log_deal`, `update_deal` | Record a deal without a CRM; re-attribute any deal |
 | `record_spend`, `delete_spend_entry` | Add a charge (money, or units priced by rate) with a ref so retries never double count; remove a mistake |
@@ -420,13 +415,13 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_analytics_site_brands` | Which brand each analytics site reports for (matched by domain unless picked) |
 | `sync_analytics` | Sync analytics now instead of within six hours |
 | `get_tracking_taxonomy` | The channels campaign links can be in, with each one's utm_medium and usual sources |
-| `list_tracking_campaigns`, `get_tracking_campaign` | Campaigns with their tags, ofc code, landing link and link count; look one up by its ofc code |
+| `list_tracking_campaigns`, `get_tracking_campaign` | Campaigns with their tags, ofc code, landing link and link count; look one up by its ofc code. Take `brand`: they belong to one brand |
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
 | `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term, and optionally a short redirect link that counts clicks |
 | `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |
 | `list_attribution_models`, `create_attribution_model`, `update_attribution_model`, `archive_attribution_model` | The workspace's own attribution models: windows per channel, channels left out, position weights and half-life, each change a new version |
 | `list_conversion_definitions`, `create_conversion_definition`, `update_conversion_definition`, `archive_conversion_definition`, `list_conversion_presets`, `add_conversion_preset` | What the workspace counts as a conversion: an event, filters, a value and each ad network's name for it, with presets by kind of business |
-| `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any model |
+| `get_attribution_channels`, `get_attribution_campaigns` | Visits, conversions, revenue and cost per channel, and per source and campaign, under any model. Take `brand`: they belong to one brand |
 | `get_attribution_customers`, `get_attribution_cohorts` | New or known people and first or repeat revenue per channel, and what the people each channel first brought have paid to date |
 | `get_attribution_accounts`, `get_attribution_deals` | Credit rolled up to each company with the deals it won, and won deal value spread across channels by the credit of its people |
 | `get_attribution_ads` | Per paid ad campaign, ad set or ad: first-party visits, credited conversions and revenue beside the platform's spend and its own conversion count |
@@ -434,13 +429,16 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_ad_connections` | List connected ad platforms and what each still needs |
 | `list_ad_accounts` | List ad accounts with currency, brand and sync status |
 | `update_ad_account` | Set an ad account's brand, or switch its sync |
-| `list_ad_campaigns` | Campaigns ranked by spend, with platform-reported results |
+| `list_ad_campaigns` | Campaigns ranked by spend, with platform-reported results, type, bid strategy, the brand's target cost per conversion (over or under) and whether spend is scaling up or down |
+| `set_ad_target` | Set the target cost per conversion for a campaign, or for an ad account's campaigns. Outflare's own, never sent to the platform. Needs `analytics.manage` |
 | `list_ad_items` | Meta ad sets, Google ad groups and ads ranked by spend, with each ad's headline and landing page |
 | `list_ad_conversion_actions` | Platform conversions by action (purchase, lead, each Google conversion action) |
 | `list_ad_keywords` | Google search keywords ranked by spend |
 | `list_ad_search_terms` | What people searched that showed a Google ad, with the keyword it matched |
 | `get_ads_summary` | Ad spend and results grouped by platform, brand, account or day |
 | `list_ad_tracking_templates` | The tracking template to paste into each ad network, with its click ids and macros |
+| `plan_ad_tracking` | Which of an ad account's URL suffixes need the tracking template, read from the platform (Google Ads), with what each would say. Changes nothing |
+| `add_ad_tracking` | Add the tracking template to every ad of an ad account, keeping the parameters already there. Needs `ads.manage` |
 | `get_ad_tracking_health` | Whether paid traffic is tracked per network, campaigns spending without tracked visits, send-back failures, and what to fix |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `pause_ad_campaign`, `resume_ad_campaign`, `set_ad_campaign_budget` | Pause or resume a campaign, or set its daily budget, on the workspace's own Google Ads, Meta, Microsoft, LinkedIn or TikTok account: the change is queued, made by a job and read back from the platform. On the action layer a raise past a fifth always waits for a person, and so does anything over the grant's spend caps. Needs `ads.manage` |
@@ -455,6 +453,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_content`, `get_content` | Posts and pages written in Outflare for a brand's website, with their bodies and publications |
 | `create_content`, `update_content` | Write a post or page (Markdown), change it, approve it for going live, or archive it. Needs `content.manage` |
 | `publish_content` | Put a post or page on the brand's own CMS (WordPress, Ghost), as a draft there or live. Needs `content.manage`; an agent's publication may be held for a person |
+| `deliver_content` | Report a post or page live on the brand's own site after the `content.approved` webhook, so the item is published and measured. Needs `content.manage` |
 | `list_ad_changes` | Every change asked for, whether it applied, and whether the platform showed it afterwards |
 | `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
 | `list_ad_audiences` | An ad account's customer list audiences, for a journey's sync_audience step |
@@ -466,7 +465,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_seo_sites`, `add_seo_site`, `update_seo_site`, `delete_seo_site` | The websites OutflareBot audits: ownership, crawl settings and limits, latest crawl |
 | `verify_seo_site`, `add_seo_site_dns`, `get_seo_site_dns_approval` | Check the DNS record, meta tag or file that proves the user owns a site; add the DNS record through the workspace's Cloudflare in one click, or with a link the user approves once at their DNS provider |
 | `start_crawl`, `get_crawl`, `list_crawls`, `stop_crawl` | Crawl a site now, follow it, list past crawls, stop one |
-| `list_experiments`, `create_experiment`, `get_experiment`, `list_experiment_pages`, `start_experiment`, `stop_experiment`, `delete_experiment` | SEO experiments: split a site's pages into matched treatment and control groups, start measuring on the next deploy, and see whether the change helped |
+| `list_experiments`, `create_experiment`, `get_experiment`, `list_experiment_pages`, `start_experiment`, `stop_experiment`, `delete_experiment` | SEO experiments: split a site's pages into matched treatment and control groups, start measuring on the next deploy, and see whether the change helped. Take `brand`: they belong to one brand |
 | `list_crawl_pages`, `get_crawl_page` | Every URL a crawl found: status, redirects, noindex, nofollow, robots.txt blocks, title, description, canonical, h1, hreflang, schema, word count, links in and out |
 | `get_crawl_ai_access` | What AI crawlers may read of a crawled site: per crawler (OAI-SearchBot, ClaudeBot, PerplexityBot and others) whether robots.txt lets it in and how many pages it is kept from, and whether the site has an llms.txt |
 | `get_ai_bot_hits` | How often AI crawlers requested each site, per crawler and day, from the request logs of the workspace's own Cloudflare connection |
@@ -487,7 +486,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_news_articles`, `list_coverage`, `add_coverage`, `update_coverage` | What the news watch found, and coverage: articles about a brand on the outlet's company record, to confirm or dismiss |
 | `reclaim_link_prospects`, `check_link_prospects`, `check_link_prospect` | Lost links as prospects to win back, and OutflareBot's check of prospects' pages: up or gone, already linking, broken outbound links with archive snapshots, the AI's read (with the workspace's own key) and who to contact |
 | `search_web` | One search results page for any query (Google operators work) from the workspace's own DataForSEO or Geonode; costs money within the connection's budget, so estimate first |
-| `list_link_sequences`, `create_link_sequence`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
+| `list_link_sequences`, `create_link_sequence`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence; without it, a daily limit applies and pitches the AI is unsure about still wait), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
 | `read_links`, `list_link_reads`, `get_link_read`, `list_dead_pages`, `list_top_linked_pages` | Who links to any page or domain, from the workspace's own Ahrefs or DataForSEO (paid; estimate first), and free reports over earlier reads: competitors' dead pages with links, a domain's most linked pages |
 | `get_link_building_settings`, `update_link_building_settings` | The pitch cool-down, the weekly read of competitors' dead pages with its share of the budget, and how often broken-link prospects are checked again |
 | `list_link_assets`, `publish_link_asset` | Mark a page of yours published (`asset.published`), which can start the "Promote a new page" playbook by itself. Needs `seo.read`, and `seo.manage` to publish |
@@ -530,7 +529,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_social_publications`, `create_social_publication`, `update_social_publication`, `draft_social_publication`, `cancel_social_publication` | The brand's own original posts on X and LinkedIn: write one or have the workspace's own AI draft it, with a tracked link and an optional time; a person approves each one in Outflare before it posts (there is no approve tool) |
 | `list_social_series`, `create_social_series`, `update_social_series`, `add_series_post` | Recurring posts such as a daily changelog summary: a person approves the series once, then each post handed in goes out with no other approval, up to its daily limit |
 
-Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `stop_mission`, `complete_mission`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account, and `place_reddit_action`, `approve_reddit_action` and `check_reddit_action`, which reach Reddit through Engain. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
+Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account, and `place_reddit_action`, `approve_reddit_action` and `check_reddit_action`, which reach Reddit through Engain. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
 
 ### Analytics prompts and resources
 
@@ -548,7 +547,7 @@ The resource `outflare://analytics/catalog` is the analytics catalog, for client
 
 ### Missions (retired)
 
-Missions are being retired for the action layer: your token's changes run, wait for a person or are refused by its grants (`list_actions`, `get_action`), with no mission to start or approve first, and `run_playbook` hands a playbook to Outflare's agent. Nothing starts a new mission. A mission made before keeps working until it ends: `use_mission` with its id, `get_mission` for its brief and limits, act with the normal tools (a write that comes back with `approval_required` waits; poll `get_mission_action`), `post_mission_update` as you go, and `complete_mission` with a report.
+Missions are retired: your token's changes run, wait for a person or are refused by its grants (`list_actions`, `get_action`), and `run_playbook` hands a playbook to Outflare's agent. What missions did stays readable (`list_missions`, `get_mission`, `list_mission_calls`, `list_mission_actions`); a change to a mission, or one sent with the `Outflare-Mission` header, answers 410 `mission_retired`.
 
 A typical run starts with `get_context`, then: `list_ideal_customer_profiles`, `list_data_providers`, `preview_lead_search`, `create_lead_list` with `build: true`, `get_list_run` until done, `list_lead_list_members`. Or from a CSV: `get_overview`, `import_leads_csv`, `check_recipients`, `create_sequence`, `preview_sequence` for a real lead, `enroll_leads`, then `update_sequence` with `status: "active"`.
 

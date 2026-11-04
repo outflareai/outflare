@@ -26,10 +26,18 @@ func (s *Server) routesAttribution(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/settings", s.inWorkspace(read, s.getAttributionSettings))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/attribution/settings", s.inWorkspace(manage, s.updateAttributionSettings))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/channels", s.inWorkspace(read, s.attributionChannels))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/campaigns", s.inWorkspace(read, s.attributionCampaigns))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/ads", s.inWorkspace(read, s.attributionAds))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/conversions", s.inWorkspace(read, s.listAttributionConversions))
+	// What a brand's visits and conversions were credited to is the
+	// brand's (brand_website.go). The settings, models and conversion
+	// definitions stay the workspace's, held by its first brand, until
+	// the attribution runner and ad send-back read them per brand.
+	for _, t := range s.twins("attribution") {
+		mux.HandleFunc("GET "+t.path+"/channels", t.on(s.inWorkspace)(read, s.attributionChannels))
+		mux.HandleFunc("GET "+t.path+"/campaigns", t.on(s.inWorkspace)(read, s.attributionCampaigns))
+		mux.HandleFunc("GET "+t.path+"/ads", t.on(s.inWorkspace)(read, s.attributionAds))
+		mux.HandleFunc("GET "+t.path+"/conversions", t.on(s.inWorkspace)(read, s.listAttributionConversions))
+	}
+	// Rolled-up reports (customers, cohorts, accounts, deals) stay workspace
+	// routes for now; they move under the brand in a later change.
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/customers", s.inWorkspace(read, s.attributionCustomers))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/cohorts", s.inWorkspace(read, s.attributionCohorts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/accounts", s.inWorkspace(read, s.attributionAccounts))
@@ -253,7 +261,16 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 		return attributionFilter{}, false
 	}
 	ref := q.Get("model")
-	brand, ok := s.brandFilter(w, r)
+	// The reports served under the brand (brand_website.go) default to the
+	// first brand on their deprecated workspace routes; the roll-ups and the
+	// other callers, still workspace routes, keep ?brand= as a filter.
+	pick := s.brandFilter
+	for _, rep := range []string{"/attribution/channels", "/attribution/campaigns", "/attribution/ads", "/attribution/conversions"} {
+		if strings.HasSuffix(r.Pattern, rep) {
+			pick = s.dataBrand
+		}
+	}
+	brand, ok := pick(w, r)
 	if !ok {
 		return attributionFilter{}, false
 	}

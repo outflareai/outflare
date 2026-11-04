@@ -332,3 +332,41 @@ func HasTemplate(tags ...string) bool {
 	}
 	return false
 }
+
+// AddTemplate returns a URL suffix or URL parameters with the template's
+// parameters added: every parameter already there stays as it is, in its
+// place, and the template adds only the keys it lacks, so a suffix the
+// advertiser wrote keeps its own UTM tags. Values are left unescaped, as
+// the network fills its macros in.
+func AddTemplate(existing, template string) string {
+	existing = strings.Trim(strings.TrimSpace(existing), "?&")
+	have := map[string]bool{}
+	for _, p := range strings.Split(existing, "&") {
+		if k, _, _ := strings.Cut(p, "="); k != "" {
+			have[k] = true
+		}
+	}
+	parts := []string{}
+	if existing != "" {
+		parts = append(parts, existing)
+	}
+	for _, p := range strings.Split(template, "&") {
+		k, _, _ := strings.Cut(p, "=")
+		if k == "" || have[k] {
+			continue
+		}
+		have[k] = true
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, "&")
+}
+
+// NetworkForConnector returns the network whose ads a connector reads.
+func NetworkForConnector(connector string) (Network, bool) {
+	for _, n := range Networks {
+		if n.Connector == connector {
+			return n, true
+		}
+	}
+	return Network{}, false
+}

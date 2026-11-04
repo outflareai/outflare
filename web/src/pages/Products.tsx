@@ -58,6 +58,7 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
   const [aliases, setAliases] = useState("");
   const [churnMode, setChurnMode] = useState<"cancellation" | "inactivity">("cancellation");
   const [editing, setEditing] = useState<"stages" | "moves" | null>(null);
+  const [changing, setChanging] = useState<Product | null>(null);
 
   const load = useCallback(async () => {
     const [p, n, l] = await Promise.all([
@@ -236,12 +237,71 @@ function ProductsFor({ brand, canManage }: { brand: string; canManage: boolean }
                     {p.aliases.length > 0 && <> · {p.aliases.join(", ")}</>}
                   </div>
                 </div>
+                {canManage && !p.archived_at && <Button variant="ghost" disabled={busy} onClick={() => setChanging(changing?.id === p.id ? null : p)}>Edit</Button>}
                 {canManage && <Button variant="ghost" disabled={busy} onClick={() => archive(p)}>{p.archived_at ? "Restore" : "Archive"}</Button>}
+                {changing?.id === p.id && <ProductEditor brand={brand} product={p} onClose={() => setChanging(null)} onSaved={() => { setChanging(null); void load(); }} />}
               </li>
             ))}
           </ul>
         )}
       </Card>
+    </div>
+  );
+}
+
+// ProductEditor changes a product's name, aliases and when its customers
+// count as at risk or churned. Its key never changes, so rules and events
+// that name it keep working.
+function ProductEditor({ brand, product, onClose, onSaved }: { brand: string; product: Product; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(product.name);
+  const [aliases, setAliases] = useState(product.aliases.join(", "));
+  const [churnMode, setChurnMode] = useState(product.churn_mode);
+  const [atRisk, setAtRisk] = useState(String(product.at_risk_days));
+  const [churn, setChurn] = useState(String(product.churn_days));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function save() {
+    setBusy(true);
+    setError("");
+    const { error } = await api.PATCH("/v1/brands/{brand}/products/{product}", {
+      params: { path: { brand, product: product.id } },
+      body: {
+        name: name.trim(),
+        aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean),
+        churn_mode: churnMode,
+        at_risk_days: Number(atRisk),
+        churn_days: Number(churn),
+        version: product.version,
+      },
+    });
+    setBusy(false);
+    if (error) return setError(errorMessage(error));
+    toast(`${name.trim()} saved.`);
+    onSaved();
+  }
+  const days = (v: string) => /^\d+$/.test(v) && Number(v) >= 1;
+  return (
+    <div className="w-full space-y-2 rounded-md border p-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-[12px] text-muted-foreground">Name<input className={`${field} mt-1 block w-56`} value={name} onChange={(e) => setName(e.target.value)} /></label>
+        <label className="text-[12px] text-muted-foreground">Aliases, separated by commas<input className={`${field} mt-1 block w-72`} placeholder="resi, billing:prod_123" value={aliases} onChange={(e) => setAliases(e.target.value)} /></label>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-[12px] text-muted-foreground">Churned
+          <select className={`${field} mt-1 block`} value={churnMode} onChange={(e) => setChurnMode(e.target.value as "cancellation" | "inactivity")}>
+            <option value="cancellation">When they cancel</option>
+            <option value="inactivity">After no usage</option>
+          </select>
+        </label>
+        <label className="text-[12px] text-muted-foreground">At risk after (days without usage)<input type="number" min={1} max={365} className={`${field} mt-1 block w-28`} value={atRisk} onChange={(e) => setAtRisk(e.target.value)} /></label>
+        {churnMode === "inactivity" && <label className="text-[12px] text-muted-foreground">Churned after (days without usage)<input type="number" min={1} max={730} className={`${field} mt-1 block w-28`} value={churn} onChange={(e) => setChurn(e.target.value)} /></label>}
+      </div>
+      <p className="text-[12px] text-muted-foreground">Its key, <span className="font-mono">{product.key}</span>, stays the same, so rules and events that use it keep working. New days apply from the next check.</p>
+      {error && <ErrorText>{error}</ErrorText>}
+      <div className="flex gap-2">
+        <Button disabled={busy || !name.trim() || !days(atRisk) || !days(churn)} onClick={save}>Save</Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
     </div>
   );
 }

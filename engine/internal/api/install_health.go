@@ -26,7 +26,7 @@ const (
 	// siteScriptVersion is the version /site.js sends (VERSION in site.js);
 	// siteScriptMinVersion is the oldest the server still takes as is.
 	// Copies from before the script sent a version count as "1".
-	siteScriptVersion    = 9
+	siteScriptVersion    = 10
 	siteScriptMinVersion = 1
 
 	// A site key whose site sent visits but none for this long is silent.
@@ -76,11 +76,107 @@ type deprecatedOperation struct {
 // (plans/brands/README.md, decision 6). The workspace routes stay until
 // the contract step.
 var deprecatedOperations = map[string]deprecatedOperation{
-	// Missions are being retired for agent runs (ADR 13). startPlaybook
-	// already answers 410 mission_retired; the other two still work.
-	"createMission": {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
-	"planMission":   {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
-	"startPlaybook": {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	// Website and analytics (step 6).
+	"createSiteKey":                   {instead: "POST /v1/brands/{brand}/site-keys"},
+	"createSiteProxySecret":           {instead: "POST /v1/brands/{brand}/site-keys/{id}/proxy-secret"},
+	"listSiteKeys":                    {instead: "GET /v1/brands/{brand}/site-keys"},
+	"removeSiteProxySecret":           {instead: "DELETE /v1/brands/{brand}/site-keys/{id}/proxy-secret"},
+	"revokeSiteKey":                   {instead: "DELETE /v1/brands/{brand}/site-keys/{id}"},
+	"rotateSiteKey":                   {instead: "POST /v1/brands/{brand}/site-keys/{id}/rotate"},
+	"updateSiteKey":                   {instead: "PATCH /v1/brands/{brand}/site-keys/{id}"},
+	"addTrackingDomain":               {instead: "POST /v1/brands/{brand}/tracking-domains"},
+	"addTrackingDomainDNS":            {instead: "POST /v1/brands/{brand}/tracking-domains/{id}/dns"},
+	"analyticsSummary":                {instead: "GET /v1/brands/{brand}/analytics/summary"},
+	"archiveFlag":                     {instead: "DELETE /v1/brands/{brand}/flags/{flag}"},
+	"askABTests":                      {instead: "POST /v1/brands/{brand}/ab-tests/ask"},
+	"checkABTestVersion":              {instead: "POST /v1/brands/{brand}/ab-tests/{test}/checks"},
+	"checkTrackingDomain":             {instead: "POST /v1/brands/{brand}/tracking-domains/{id}/check"},
+	"compareAnalyticsTools":           {instead: "GET /v1/brands/{brand}/analytics/compare"},
+	"createABTest":                    {instead: "POST /v1/brands/{brand}/ab-tests"},
+	"createExperiment":                {instead: "POST /v1/brands/{brand}/experiments"},
+	"createFlag":                      {instead: "POST /v1/brands/{brand}/flags"},
+	"createFlagEditLink":              {instead: "POST /v1/brands/{brand}/flags/{flag}/edit-link"},
+	"createTrackingCampaign":          {instead: "POST /v1/brands/{brand}/tracking-campaigns"},
+	"createTrackingLink":              {instead: "POST /v1/brands/{brand}/tracking-campaigns/{id}/links"},
+	"deleteExperiment":                {instead: "DELETE /v1/brands/{brand}/experiments/{id}"},
+	"duplicateABTest":                 {instead: "POST /v1/brands/{brand}/ab-tests/{test}/duplicate"},
+	"endABTest":                       {instead: "POST /v1/brands/{brand}/ab-tests/{test}/end"},
+	"evaluateFlags":                   {instead: "POST /v1/brands/{brand}/flags/evaluate"},
+	"freezeABTest":                    {instead: "POST /v1/brands/{brand}/ab-tests/{test}/freeze"},
+	"getABTest":                       {instead: "GET /v1/brands/{brand}/ab-tests/{test}"},
+	"getABTestAIRun":                  {instead: "GET /v1/brands/{brand}/ab-test-ai-runs/{run}"},
+	"getABTestBreakdown":              {instead: "GET /v1/brands/{brand}/ab-tests/{test}/breakdown"},
+	"getABTestChecklist":              {instead: "GET /v1/brands/{brand}/ab-tests/{test}/checklist"},
+	"getABTestFactorial":              {instead: "GET /v1/brands/{brand}/ab-tests/{test}/factorial"},
+	"getABTestInteractions":           {instead: "GET /v1/brands/{brand}/ab-tests/{test}/interactions"},
+	"getABTestPreviews":               {instead: "GET /v1/brands/{brand}/ab-tests/{test}/previews"},
+	"getABTestResults":                {instead: "GET /v1/brands/{brand}/ab-tests/{test}/results"},
+	"getAnalyticsCatalog":             {instead: "GET /v1/brands/{brand}/analytics/catalog"},
+	"getAnalyticsChanges":             {instead: "GET /v1/brands/{brand}/analytics/changes"},
+	"getAnalyticsHistory":             {instead: "GET /v1/brands/{brand}/analytics/history"},
+	"getAnalyticsOverview":            {instead: "GET /v1/brands/{brand}/analytics/overview"},
+	"getAttributionAds":               {instead: "GET /v1/brands/{brand}/attribution/ads"},
+	"getAttributionCampaigns":         {instead: "GET /v1/brands/{brand}/attribution/campaigns"},
+	"getAttributionChannels":          {instead: "GET /v1/brands/{brand}/attribution/channels"},
+	"getConsentBanner":                {instead: "GET /v1/brands/{brand}/site-keys/{id}/consent-banner"},
+	"getCookiePolicy":                 {instead: "GET /v1/brands/{brand}/site-keys/{id}/cookie-policy"},
+	"getExperiment":                   {instead: "GET /v1/brands/{brand}/experiments/{id}"},
+	"getFlag":                         {instead: "GET /v1/brands/{brand}/flags/{flag}"},
+	"getFlagGroupHoldout":             {instead: "GET /v1/brands/{brand}/flag-groups/{group}/holdout"},
+	"getTrackingCampaign":             {instead: "GET /v1/brands/{brand}/tracking-campaigns/{id}"},
+	"getTrackingDomainDNSApproval":    {instead: "GET /v1/brands/{brand}/tracking-domains/{id}/dns/approval"},
+	"getTrackingTaxonomy":             {instead: "GET /v1/brands/{brand}/tracking-taxonomy"},
+	"listABTestAIRuns":                {instead: "GET /v1/brands/{brand}/ab-test-ai-runs"},
+	"listABTestLearnings":             {instead: "GET /v1/brands/{brand}/ab-tests/learnings"},
+	"listABTests":                     {instead: "GET /v1/brands/{brand}/ab-tests"},
+	"listAnalyticsSources":            {instead: "GET /v1/brands/{brand}/analytics"},
+	"listAnalyticsSyncs":              {instead: "GET /v1/brands/{brand}/analytics/syncs"},
+	"listAttributionConversions":      {instead: "GET /v1/brands/{brand}/attribution/conversions"},
+	"listCookiePolicyVersions":        {instead: "GET /v1/brands/{brand}/site-keys/{id}/cookie-policy/versions"},
+	"listExperimentPages":             {instead: "GET /v1/brands/{brand}/experiments/{id}/pages"},
+	"listExperiments":                 {instead: "GET /v1/brands/{brand}/experiments"},
+	"listFlagGroups":                  {instead: "GET /v1/brands/{brand}/flag-groups"},
+	"listFlags":                       {instead: "GET /v1/brands/{brand}/flags"},
+	"listSiteCookies":                 {instead: "GET /v1/brands/{brand}/site-keys/{id}/cookies"},
+	"listTrackingCampaigns":           {instead: "GET /v1/brands/{brand}/tracking-campaigns"},
+	"listTrackingDomains":             {instead: "GET /v1/brands/{brand}/tracking-domains"},
+	"listTrackingLinks":               {instead: "GET /v1/brands/{brand}/tracking-campaigns/{id}/links"},
+	"listVisitors":                    {instead: "GET /v1/brands/{brand}/visitors"},
+	"planABTest":                      {instead: "POST /v1/brands/{brand}/ab-tests/plan"},
+	"reaskConsentBanner":              {instead: "POST /v1/brands/{brand}/site-keys/{id}/consent-banner/reask"},
+	"removeTrackingDomain":            {instead: "DELETE /v1/brands/{brand}/tracking-domains/{id}"},
+	"reportTrackingDomainDNSApproved": {instead: "POST /v1/brands/{brand}/tracking-domains/{id}/dns/approved"},
+	"setFlagGroup":                    {instead: "PUT /v1/brands/{brand}/flag-groups/{group}"},
+	"shipABTest":                      {instead: "POST /v1/brands/{brand}/ab-tests/{test}/ship"},
+	"startABTest":                     {instead: "POST /v1/brands/{brand}/ab-tests/{test}/start"},
+	"startCookieScan":                 {instead: "POST /v1/brands/{brand}/site-keys/{id}/cookie-scans"},
+	"startExperiment":                 {instead: "POST /v1/brands/{brand}/experiments/{id}/start"},
+	"stopExperiment":                  {instead: "POST /v1/brands/{brand}/experiments/{id}/stop"},
+	"suggestABTests":                  {instead: "POST /v1/brands/{brand}/ab-tests/suggestions"},
+	"summarizeABTest":                 {instead: "POST /v1/brands/{brand}/ab-tests/{test}/summary"},
+	"updateABTest":                    {instead: "PATCH /v1/brands/{brand}/ab-tests/{test}"},
+	"updateConsentBanner":             {instead: "PUT /v1/brands/{brand}/site-keys/{id}/consent-banner"},
+	"updateExperiment":                {instead: "PATCH /v1/brands/{brand}/experiments/{id}"},
+	"updateFlag":                      {instead: "PATCH /v1/brands/{brand}/flags/{flag}"},
+	"updateSiteCookie":                {instead: "PATCH /v1/brands/{brand}/site-keys/{id}/cookies/{cookie}"},
+	"updateTrackingCampaign":          {instead: "PATCH /v1/brands/{brand}/tracking-campaigns/{id}"},
+	"writeABTestLearning":             {instead: "POST /v1/brands/{brand}/ab-tests/{test}/learning"},
+	"writeABTestVersions":             {instead: "POST /v1/brands/{brand}/ab-tests/versions"},
+	// Missions are retired (ADR 13): these answer 410 mission_retired.
+	"approveMission":               {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"approveMissionAction":         {instead: "POST /v1/workspaces/{ws}/actions/{id}/approve"},
+	"completeMission":              {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/complete"},
+	"createMission":                {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"pauseMission":                 {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/pause"},
+	"planMission":                  {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"postMissionUpdate":            {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/updates"},
+	"rejectMissionAction":          {instead: "POST /v1/workspaces/{ws}/actions/{id}/reject"},
+	"resolveMissionConnectRequest": {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/updates"},
+	"resumeMission":                {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/resume"},
+	"startPlaybook":                {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"stopMission":                  {instead: "POST /v1/workspaces/{ws}/agent-runs/{id}/stop"},
+	"submitMission":                {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
+	"updateMission":                {instead: "POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs"},
 	// Customer data (step 2b part 2).
 	"addRecordIdentity":       {instead: "POST /v1/brands/{brand}/records/{record}/identities"},
 	"addRecordRelationship":   {instead: "POST /v1/brands/{brand}/records/{record}/relationships"},
@@ -304,8 +400,13 @@ func (s *Server) installChecks(ctx context.Context, ws, brand string) (installHe
 	brandPage := s.brandAppPath(ctx, ws, brand, "")
 	page := func(p string) string { return brandPage + p }
 	forBrand := func(b *string) bool { return brand == "" || b == nil || *b == brand }
+	// One check per key: the same problem can turn up in several rows (one
+	// deprecated route called by two clients), and install_issues allows one
+	// open issue per key.
+	added := map[string]bool{}
 	add := func(c installCheck) {
-		if forBrand(c.BrandID) {
+		if forBrand(c.BrandID) && !added[c.Key] {
+			added[c.Key] = true
 			v.Checks = append(v.Checks, c)
 		}
 	}
@@ -604,6 +705,9 @@ func (s *Server) refreshWorkspaceIssues(ctx context.Context, ws string) error {
 		rows.Close()
 		now := map[string]bool{}
 		for _, c := range v.Checks {
+			if now[c.Key] {
+				continue // handled already in this pass
+			}
 			now[c.Key] = true
 			if id, ok := open[c.Key]; ok {
 				if _, err := tx.Exec(ctx, `UPDATE install_issues SET last_seen_at = now(), severity = $2, title = $3 WHERE id = $1`, id, c.Severity, c.Title); err != nil {

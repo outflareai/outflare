@@ -477,7 +477,7 @@ func (s *Server) insightSegments(ctx context.Context, ws, brand, host string, sr
 		out.Notes = append(out.Notes, "Topic filters require query data, which is not present in country/device segments.")
 		return nil
 	}
-	rows, e := s.pool.Query(ctx, `SELECT page,country,device,COALESCE(sum(clicks) FILTER(WHERE day >= $5),0)::float8,COALESCE(sum(impressions) FILTER(WHERE day >= $5),0)::float8,COALESCE(sum(position*impressions) FILTER(WHERE day >= $5)/NULLIF(sum(impressions) FILTER(WHERE day >= $5),0),0),COALESCE(sum(clicks) FILTER(WHERE day < $5),0)::float8 FROM search_segments WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND integration_id=$3 AND site=$4 AND day BETWEEN $5::date-($6::date-$5::date+1) AND $6 AND `+seointel.PageHostSQL("page")+`=ANY($7) AND ($8='' OR country=$8) AND ($9='' OR device=$9) GROUP BY page,country,device ORDER BY COALESCE(sum(clicks) FILTER(WHERE day >= $5),0) DESC LIMIT 10000`, ws, brand, src.IntegrationID, src.Property, win.from, win.to, seointel.PageHosts(host), country, device)
+	rows, e := s.pool.Query(ctx, `SELECT page,country,device,COALESCE(sum(clicks) FILTER(WHERE day >= $5),0)::float8,COALESCE(sum(impressions) FILTER(WHERE day >= $5),0)::float8,COALESCE(sum(position*impressions) FILTER(WHERE day >= $5)/NULLIF(sum(impressions) FILTER(WHERE day >= $5),0),0),COALESCE(sum(clicks) FILTER(WHERE day < $5),0)::float8 FROM search_segments WHERE workspace_id=$1 AND brand_id=$2 AND integration_id=$3 AND site=$4 AND day BETWEEN $5::date-($6::date-$5::date+1) AND $6 AND `+seointel.PageHostSQL("page")+`=ANY($7) AND ($8='' OR country=$8) AND ($9='' OR device=$9) GROUP BY page,country,device ORDER BY COALESCE(sum(clicks) FILTER(WHERE day >= $5),0) DESC LIMIT 10000`, ws, brand, src.IntegrationID, src.Property, win.from, win.to, seointel.PageHosts(host), country, device)
 	if e != nil {
 		return e
 	}
@@ -504,7 +504,7 @@ func (s *Server) insightSegments(ctx context.Context, ws, brand, host string, sr
 	begin, _ := time.Parse(time.DateOnly, win.from)
 	days := int(end.Sub(begin).Hours()/24) + 1
 	var baselineDays int
-	if e = s.pool.QueryRow(ctx, `SELECT count(*) FROM search_completeness WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND integration_id=$3 AND site=$4 AND day BETWEEN $5::date-$6::int AND $5::date-1`, ws, brand, src.IntegrationID, src.Property, win.from, days).Scan(&baselineDays); e != nil {
+	if e = s.pool.QueryRow(ctx, `SELECT count(*) FROM search_completeness WHERE workspace_id=$1 AND brand_id=$2 AND integration_id=$3 AND site=$4 AND day BETWEEN $5::date-$6::int AND $5::date-1`, ws, brand, src.IntegrationID, src.Property, win.from, days).Scan(&baselineDays); e != nil {
 		return e
 	}
 	for _, x := range list {

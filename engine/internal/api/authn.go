@@ -52,7 +52,8 @@ type principal struct {
 	// Set when the token is a connected app's (an OAuth grant): its
 	// permissions are changed under Connect your AI, not API tokens.
 	TokenGrantID string
-	// The token makes changes only inside a mission (Outflare-Mission).
+	// The token was made to change things only inside a mission; with
+	// missions retired, its changes go through the action layer.
 	TokenRequiresMission bool
 	// The token's changes go through the action layer (actionGate).
 	TokenActionGate bool
@@ -401,12 +402,14 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 		// grants, every change waits for a person, as a mission's
 		// approvals did.
 		_, replaying := r.Context().Value(ctxActionReplayKey{}).(string)
-		if (p.TokenActionGate || (p.TokenRequiresMission && m == "")) && !replaying && r.Method != http.MethodGet && r.Method != http.MethodHead && !isActionRoute(r) && !isAgentRunRoute(r) && !isAgentAppRoute(r) && !readsOnly(r) {
+		if (p.TokenActionGate || (p.TokenRequiresMission && m == "")) && !replaying && r.Method != http.MethodGet && r.Method != http.MethodHead && !isMissionRoute(r) && !isActionRoute(r) && !isAgentRunRoute(r) && !isAgentAppRoute(r) && !readsOnly(r) {
 			s.idempotent(w, r, a, func(w http.ResponseWriter, r *http.Request) { s.actionGate(w, r, a, next) })
 			return
 		}
-		if m != "" && !isMissionRoute(r) && !readsOnly(r) {
-			s.idempotent(w, r, a, func(w http.ResponseWriter, r *http.Request) { s.missionGate(w, r, a, m, next) })
+		// Missions are retired: a change made inside one is refused rather
+		// than run without the mission's limits and approvals.
+		if m != "" && !isMissionRoute(r) && !readsOnly(r) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+			missionRetired(w, r)
 			return
 		}
 		s.idempotent(w, r, a, next)
@@ -468,7 +471,14 @@ func record(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, ta
 // recordWithProps is record with extra product event properties: ids,
 // enums and counts only, never names or text.
 func recordWithProps(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, targetType, targetID string, data, props map[string]any) error {
+	return recordWithWebhook(ctx, q, p, workspaceID, action, targetType, targetID, data, props, nil)
+}
+
+// recordWithWebhook is recordWithProps with the data webhooks deliver in
+// place of data (audit.Event.WebhookData).
+func recordWithWebhook(ctx context.Context, q pgx.Tx, p *principal, workspaceID, action, targetType, targetID string, data, props, webhook map[string]any) error {
 	e := audit.Event{
+		WebhookData: webhook,
 		WorkspaceID: workspaceID,
 		Action:      action,
 		TargetType:  targetType,
@@ -656,4 +666,12 @@ func networkKey(ip string) string {
 		return ip
 	}
 	return p.String()
+}
+
+// nonNil makes a nil slice an empty one, so it is [] in JSON, never null.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }

@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller, brandRef } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -46,6 +47,8 @@ export function registerFlagTools(
   withBrand: <T extends { brand?: string }>(q: T) => T,
 ): void {
   const path = () => ({ ws: workspace() });
+  // Flags and A/B tests belong to one brand: calls go to its routes.
+  const onBrand = brandCaller(gtm, workspace);
 
   server.registerTool(
     "list_flags",
@@ -53,18 +56,18 @@ export function registerFlagTools(
       title: "List feature flags",
       description: "Switches and splits (A/B tests) the website script and servers read: on or off, versions and weights, who gets them.",
       inputSchema: {
-        brand: z.string().optional().describe("Only this brand's flags and the shared ones: a handle or id from list_brands."),
+        brand: brandRef,
         status: z.enum(["on", "off", "archived", "all"]).optional().describe("Default: every flag but the archived ones."),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/flags", { params: { path: path(), query: withBrand(q) } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flags", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
     "get_flag",
-    { title: "Get a feature flag", description: "One flag, by id or key.", inputSchema: { flag: flagRef }, annotations: read },
-    ({ flag }) => call(() => gtm.GET("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ...path(), flag } } })),
+    { title: "Get a feature flag", description: "One flag, by id or key.", inputSchema: { brand: brandRef, flag: flagRef }, annotations: read },
+    ({ brand, flag }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: b, flag } } }))),
   );
 
   server.registerTool(
@@ -73,6 +76,7 @@ export function registerFlagTools(
       title: "Check which version a visitor gets",
       description: "The version a visitor gets of every flag that is on, and why (match, rules, rollout). Pass the anonymous_id the website script gave them so the answer matches the site. Nothing is stored.",
       inputSchema: {
+        brand: brandRef,
         anonymous_id: z.string().max(200).optional(),
         user_id: z.string().max(200).optional(),
         url: z.string().optional().describe("The page they are on, for host, path and query rules."),
@@ -83,7 +87,7 @@ export function registerFlagTools(
       },
       annotations: read,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/flags/evaluate", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/flags/evaluate", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -91,10 +95,10 @@ export function registerFlagTools(
     {
       title: "List exclusion groups",
       description: "Every exclusion group: its flags and the slice of visitors each owns, its holdout, and the share still free.",
-      inputSchema: {},
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/flag-groups", { params: { path: path() } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flag-groups", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -104,6 +108,7 @@ export function registerFlagTools(
       description:
         "What the group's changes did together: visitors kept out of every flag in the group (its holdout) against everyone else, on a goal, over the last days. The lift is the combined effect.",
       inputSchema: {
+        brand: brandRef,
         group: z.string().describe("The group's name."),
         event: z.string().optional().describe("The goal: an event name such as signup_started."),
         page: z.string().optional().describe("Or a page path, such as /thanks (a trailing * for a section)."),
@@ -111,9 +116,9 @@ export function registerFlagTools(
       },
       annotations: read,
     },
-    ({ group, event, page, days }) => {
+    ({ brand, group, event, page, days }) => {
       if (!event && !page) return { isError: true, content: [{ type: "text" as const, text: "Give the goal: event or page." }] };
-      return call(() => gtm.GET("/v1/workspaces/{ws}/flag-groups/{group}/holdout", { params: { path: { ...path(), group }, query: { event, page, days } } }));
+      return call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flag-groups/{group}/holdout", { params: { path: { brand: b, group }, query: { event, page, days } } })));
     },
   );
 
@@ -125,10 +130,10 @@ export function registerFlagTools(
       title: "Set an exclusion group's holdout",
       description:
         "Keep a percent of the group's visitors (0 to 50) out of every flag in it, so they see the default experience and the group's combined effect can be measured against them. It can't reach into a flag's slice.",
-      inputSchema: { group: z.string().describe("The group's name."), holdout: z.number().int().min(0).max(50) },
+      inputSchema: { brand: brandRef, group: z.string().describe("The group's name."), holdout: z.number().int().min(0).max(50) },
       annotations: write,
     },
-    ({ group, holdout }) => call(() => gtm.PUT("/v1/workspaces/{ws}/flag-groups/{group}", { params: { path: { ...path(), group } }, body: { holdout } })),
+    ({ brand, group, holdout }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/flag-groups/{group}", { params: { path: { brand: b, group } }, body: { holdout } }))),
   );
 
   server.registerTool(
@@ -136,10 +141,10 @@ export function registerFlagTools(
     {
       title: "Add a feature flag",
       description: "A switch, or a split between versions to test which works better. It starts off unless status is on. The site reads it with outflare.flag(key) when its script tag has data-flags.",
-      inputSchema: { key: key.describe("What code asks for, such as pricing-headline. It can't change later."), ...fields },
+      inputSchema: { brand: brandRef, key: key.describe("What code asks for, such as pricing-headline. It can't change later."), ...fields },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/flags", { params: { path: path() }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/flags", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -147,10 +152,10 @@ export function registerFlagTools(
     {
       title: "Change a feature flag",
       description: "Turn it on or off, or change its versions, rollout, rules or brand. Visitors get the change within 10 seconds; changing the weights of a running split moves some visitors to another version.",
-      inputSchema: { flag: flagRef, ...fields },
+      inputSchema: { brand: brandRef, flag: flagRef, ...fields },
       annotations: write,
     },
-    ({ flag, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ...path(), flag } }, body: body as never })),
+    ({ brand, flag, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: b, flag } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -158,9 +163,9 @@ export function registerFlagTools(
     {
       title: "Archive a feature flag",
       description: "Turn a flag off for good and free its key. Code that still asks for it gets false.",
-      inputSchema: { flag: flagRef },
+      inputSchema: { brand: brandRef, flag: flagRef },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    ({ flag }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/flags/{flag}", { params: { path: { ...path(), flag } } })),
+    ({ brand, flag }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/flags/{flag}", { params: { path: { brand: b, flag } } }))),
   );
 }

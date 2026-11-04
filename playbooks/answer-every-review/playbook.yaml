@@ -1,0 +1,56 @@
+id: answer-every-review
+version: 1
+title: Answer every review, and ask happy customers for one
+summary: Read the brand's review pages every day, draft a reply to each new review for a person to approve, and ask recent happy customers for a review.
+description: |
+  Buyers read the replies as closely as the reviews. A thoughtful answer
+  to a bad review often does more than a good one, and a steady flow of
+  recent reviews keeps the score honest. This playbook finds the brand's
+  review pages, drafts a reply to every new review in the brand's voice
+  for a person to approve, and sends a review request to customers who
+  recently had a good outcome.
+tier: obvious
+goals: [customers, retention]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  data:
+    - { check: records, label: "Customer records, for who to ask for a review" }
+  connections:
+    - capability: web.search
+      label: A web search connection, to find and read review pages
+      recommended: [geonode]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Read the brand's context and its review guide, and find its review pages.
+    tools: [getBrandContext, getReviewGuide, discoverReviewPages, listReviewPages]
+  - say: Read new reviews and draft a reply to each, held for a person.
+    tools: [listReviews, getReview, draftReviewReply]
+  - say: Mark each review replied once the person posts the answer.
+    tools: [markReviewReplied]
+  - say: Set up a review request to customers with a recent good outcome, and preview it.
+    tools: [createReviewRequestCampaign, previewReviewRequestCampaign]
+  - say: Read the review score and volume each week.
+    tools: [getReviewsSummary]
+guardrails:
+  - Every reply and every review request waits for a person's approval.
+  - Never offers anything in return for a review, and never asks only happy customers where a site's rules forbid it.
+  - Never writes a review, and never argues with a reviewer.
+measure:
+  - { metric: Reviews answered, how: "New reviews with a reply, and how long they waited." }
+  - { metric: Review score and volume, how: "Across the brand's review pages, this month against last." }
+prompt: |
+  Find {{brand}}'s review pages, draft a reply to every new review for me
+  to approve, and set up a review request to customers who recently had
+  a good outcome.
+example: |
+  Northpeak had 14 unanswered reviews across three sites. All were
+  answered in a week, and the review request brought 22 new reviews in
+  a month.

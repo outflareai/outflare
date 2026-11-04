@@ -415,6 +415,9 @@ function ActivityDialog({
     filterable: true,
     sensitivity: "internal",
     precedence: [],
+    owner_id: null,
+    retention_days: null,
+    destinations: [],
   };
   async function save(e?: FormEvent) {
     e?.preventDefault();

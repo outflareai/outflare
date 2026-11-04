@@ -1,6 +1,6 @@
 # Fix autonomy
 
-Fix autonomy says how far agents may go with the [fixes list](crawler.md#the-fixes-list) on their own. It works through the same approval gate as every other write an agent makes in a [mission](../README.md#missions): what the setting lets through runs, and everything else waits for a person to approve it.
+Fix autonomy says how far agents may go with the [fixes list](crawler.md#the-fixes-list) on their own. It works through the same approval gate as every other change an agent makes on the [action layer](actions.md): what the setting lets through runs, and everything else waits for a person to approve it.
 
 Copilot is the default, so nothing changes until an owner or admin chooses otherwise.
 

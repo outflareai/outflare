@@ -33,6 +33,7 @@ func (s *Server) routesContent(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/content/{id}", s.onBrand(read, s.getContent))
 	mux.HandleFunc("PATCH /v1/brands/{brand}/content/{id}", s.onBrand(manage, s.updateContent))
 	mux.HandleFunc("POST /v1/brands/{brand}/content/{id}/publish", s.onBrand(manage, s.publishContent))
+	mux.HandleFunc("POST /v1/brands/{brand}/content/{id}/delivered", s.onBrand(manage, s.deliveredContent))
 }
 
 var (
@@ -42,25 +43,37 @@ var (
 )
 
 type contentView struct {
-	ID            string     `json:"id"`
-	BrandID       string     `json:"brand_id"`
-	Title         string     `json:"title"`
-	Slug          string     `json:"slug"`
-	Target        string     `json:"target"`
-	Body          string     `json:"body,omitempty"`
-	Excerpt       string     `json:"excerpt"`
-	Tags          []string   `json:"tags"`
-	CanonicalURL  string     `json:"canonical_url"`
-	Status        string     `json:"status"`
-	IntegrationID *string    `json:"integration_id"`
-	ExternalID    string     `json:"external_id"`
-	URL           string     `json:"url"`
-	CMSStatus     string     `json:"cms_status"`
-	PublishedAt   *time.Time `json:"published_at"`
-	Notes         string     `json:"notes"`
-	CreatedBy     *string    `json:"created_by"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID      string `json:"id"`
+	BrandID string `json:"brand_id"`
+	Title   string `json:"title"`
+	Slug    string `json:"slug"`
+	Target  string `json:"target"`
+	Body    string `json:"body,omitempty"`
+	// HTML is the body rendered as it is published or delivered; only
+	// when reading one item.
+	HTML          string           `json:"html,omitempty"`
+	Excerpt       string           `json:"excerpt"`
+	Tags          []string         `json:"tags"`
+	CanonicalURL  string           `json:"canonical_url"`
+	Language      string           `json:"language"`
+	Placement     contentPlacement `json:"placement"`
+	SEO           contentSEO       `json:"seo"`
+	Links         contentLinks     `json:"links"`
+	Media         []contentMedia   `json:"media"`
+	Brief         contentBrief     `json:"brief"`
+	Revision      int              `json:"revision"`
+	ApprovedBy    *string          `json:"approved_by"`
+	ApprovedAt    *time.Time       `json:"approved_at"`
+	Status        string           `json:"status"`
+	IntegrationID *string          `json:"integration_id"`
+	ExternalID    string           `json:"external_id"`
+	URL           string           `json:"url"`
+	CMSStatus     string           `json:"cms_status"`
+	PublishedAt   *time.Time       `json:"published_at"`
+	Notes         string           `json:"notes"`
+	CreatedBy     *string          `json:"created_by"`
+	CreatedAt     time.Time        `json:"created_at"`
+	UpdatedAt     time.Time        `json:"updated_at"`
 	// The latest publications, newest first; only on one item.
 	Publishes []contentPublishView `json:"publishes,omitempty"`
 }
@@ -80,17 +93,21 @@ type contentPublishView struct {
 	AppliedAt  *time.Time `json:"applied_at"`
 }
 
-const contentCols = `i.id, i.brand_id, i.title, i.slug, i.target, i.body, i.excerpt, i.tags, i.canonical_url, i.status, i.integration_id, i.external_id, i.url, i.cms_status,
+const contentCols = `i.id, i.brand_id, i.title, i.slug, i.target, i.body, i.excerpt, i.tags, i.canonical_url, i.language, i.placement, i.seo, i.links, i.media, i.brief, i.revision, apv.display_name, i.approved_at, i.status, i.integration_id, i.external_id, i.url, i.cms_status,
 	i.published_at, i.notes, ac.display_name, i.created_at, i.updated_at`
 
-const contentFrom = `FROM content_items i LEFT JOIN actors ac ON ac.id = i.created_by`
+const contentFrom = `FROM content_items i LEFT JOIN actors ac ON ac.id = i.created_by LEFT JOIN actors apv ON apv.id = i.approved_by`
 
 func scanContent(row pgx.CollectableRow) (contentView, error) {
 	var v contentView
-	err := row.Scan(&v.ID, &v.BrandID, &v.Title, &v.Slug, &v.Target, &v.Body, &v.Excerpt, &v.Tags, &v.CanonicalURL, &v.Status, &v.IntegrationID, &v.ExternalID, &v.URL, &v.CMSStatus,
+	err := row.Scan(&v.ID, &v.BrandID, &v.Title, &v.Slug, &v.Target, &v.Body, &v.Excerpt, &v.Tags, &v.CanonicalURL,
+		&v.Language, &v.Placement, &v.SEO, &v.Links, &v.Media, &v.Brief, &v.Revision, &v.ApprovedBy, &v.ApprovedAt, &v.Status, &v.IntegrationID, &v.ExternalID, &v.URL, &v.CMSStatus,
 		&v.PublishedAt, &v.Notes, &v.CreatedBy, &v.CreatedAt, &v.UpdatedAt)
 	if v.Tags == nil {
 		v.Tags = []string{}
+	}
+	if v.Media == nil {
+		v.Media = []contentMedia{}
 	}
 	return v, err
 }
@@ -174,6 +191,7 @@ type contentInput struct {
 	Notes        *string   `json:"notes"`
 	// draft, approved or archived; published is set by a publication.
 	Status *string `json:"status"`
+	deliveryInput
 }
 
 func (in *contentInput) validate() string {
@@ -225,7 +243,7 @@ func (in *contentInput) validate() string {
 	if in.Status != nil && !slices.Contains([]string{"draft", "approved", "archived"}, *in.Status) {
 		return "status is draft, approved or archived; published is set when it goes live"
 	}
-	return ""
+	return in.deliveryInput.validate()
 }
 
 func (s *Server) createContent(w http.ResponseWriter, r *http.Request) {
@@ -263,14 +281,22 @@ func (s *Server) createContent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO content_items (workspace_id, brand_id, title, slug, target, body, excerpt, tags, canonical_url, notes, status, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-			a.WorkspaceID, a.Brand, *req.Title, str(req.Slug), target, str(req.Body), str(req.Excerpt), tags, str(req.CanonicalURL), str(req.Notes), status, actorRef(a)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO content_items (workspace_id, brand_id, title, slug, target, body, excerpt, tags, canonical_url, notes, status, created_by,
+				language, placement, seo, links, media, brief)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14::jsonb, '{}'), COALESCE($15::jsonb, '{}'), COALESCE($16::jsonb, '{}'), COALESCE($17::jsonb, '[]'), COALESCE($18::jsonb, '{}')) RETURNING id`,
+			a.WorkspaceID, a.Brand, *req.Title, str(req.Slug), target, str(req.Body), str(req.Excerpt), tags, str(req.CanonicalURL), str(req.Notes), status, actorRef(a),
+			str(req.Language), jsonArg(req.Placement), jsonArg(req.SEO), jsonArg(req.Links), jsonArg(req.Media), jsonArg(req.Brief)).Scan(&id); err != nil {
 			return err
 		}
-		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "content.created", "content", id,
+		if err := recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "content.created", "content", id,
 			map[string]any{"brand_id": a.Brand, "title": *req.Title, "target": target, "status": status},
-			map[string]any{"brand_id": a.Brand, "target": target, "status": status, "body_chars": len(str(req.Body))})
+			map[string]any{"brand_id": a.Brand, "target": target, "status": status, "body_chars": len(str(req.Body))}); err != nil {
+			return err
+		}
+		if status != "approved" {
+			return nil
+		}
+		return s.approveContent(ctx, tx, a, id, map[string]any{"brand_id": a.Brand, "status": status})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -288,6 +314,9 @@ func (s *Server) loadContent(ctx context.Context, a *access, id string) (content
 		return v, errNotFound
 	}
 	if err != nil {
+		return v, err
+	}
+	if v.HTML, err = cmspublish.HTML(v.Body); err != nil {
 		return v, err
 	}
 	prow, err := s.pool.Query(ctx, `SELECT id, item_id, kind, live, status, error, external_id, url, cms_status, verified, created_at, applied_at
@@ -357,13 +386,17 @@ func (s *Server) updateContent(w http.ResponseWriter, r *http.Request) {
 			status = &s
 		}
 		if _, err := tx.Exec(ctx, `UPDATE content_items SET title = COALESCE($2, title), slug = COALESCE($3, slug), target = COALESCE($4, target), body = COALESCE($5, body),
-				excerpt = COALESCE($6, excerpt), tags = COALESCE($7, tags), canonical_url = COALESCE($8, canonical_url), notes = COALESCE($9, notes), status = COALESCE($10, status), updated_at = now()
-			WHERE id = $1`, id, req.Title, req.Slug, req.Target, req.Body, req.Excerpt, req.Tags, req.CanonicalURL, req.Notes, status); err != nil {
+				excerpt = COALESCE($6, excerpt), tags = COALESCE($7, tags), canonical_url = COALESCE($8, canonical_url), notes = COALESCE($9, notes), status = COALESCE($10, status),
+				language = COALESCE($11, language), placement = COALESCE($12::jsonb, placement), seo = COALESCE($13::jsonb, seo), links = COALESCE($14::jsonb, links),
+				media = COALESCE($15::jsonb, media), brief = COALESCE($16::jsonb, brief), updated_at = now()
+			WHERE id = $1`, id, req.Title, req.Slug, req.Target, req.Body, req.Excerpt, req.Tags, req.CanonicalURL, req.Notes, status,
+			req.Language, jsonArg(req.Placement), jsonArg(req.SEO), jsonArg(req.Links), jsonArg(req.Media), jsonArg(req.Brief)); err != nil {
 			return err
 		}
 		changed := map[string]any{"brand_id": a.Brand}
 		for k, set := range map[string]bool{"title": req.Title != nil, "slug": req.Slug != nil, "target": req.Target != nil, "body": req.Body != nil, "excerpt": req.Excerpt != nil,
-			"tags": req.Tags != nil, "canonical_url": req.CanonicalURL != nil, "notes": req.Notes != nil} {
+			"tags": req.Tags != nil, "canonical_url": req.CanonicalURL != nil, "notes": req.Notes != nil, "language": req.Language != nil, "placement": req.Placement != nil,
+			"seo": req.SEO != nil, "links": req.Links != nil, "media": req.Media != nil, "brief": req.Brief != nil} {
 			if set {
 				changed[k] = true
 			}
@@ -372,7 +405,7 @@ func (s *Server) updateContent(w http.ResponseWriter, r *http.Request) {
 		if status != nil && *status != cur {
 			changed["status"] = *status
 			if *status == "approved" && req.Status != nil {
-				action = "content.approved"
+				return s.approveContent(ctx, tx, a, id, changed)
 			}
 		}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, action, "content", id, changed, map[string]any{"brand_id": a.Brand})

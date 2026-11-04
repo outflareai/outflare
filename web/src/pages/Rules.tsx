@@ -8,7 +8,7 @@ import { PickBrand } from "@/components/pick-brand";
 // the flow builder.
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { EmailTemplate, Journey, Rule, RuleCondition, RuleSimulation, RuleTrigger, SmartList } from "@outflare/sdk";
+import type { EmailTemplate, Journey, Rule, RuleCondition, RuleSimulation, RuleTrigger, Schemas, SmartList } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
@@ -447,6 +447,7 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
               )}
             </div>
           </Card>
+          <Firings brand={brandId} rule={r.id} go={go} />
           <Card title="Where its event goes" description={<>Journeys that start on <code>{r.emit_event}</code>, or end when it happens.</>}>
             <div className="space-y-3 text-[13px]">
               {starts.length === 0 && ends.length === 0 && <p className="text-muted-foreground">Nothing uses it yet.</p>}
@@ -474,5 +475,53 @@ function RuleDetail({ ws, id, canManage, lists, back, onCreated, go }: { ws: str
       )}
       {picking && <StepPicker kinds={kinds.filter((k) => k.kind !== "exit")} onPick={(k) => followUp(k.kind)} onClose={() => setPicking(false)} onConnect={() => go("connectors")} />}
     </div>
+  );
+}
+
+// Firings lists who a rule fired for, newest first, with the event it
+// emitted. Records are named from the brand's records; one that was
+// deleted or erased since shows as such.
+function Firings({ brand, rule, go }: { brand: string; rule: string; go: Go }) {
+  const [list, setList] = useState<Schemas["RuleFiring"][] | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!brand) return;
+    let live = true;
+    void api.GET("/v1/brands/{brand}/rules/{id}/firings", { params: { path: { brand, id: rule }, query: { limit: 50 } } }).then(async ({ data, error }) => {
+      if (!live) return;
+      if (!data) return setError(errorMessage(error));
+      setList(data.data);
+      const ids = [...new Set(data.data.map((f) => f.record_id))];
+      const found = await Promise.all(
+        ids.map((record) => api.GET("/v1/brands/{brand}/records/{record}", { params: { path: { brand, record } } }).then(({ data }) => [record, data?.name || "Unnamed record"] as const)),
+      );
+      if (live) setNames(Object.fromEntries(found.map(([id, n]) => [id, n])));
+    });
+    return () => {
+      live = false;
+    };
+  }, [brand, rule]);
+  return (
+    <Card title="Who it fired for" description="The latest 50 firings, newest first.">
+      {error ? (
+        <ErrorText>{error}</ErrorText>
+      ) : !list ? (
+        <Loading />
+      ) : list.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">It hasn't fired yet.</p>
+      ) : (
+        <ul className="divide-y text-[13px]">
+          {list.map((f) => (
+            <li key={f.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <button className="underline" onClick={() => go("people", f.record_id)}>{names[f.record_id] ?? "…"}</button>
+              <span className="text-muted-foreground" title={stamp(f.fired_at)}>{ago(f.fired_at)}</span>
+              {f.depth > 1 && <Badge tone="grey">set off by another rule</Badge>}
+              <span className="ml-auto text-[12px] text-muted-foreground">v{f.rule_version}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }

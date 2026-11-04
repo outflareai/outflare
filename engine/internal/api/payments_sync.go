@@ -464,6 +464,10 @@ func (r *paymentRun) transaction(ctx context.Context, tx pgx.Tx, rec string, t n
 	start := time.Now()
 	_, created, err := saveTransaction(ctx, tx, nil, r.ws, *brand, t)
 	outcome := map[bool]string{true: "created", false: "duplicate"}[created]
+	if errors.Is(err, errTransactionDeleted) {
+		// Deleted by someone in this brand: the sync leaves it deleted.
+		outcome, err = "deleted", nil
+	}
 	if err != nil {
 		outcome = "error"
 	}

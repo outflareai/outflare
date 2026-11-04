@@ -1,3 +1,4 @@
+import { UnassignedNotice } from "@/components/connection-brands";
 import { SearchDashboard } from "./pages/SearchDashboard";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,8 @@ import { Members } from "./pages/Members";
 import { Tokens } from "./pages/Tokens";
 import { Webhooks } from "./pages/Webhooks";
 import { Alerts } from "./pages/Alerts";
+import { BrandAccounts } from "./pages/BrandAccounts";
+import { Content } from "./pages/Content";
 import { Digests } from "./pages/Digests";
 import { AIUsage } from "./pages/AIUsage";
 import { AIAccounts } from "./pages/AIAccounts";
@@ -60,8 +63,9 @@ import { Channels } from "./pages/Channels";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { LeadFinder } from "./pages/LeadFinder";
 import { EmailFinder } from "./pages/EmailFinder";
-import { CloudPage } from "./pages/CloudLocked";
+import { CloudPage, CloudLocked } from "./pages/CloudLocked";
 import { cloudFeature } from "./lib/cloud";
+import { pageIsAvailable, pageExtension } from "./lib/extensions";
 import { Missions } from "./pages/Missions";
 import { Agents } from "./pages/Agents";
 import { Playbooks } from "./pages/Playbooks";
@@ -303,6 +307,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     };
   }, [kind, item, link, wsId]); // eslint-disable-line react-hooks/exhaustive-deps
   const [unread, setUnread] = useState(0);
+  const [badges, setBadges] = useState<Record<string, string>>({});
   const [pitchesWaiting, setPitchesWaiting] = useState(0);
   const ws = me.workspaces.find((w) => w.id === wsId);
   // What the person may do here, from their role. The server checks every
@@ -388,6 +393,19 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     lastBrand.current = pickedBrand ?? "";
     if (was !== undefined && was !== lastBrand.current && item) setTab(tab);
   }, [pickedBrand, brandState.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Server extensions' links can carry a short badge for the open
+  // workspace (such as an account balance), refreshed every minute.
+  useEffect(() => {
+    setBadges({});
+    if (!wsId || !me.menu_links?.length) return;
+    const load = () => api.GET("/v1/workspaces/{ws}/menu-badges", { params: { path: { ws: wsId } } }).then(({ data }) => {
+      if (data) setBadges(data.badges);
+    });
+    load();
+    const t = setInterval(load, 60000);
+    return () => clearInterval(t);
+  }, [wsId, me.menu_links?.length]);
 
   // Unread replies show on the Inbox tab, and link pitches waiting for
   // approval on Link building, for the brand picked in the sidebar,
@@ -503,7 +521,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     ...everyday.filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
     ...(canOpen(ws, "ai") ? [goTo("ai", "Connect Claude, ChatGPT or another AI app")] : []),
     ...(isAdmin ? [{ ...goTo("get-started", "Get started: set up the workspace", "Workspace"), run: () => { setOpenedFrom("palette"); go("get-started"); } }] : []),
-    ...modules.flatMap((m) => m.tabs.filter((t) => canOpen(ws, t)).map((t) => goTo(t, tabNames[t], m.label))),
+    ...modules.flatMap((m) => m.tabs.filter((t) => canOpen(ws, t) && pageIsAvailable(t)).map((t) => goTo(t, t === "agent-mail" ? "Agent Mail" : tabNames[t], m.label))),
     ...(["tools", "connectors"] as const).filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
     ...settings.flatMap((g) => g.tabs.map((t) => goTo(t, `${tabNames[t]}`, "Settings"))),
     { id: "api", label: apiOpen ? "Hide the API panel" : "Show the API call for this page", group: "Developer", icon: "code", run: () => setApiOpen((o) => !o) },
@@ -527,12 +545,15 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     return <GetStarted key={ws.id} ws={ws.id} wsName={ws.name} from={openedFrom} go={setTab} />;
   }
 
+  const AgentMailPage = pageExtension("agent-mail");
+
   return (
     <SidebarProvider style={{ "--sidebar-width": "15rem" } as React.CSSProperties}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:shadow-md focus:ring-2 focus:ring-ring">Skip to content</a>
       <Sidebar
         me={me.user}
         links={me.menu_links}
+        badges={badges}
         workspaces={me.workspaces}
         ws={ws}
         onWorkspace={(id) => { setWsId(id); setItem(undefined); }}
@@ -564,6 +585,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <button aria-label="Dismiss" className="-m-2 p-2" onClick={() => setLost("")}><Icon name="x" className="size-3.5" /></button>
           </div>
         )}
+        {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={ws.id} ws={ws.id} onFix={() => setTab("connectors")} />}
         {!ready && <Loading />}
         {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -574,7 +596,9 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "ideal-customers" && <IdealCustomers key={ws.id} ws={ws.id} canManage={writer} />}
+        {ready && ws && tab === "brand-accounts" && <BrandAccounts key={ws.id} ws={ws.id} canManage={can("accounts.manage")} />}
         {ready && ws && tab === "experiments" && <Experiments key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "content" && <Content key={ws.id} ws={ws.id} canManage={can("content.manage")} go={setTab} />}
         {ready && ws && tab === "seo-overview" && <SEOOverview key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "audits" && <SiteAudits key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(s) => setItem(s || undefined)} go={setTab} />}
         {ready && ws && tab === "search-insights" && <SearchDashboard key={ws.id} ws={ws.id} go={setTab} initialSite={item} canManage={can("seo.manage")} />}
@@ -585,7 +609,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "competitors" && <Competitors key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
-        {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} item={item} />}
         {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -605,7 +629,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "providers" && <Providers key={ws.id} ws={ws.id} canManage={isAdmin} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
-        {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "sequences" && <Sequences key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
@@ -642,6 +666,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "email-finder" && <EmailFinder key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "suppression" && <Suppression key={ws.id} ws={ws.id} canAdd={writer} canRemove={isAdmin} />}
         {ready && ws && tab === "connectors" && <Connectors key={ws.id} ws={ws.id} canManage={isAdmin} canVerify={writer} canImport={writer} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "agent-mail" && (
+          <CloudPage feature={cloudFeature("agent-mail")!}>
+            {AgentMailPage ? <AgentMailPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} /> : <CloudLocked feature={cloudFeature("agent-mail")!} />}
+          </CloudPage>
+        )}
         {ready && ws && tab === "support" && <Support key={ws.id} ws={ws.id} canManage={writer} canSetUp={can("mailboxes.manage")} myId={me.user.id ?? ""} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "knowledge" && <Knowledge key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "help-centre" && <HelpCentre key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}

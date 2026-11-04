@@ -90,6 +90,12 @@ export type UiEvent =
  | "ui.crm_exported"
   | "ui.review_view_opened" // review module subview selected
   | "ui.review_campaign_step_opened" // review campaign editor step selected
+  | "ui.account_recorded"
+  | "ui.content_copied" // a content item copied as Markdown or HTML (format)
+  | "ui.content_downloaded" // a content item downloaded as a Markdown file
+  | "ui.account_takeover_started"
+  | "ui.account_takeover_handed_back"
+  | "ui.accounts_offboarded"
   | "ui.coverage_view_opened"
   | "ui.coverage_exported"
   | "ui.coverage_filters_changed"

@@ -139,7 +139,7 @@ func (s *Syncer) storeConversions(ctx context.Context, ws, id, site, host string
 			return err
 		}
 		var brand *string
-		if err := tx.QueryRow(ctx, `SELECT analytics_site_brand($1,$2,$3,$4)`, ws, id, site, host).Scan(&brand); err != nil && err != pgx.ErrNoRows {
+		if err := tx.QueryRow(ctx, `SELECT outflare_site_brand($1, $2)`, id, site).Scan(&brand); err != nil && err != pgx.ErrNoRows {
 			return err
 		}
 		outcomes := [][]any{}

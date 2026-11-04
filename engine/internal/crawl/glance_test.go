@@ -32,9 +32,12 @@ func TestGlance(t *testing.T) {
 	f := &mapFetcher{pages: map[string]string{
 		"/robots.txt": "User-agent: *\nDisallow: /private/\nCrawl-delay: 3\nSitemap: https://rival.example/sitemap.xml\nSitemap: https://other.example/sitemap.xml\n",
 		"/sitemap.xml": `<sitemapindex><sitemap><loc>https://rival.example/blog.xml</loc></sitemap>` +
-			`<sitemap><loc>https://rival.example/private/hidden.xml</loc></sitemap></sitemapindex>`,
+			`<sitemap><loc>https://rival.example/private/hidden.xml</loc></sitemap><sitemap><loc>https://rival.example/news.xml</loc></sitemap></sitemapindex>`,
+		// A second sitemap that lists pages the first one already has.
+		"/news.xml": `<urlset><url><loc>https://www.rival.example/blog/b</loc></url><url><loc>https://rival.example/news/c</loc></url></urlset>`,
 		"/blog.xml": `<urlset><url><loc>https://rival.example/blog/a</loc><lastmod>2026-10-01</lastmod></url>` +
-			`<url><loc>https://www.rival.example/blog/b</loc></url><url><loc>https://elsewhere.example/x</loc></url></urlset>`,
+			`<url><loc>https://www.rival.example/blog/b</loc></url><url><loc>https://elsewhere.example/x</loc></url>` +
+			`<url><loc>https://rival.example/blog/a</loc></url></urlset>`,
 		"/": `<html><head><title>Rival</title><meta name="description" content="We sell things"></head><body><a href="/pricing">Pricing</a></body></html>`,
 	}}
 	var waits []time.Duration
@@ -50,12 +53,12 @@ func TestGlance(t *testing.T) {
 	for _, p := range look.Pages {
 		urls = append(urls, p.URL)
 	}
-	if !slices.Equal(urls, []string{"https://rival.example/blog/a", "https://www.rival.example/blog/b"}) || look.Pages[0].Lastmod != "2026-10-01" {
+	if !slices.Equal(urls, []string{"https://rival.example/blog/a", "https://www.rival.example/blog/b", "https://rival.example/news/c"}) || look.Pages[0].Lastmod != "2026-10-01" {
 		t.Fatalf("pages = %+v", look.Pages)
 	}
-	// robots.txt, the home page and two sitemaps; never the other host's
+	// robots.txt, the home page and three sitemaps; never the other host's
 	// sitemap, the disallowed one or a linked page.
-	want := []string{"https://rival.example/robots.txt", "https://rival.example/", "https://rival.example/sitemap.xml", "https://rival.example/blog.xml"}
+	want := []string{"https://rival.example/robots.txt", "https://rival.example/", "https://rival.example/sitemap.xml", "https://rival.example/blog.xml", "https://rival.example/news.xml"}
 	if !slices.Equal(f.got, want) {
 		t.Fatalf("fetched %v", f.got)
 	}

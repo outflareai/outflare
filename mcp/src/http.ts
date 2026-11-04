@@ -4,8 +4,8 @@
 // the caller's bearer token (an OAuth access token or an API token), so this
 // only listens on loopback and only answers the engine.
 //
-// Each MCP session keeps its own server, because use_mission changes
-// what later calls do. The session belongs to the API
+// Each MCP session keeps its own server and its own client. The session
+// belongs to the API
 // token that opened it: an app's refreshed access token is the same token
 // with a new secret, so it carries on; any other token is refused.
 

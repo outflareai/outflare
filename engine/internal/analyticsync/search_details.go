@@ -14,7 +14,7 @@ func (s *Syncer) storeSearchDetails(ctx context.Context, ws, id, site, host stri
 		// Connections can serve several brands; resolve the property's brand using
 		// the same explicit site assignment the analytics sync already uses.
 		var brand *string
-		if err := tx.QueryRow(ctx, `SELECT analytics_site_brand($1,$2,$3,$4)`, ws, id, site, host).Scan(&brand); err != nil && err != pgx.ErrNoRows {
+		if err := tx.QueryRow(ctx, `SELECT outflare_site_brand($1, $2)`, id, site).Scan(&brand); err != nil && err != pgx.ErrNoRows {
 			return err
 		}
 		var clicks, impressions float64

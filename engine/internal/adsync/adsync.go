@@ -61,6 +61,7 @@ type payload struct {
 func (s *Syncer) Register(q *jobs.Queue) {
 	q.Handle(JobSync, s.job)
 	q.Handle(JobChange, s.changeJob)
+	q.Handle(JobTracking, s.trackingJob)
 }
 
 func (s *Syncer) now() time.Time {
@@ -302,6 +303,12 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool
 	}
 }
 
+// connectionBrand is the one brand a connection serves, which its ad
+// accounts take until someone sets theirs: the brand's own connection, or
+// a workspace connection shared with only one brand. Otherwise null, and
+// the accounts stay workspace-wide.
+const connectionBrand = `COALESCE(i.brand_id, CASE WHEN cardinality(i.brand_ids) = 1 THEN i.brand_ids[1] END)`
+
 // saveAccounts records the accounts a sign-in sees. New accounts sync
 // until MaxAccounts are on; accounts it no longer sees are marked gone.
 func (s *Syncer) saveAccounts(ctx context.Context, ws, integrationID, connector string, found []connectors.AdAccount) error {
@@ -321,11 +328,13 @@ func (s *Syncer) saveAccounts(ctx context.Context, ws, integrationID, connector 
 				cur = "USD"
 			}
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO ad_accounts (workspace_id, integration_id, connector, external_id, name, currency, time_zone, meta, sync_on)
+				INSERT INTO ad_accounts (workspace_id, integration_id, connector, external_id, name, currency, time_zone, meta, sync_on, brand_id)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-					(SELECT count(*) FROM ad_accounts WHERE integration_id = $2 AND sync_on) < $9)
+					(SELECT count(*) FROM ad_accounts WHERE integration_id = $2 AND sync_on) < $9,
+					(SELECT `+connectionBrand+` FROM integrations i WHERE i.id = $2))
 				ON CONFLICT (integration_id, external_id) DO UPDATE SET name = EXCLUDED.name, currency = EXCLUDED.currency,
-					time_zone = EXCLUDED.time_zone, meta = EXCLUDED.meta, status = 'active', updated_at = now()`,
+					time_zone = EXCLUDED.time_zone, meta = EXCLUDED.meta, status = 'active', updated_at = now(),
+					brand_id = COALESCE(ad_accounts.brand_id, EXCLUDED.brand_id)`,
 				ws, integrationID, connector, a.ID, trim(a.Name, 300), cur, a.TimeZone, meta, MaxAccounts); err != nil {
 				return err
 			}
@@ -411,17 +420,24 @@ func (s *Syncer) syncAccount(ctx context.Context, o *connectors.Opened, r connec
 			var id string
 			var b *string
 			err := tx.QueryRow(ctx, `
-				INSERT INTO ad_entities (workspace_id, ad_account_id, level, external_id, name, status, provider_status, objective, daily_budget_micros)
-				VALUES ($1, $2, 'campaign', $3, $4, $5, $6, $7, $8)
+				INSERT INTO ad_entities (workspace_id, ad_account_id, level, external_id, name, status, provider_status, objective, daily_budget_micros,
+					bidding_strategy, platform_target_cpa_micros, platform_target_roas)
+				VALUES ($1, $2, 'campaign', $3, $4, $5, $6, $7, $8, $9, $10, $11)
 				ON CONFLICT (ad_account_id, level, external_id) DO UPDATE SET
 					name = COALESCE(NULLIF(EXCLUDED.name, ''), ad_entities.name),
+					-- A platform that says how it bids replaces the targets with
+					-- what it says now; one that doesn't leaves them.
+					platform_target_cpa_micros = CASE WHEN EXCLUDED.bidding_strategy = '' THEN ad_entities.platform_target_cpa_micros ELSE EXCLUDED.platform_target_cpa_micros END,
+					platform_target_roas = CASE WHEN EXCLUDED.bidding_strategy = '' THEN ad_entities.platform_target_roas ELSE EXCLUDED.platform_target_roas END,
+					bidding_strategy = COALESCE(NULLIF(EXCLUDED.bidding_strategy, ''), ad_entities.bidding_strategy),
 					status = CASE WHEN EXCLUDED.provider_status = '' THEN ad_entities.status ELSE EXCLUDED.status END,
 					provider_status = COALESCE(NULLIF(EXCLUDED.provider_status, ''), ad_entities.provider_status),
 					objective = COALESCE(NULLIF(EXCLUDED.objective, ''), ad_entities.objective),
 					daily_budget_micros = COALESCE(EXCLUDED.daily_budget_micros, ad_entities.daily_budget_micros),
 					updated_at = now()
 				RETURNING id, brand_id`,
-				o.WorkspaceID, a.id, c.ID, trim(c.Name, 300), statusOr(c.Status), trim(c.ProviderStatus, 60), trim(c.Objective, 60), c.DailyBudgetMicros).Scan(&id, &b)
+				o.WorkspaceID, a.id, c.ID, trim(c.Name, 300), statusOr(c.Status), trim(c.ProviderStatus, 60), trim(c.Objective, 60), c.DailyBudgetMicros,
+				trim(c.BiddingStrategy, 60), c.TargetCPAMicros, c.TargetROAS).Scan(&id, &b)
 			if err != nil {
 				return err
 			}

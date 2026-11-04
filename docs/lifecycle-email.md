@@ -155,7 +155,8 @@ Both are off unless a template turns them on (`track_opens`,
 `track: {"opens": true, "clicks": true}`, the same opt-in as click tracking
 in sequences. Opens use an invisible image; clicks go through the same
 `/c/` redirect links as sequences, on the workspace's tracking domain when
-it has one. Loads and clicks by mail scanners and privacy proxies right
+it has one. A link longer than 2,000 characters (a signed sign-in link,
+say) is sent as written and not tracked, in sequences too. Loads and clicks by mail scanners and privacy proxies right
 after sending stay on the timeline (`opened_automatic`,
 `clicked_automatic`) but are not counted. Opens are a rough signal: Apple
 Mail loads images for privacy, and some apps block them. Opens and clicks

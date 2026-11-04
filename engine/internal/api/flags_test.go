@@ -77,14 +77,15 @@ func TestFlags(t *testing.T) {
 	// One for the other brand.
 	owner.must(201, "POST", base+"/flags", map[string]any{"key": "repocket-banner", "status": "on", "brand_id": rp})
 
-	if list := owner.must(200, "GET", base+"/flags", nil)["data"].([]any); len(list) != 4 {
+	if list := owner.must(200, "GET", base+"/flags?brand=all", nil)["data"].([]any); len(list) != 4 {
 		t.Fatalf("%d flags", len(list))
 	}
-	// A brand's flags include the shared ones, which reach its site too.
-	if list := owner.must(200, "GET", base+"/flags?brand="+geo, nil)["data"].([]any); len(list) != 3 {
+	// A flag is one brand's: one made without a brand is the first
+	// brand's, and none is shared.
+	if list := owner.must(200, "GET", base+"/flags?brand="+geo, nil)["data"].([]any); len(list) != 1 {
 		t.Fatalf("geonode's flags: %v", list)
 	}
-	if list := owner.must(200, "GET", base+"/flags?brand=none", nil)["data"].([]any); len(list) != 2 {
+	if list := owner.must(200, "GET", base+"/flags?brand=none", nil)["data"].([]any); len(list) != 0 {
 		t.Fatalf("shared flags: %v", list)
 	}
 	if one := owner.must(200, "GET", base+"/flags/pricing-headline", nil); one["id"] != splitID {
@@ -127,10 +128,10 @@ func TestFlags(t *testing.T) {
 	}
 	// A person previewing gets the version they asked for and its content,
 	// even of a flag that is still off; a version the flag doesn't have
-	// changes nothing.
+	// changes nothing. chat-widget is the first brand's, not Geonode's.
 	_, o := askSiteFlags(t, e, "https://geonode.com", k, "visitor-0001", "https://geonode.com/blog",
 		map[string]string{"pricing-headline": "faster", "chat-widget": "on", "billing-v2": "on", "repocket-banner": "on"})
-	if fl := o["flags"].(map[string]any); fl["pricing-headline"] != "faster" || fl["chat-widget"] != "on" || fl["billing-v2"] != nil || fl["repocket-banner"] != nil ||
+	if fl := o["flags"].(map[string]any); fl["pricing-headline"] != "faster" || fl["chat-widget"] != nil || fl["billing-v2"] != nil || fl["repocket-banner"] != nil ||
 		o["payloads"].(map[string]any)["pricing-headline"].(map[string]any)["headline"] != "Ship faster" {
 		t.Fatalf("preview: %v", o)
 	}

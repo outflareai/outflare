@@ -37,8 +37,12 @@ func TestEmailBroadcastHoldout(t *testing.T) {
 	}
 	owner.must(201, "POST", base+"/email-templates", map[string]any{"name": "Launch", "purpose": "lifecycle",
 		"subject": "New", "html": "<p>Hi</p>", "from": "news@example.com", "publish": true})
+	// 50 people, so the sent and held-out sides can never both reach the
+	// lift report's minimum of 30 people, and its verdict is always
+	// too_early. With 60, a 30/30 split (about 3 runs in 100) got a real
+	// verdict and failed the test.
 	ids := []string{}
-	for i := range 60 {
+	for i := range 50 {
 		id, err := customers.EnsurePerson(ctx, e.pool, ws, "email", fmt.Sprintf("p%d@example.org", i), true, "")
 		if err != nil {
 			t.Fatal(err)
@@ -63,12 +67,13 @@ func TestEmailBroadcastHoldout(t *testing.T) {
 	done := make(chan struct{})
 	go func() { q.Run(runCtx, 2); close(done) }() //nolint:errcheck
 	defer func() { cancel(); <-done }()
-	for i := 0; ; i++ {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
 		b = owner.must(200, "GET", base+"/email-broadcasts/"+id, nil)
 		if b["status"] == "sent" {
 			break
 		}
-		if i > 400 {
+		if time.Now().After(deadline) {
 			t.Fatalf("broadcast = %v", b)
 		}
 		time.Sleep(25 * time.Millisecond)
