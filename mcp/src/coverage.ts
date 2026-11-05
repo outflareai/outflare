@@ -10,6 +10,7 @@ type Call = (
 const resources = [
   "publishers",
   "placements",
+  "parties",
   "agreements",
   "deliverables",
   "invoices",
@@ -18,6 +19,7 @@ const resources = [
   "budgets",
   "tasks",
   "candidates",
+  "searches",
   "views",
   "rules",
   "finance_tasks",
@@ -151,6 +153,204 @@ export function registerCoverageTools(
             }),
           ),
       );
+  }
+  if (!readOnly)
+    server.registerTool(
+      "delete_coverage_parties",
+      {
+        title: "Remove a party from a placement",
+        description:
+          "Takes a CRM company or person (an agency, partner, creator, author or editor) off a placement. The placement's history keeps that they were there.",
+        inputSchema: { brand, id },
+        annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+      },
+      ({ brand, id }) =>
+        call(() =>
+          gtm.DELETE("/v1/brands/{brand}/coverage/parties/{id}", {
+            params: { path: { brand, id } },
+          }),
+        ),
+    );
+  if (!readOnly)
+    server.registerTool(
+      "run_coverage_search",
+      {
+        title: "Run a Presence web search now",
+        description:
+          "Queues one of the brand's web searches on the workspace's own search results connection, within its budget. Results that aren't the brand's own pages become finds to review (list_coverage_candidates). Without a connection the search's last_error says connector_needed.",
+        inputSchema: { brand, id },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      },
+      ({ brand, id }) =>
+        call(() =>
+          gtm.POST("/v1/brands/{brand}/coverage/searches/{id}/run", {
+            params: { path: { brand, id } },
+          }),
+        ),
+    );
+  server.registerTool(
+    "list_coverage_competitors",
+    {
+      title: "List competitors whose presence is scanned",
+      description:
+        "The brand's tracked competitors with how often each is scanned (top ones weekly, the rest monthly unless changed), when it was last scanned, what each source said (connector_needed means the workspace has to connect a search results or SEO connection) and how many pages it appears on. Also the brand's scan settings.",
+      inputSchema: { brand },
+      annotations: read,
+    },
+    ({ brand }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/coverage/competitors", {
+          params: { path: { brand } },
+        }),
+      ),
+  );
+  server.registerTool(
+    "list_coverage_competitor_placements",
+    {
+      title: "List where competitors appear",
+      description:
+        "Pages where the brand's competitors appear, strongest sites first, with each page's type, whether it looks paid for (likely_paid only with evidence) and the site's domain rating and traffic. gap='true' keeps the sites where the brand has no publisher yet: the places to go after.",
+      inputSchema: {
+        brand,
+        competitor_id: z.string().uuid().optional(),
+        kind: z.string().optional(),
+        arrangement: z.enum(["likely_paid", "unknown"]).optional(),
+        gap: z.enum(["true", "false"]).optional(),
+        include_gone: z.enum(["true", "false"]).optional(),
+        q: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/coverage/competitor_placements", {
+          params: { path: { brand }, query },
+        }),
+      ),
+  );
+  server.registerTool(
+    "list_coverage_opportunities",
+    {
+      title: "List Presence opportunities by leverage",
+      description:
+        "Places worth the team's effort, highest leverage first (0 to 100: SEO and AI answers together, plus how many competitors are there). Each says why (competitor_gap, ai_cited, unlinked_mention, link_removed), what to do next (pitch, request_link, reclaim_link), and the evidence and factors behind its score. Use it to pick the next outreach; drafting and sending still go through the normal outreach tools and approvals.",
+      inputSchema: {
+        brand,
+        state: z.enum(["open", "picked", "dismissed", "won", "all"]).optional(),
+        reason: z.enum(["competitor_gap", "ai_cited", "unlinked_mention", "link_removed"]).optional(),
+        action: z.enum(["pitch", "request_link", "reclaim_link"]).optional(),
+        kind: z.string().optional(),
+        min_score: z.number().min(0).max(100).optional(),
+        q: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/coverage/opportunities", {
+          params: { path: { brand }, query },
+        }),
+      ),
+  );
+  if (!readOnly) {
+    server.registerTool(
+      "update_coverage_opportunity",
+      {
+        title: "Pick, dismiss or win an opportunity",
+        description:
+          "picked: someone is on it (set owner_id); dismissed: keep it out of the list; won: the brand got there; open: back to the list. Changes nobody is contacted.",
+        inputSchema: {
+          brand,
+          id,
+          state: z.enum(["open", "picked", "dismissed", "won"]).optional(),
+          owner_id: z.string().uuid().nullable().optional(),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand, id, ...body }) =>
+        call(() =>
+          gtm.PATCH("/v1/brands/{brand}/coverage/opportunities/{id}", {
+            params: { path: { brand, id } },
+            body,
+          }),
+        ),
+    );
+    server.registerTool(
+      "refresh_coverage_opportunities",
+      {
+        title: "Suggest Presence opportunities now",
+        description:
+          "Suggests opportunities from where competitors appear and from the brand's placements, refreshes scores and marks won the ones reached. It also runs daily by itself and calls no paid connection.",
+        inputSchema: { brand },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand }) =>
+        call(() =>
+          gtm.POST("/v1/brands/{brand}/coverage/opportunities/refresh", {
+            params: { path: { brand } },
+          }),
+        ),
+    );
+  }
+  if (!readOnly) {
+    server.registerTool(
+      "update_coverage_competitor_settings",
+      {
+        title: "Change how often competitors are scanned",
+        description:
+          "How many competitors count as top (by shared keywords) and the days between scans for the top ones and the rest. rest_every_days 7 scans every competitor weekly.",
+        inputSchema: {
+          brand,
+          top_competitors: z.number().int().min(0).max(1000).optional(),
+          top_every_days: z.number().int().min(1).max(90).optional(),
+          rest_every_days: z.number().int().min(1).max(90).optional(),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand, ...body }) =>
+        call(() =>
+          gtm.PATCH("/v1/brands/{brand}/coverage/competitors/settings", {
+            params: { path: { brand } },
+            body,
+          }),
+        ),
+    );
+    server.registerTool(
+      "update_coverage_competitor",
+      {
+        title: "Set one competitor's scan cadence",
+        description: "every_days gives this competitor its own days between scans; null follows the brand's settings again.",
+        inputSchema: { brand, id, every_days: z.number().int().min(1).max(90).nullable() },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand, id, every_days }) =>
+        call(() =>
+          gtm.PATCH("/v1/brands/{brand}/coverage/competitors/{id}", {
+            params: { path: { brand, id } },
+            body: { every_days },
+          }),
+        ),
+    );
+    server.registerTool(
+      "scan_coverage_competitor",
+      {
+        title: "Scan where a competitor appears now",
+        description:
+          "Queues a scan of search results for the competitor's name and of who links to its site, on the workspace's own connections and within their budgets, plus pages AI answers cite when they name it. Results show in list_coverage_competitor_placements.",
+        inputSchema: { brand, id },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      },
+      ({ brand, id }) =>
+        call(() =>
+          gtm.POST("/v1/brands/{brand}/coverage/competitors/{id}/scan", {
+            params: { path: { brand, id } },
+          }),
+        ),
+    );
   }
   server.registerTool(
     "get_coverage_reports",

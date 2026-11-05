@@ -38,7 +38,8 @@ func TestGlance(t *testing.T) {
 		"/blog.xml": `<urlset><url><loc>https://rival.example/blog/a</loc><lastmod>2026-10-01</lastmod></url>` +
 			`<url><loc>https://www.rival.example/blog/b</loc></url><url><loc>https://elsewhere.example/x</loc></url>` +
 			`<url><loc>https://rival.example/blog/a</loc></url></urlset>`,
-		"/": `<html><head><title>Rival</title><meta name="description" content="We sell things"></head><body><a href="/pricing">Pricing</a></body></html>`,
+		"/": `<html><head><title>Rival</title><meta name="description" content="We sell things"></head><body><a href="/pricing">Pricing</a>` +
+			`<a href="https://twitter.com/rivalhq">X</a><a href="https://www.trustpilot.com/review/rival.example">Reviews</a></body></html>`,
 	}}
 	var waits []time.Duration
 	wait := func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
@@ -48,6 +49,9 @@ func TestGlance(t *testing.T) {
 	}
 	if look.Title != "Rival" || look.Description != "We sell things" {
 		t.Fatalf("home = %q %q", look.Title, look.Description)
+	}
+	if len(look.Links) != 2 || look.Links[0].URL != "https://x.com/rivalhq" || look.Links[1].Kind != "trustpilot" {
+		t.Fatalf("links = %+v", look.Links)
 	}
 	var urls []string
 	for _, p := range look.Pages {

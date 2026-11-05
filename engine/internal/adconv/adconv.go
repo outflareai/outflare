@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/conversions"
+	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -54,7 +57,60 @@ const (
 	// passed over; filterBatch is the most events checked per rule a tick.
 	settle      = time.Minute
 	filterBatch = 5000
+	// browserWait is how long a copy of an event from the website script
+	// waits for the server's copy of the same event (see oneCopy).
+	browserWait = 15 * time.Minute
 )
+
+// oneCopy is the condition that sends each event once when a site sends
+// it from both the browser and its server. The website script stores its
+// copy's messageId as "browser:" + that id, so a browser can never take an
+// id the server uses. The server's copy is preferred, since it names the
+// person: a browser copy is sent only after browserWait, and only when no
+// server copy has arrived; a server copy is skipped when the browser copy
+// was already queued for the rule. A server copy is found by the same
+// messageId or, when the developer didn't give both copies the same one
+// (the script then makes its own), by SameEvent: the same event name with
+// the same order_id, or for the same person or browser within browserWait. So a forgotten id doesn't
+// count a conversion twice. ruleID is the SQL for the rule's id; e is the
+// event.
+func oneCopy(ruleID string) string {
+	wait := fmt.Sprintf("%d seconds", int(browserWait.Seconds()))
+	return `(CASE WHEN e.source = 'browser' OR e.message_id LIKE 'browser:%'
+		THEN e.received_at <= now() - interval '` + wait + `'
+			AND NOT EXISTS (SELECT 1 FROM customer_events s WHERE s.workspace_id = e.workspace_id AND s.message_id = substr(e.message_id, 9))
+			AND NOT EXISTS (SELECT 1 FROM customer_events s WHERE ` + SameEvent("s", "e") + `)
+		ELSE NOT EXISTS (SELECT 1 FROM customer_events b JOIN ad_conversion_sends x ON x.event_row_id = b.id AND x.rule_id = ` + ruleID + `
+			WHERE b.workspace_id = e.workspace_id AND b.message_id = 'browser:' || e.message_id)
+		  AND NOT EXISTS (SELECT 1 FROM customer_events b JOIN ad_conversion_sends x ON x.event_row_id = b.id AND x.rule_id = ` + ruleID + `
+			WHERE ` + SameEvent("e", "b") + `)
+		END)`
+}
+
+// SameEvent is the SQL condition that server event s and website event b
+// are one event sent without a shared messageId: the same name, and the
+// same order_id (an order's copies, at any time apart), or else the same
+// person (or the same browser, when the server names it) within
+// browserWait of each other.
+func SameEvent(s, b string) string {
+	wait := fmt.Sprintf("%d seconds", int(browserWait.Seconds()))
+	return s + `.workspace_id = ` + b + `.workspace_id AND ` + s + `.name = ` + b + `.name
+		AND ` + s + `.source <> 'browser' AND COALESCE(` + s + `.message_id, '') NOT LIKE 'browser:%' AND ` + b + `.source = 'browser'
+		AND (` + SameOrder(s, b) + `
+			OR (((` + s + `.record_id IS NOT NULL AND ` + s + `.record_id = ` + b + `.record_id) OR (` + s + `.anonymous_id IS NOT NULL AND ` + s + `.anonymous_id = ` + b + `.anonymous_id))
+				AND ` + s + `.occurred_at BETWEEN ` + b + `.occurred_at - interval '` + wait + `' AND ` + b + `.occurred_at + interval '` + wait + `'))`
+}
+
+// SameOrder is the SQL condition that events s and b name the same order:
+// the same non-empty order_id in their properties.
+func SameOrder(s, b string) string {
+	return `(NULLIF(btrim(` + s + `.properties->>'order_id'), '') = NULLIF(btrim(` + b + `.properties->>'order_id'), ''))`
+}
+
+// conversionID is the SQL for the id an event is sent with (Google's order
+// id, Meta's event id): its messageId without the script's "browser:", so
+// both copies, and an ad pixel given the same id, are counted once.
+const conversionID = `COALESCE(NULLIF(regexp_replace(e.message_id, '^browser:', ''), ''), e.id::text)`
 
 // Consent modes.
 const (
@@ -109,14 +165,20 @@ func (s *Sender) Run(ctx context.Context) {
 	}
 }
 
-// Tick queues every new event an enabled rule matches, then asks for a
-// send of each rule with conversions waiting.
+// Tick queues every new event an enabled rule matches and every refund of
+// a conversion sent, then asks for a send of each rule with conversions or
+// adjustments waiting.
 func (s *Sender) Tick(ctx context.Context) error {
 	if _, err := Match(ctx, s.Pool, ""); err != nil {
 		return err
 	}
+	if _, err := MatchAdjustments(ctx, s.Pool, ""); err != nil {
+		return err
+	}
 	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT q.rule_id, q.workspace_id FROM ad_conversion_sends q
-		JOIN ad_conversion_rules r ON r.id = q.rule_id WHERE q.status = 'queued' AND r.enabled`)
+		JOIN ad_conversion_rules r ON r.id = q.rule_id WHERE q.status = 'queued' AND r.enabled
+		UNION SELECT x.rule_id, x.workspace_id FROM ad_conversion_adjustments j JOIN ad_conversion_sends x ON x.id = j.send_id
+		JOIN ad_conversion_rules r ON r.id = x.rule_id WHERE j.status = 'queued' AND j.next_attempt_at <= now() AND r.enabled`)
 	if err != nil {
 		return err
 	}
@@ -158,7 +220,7 @@ func (s *Sender) Tick(ctx context.Context) error {
 func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
 	tag, err := q.Exec(ctx, `
 		INSERT INTO ad_conversion_sends (workspace_id, rule_id, event_row_id, record_id, event_id, occurred_at)
-		SELECT r.workspace_id, r.id, e.id, e.record_id, COALESCE(NULLIF(e.message_id, ''), e.id::text), e.occurred_at
+		SELECT r.workspace_id, r.id, e.id, e.record_id, `+conversionID+`, e.occurred_at
 		FROM ad_conversion_rules r
 		JOIN ad_accounts a ON a.id = r.ad_account_id AND a.status = 'active'
 		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
@@ -168,6 +230,7 @@ func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error)
 		WHERE r.enabled AND ($1 = '' OR r.workspace_id::text = $1)
 		  AND (r.conversion_id IS NULL OR (d.archived_at IS NULL AND d.filters = '[]'::jsonb))
 		  AND (e.brand_id IS NULL OR a.brand_id IS NULL OR e.brand_id = a.brand_id)
+		  AND `+oneCopy("r.id")+`
 		ON CONFLICT (rule_id, event_row_id) DO NOTHING`, ws, fmt.Sprintf("%d seconds", int(window.Seconds())))
 	if err != nil {
 		return 0, err
@@ -183,12 +246,12 @@ func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error)
 // event that doesn't qualify is looked at once and never logged as a send.
 func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64, error) {
 	type pending struct {
-		id, ws, key string
-		from        time.Time
-		brand       *string
+		id, ws, defID string
+		from          time.Time
+		brand         *string
 	}
 	rows, err := q.Query(ctx, `
-		SELECT r.id::text, r.workspace_id::text, d.key, COALESCE(r.matched_until, r.created_at), a.brand_id::text
+		SELECT r.id::text, r.workspace_id::text, d.id::text, COALESCE(r.matched_until, r.created_at), a.brand_id::text
 		FROM ad_conversion_rules r
 		JOIN ad_accounts a ON a.id = r.ad_account_id AND a.status = 'active'
 		JOIN conversion_definitions d ON d.id = r.conversion_id AND d.archived_at IS NULL AND d.filters <> '[]'::jsonb
@@ -199,7 +262,7 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 	var list []pending
 	for rows.Next() {
 		var p pending
-		if err := rows.Scan(&p.id, &p.ws, &p.key, &p.from, &p.brand); err != nil {
+		if err := rows.Scan(&p.id, &p.ws, &p.defID, &p.from, &p.brand); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -211,7 +274,7 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 	}
 	var queued int64
 	for _, p := range list {
-		d, err := conversions.Get(ctx, q, p.ws, p.key)
+		d, err := conversions.GetByID(ctx, q, p.ws, p.defID)
 		if err != nil {
 			return queued, err
 		}
@@ -222,11 +285,12 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 		if floor := cutoff.Add(-window); p.from.Before(floor) {
 			p.from = floor
 		}
-		ev, err := q.Query(ctx, `SELECT id::text, record_id::text, COALESCE(NULLIF(message_id, ''), id::text), occurred_at, properties, received_at
-			FROM customer_events
-			WHERE workspace_id = $1 AND name = $2 AND received_at > $3 AND received_at <= $4 AND occurred_at > now() - interval '30 days'
-			  AND (brand_id IS NULL OR $5::uuid IS NULL OR brand_id = $5::uuid)
-			ORDER BY received_at, id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch)
+		ev, err := q.Query(ctx, `SELECT e.id::text, e.record_id::text, `+conversionID+`, e.occurred_at, e.properties, e.received_at
+			FROM customer_events e
+			WHERE e.workspace_id = $1 AND e.name = $2 AND e.received_at > $3 AND e.received_at <= $4 AND e.occurred_at > now() - interval '30 days'
+			  AND (e.brand_id IS NULL OR $5::uuid IS NULL OR e.brand_id = $5::uuid)
+			  AND `+oneCopy("$7::uuid")+`
+			ORDER BY e.received_at, e.id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch, p.id)
 		if err != nil {
 			return queued, err
 		}
@@ -271,6 +335,17 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 		if n == filterBatch {
 			until = last.Add(-time.Microsecond)
 		}
+		// A browser copy still waiting for its server copy (oneCopy) is
+		// checked again next time: stop just before the first one.
+		var waiting *time.Time
+		if err := q.QueryRow(ctx, `SELECT min(received_at) FROM customer_events
+			WHERE workspace_id = $1 AND name = $2 AND message_id LIKE 'browser:%' AND received_at > $3 AND received_at <= $4
+			  AND received_at > now() - $5::interval`, p.ws, d.Event, p.from, until, fmt.Sprintf("%d seconds", int(browserWait.Seconds()))).Scan(&waiting); err != nil {
+			return queued, err
+		}
+		if waiting != nil {
+			until = waiting.Add(-time.Microsecond)
+		}
 		if _, err := q.Exec(ctx, `UPDATE ad_conversion_rules SET matched_until = $2 WHERE id = $1`, p.id, until); err != nil {
 			return queued, err
 		}
@@ -289,6 +364,8 @@ func (s *Sender) job(ctx context.Context, job jobs.Job) error {
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil {
 		return nil
 	}
+	// Refunds change conversions already sent, after this round's sends.
+	defer s.adjustJob(ctx, *job.WorkspaceID, p.Rule)
 	res, err := s.SendRule(ctx, *job.WorkspaceID, p.Rule)
 	if res.Connector != "" {
 		metrics.AdConversions(res.Connector, res.Sent, res.Skipped, res.Failed)
@@ -332,8 +409,11 @@ func (e dbError) Unwrap() error { return e.error }
 type rule struct {
 	id, ws, integrationID, connector, eventType, targetID, targetName string
 	valueProperty, valueUnit, currency                                string
-	fixed                                                             *int64
-	acct                                                              connectors.AdAccount
+	// brand is the ad account's brand ("": none, so the first brand's
+	// settings).
+	brand string
+	fixed *int64
+	acct  connectors.AdAccount
 	// def is the conversion definition the rule sends, if it names one.
 	def *conversions.Definition
 }
@@ -344,6 +424,32 @@ type queued struct {
 	occurred         time.Time
 	props            map[string]any
 	attempts         int
+	// country is where the event itself says the person was (eventCountry),
+	// for when no website visit of theirs says.
+	country string
+}
+
+var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
+
+// eventCountry is the country an event's own context gives: Segment's
+// context.location.country as a two-letter code, else the country of
+// context.ip, the address a server passes on for its user. "" if neither.
+func eventCountry(c map[string]any) string {
+	if loc, ok := c["location"].(map[string]any); ok {
+		if v, ok := loc["country"].(string); ok {
+			if v = strings.ToUpper(strings.TrimSpace(v)); countryCode.MatchString(v) {
+				return v
+			}
+		}
+	}
+	if v, ok := c["ip"].(string); ok {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(v)); err == nil {
+			if cc := geoip.Country(ip); countryCode.MatchString(cc) {
+				return cc
+			}
+		}
+	}
+	return ""
 }
 
 // SendRule sends one rule's waiting conversions, a batch at a time.
@@ -367,7 +473,7 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 		s.failAll(ctx, ruleID, err.Error(), &res)
 		return res, err
 	}
-	mode, err := s.consentMode(ctx, ws)
+	mode, err := s.consentMode(ctx, ws, r.brand)
 	if err != nil {
 		return res, dbError{err}
 	}
@@ -462,17 +568,17 @@ func (s *Sender) SendRule(ctx context.Context, ws, ruleID string) (Result, error
 func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 	var r rule
 	var meta []byte
-	var defKey *string
+	var defID *string
 	err := s.Pool.QueryRow(ctx, `
 		SELECT r.id, r.workspace_id, a.integration_id, a.connector, r.event_type, r.target_id, r.target_name,
 			r.value_property, r.value_unit, r.currency, r.fixed_value_micros,
-			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.key
+			a.external_id, a.name, a.currency, a.time_zone, a.meta, d.id::text, coalesce(a.brand_id::text, '')
 		FROM ad_conversion_rules r JOIN ad_accounts a ON a.id = r.ad_account_id
 		LEFT JOIN conversion_definitions d ON d.id = r.conversion_id
 		WHERE r.workspace_id = $1 AND r.id = $2 AND r.enabled`, ws, id).Scan(
 		&r.id, &r.ws, &r.integrationID, &r.connector, &r.eventType, &r.targetID, &r.targetName,
 		&r.valueProperty, &r.valueUnit, &r.currency, &r.fixed,
-		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defKey)
+		&r.acct.ID, &r.acct.Name, &r.acct.Currency, &r.acct.TimeZone, &meta, &defID, &r.brand)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return r, connectors.ErrNotFound
 	}
@@ -480,8 +586,8 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 		return r, dbError{err}
 	}
 	_ = json.Unmarshal(meta, &r.acct.Meta)
-	if defKey != nil {
-		d, err := conversions.Get(ctx, s.Pool, ws, *defKey)
+	if defID != nil {
+		d, err := conversions.GetByID(ctx, s.Pool, ws, *defID)
 		if err != nil {
 			return r, dbError{err}
 		}
@@ -490,13 +596,13 @@ func (s *Sender) loadRule(ctx context.Context, ws, id string) (rule, error) {
 	return r, nil
 }
 
-func (s *Sender) consentMode(ctx context.Context, ws string) (string, error) {
-	return ConsentMode(ctx, s.Pool, ws)
+func (s *Sender) consentMode(ctx context.Context, ws, brand string) (string, error) {
+	return ConsentMode(ctx, s.Pool, ws, brand)
 }
 
 func (s *Sender) loadQueued(ctx context.Context, ws, ruleID string) ([]queued, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT q.id, q.event_id, q.record_id, e.anonymous_id, q.occurred_at, e.properties, q.attempts
+		SELECT q.id, q.event_id, q.record_id, e.anonymous_id, q.occurred_at, e.properties, e.context, q.attempts
 		FROM ad_conversion_sends q JOIN customer_events e ON e.id = q.event_row_id
 		WHERE q.workspace_id = $1 AND q.rule_id = $2 AND q.status = 'queued'
 		ORDER BY q.created_at, q.id LIMIT $3`, ws, ruleID, batch)
@@ -507,11 +613,14 @@ func (s *Sender) loadQueued(ctx context.Context, ws, ruleID string) ([]queued, e
 	var out []queued
 	for rows.Next() {
 		var q queued
-		var props []byte
-		if err := rows.Scan(&q.id, &q.eventID, &q.recordID, &q.anonID, &q.occurred, &props, &q.attempts); err != nil {
+		var props, evCtx []byte
+		if err := rows.Scan(&q.id, &q.eventID, &q.recordID, &q.anonID, &q.occurred, &props, &evCtx, &q.attempts); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(props, &q.props)
+		var c map[string]any
+		_ = json.Unmarshal(evCtx, &c)
+		q.country = eventCountry(c)
 		out = append(out, q)
 	}
 	return out, rows.Err()
@@ -530,7 +639,7 @@ func (s *Sender) build(ctx context.Context, ws string, r rule, mode string, q qu
 			return cv, fmt.Sprintf("it doesn't meet the conditions of %s", r.def.Name), nil
 		}
 	}
-	send, granted, reason, err := Consent(ctx, s.Pool, ws, q.recordID, q.anonID, mode)
+	send, granted, reason, err := consentFor(ctx, s.Pool, ws, q.recordID, q.anonID, mode, "ad_user_data", "ad data", q.country)
 	if err != nil || !send {
 		return cv, reason, err
 	}
@@ -613,7 +722,7 @@ func (s *Sender) clicks(ctx context.Context, ws string, q queued, cv *connectors
 // Consent says whether a person's conversion may be sent, whether they
 // granted ad data, and why not when it may not.
 func Consent(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode string) (send, granted bool, reason string, err error) {
-	return consentFor(ctx, q, ws, recordID, anonID, mode, "ad_user_data", "ad data")
+	return consentFor(ctx, q, ws, recordID, anonID, mode, "ad_user_data", "ad data", "")
 }
 
 // AudienceConsent says whether a person may be added to an ad platform's
@@ -625,27 +734,36 @@ func AudienceConsent(ctx context.Context, q jobs.Querier, ws, recordID, mode str
 	if err != nil || !add {
 		return false, false, reason, err
 	}
-	add, pers, reason, err := consentFor(ctx, q, ws, &recordID, nil, mode, "ad_personalization", "ad personalisation")
+	add, pers, reason, err := consentFor(ctx, q, ws, &recordID, nil, mode, "ad_personalization", "ad personalisation", "")
 	return add, add && data && pers, reason, err
 }
 
-// ConsentMode is the workspace's consent_mode: OptOut unless set.
-func ConsentMode(ctx context.Context, q jobs.Querier, ws string) (string, error) {
+// ConsentMode is a brand's consent_mode ("": the workspace's first
+// brand's): OptOut unless set.
+func ConsentMode(ctx context.Context, q jobs.Querier, ws, brand string) (string, error) {
 	mode := OptOut
-	err := q.QueryRow(ctx, `SELECT consent_mode FROM ad_settings WHERE workspace_id = $1`, ws).Scan(&mode)
+	err := q.QueryRow(ctx, `SELECT consent_mode FROM ad_settings WHERE workspace_id = $1
+		AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1))`, ws, brand).Scan(&mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OptOut, nil
 	}
 	return mode, err
 }
 
-func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what string) (send, granted bool, reason string, err error) {
+// consentFor decides one purpose. The person's country is their latest
+// website visit's; fallback, the event's own (eventCountry), is used when
+// no visit says, such as a purchase from a server for someone the site
+// script never saw.
+func consentFor(ctx context.Context, q jobs.Querier, ws string, recordID, anonID *string, mode, purpose, what, fallback string) (send, granted bool, reason string, err error) {
 	var country string
 	err = q.QueryRow(ctx, `SELECT country FROM site_sessions WHERE workspace_id = $1
 		AND (record_id = $2 OR ($3::text IS NOT NULL AND anonymous_id = $3)) AND country <> ''
 		ORDER BY started_at DESC LIMIT 1`, ws, recordID, anonID).Scan(&country)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return false, false, "", err
+	}
+	if country == "" {
+		country = fallback
 	}
 	// The person's latest choice, or, for a visitor nobody has identified
 	// yet, the one their browser made on the site's consent banner.

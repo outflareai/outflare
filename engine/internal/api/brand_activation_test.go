@@ -155,13 +155,25 @@ func TestBrandActivation(t *testing.T) {
 	if err := svc.RunDomainCheck(ctx, did); err != nil {
 		t.Fatal(err)
 	}
-	// Topics are still the workspace's (every brand's); choosing one is
-	// per brand (consent on that brand's person).
+	// Topics are per brand: each brand has its own "news", and choosing
+	// one is per brand too (consent on that brand's person).
 	topic := owner.must(201, "POST", a+"/email-topics", map[string]any{"name": "News"})
-	if topic["brand_id"] != nil {
+	if topic["brand_id"] != alpha {
 		t.Fatalf("topic brand %v", topic["brand_id"])
 	}
-	owner.must(200, "GET", b+"/email-topics/"+topic["id"].(string), nil)
+	owner.must(404, "GET", b+"/email-topics/"+topic["id"].(string), nil)
+	if l := owner.must(200, "GET", b+"/email-topics", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("bravo sees alpha's topics: %v", l)
+	}
+	// Bravo's own topic can use the same key: keys are unique per brand.
+	bravoNews := owner.must(201, "POST", b+"/email-topics", map[string]any{"name": "News"})
+	if bravoNews["brand_id"] != bravo || bravoNews["key"] != "news" || bravoNews["id"] == topic["id"] {
+		t.Fatalf("bravo's own news topic: %v", bravoNews)
+	}
+	owner.must(409, "POST", a+"/email-topics", map[string]any{"name": "News"})
+	if l := owner.must(200, "GET", a+"/email-topics", nil)["data"].([]any); len(l) != 1 {
+		t.Fatalf("alpha's topics: %v", l)
+	}
 	tpl := owner.must(201, "POST", a+"/email-templates", map[string]any{"name": "Monthly", "purpose": "lifecycle", "topic": "news",
 		"subject": "News", "html": "<p>News</p>", "from": "news@example.com", "publish": true})
 	if tpl["brand_id"] != alpha {

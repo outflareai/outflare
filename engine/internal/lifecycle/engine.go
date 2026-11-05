@@ -294,7 +294,7 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 		var approved bool
 		err := tx.QueryRow(ctx, `SELECT e.record_id::text, r.record_type, e.account_id::text, e.product_id::text, e.brand_id::text, e.name, e.properties,
 				e.source, e.occurred_at, e.received_at, l.enabled_at,
-				EXISTS (SELECT 1 FROM event_definitions d WHERE d.workspace_id = e.workspace_id AND d.name = e.name AND d.status = 'approved')
+				EXISTS (SELECT 1 FROM event_definitions d WHERE d.workspace_id = e.workspace_id AND d.brand_id IS NOT DISTINCT FROM e.brand_id AND d.name = e.name AND d.status = 'approved')
 			FROM customer_events e
 			JOIN records r ON r.id = e.record_id AND r.merged_into IS NULL AND r.archived_at IS NULL AND r.deleted_at IS NULL
 			JOIN lifecycle_settings l ON l.brand_id = e.brand_id

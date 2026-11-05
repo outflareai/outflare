@@ -54,7 +54,7 @@ func (s *Service) Schedule(ctx context.Context, now time.Time) error {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT x.workspace_id::text, x.id::text FROM link_prospects x
 		LEFT JOIN link_page_checks c ON c.prospect_id = x.id
-		LEFT JOIN link_building_settings st ON st.workspace_id = x.workspace_id
+		LEFT JOIN link_building_settings st ON st.workspace_id = x.workspace_id AND st.brand_id = COALESCE(x.brand_id, outflare_first_brand(x.workspace_id))
 		WHERE (x.stage = 'agreed' AND (c.checked_at IS NULL OR c.checked_at < $1))
 		   OR (x.stage = 'live' AND (c.checked_at IS NULL OR c.checked_at < $2))
 		   OR (x.stage = 'prospect' AND x.method = 'broken_link' AND c.checked_at IS NOT NULL AND COALESCE(st.recheck_days, 30) > 0

@@ -132,7 +132,9 @@ func (s *Server) listTrackingCampaigns(w http.ResponseWriter, r *http.Request) {
 // findTrackingCampaign finds a campaign by id, slug or ofc code.
 func (s *Server) findTrackingCampaign(w http.ResponseWriter, r *http.Request, ws, ref string) (*trackingCampaignView, bool) {
 	ref = strings.ToLower(strings.TrimSpace(ref))
-	v, err := scanTrackingCampaign(s.pool.QueryRow(r.Context(), trackingCampaignSelect+` AND (c.id::text = $2 OR c.slug = $2 OR c.code = $2)`, ws, ref))
+	v, err := scanTrackingCampaign(s.pool.QueryRow(r.Context(), trackingCampaignSelect+` AND (c.id::text = $2 OR c.slug = $2 OR c.code = $2)
+		AND ($3 = '' OR c.brand_id = $3::uuid)
+		ORDER BY c.slug <> $2 DESC, c.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, c.created_at LIMIT 1`, ws, ref, accessFrom(r.Context()).Brand))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "campaign not found")
 		return nil, false
@@ -263,7 +265,7 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 		err := tx.QueryRow(ctx, `
 			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by, redirect_links)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false))
-			ON CONFLICT (workspace_id, slug) DO NOTHING RETURNING id::text`,
+			ON CONFLICT DO NOTHING RETURNING id::text`,
 			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID), in.RedirectLinks).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict

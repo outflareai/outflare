@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/adconv"
+	"github.com/outflareai/outflare/engine/internal/adsuggest"
 	"github.com/outflareai/outflare/engine/internal/adsync"
 	"github.com/outflareai/outflare/engine/internal/aiaccounts"
 	"github.com/outflareai/outflare/engine/internal/aidesktop"
@@ -297,6 +298,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	rankChecks.Register(queue)
 	adSync := &adsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	adSync.Register(queue)
+	(&adsuggest.Runner{Pool: pool, Log: log}).Register(queue)
 	contentPublish := &cmspublish.Publisher{Pool: pool, Store: integrations, Log: log}
 	contentPublish.Register(queue)
 	// Browser tasks run only where there is a browser: a browser-role
@@ -441,7 +443,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		TrackingTarget: cfg.TrackingTarget, PartnersDomain: cfg.PartnersDomain, TrackingCerts: host.trackingCerts, Quota: host.quota, EdgeSecret: cfg.EdgeSecret,
 		PostHogKey: cfg.PostHogKey, PostHogHost: cfg.PostHogHost, MCP: mcpUpstream, PrivacyURL: cfg.PrivacyURL, TermsURL: cfg.TermsURL, CommunityLinks: cfg.CommunityLinks, CommunityXURL: cfg.CommunityXURL, CommunityBuilderURL: cfg.CommunityBuilderURL, SignedInCookieDomain: cfg.SignedInCookieDomain, EventArchive: archive,
 		SiteInbox: true, QueryConnections: queryConnections(cfg.QueryConnections),
-		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, MenuBadges: host.menuBadges, AITools: host.aiTools, SupportAuto: host.supportAuto,
+		Routes: host.registerRoutes, Middleware: host.middleware, Capabilities: host.capabilities, WorkspaceRoutes: host.workspaceRoutes, MenuLinks: host.menuLinks, MenuBadges: host.menuBadges, AITools: host.aiTools, SupportAuto: host.supportAuto, AdAutoApprove: host.adAutoApprove,
 	})
 	// Smart lists from a saved query run it through Query's own role.
 	smart.Query = apiServer.SmartListQueryIDs
@@ -469,7 +471,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	// into the operator's own workspace when OUTFLARE_EVENTS_WORKSPACE is.
 	var sinks []track.Sink
 	if cfg.EventsWorkspace != "" {
-		sink, err := apiServer.ProductEventSink(ctx, cfg.EventsWorkspace)
+		sink, err := apiServer.ProductEventSink(ctx, cfg.EventsWorkspace, cfg.EventsBrand)
 		if err != nil {
 			log.Error("product events: not kept in a workspace", "err", err)
 		} else {
@@ -508,7 +510,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		metrics.SetWorkers(cfg.Workers + sendWorkers)
 	}
 	if cfg.MetricsAddr != "" {
-		metrics.Registry.MustRegister(&metrics.Postgres{Pool: pool, Log: log})
+		metrics.Registry.MustRegister(&metrics.Postgres{Pool: pool, Log: log, PageReaders: pageReaders(registry)})
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -529,11 +531,15 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		}
 	}()
 	// The hosted MCP server answers /mcp, so it runs wherever the API does.
+	// It outlives the shutdown signal until the HTTP server has drained, so
+	// requests still in flight during a deploy can finish.
+	mcpCtx, stopMCP := context.WithCancel(context.WithoutCancel(ctx))
+	defer stopMCP()
 	if mcpHost != nil && (cfg.Role == config.RoleAll || cfg.Role == config.RoleAPI) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			mcpHost.Run(ctx)
+			mcpHost.Run(mcpCtx)
 		}()
 	}
 	if browses {
@@ -666,6 +672,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			apiServer.RunABTests(ctx, 5*time.Minute)
+		}()
+		// Alerts on a number: each saved trend with a line is checked hourly.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunInsightAlerts(ctx, 5*time.Minute)
 		}()
 		// Each visit's channel, and the credit for each conversion.
 		wg.Add(1)
@@ -918,6 +930,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	srv.Shutdown(shutdownCtx) //nolint:errcheck
+	stopMCP()
 	stop()
 	wg.Wait()
 	apiServer.FlushLogs(shutdownCtx) //nolint:errcheck
@@ -1013,4 +1026,16 @@ func queryConnections(n int) int {
 		return -1
 	}
 	return n
+}
+
+// pageReaders are the connector ids that read pages, as the review and
+// social reads pick them (s.socialMetricsConnectors).
+func pageReaders(r *connectors.Registry) []string {
+	var ids []string
+	for _, d := range r.All() {
+		if d.Has(connectors.CapCrawlFetch) && !d.Has(connectors.CapSocialMetrics) {
+			ids = append(ids, d.ID)
+		}
+	}
+	return ids
 }

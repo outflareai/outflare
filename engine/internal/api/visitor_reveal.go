@@ -103,7 +103,7 @@ func (s *Server) queueReveal(ctx context.Context, ws, anon, ip string) error {
 		return nil
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		set, err := visitors.Load(ctx, tx, ws)
+		set, err := visitors.Load(ctx, tx, ws, "")
 		if err != nil || !set.RevealCompanies {
 			return err
 		}
@@ -179,7 +179,7 @@ func (s *Server) visitorRevealJob(ctx context.Context, job jobs.Job) error {
 	ip := string(plain)
 	hash := s.ipHash(ip)
 	now := time.Now().UTC()
-	set, err := visitors.Load(ctx, s.pool, ws)
+	set, err := visitors.Load(ctx, s.pool, ws, "")
 	if err != nil {
 		return err
 	}

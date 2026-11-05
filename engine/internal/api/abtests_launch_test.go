@@ -134,3 +134,37 @@ func TestABTestsDeliveryCheck(t *testing.T) {
 		t.Fatalf("slow delivery: %v", c)
 	}
 }
+
+// The checklist warns when the site script reported visual changes that
+// found nothing on the page, naming the version, the page and the parts.
+func TestABTestsMissedChangesCheck(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	owner.must(201, "POST", base+"/flags", map[string]any{"key": "cta", "name": "Call to action",
+		"variants": []map[string]any{{"key": "control", "weight": 50}, {"key": "bold", "weight": 50}}})
+	id := owner.must(201, "POST", base+"/ab-tests", map[string]any{"flag": "cta", "goals": []map[string]any{{"kind": "event", "name": "signup_started"}}})["id"].(string)
+	check := func() map[string]any {
+		t.Helper()
+		for _, c := range owner.must(200, "GET", base+"/ab-tests/"+id+"/checklist", nil)["checks"].([]any) {
+			if c := c.(map[string]any); c["id"] == "changes_found" {
+				return c
+			}
+		}
+		return nil
+	}
+	if c := check(); c != nil {
+		t.Fatalf("warned with nothing reported: %v", c)
+	}
+	if _, err := e.pool.Exec(t.Context(), `
+		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, 'track', 'experiment_change_missed', 'v-' || i,
+			'{"flag": "cta", "variant": "bold", "path": "/pricing", "missed": 2, "found": 1, "selectors": [".promo", "#hero h1"]}', '{}', now() - interval '1 hour'
+		FROM generate_series(1, 3) i`, ws); err != nil {
+		t.Fatal(err)
+	}
+	c := check()
+	if c == nil || c["status"] != "warn" || !strings.Contains(c["text"].(string), "3 visitor(s)") || !strings.Contains(c["text"].(string), "bold on /pricing") || !strings.Contains(c["text"].(string), ".promo, #hero h1") {
+		t.Fatalf("missed check: %v", c)
+	}
+}

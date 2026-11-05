@@ -4,6 +4,7 @@ import { api, errorMessage } from "../../api";
 export const resources = [
   "publishers",
   "placements",
+  "parties",
   "agreements",
   "deliverables",
   "invoices",
@@ -12,6 +13,7 @@ export const resources = [
   "budgets",
   "tasks",
   "candidates",
+  "searches",
   "views",
   "rules",
   "finance_tasks",
@@ -43,8 +45,34 @@ type DetailPath = Extract<
   keyof paths,
   `/v1/brands/{brand}/coverage/${Exclude<Resource, "payments">}/{id}`
 >;
+// Names people use for values whose code names read badly.
+const names: Record<string, string> = {
+  display_ad: "Banner",
+  youtube: "YouTube video",
+  influencer: "Influencer post",
+  forum: "Forum thread",
+  mcp_directory: "MCP directory",
+  app_listing: "App store listing",
+  organic: "Organic (free, unprompted)",
+  in_house: "In-house",
+  delivered_by: "Who delivered it",
+  deal: "CRM deal",
+  deal_id: "CRM deal",
+  account_manager: "Account manager",
+  parties: "People and companies",
+  ai_citations: "AI answers",
+  web_search: "Web search",
+  social: "Social watch",
+  link_prospects: "Link prospects",
+  connector_needed: "Needs a search results connection",
+  budget_reached: "Connection budget reached",
+  link_status: "Link",
+  mention_status: "Mention",
+  mention_missing: "Mention removed",
+  offline_since: "Offline since",
+};
 export const label = (s: string) =>
-  s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  names[s] ?? s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 export const nameOf = (r: Row) => String(r.title || r.domain || r.id);
 export async function list(
   brand: string,

@@ -58,10 +58,13 @@ const (
 
 // Definition is one conversion a workspace counts.
 type Definition struct {
-	ID    string `json:"id"`
-	Key   string `json:"key"`
-	Name  string `json:"name"`
-	Event string `json:"event"`
+	ID string `json:"id"`
+	// BrandID is the brand the definition counts for: it matches only
+	// that brand's events. "" is none.
+	BrandID string `json:"-"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Event   string `json:"event"`
 	// Filters must all match; none means every such event.
 	Filters []Filter `json:"filters"`
 	// ValueMode is none, fixed (FixedValueMinor) or property

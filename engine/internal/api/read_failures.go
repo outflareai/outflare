@@ -5,11 +5,12 @@ import (
 	"fmt"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // Why a daily read of a page (a review page, a public profile) failed, in
 // a word: the error_code of its read_failed event, kept on the row as
-// last_error_code. blocked, slow_page, page_not_found, invalid_address and the
+// last_error_code. blocked, slow_page, page_failed, page_not_found, invalid_address and the
 // connector's own (connector_auth, connector_quota ...) are the site's or
 // the workspace's; no_follower_count and not_a_review_page (the site
 // answered with no bot check and the parser found nothing) and save_failed
@@ -17,6 +18,7 @@ import (
 const (
 	readBlocked        = "blocked"
 	readSlow           = "slow_page"
+	readPageFailed     = "page_failed"
 	readNotFound       = "page_not_found"
 	readInvalidAddress = "invalid_address"
 	readNoCount        = "no_follower_count"
@@ -31,17 +33,18 @@ type readFailure struct {
 	err  *connectors.Error
 }
 
-func (e *readFailure) Error() string { return e.err.Error() }
-func (e *readFailure) Unwrap() error { return e.err }
+func (e *readFailure) Error() string     { return e.err.Error() }
+func (e *readFailure) Unwrap() error     { return e.err }
+func (e *readFailure) ErrorCode() string { return e.code }
 
 func readFailed(code, format string, a ...any) error {
 	return &readFailure{code, connectors.Errf(connectors.ErrInvalid, "%s", fmt.Sprintf(format, a...))}
 }
 
 // pageFailed turns a page reader's *connectors.PageError (the site showed
-// it a bot check, or the page was slower than it allows) into the page's
-// own failure, tried again the same day; any other error is returned as it
-// is.
+// it a bot check or a login wall, the site failed or refused the page some
+// other way, or the page was slower than it allows) into the page's own
+// failure, tried again the same day; any other error is returned as it is.
 func pageFailed(err error) error {
 	var pe *connectors.PageError
 	if !errors.As(err, &pe) {
@@ -49,6 +52,9 @@ func pageFailed(err error) error {
 	}
 	if pe.Blocked {
 		return readFailed(readBlocked, "the site showed a bot check instead of the page (%s); Outflare tries again later today", pe.Code)
+	}
+	if pe.Failed {
+		return readFailed(readPageFailed, "the page reader couldn't read the page (%s); Outflare tries again later today", pe.Code)
 	}
 	return readFailed(readSlow, "the page took longer to read than the page reader allows (%s); Outflare tries again later today", pe.Code)
 }
@@ -76,4 +82,19 @@ func readOutcome(code string) string {
 // Every other failure is tried again the same day.
 func waitsForPerson(code string) bool {
 	return code == readNotFound || code == readInvalidAddress || code == "connector_invalid"
+}
+
+// readEventOutcome is a failed read's event outcome. A site that showed a
+// bot check, a slow or missing page, a wrong address and the connected
+// service's own answers (a bad key, a used-up quota, an outage) are
+// failure: nothing in Outflare is broken, and the read is tried again as
+// usual (the job queue does the same for connector errors). A parser that
+// found nothing or a read Outflare couldn't save is an error, Outflare's to
+// fix.
+func readEventOutcome(code string) string {
+	switch code {
+	case readNoCount, reviewNotAPage, readSaveFailed:
+		return track.Error
+	}
+	return track.Failure
 }

@@ -1,12 +1,14 @@
 # Conversions
 
-A conversion is whatever a workspace counts as one: a sign-up, a payment, a booked or held call, a qualified lead, an order. Outflare defines conversions once, on the customer events stream ([customers.md](customers.md#product-events)), and never per integration. A call is a conversion because a `call.completed` or `meeting.held` event says so, whichever tool sent it. Modules read the same definitions:
+A conversion is whatever a brand counts as one: a sign-up, a payment, a booked or held call, a qualified lead, an order. Outflare defines conversions once, on the customer events stream ([customers.md](customers.md#product-events)), and never per integration. A call is a conversion because a `call.completed` or `meeting.held` event says so, whichever tool sent it. Modules read the same definitions:
 
 - [Attribution](attribution.md) credits channels with them.
 - Each definition also carries every ad network's own name for the conversion. A [send-back rule](paid-media.md#sending-conversions-back) that names the definition sends only the events that meet it, worth what it says, under that name.
 - Modules in the engine, such as partner programs, read them through `engine/internal/conversions`.
 
-Nothing here is particular to a kind of business. Presets are starting points a workspace copies and changes.
+Nothing here is particular to a kind of business. Presets are starting points a brand copies and changes.
+
+Each brand has its own definitions, under `/v1/brands/{brand}/conversion-definitions` (the workspace routes are deprecated and act on the first brand). A definition counts only its own brand's events, and another brand's routes don't list or reach it. Until a later release, a key is still used by one brand at a time in a workspace.
 
 In the web app they live under **Analytics → Channels → Conversions**: add a preset, define a conversion with its conditions, value and ad network names, edit or archive one. The API and MCP do the same.
 
@@ -32,7 +34,7 @@ Anything without an integration posts its events through the API (`POST .../cust
 
 ## Presets
 
-`GET .../conversion-definitions/presets` lists them, and `POST .../conversion-definitions/presets/{preset}` adds the definitions whose keys the workspace doesn't use yet. Adding one twice changes nothing.
+`GET .../conversion-definitions/presets` lists them, and `POST .../conversion-definitions/presets/{preset}` adds the definitions whose keys the workspace doesn't use yet, in that brand. Adding one twice changes nothing.
 
 | Preset | Definitions |
 | --- | --- |
@@ -40,6 +42,8 @@ Anything without an integration posts its events through the API (`POST .../cust
 | `booked_calls` | Booked call (`meeting.booked`), Held call (`meeting.held`), Deal won (`payment.succeeded`) |
 | `ecommerce` | Purchase (`order_completed`, valued at `revenue`), Account created (`signed_up`, not credited) |
 | `lead_gen` | Lead (`form_submitted`), Qualified lead (`lead_qualified`) |
+
+A workspace that also sends payments as [transactions](transactions.md) or from a billing connector should count Payment (`payment.succeeded`) rather than Purchase (`order_completed`): each order is also a payment, and a payment sent more than one way is counted once ([One payment, counted once](transactions.md#one-payment-counted-once)).
 
 Network events in presets use Meta's, TikTok's and Reddit's standard event names. Add other networks' names to a definition yourself.
 
@@ -56,7 +60,7 @@ When an event matches several definitions, the first by key counts. A definition
 
 | Call | MCP | What it does |
 | --- | --- | --- |
-| `GET .../conversion-definitions` | `list_conversion_definitions` | The workspace's definitions (`archived=true` for archived ones too) |
+| `GET .../conversion-definitions` | `list_conversion_definitions` | The brand's definitions (`archived=true` for archived ones too) |
 | `POST .../conversion-definitions` | `create_conversion_definition` | Define one |
 | `GET`, `PATCH`, `DELETE .../conversion-definitions/{key}` | `update_conversion_definition`, `archive_conversion_definition` | Read, change (fields left out keep their values) or archive one |
 | `GET .../conversion-definitions/presets`, `POST .../presets/{preset}` | `list_conversion_presets`, `add_conversion_preset` | The presets, and adding one |

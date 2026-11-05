@@ -22,7 +22,9 @@
 // mode (granted by default), track an event to send after the page view,
 // and bodies lists what each post sent. bootstrap is the JSON (an object,
 // or a string as written) of a <script id="outflare-flags"> the site's
-// server put in the page.
+// server put in the page. flagsAttr sets data-flags to that value (such
+// as "off"); hidden lists the of-hide styles added to <head>, with whether
+// they were taken off again.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -38,6 +40,7 @@ const loc = {
 };
 const attrs = { "data-key": "ofk_test_not_a_real_key", "data-consent": opt.consent || "granted", "data-domains": opt.domains || "" };
 if (opt.flags && !opt.noTag) attrs["data-flags"] = "";
+if (opt.flagsAttr !== undefined) attrs["data-flags"] = opt.flagsAttr;
 if (opt.bannerOff) attrs["data-banner"] = "off";
 if (opt.cookiesOff) attrs["data-cookies"] = "off";
 const classes = new Set(opt.htmlClass ? [opt.htmlClass] : []);
@@ -77,6 +80,7 @@ const elements = Object.fromEntries(Object.entries(opt.elements || {}).map(([sel
   const e = { textContent: "old", attrs: {}, display: "", setAttribute(k, v) { e.attrs[k] = v; }, style: { setProperty(k, v) { e.display = v; } } };
   return e;
 })]));
+const appended = [];
 const spots = Array.from({ length: opt.policySpots || 0 }, () => ({ innerHTML: "", querySelector: () => null }));
 const document = {
   readyState: opt.loaded ? "complete" : "loading",
@@ -105,6 +109,7 @@ const document = {
     const n = { attrs: {}, setAttribute(k, v) { n.attrs[k] = v; } };
     return n;
   },
+  head: { appendChild(n) { appended.push(n); n.parentNode = { removeChild() { n.removed = true; } }; } },
   documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
 };
 const history = {
@@ -174,4 +179,5 @@ for (let i = 0; i < 10; i++) {
 console.log(JSON.stringify({ anon: window.outflare.anonymousId(), href, posts, flagAsks, got, classes: [...classes].sort(), tracked, stored: Object.fromEntries(storage),
   choices, bannerAsks, cookieReports, policy: spots.map((s) => s.innerHTML), local: Object.fromEntries(local), state, consent: window.outflare.consent(), dataLayer: (window.dataLayer || []).map((a) => [...a]), uetq: window.uetq || null, fbq, ran,
   cookies: Object.fromEntries(jar), bodies,
+  hidden: appended.filter((n) => n.id === "of-hide").map((n) => ({ css: n.textContent, removed: !!n.removed })),
   elements: Object.fromEntries(Object.entries(elements).map(([k, els]) => [k, els.map((e) => ({ text: e.textContent, attrs: e.attrs, display: e.display }))])) }));

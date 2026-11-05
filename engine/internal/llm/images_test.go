@@ -79,6 +79,11 @@ func TestClaudeSendsImages(t *testing.T) {
 	if strings.Count(body, data) != 2 || !strings.Contains(body, `"media_type":"image/png"`) || !strings.Contains(body, `"tool_result"`) {
 		t.Fatalf("body: %s", body)
 	}
+	// The system prefix and the conversation so far are both cached, so
+	// an agent's next step reads them back cheaply.
+	if strings.Count(body, `"cache_control":{"type":"ephemeral"}`) != 2 {
+		t.Fatalf("cache breakpoints: %s", body)
+	}
 	// The assistant message was rebuilt from stored state, so its tool
 	// call is sent as a tool_use block the tool_result can answer.
 	if !strings.Contains(body, `"type":"tool_use"`) || !strings.Contains(body, `"id":"t1"`) || !strings.Contains(body, `"name":"shot"`) {

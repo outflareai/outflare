@@ -333,6 +333,9 @@ type payload struct {
 	// SiteReads only reads again the SEO sites' competitors and backlinks
 	// whose weekly read failed, and nothing else.
 	SiteReads bool `json:"site_reads,omitempty"`
+	// Suggest only asks which domains compete with each SEO site, the
+	// daily look for new competitors (suggest.go).
+	Suggest bool `json:"suggest,omitempty"`
 }
 
 // Register adds the job handler.
@@ -400,6 +403,12 @@ func (s *Syncer) QueueDue(ctx context.Context) error {
 		if _, err := Enqueue(ctx, s.Pool, d.ws, d.id, fmt.Sprintf("%s:%d", d.id, slot)); err != nil {
 			return err
 		}
+	}
+	if err := s.queueSuggest(ctx, ids); err != nil {
+		return err
+	}
+	if err := SuggestFromRankings(ctx, s.Pool, s.Log); err != nil {
+		return err
 	}
 	return s.tickNew(ctx, ids)
 }
@@ -543,6 +552,9 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 	}
 	if p.SiteReads {
 		return s.retrySiteReads(ctx, *job.WorkspaceID, p.Integration)
+	}
+	if p.Suggest {
+		return s.suggestDaily(ctx, *job.WorkspaceID, p.Integration)
 	}
 	res, err := s.sync(ctx, *job.WorkspaceID, p.Integration, p.NewOnly, p.Retry)
 	s.report(ctx, *job.WorkspaceID, p.Integration, res, err)

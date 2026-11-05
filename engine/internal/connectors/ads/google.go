@@ -27,8 +27,8 @@ func (GoogleAds) Definition() c.Definition {
 	d := def("google_ads", "Google Ads", "https://ads.google.com",
 		"https://developers.google.com/google-ads/api/docs/start", "https://developers.google.com/google-ads/api/docs/get-started/dev-token",
 		"Spend, clicks and conversions per campaign from your Google Ads accounts.",
-		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. It changes a campaign only when you, or an agent within the grants you set, pause or resume it or set its daily budget, and adds Outflare's tracking parameters to URL suffixes only when you press Add the template; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
-	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage, c.CapAdsTracking)
+		"Signs in with Google and reads every Google Ads account the sign-in can see, including accounts under a manager account. It changes a campaign only when you, or an agent within the grants you set, pause or resume it, set its daily budget, bidding, audiences or countries, or add keywords, or when you start, keep or roll back an experiment on it, makes new ads, ad groups and campaigns paused only when you approve them and turns them on only when you say, and adds Outflare's tracking parameters to URL suffixes only when you press Add the template; it sends conversions only to the conversion actions you choose under Paid ads, and adds people only to the Customer Match lists your journeys name.")
+	d.Capabilities = append(d.Capabilities, c.CapAdsConversions, c.CapAdsAudiences, c.CapAdsManage, c.CapAdsTracking, c.CapAdsKeywords, c.CapAdsTests, c.CapAdsTargeting, c.CapAdsCreate)
 	d.OAuth = &c.OAuth{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
@@ -144,6 +144,8 @@ type gaqlRow struct {
 			ResponsiveSearchAd struct {
 				Headlines    []struct{ Text string } `json:"headlines"`
 				Descriptions []struct{ Text string } `json:"descriptions"`
+				Path1        string                  `json:"path1"`
+				Path2        string                  `json:"path2"`
 			} `json:"responsiveSearchAd"`
 			ResponsiveDisplayAd struct {
 				Headlines    []struct{ Text string } `json:"headlines"`
@@ -166,9 +168,39 @@ type gaqlRow struct {
 			MatchType string `json:"matchType"`
 		} `json:"keyword"`
 	} `json:"adGroupCriterion"`
+	Recommendation struct {
+		ResourceName string `json:"resourceName"`
+		Type         string `json:"type"`
+		Campaign     string `json:"campaign"`
+		Impact       struct {
+			BaseMetrics      googleImpact `json:"baseMetrics"`
+			PotentialMetrics googleImpact `json:"potentialMetrics"`
+		} `json:"impact"`
+	} `json:"recommendation"`
 	SearchTermView struct {
 		SearchTerm string `json:"searchTerm"`
 	} `json:"searchTermView"`
+	ExperimentArm struct {
+		Control           bool     `json:"control"`
+		Campaigns         []string `json:"campaigns"`
+		InDesignCampaigns []string `json:"inDesignCampaigns"`
+	} `json:"experimentArm"`
+	CampaignCriterion struct {
+		ResourceName string `json:"resourceName"`
+		Type         string `json:"type"`
+		Negative     bool   `json:"negative"`
+		UserList     struct {
+			UserList string `json:"userList"`
+		} `json:"userList"`
+		Location struct {
+			GeoTargetConstant string `json:"geoTargetConstant"`
+		} `json:"location"`
+	} `json:"campaignCriterion"`
+	GeoTargetConstant struct {
+		ResourceName string `json:"resourceName"`
+		CountryCode  string `json:"countryCode"`
+		TargetType   string `json:"targetType"`
+	} `json:"geoTargetConstant"`
 	Segments struct {
 		Date                 string `json:"date"`
 		ConversionActionName string `json:"conversionActionName"`
@@ -778,4 +810,78 @@ func gclidFromCookie(v string) string {
 		return ""
 	}
 	return parts[2]
+}
+
+// AdjustConversions uploads conversion adjustments with partial failure
+// on: a restatement (the value left after a partial refund) or a
+// retraction (a full one), found by the order id the conversion was sent
+// with.
+func (g GoogleAds) AdjustConversions(ctx context.Context, cl *c.Client, creds c.Creds, acct c.AdAccount, target c.ConversionTarget, adjs []c.AdConversionAdjustment) ([]c.ConversionResult, error) {
+	results := make([]c.ConversionResult, len(adjs))
+	if len(adjs) == 0 {
+		return results, nil
+	}
+	body := make([]map[string]any, len(adjs))
+	for i, a := range adjs {
+		results[i] = c.ConversionResult{Index: a.Index}
+		row := map[string]any{
+			"conversionAction":   "customers/" + acct.ID + "/conversionActions/" + target.ID,
+			"orderId":            a.EventID,
+			"adjustmentDateTime": a.Time.UTC().Format("2006-01-02 15:04:05-07:00"),
+			"adjustmentType":     "RETRACTION",
+		}
+		if !a.Retract {
+			row["adjustmentType"] = "RESTATEMENT"
+			row["restatementValue"] = map[string]any{"adjustedValue": float64(a.ValueMicros) / 1e6, "currencyCode": a.Currency}
+		}
+		body[i] = row
+	}
+	var resp struct {
+		PartialFailureError *struct {
+			Message string `json:"message"`
+			Details []struct {
+				Errors []struct {
+					Message  string `json:"message"`
+					Location struct {
+						FieldPathElements []struct {
+							FieldName string `json:"fieldName"`
+							Index     *int   `json:"index"`
+						} `json:"fieldPathElements"`
+					} `json:"location"`
+				} `json:"errors"`
+			} `json:"details"`
+		} `json:"partialFailureError"`
+	}
+	err := g.call(cl, creds, acct.Meta["login_customer_id"]).post(ctx, g.base(cl)+"/customers/"+esc(acct.ID)+":uploadConversionAdjustments",
+		map[string]any{"conversionAdjustments": body, "partialFailure": true}, &resp)
+	if err != nil {
+		return nil, err
+	}
+	failed := map[int]string{}
+	if pf := resp.PartialFailureError; pf != nil {
+		for _, d := range pf.Details {
+			for _, e := range d.Errors {
+				for _, f := range e.Location.FieldPathElements {
+					if f.FieldName == "conversion_adjustments" || f.FieldName == "conversionAdjustments" {
+						if f.Index != nil {
+							failed[*f.Index] = e.Message
+						}
+					}
+				}
+			}
+		}
+		if len(failed) == 0 && pf.Message != "" {
+			for i := range adjs {
+				failed[i] = pf.Message
+			}
+		}
+	}
+	for i := range adjs {
+		if msg, bad := failed[i]; bad {
+			results[i].Reason = msg
+			continue
+		}
+		results[i].OK = true
+	}
+	return results, nil
 }

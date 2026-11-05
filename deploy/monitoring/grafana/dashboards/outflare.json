@@ -5411,7 +5411,7 @@
     {
       "type": "timeseries",
       "title": "Review pages being read",
-      "description": "Active review pages by platform, and how many failed their last read. Normal: few failing.",
+      "description": "Active review pages by platform, how many failed their last read, and how many wait for the workspace to connect a page reader (no_reader). Normal: few failing.",
       "id": 90,
       "datasource": {
         "type": "prometheus",
@@ -5460,8 +5460,8 @@
     },
     {
       "type": "timeseries",
-      "title": "Longest since a review page was read",
-      "description": "Time since the least recently read active page was read, by platform. Pages are read once a day, so normal is under 25 hours.",
+      "title": "Longest since a review page was tried",
+      "description": "Time since a read of the least recently tried active page ended, read or failed, by platform; pages with no page reader connected are left out. Pages are read once a day and failures are tried again the same day, so normal is under 25 hours.",
       "id": 91,
       "datasource": {
         "type": "prometheus",
@@ -10047,7 +10047,7 @@
       },
       "targets": [
         {
-          "expr": "max(outflare_jobs_oldest_due_seconds{kind=~\"coverage[.](check|review|extract)\"})",
+          "expr": "max(outflare_jobs_oldest_due_seconds{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan)\"})",
           "refId": "A",
           "legendFormat": "{{health}}{{outcome}}"
         }
@@ -10070,9 +10070,75 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=~\"coverage[.](check|review|extract)\",outcome=~\"retried|dead\"}[5m]))",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan)\",outcome=~\"retried|dead\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{health}}{{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 940,
+      "type": "timeseries",
+      "title": "Presence discovery",
+      "description": "Pages discovery added to brands' review lists, by source, and web search runs by outcome. Finds come in bursts once a day; sustained connector errors need a look at the search results connectors.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 766
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (source) (increase(outflare_coverage_found_total[1h]))",
+          "refId": "A",
+          "legendFormat": "found: {{source}}"
+        },
+        {
+          "expr": "sum by (outcome) (increase(outflare_coverage_search_runs_total[1h]))",
+          "refId": "B",
+          "legendFormat": "search: {{outcome}}"
+        }
+      ]
+    },
+    {
+      "id": 941,
+      "type": "timeseries",
+      "title": "Where competitors appear",
+      "description": "Competitor presence scans by source and outcome, new pages found where a competitor appears, by whether they look paid for, and opportunities suggested and won. Scans run weekly or monthly per competitor; connector_needed is normal until a workspace connects a search results or SEO connection, while sustained connector or provider errors need a look. Also the daily look for new competitors: looks that worked (ok) or failed (error) and the competitors suggested, by source; normally one look a site a day and a few suggestions.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 766
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (source, outcome) (increase(outflare_coverage_competitor_scans_total[1h]))",
+          "refId": "A",
+          "legendFormat": "scan: {{source}} {{outcome}}"
+        },
+        {
+          "expr": "sum by (arrangement) (increase(outflare_coverage_competitor_found_total[1h]))",
+          "refId": "B",
+          "legendFormat": "found: {{arrangement}}"
+        },
+        {
+          "expr": "sum by (event) (increase(outflare_coverage_opportunities_total[1h]))",
+          "refId": "C",
+          "legendFormat": "opportunities: {{event}}"
+        },
+        {
+          "expr": "sum by (source, outcome) (increase(outflare_seo_competitor_suggestions_total[1h]))",
+          "legendFormat": "new competitors {{source}} {{outcome}}",
+          "refId": "D"
         }
       ]
     },
@@ -10085,7 +10151,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 766
+        "y": 774
       },
       "datasource": {
         "type": "prometheus",
@@ -10112,7 +10178,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 774
+        "y": 782
       },
       "targets": [
         {
@@ -10174,7 +10240,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 766
+        "y": 774
       },
       "targets": [
         {
@@ -10230,7 +10296,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 782,
+        "y": 790,
         "w": 12,
         "h": 8
       },
@@ -10253,7 +10319,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 774,
+        "y": 782,
         "w": 12,
         "h": 8
       },
@@ -10282,7 +10348,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 790
+        "y": 798
       },
       "targets": [
         {
@@ -10344,7 +10410,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 782
+        "y": 790
       },
       "targets": [
         {
@@ -10394,7 +10460,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 798
+        "y": 806
       }
     },
     {
@@ -10410,7 +10476,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 799
+        "y": 807
       },
       "targets": [
         {
@@ -10456,7 +10522,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 807
+        "y": 815
       }
     },
     {
@@ -10472,7 +10538,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 808
+        "y": 816
       },
       "targets": [
         {
@@ -10525,7 +10591,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 808
+        "y": 816
       },
       "targets": [
         {
@@ -10575,7 +10641,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 816
+        "y": 824
       }
     },
     {
@@ -10591,7 +10657,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 817
+        "y": 825
       },
       "targets": [
         {
@@ -10644,7 +10710,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 817
+        "y": 825
       },
       "targets": [
         {
@@ -10693,7 +10759,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 825
+        "y": 833
       },
       "targets": [
         {
@@ -10712,7 +10778,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 833
+        "y": 841
       },
       "panels": []
     },
@@ -10729,7 +10795,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 834
+        "y": 842
       },
       "targets": [
         {
@@ -10782,7 +10848,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 834
+        "y": 842
       },
       "targets": [
         {
@@ -10844,7 +10910,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 842
+        "y": 850
       },
       "targets": [
         {
@@ -10906,7 +10972,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 842
+        "y": 850
       },
       "targets": [
         {
@@ -10955,7 +11021,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 850
+        "y": 858
       },
       "panels": []
     },
@@ -10972,7 +11038,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 851
+        "y": 859
       },
       "targets": [
         {
@@ -11021,7 +11087,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 851
+        "y": 859
       },
       "targets": [
         {
@@ -11070,7 +11136,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 859
+        "y": 867
       },
       "targets": [
         {
@@ -11119,7 +11185,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 859
+        "y": 867
       },
       "targets": [
         {
@@ -11170,7 +11236,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 867
+        "y": 875
       }
     },
     {
@@ -11186,7 +11252,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 868
+        "y": 876
       },
       "targets": [
         {
@@ -11239,7 +11305,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 868
+        "y": 876
       },
       "targets": [
         {
@@ -11292,7 +11358,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 876
+        "y": 884
       },
       "targets": [
         {
@@ -11345,7 +11411,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 876
+        "y": 884
       },
       "targets": [
         {
@@ -11398,7 +11464,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 884
+        "y": 892
       },
       "targets": [
         {
@@ -11451,7 +11517,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 884
+        "y": 892
       },
       "targets": [
         {
@@ -11509,7 +11575,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 892
+        "y": 900
       },
       "panels": []
     },
@@ -11526,7 +11592,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 893
+        "y": 901
       },
       "targets": [
         {
@@ -11575,7 +11641,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 893
+        "y": 901
       },
       "targets": [
         {
@@ -11620,7 +11686,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 901
+        "y": 909
       },
       "panels": []
     },
@@ -11637,7 +11703,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 902
+        "y": 910
       },
       "targets": [
         {
@@ -11683,7 +11749,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 902
+        "y": 910
       },
       "targets": [
         {
@@ -11743,7 +11809,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 910
+        "y": 918
       },
       "panels": []
     },
@@ -11760,7 +11826,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 911
+        "y": 919
       },
       "targets": [
         {
@@ -11813,7 +11879,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 911
+        "y": 919
       },
       "targets": [
         {
@@ -11862,7 +11928,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 919
+        "y": 927
       },
       "panels": []
     },
@@ -11879,7 +11945,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 920
+        "y": 928
       },
       "targets": [
         {
@@ -11932,7 +11998,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 920
+        "y": 928
       },
       "targets": [
         {
@@ -11994,7 +12060,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 928
+        "y": 936
       },
       "targets": [
         {
@@ -12065,7 +12131,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 928
+        "y": 936
       },
       "targets": [
         {
@@ -12123,7 +12189,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 936
+        "y": 944
       },
       "panels": []
     },
@@ -12140,7 +12206,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 937
+        "y": 945
       },
       "targets": [
         {
@@ -12193,7 +12259,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 937
+        "y": 945
       },
       "targets": [
         {
@@ -12246,7 +12312,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 946
+        "y": 954
       },
       "targets": [
         {
@@ -12313,7 +12379,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 945
+        "y": 953
       },
       "panels": []
     },
@@ -12330,7 +12396,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 954
+        "y": 962
       },
       "targets": [
         {
@@ -12383,7 +12449,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 946
+        "y": 954
       },
       "targets": [
         {
@@ -12441,7 +12507,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 962
+        "y": 970
       }
     },
     {
@@ -12457,7 +12523,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 963
+        "y": 971
       },
       "targets": [
         {
@@ -12510,7 +12576,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 963
+        "y": 971
       },
       "targets": [
         {
@@ -12559,7 +12625,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 971
+        "y": 979
       },
       "panels": []
     },
@@ -12576,7 +12642,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 972
+        "y": 980
       },
       "targets": [
         {
@@ -12618,7 +12684,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 972
+        "y": 980
       },
       "targets": [
         {
@@ -12665,7 +12731,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 980
+        "y": 988
       },
       "panels": []
     },
@@ -12682,7 +12748,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 981
+        "y": 989
       },
       "targets": [
         {
@@ -12724,7 +12790,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 981
+        "y": 989
       },
       "targets": [
         {
@@ -12771,7 +12837,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 989
+        "y": 997
       }
     },
     {
@@ -12787,7 +12853,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 990
+        "y": 998
       },
       "targets": [
         {
@@ -12840,7 +12906,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 990
+        "y": 998
       },
       "targets": [
         {
@@ -12893,7 +12959,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 998
+        "y": 1006
       },
       "targets": [
         {
@@ -12955,7 +13021,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 998
+        "y": 1006
       },
       "targets": [
         {
@@ -13004,7 +13070,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1006
+        "y": 1014
       }
     },
     {
@@ -13020,7 +13086,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 1007
+        "y": 1015
       },
       "targets": [
         {
@@ -13073,7 +13139,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 1007
+        "y": 1015
       },
       "targets": [
         {
@@ -13120,7 +13186,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 1007
+        "y": 1015
       },
       "targets": [
         {
@@ -13173,7 +13239,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 1015
+        "y": 1023
       },
       "targets": [
         {
@@ -13226,7 +13292,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 1015
+        "y": 1023
       },
       "targets": [
         {
@@ -13275,7 +13341,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1023
+        "y": 1031
       },
       "panels": []
     },
@@ -13292,7 +13358,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1024
+        "y": 1032
       },
       "targets": [
         {
@@ -13320,6 +13386,447 @@
           "placement": "right",
           "calcs": [
             "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Paid media (suggestions)",
+      "collapsed": false,
+      "id": 930,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1040
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Suggestions made, by kind",
+      "description": "Changes Outflare suggested for campaigns per hour, by kind. They come after each ad sync; none for days means no sync ran or no campaign has a target.",
+      "id": 931,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1041
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(outflare_ads_suggestions_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Verdicts on approved suggestions",
+      "description": "Approved suggestions judged after their measuring window, by verdict. Mostly not_sure means windows end with too few conversions.",
+      "id": 932,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1041
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (verdict) (rate(outflare_ads_suggestion_verdicts_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{verdict}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Suggestion runs, by outcome",
+      "description": "Runs of the suggestions job per hour (one per workspace after each ad sync), by outcome. Normal is all success.",
+      "id": 933,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1041
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ads_suggest_run_seconds_count{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Insights and funnels",
+      "id": 934,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1049
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Insight runs an hour, by kind and how they ended",
+      "description": "Insight queries people and agents ran (funnel, funnel_people, trend, retention), tiles of shared dashboards (shared), the hourly checks of alerts on a number (alert_check) and dashboards in the digest (digest): success, invalid (a spec the caller can fix), timeout (over 30 seconds) or error. Normal is nearly all success; timeouts mean questions over large date ranges outgrew the database, errors mean a broken query.",
+      "id": 935,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1050
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (rate(outflare_insights_runs_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Funnel run time (p50 and p95)",
+      "description": "How long a funnel takes to answer. Normal is under a second or two; a p95 near 30 seconds means funnels are about to time out, so look at the brand's event volume and the database's load.",
+      "id": 936,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1050
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, kind) (rate(outflare_insights_run_seconds_bucket{job=\"$job\"}[$__rate_interval])))",
+          "legendFormat": "p50 {{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, kind) (rate(outflare_insights_run_seconds_bucket{job=\"$job\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Steps of tests in ad networks, by outcome",
+      "description": "Starting, reading and ending tests inside Google Ads (experiments) and Meta (split tests) per hour, by connector, step and outcome. Normal is success; failed means the network refused (the test shows why); error is retried.",
+      "id": 937,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1058
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, step, outcome) (rate(outflare_ads_test_steps_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{connector}} {{step}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Steps of new ads, by outcome",
+      "description": "Making approved new ads paused, and turning them on, on Google Ads and Meta per hour, by connector, step (create, go_live) and outcome. Normal is success; failed means the platform refused (the draft shows why); error is retried.",
+      "id": 938,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1058
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, step, outcome) (rate(outflare_ads_draft_steps_total{job=\"$job\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{connector}} {{step}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Paid media (refunds sent back)",
+      "id": 942,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1066
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Refunds sent to ad platforms, by outcome",
+      "description": "Conversion adjustments: when a payment whose conversion was sent is refunded, its value is restated (partial refund) or the conversion retracted (full refund). Normal: a few sent; skipped means the platform cannot take adjustments (only Google can); failed after retries means the platform kept refusing.",
+      "id": 943,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1067
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (connector, outcome) (rate(outflare_ad_conversion_adjustments_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{connector}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
             "max"
           ]
         },

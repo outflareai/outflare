@@ -103,24 +103,42 @@ export function Competitors({ ws, go }: Props) {
     });
   }, [ws, site, section]);
 
+  // Add one or several domains at once (separated by commas, spaces or new lines).
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!host.trim()) return;
+    const hosts = [...new Set(host.split(/[\s,;]+/).map((h) => h.trim()).filter(Boolean))];
+    if (!hosts.length) return;
     setBusy("add");
-    const { error } = await api.POST("/v1/workspaces/{ws}/seo-competitors", { params: { path: { ws } }, body: { site_id: site, host: host.trim() } });
+    let added = 0;
+    const failed: string[] = [];
+    let lastError = "";
+    for (const h of hosts) {
+      const { error } = await api.POST("/v1/workspaces/{ws}/seo-competitors", { params: { path: { ws } }, body: { site_id: site, host: h } });
+      if (error) {
+        failed.push(h);
+        lastError = errorMessage(error);
+      } else added++;
+    }
     setBusy("");
-    if (error) return setError(errorMessage(error));
-    setError("");
-    setHost("");
-    toast("Tracking it. OutflareBot takes a first look now; numbers come with the next SEO snapshot.");
+    setError(failed.length ? `${failed.join(", ")}: ${lastError}` : "");
+    setHost(failed.join(", "));
+    if (added) toast(added === 1 ? "Tracking it. OutflareBot takes a first look now; numbers come with the next SEO snapshot." : `Tracking ${added} competitors.`);
     setReload((n) => n + 1);
   };
   const setStatus = async (c: SEOCompetitor, status: "tracked" | "dismissed") => {
-    setBusy(c.id);
+    setList((l) => l?.map((x) => (x.id === c.id ? { ...x, status } : x)) ?? l);
     const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-competitors/{competitor}", { params: { path: { ws, competitor: c.id } }, body: { status } });
-    setBusy("");
-    if (error) return setError(errorMessage(error));
+    if (error) {
+      setError(errorMessage(error));
+      return setReload((n) => n + 1);
+    }
     setError("");
+  };
+  const trackAll = async (list: SEOCompetitor[]) => {
+    setBusy("all");
+    for (const c of list) await setStatus(c, "tracked");
+    setBusy("");
+    toast(`Tracking ${list.length} competitors.`);
     setReload((n) => n + 1);
   };
   const check = async (c: SEOCompetitor) => {
@@ -153,7 +171,7 @@ export function Competitors({ ws, go }: Props) {
   const header = (
     <PageHeader
       title="Competitors"
-      description="Who you compete with in search. Your SEO connection suggests them; track the ones that matter to follow their numbers and what they publish. Agents use list_seo_competitors and list_competitor_events."
+      description="Your brand's competitors, one list used everywhere: Presence scans them, AI visibility counts them and agents read them. New ones are suggested every day; say yes or no. Agents use list_seo_competitors and list_competitor_events."
       action={
         sites && sites.length > 1 ? (
           <select className={field} aria-label="Site" value={site} onChange={(e) => (setList(null), setSite(e.target.value))}>
@@ -177,20 +195,22 @@ export function Competitors({ ws, go }: Props) {
   if (!current || !list) return <div className="space-y-6">{header}<Loading /></div>;
 
   const tracked = list.filter((c) => c.status === "tracked").length;
-  const shown = list.filter((c) => (show === "dismissed" ? c.status === "dismissed" : c.status !== "dismissed"));
-  const dismissed = list.length - list.filter((c) => c.status !== "dismissed").length;
+  const suggested = list.filter((c) => c.status === "suggested");
+  const shown = list.filter((c) => c.status === (show === "dismissed" ? "dismissed" : "tracked"));
+  const dismissed = list.filter((c) => c.status === "dismissed").length;
   return (
     <div className="space-y-6">
       {header}
       {error && <ErrorText>{error}</ErrorText>}
       <form onSubmit={add} className="flex flex-wrap items-center gap-2">
-        <input className={`${field} w-64 max-w-full`} aria-label="Competitor's domain" placeholder="rival.example" value={host} onChange={(e) => setHost(e.target.value)} maxLength={300} />
-        <Button type="submit" disabled={!host.trim() || busy === "add" || tracked >= 20}>Track competitor</Button>
-        <span className="text-[12px] text-muted-foreground">{tracked} of 20 tracked for {current.host}</span>
+        <input className={`${field} w-96 max-w-full`} aria-label="Competitors' domains" placeholder="rival.example, other.example" value={host} onChange={(e) => setHost(e.target.value)} maxLength={5000} />
+        <Button type="submit" disabled={!host.trim() || busy === "add"}>{busy === "add" ? "Adding…" : "Add"}</Button>
+        <span className="text-[12px] text-muted-foreground">{tracked} tracked for {current.host}. Add one or several, separated by commas.</span>
       </form>
+      <Suggestions list={suggested} busy={busy} onStatus={setStatus} onTrackAll={() => trackAll(suggested)} />
       {list.length === 0 ? (
         <Empty title="No competitors yet" action={<Button variant="ghost" onClick={() => go("connectors")}>Connect Ahrefs or DataForSEO</Button>}>
-          Add one above, or connect Ahrefs or DataForSEO with your own account: each week it suggests the domains that rank for the same keywords as {current.host}.
+          Add some above, or connect Ahrefs or DataForSEO with your own account: each day it suggests the domains that rank for the same keywords as {current.host}.
         </Empty>
       ) : (
         <>
@@ -208,7 +228,7 @@ export function Competitors({ ws, go }: Props) {
               busy={busy}
               toolbar={
                 <select className={field} aria-label="Show" value={show} onChange={(e) => setShow(e.target.value as Show)}>
-                  <option value="active">Tracked and suggested</option>
+                  <option value="active">Tracked ({tracked})</option>
                   <option value="dismissed">Dismissed ({dismissed})</option>
                 </select>
               }
@@ -466,5 +486,45 @@ function LinkGaps({ gaps, host }: { gaps: Gaps<SEOLinkGap> | null; host: string 
         ]}
       />
     </div>
+  );
+}
+
+// Suggestions to say yes or no to: from the SEO connection (sharing
+// keywords) or from rankings (ranking beside the site).
+function Suggestions({ list, busy, onStatus, onTrackAll }: {
+  list: SEOCompetitor[];
+  busy: string;
+  onStatus: (c: SEOCompetitor, s: "tracked" | "dismissed") => void;
+  onTrackAll: () => void;
+}) {
+  if (!list.length) return null;
+  const why = (c: SEOCompetitor) =>
+    c.source === "rankings"
+      ? `Ranks beside you for ${num(c.common_keywords)} of your keywords`
+      : c.common_keywords !== null
+        ? `Shares ${num(c.common_keywords)} keywords with you${providerName[c.source] ? ` (${providerName[c.source]})` : ""}`
+        : "Suggested";
+  return (
+    <section className="space-y-2 rounded-xl border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="mr-auto font-medium">Are these competitors? · {list.length}</h2>
+        <Button variant="ghost" disabled={busy === "all"} onClick={onTrackAll}>Yes to all</Button>
+      </div>
+      <div className="divide-y text-sm">
+        {list.map((c) => (
+          <div key={c.id} className="flex flex-wrap items-center gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <a className="font-medium underline-offset-2 hover:underline" href={`https://${c.host}/`} target="_blank" rel="noreferrer noopener nofollow">{c.name || c.host}</a>
+              {c.name && <span className="text-muted-foreground"> {c.host}</span>}
+              <div className="text-xs text-muted-foreground">
+                {[why(c), c.numbers?.metrics?.domain_rating != null && `rating ${num(c.numbers.metrics.domain_rating)}`, c.title].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+            <Button disabled={busy === "all"} onClick={() => onStatus(c, "tracked")} aria-label={`Yes, track ${c.host}`}>Yes</Button>
+            <Button variant="ghost" disabled={busy === "all"} onClick={() => onStatus(c, "dismissed")} aria-label={`No, ${c.host} is not a competitor`}>No</Button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -523,7 +523,9 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       title: "Record a transaction",
       description:
         "Records a payment, refund, chargeback or credit from the brand's own billing. source_id is its id there: sending it again never adds it twice and " +
-        "updates its status. Amounts are in the currency's minor unit (cents), always 0 or more.",
+        "updates its status. Amounts are in the currency's minor unit (cents), always 0 or more. A succeeded payment with a person (record_id or user_id) " +
+        "counts as a payment for revenue, attribution and ad conversions, once: the same payment already in from an Order Completed event " +
+        "(same order_id as source_id) or a billing connector is answered as that one.",
       inputSchema: {
         brand: brandRef,
         kind: z.enum(["payment", "refund", "chargeback", "credit"]),
@@ -532,14 +534,49 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
         source_id: z.string().min(1).max(200),
         status: z.enum(["succeeded", "pending", "failed", "reversed"]).optional(),
         record_id: id.optional(),
+        user_id: z.string().max(200).optional().describe("Your own id for who paid (the userId your events send), when you don't have record_id."),
         product: z.string().optional().describe("One of the brand's products, by id or key."),
-        refund_of: z.string().max(200).optional().describe("A refund or chargeback: the source_id of the payment it gives back."),
+        refund_of: z
+          .string()
+          .max(200)
+          .optional()
+          .describe("A refund or chargeback: the payment it gives back, by its source_id (an order's order_id), its order's messageId or Outflare's transaction id."),
         description: z.string().max(500).optional(),
         occurred_at: z.string().optional().describe("When it happened (RFC 3339); now by default."),
       },
       annotations: write,
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "get_developer_setup",
+    {
+      title: "Check a brand's developer setup",
+      description:
+        "A live checklist of what the brand's developer sends: sign-ups and orders from the server, payments counted once with a person, refunds finding " +
+        "their payment, the website's copies matching the server's, and refunds reaching ad networks. Each check is ok, warning or missing, with what it " +
+        "found and what to send to fix it. unmatched_refunds are refunds whose payment isn't known: link them with link_refund.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/developer-setup", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "link_refund",
+    {
+      title: "Link a refund to its payment",
+      description:
+        "For a refund whose refund_of named a payment Outflare doesn't have (get_developer_setup lists them): names its payment by any id it has (its " +
+        "order_id or source_id, its order's messageId, or Outflare's transaction id). The refund then counts and comes off that payment and its ad conversion.",
+      inputSchema: { brand: brandRef, transaction_id: id, payment: z.string().min(1).max(200) },
+      annotations: write,
+    },
+    ({ brand, transaction_id, payment }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions/{transaction}/refund-of", { params: { path: { brand: b, transaction: transaction_id } }, body: { payment } })),
+      ),
   );
 
   server.registerTool(

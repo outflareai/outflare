@@ -14,6 +14,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/retry"
+	"github.com/outflareai/outflare/engine/internal/sociallinks"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -48,6 +49,9 @@ type Look struct {
 	Pages       []SitemapPage
 	// Sitemaps is how many sitemap files were read.
 	Sitemaps int
+	// Links are the social profiles and review pages the home page links
+	// to.
+	Links []sociallinks.Link
 }
 
 // Glance looks at a site's robots.txt, its sitemaps and its home page,
@@ -113,6 +117,7 @@ func Glance(ctx context.Context, f Fetcher, wait func(context.Context, time.Dura
 			u, _ := url.Parse(raw)
 			pg := ParsePage(u, resp.Body)
 			look.Title, look.Description = clip(pg.Title, 300), clip(pg.Description, 500)
+			look.Links = sociallinks.Find(string(resp.Body), raw)
 		}
 		break
 	}
@@ -283,6 +288,13 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 			WHERE id = $1 AND workspace_id = $2`, p.CompetitorID, ws, look.Title, look.Description); err != nil {
 			return err
 		}
+		// The profiles its home page links to are suggested, for a person
+		// to say yes or no to; only confirmed ones are followed.
+		if suggested, err := suggestCompetitorLinks(ctx, tx, ws, p.CompetitorID, look.Links); err != nil {
+			return err
+		} else if suggested > 0 {
+			ev.Props["profiles_suggested"] = suggested
+		}
 		if baseline {
 			return nil
 		}
@@ -377,4 +389,22 @@ func (s *Service) ScheduleGlances(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// suggestCompetitorLinks adds the followable links of a competitor's home
+// page to its profiles as suggestions, and reports how many are new.
+func suggestCompetitorLinks(ctx context.Context, tx pgx.Tx, ws, competitorID string, found []sociallinks.Link) (int, error) {
+	if len(found) == 0 {
+		return 0, nil
+	}
+	var list []sociallinks.CompetitorLink
+	if err := tx.QueryRow(ctx, `SELECT links FROM seo_competitors WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, competitorID, ws).Scan(&list); err != nil {
+		return 0, err
+	}
+	list, added := sociallinks.Suggest(list, found)
+	if added == 0 {
+		return 0, nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE seo_competitors SET links = $3 WHERE id = $1 AND workspace_id = $2`, competitorID, ws, list)
+	return added, err
 }

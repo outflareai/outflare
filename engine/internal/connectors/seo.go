@@ -53,12 +53,15 @@ type PageJobs interface {
 }
 
 // PageError is a page the reader could not read for a reason of the
-// page's own: the site showed a bot check (Blocked), or the page took
-// longer than the reader allows. It is never an outage of the reader or a
-// wrong address, so a caller tries the page again later the same day. A
-// caller that doesn't look for it sees an unavailable error.
+// page's own: the site showed a bot check or a login wall (Blocked), the
+// site failed or refused the page in a way the reader has no code of its
+// own for (Failed), or the page took longer than the reader allows. It is
+// never an outage of the reader or a wrong address, so a caller tries the
+// page again later the same day. A caller that doesn't look for it sees an
+// unavailable error.
 type PageError struct {
 	Blocked bool
+	Failed  bool
 	// Code is the reader's own code for it (CAPTCHA_CHALLENGE, TIMEOUT).
 	Code string
 }
@@ -66,6 +69,9 @@ type PageError struct {
 func (e *PageError) Error() string {
 	if e.Blocked {
 		return "the site showed the page reader a bot check (" + e.Code + ")"
+	}
+	if e.Failed {
+		return "the page reader couldn't read the page (" + e.Code + ")"
 	}
 	return "the page took longer than the page reader allows (" + e.Code + ")"
 }

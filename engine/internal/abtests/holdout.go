@@ -30,23 +30,25 @@ type HoldoutResult struct {
 // Holdout counts every visitor who viewed a page of the site between from
 // and to, by whether they fall in group's holdout (the top holdout percent
 // of its buckets, by the same hash the flags use), and compares the goal
-// after their first view.
-func Holdout(ctx context.Context, q Querier, ws, group string, holdout int, g Goal, from, to time.Time) (HoldoutResult, error) {
+// after their first view. Only brand's visitors and events count (a
+// group is one brand's); brand "" counts every brand's.
+func Holdout(ctx context.Context, q Querier, ws, brand, group string, holdout int, g Goal, from, to time.Time) (HoldoutResult, error) {
 	out := HoldoutResult{Group: group, Holdout: holdout, Goal: g, Metric: g.MetricOf(), From: from, To: to,
 		Arms: []Arm{{Variant: "holdout"}, {Variant: "everyone_else"}}}
 	if holdout <= 0 {
 		return out, nil
 	}
-	hits := hitsSQL(g, "$1", "$3::timestamptz", "$4", "$5", "$6")
+	hits := hitsSQL(g, "$1", "$3::timestamptz", "$4", "$5", "$6", "$10::text")
 	arg, window, prop, capv := goalArgs(g)
 	bucket := flags.GroupBucketSQL("$8::text", "e.anonymous_id")
 	rows, err := q.Query(ctx, `
-		WITH params AS (SELECT $4::text, $5::int, $6::text, $7::float8, $9::int), seen AS (
+		WITH params AS (SELECT $4::text, $5::int, $6::text, $7::float8, $9::int, $10::text), seen AS (
 			SELECT DISTINCT ON (e.anonymous_id) e.anonymous_id,
 				CASE WHEN `+bucket+` >= $9::int THEN 'holdout' ELSE 'everyone_else' END AS variant, e.occurred_at
 			FROM customer_events e
 			WHERE e.workspace_id = $1 AND e.name = 'page.viewed' AND e.anonymous_id IS NOT NULL
 				AND e.occurred_at >= $2::timestamptz AND e.occurred_at < $3::timestamptz
+				AND ($10::text = '' OR e.brand_id = NULLIF($10::text, '')::uuid)
 			ORDER BY e.anonymous_id, e.occurred_at
 		), hits AS (`+hits+`
 		), per AS (
@@ -54,7 +56,7 @@ func Holdout(ctx context.Context, q Querier, ws, group string, holdout int, g Go
 		)
 		SELECT s.variant, count(*), count(*) FILTER (WHERE p.v > 0), coalesce(sum(p.v), 0)::float8, coalesce(sum(p.v * p.v), 0)::float8
 		FROM seen s LEFT JOIN per p ON p.anonymous_id = s.anonymous_id GROUP BY 1`,
-		ws, from, to, arg, window, prop, capv, group, flags.Buckets-holdout*100)
+		ws, from, to, arg, window, prop, capv, group, flags.Buckets-holdout*100, brand)
 	if err != nil {
 		return out, err
 	}

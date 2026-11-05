@@ -268,19 +268,23 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 	listBrand := brand
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if listName != "" {
-			// The list is the brand's: a name another brand uses is refused
-			// (until the contract step a list name is used in one brand of a
-			// workspace at a time).
+			// The list is the brand's: the brand's list of that name, or a
+			// new one. Until the contract step a list name is used in one
+			// brand of a workspace at a time, so another brand's is refused.
 			var id string
-			var cur *string
-			if err := tx.QueryRow(ctx, `
-				INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, $2, $3)
-				ON CONFLICT (workspace_id, lower(name)) DO UPDATE SET brand_id = COALESCE(lead_lists.brand_id, EXCLUDED.brand_id)
-				RETURNING id, brand_id::text`, a.WorkspaceID, listName, brand).Scan(&id, &cur); err != nil {
-				return err
+			err := tx.QueryRow(ctx, `INSERT INTO lead_lists (workspace_id, name, brand_id) VALUES ($1, $2, $3)
+				ON CONFLICT DO NOTHING RETURNING id`, a.WorkspaceID, listName, brand).Scan(&id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// A list from before brands had one becomes this brand's.
+				err = tx.QueryRow(ctx, `UPDATE lead_lists SET brand_id = $3
+					WHERE workspace_id = $1 AND lower(name) = lower($2) AND (brand_id = $3 OR brand_id IS NULL) RETURNING id`,
+					a.WorkspaceID, listName, brand).Scan(&id)
+				if errors.Is(err, pgx.ErrNoRows) {
+					return errInvalid("a list with that name belongs to another brand; pick another name")
+				}
 			}
-			if cur == nil || *cur != brand {
-				return errInvalid("a list with that name belongs to another brand; pick another name")
+			if err != nil {
+				return err
 			}
 			listID = &id
 		}

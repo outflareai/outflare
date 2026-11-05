@@ -260,7 +260,7 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 				display_name = CASE WHEN $12 = '' THEN display_name ELSE $12 END,
 				daily_limit = CASE WHEN $13 = 0 THEN daily_limit ELSE $13 END,
 				status = CASE WHEN status = 'paused' THEN status ELSE 'verifying' END,
-				status_reason = NULL, smtp_ok = NULL, imap_ok = NULL, updated_at = now(),
+				status_reason = NULL, smtp_ok = NULL, imap_ok = NULL, sync_failures = 0, updated_at = now(),
 				auth_method = $14, integration_id = $15
 			WHERE id = $1 AND workspace_id = $2`,
 			id, ws, r.Provider, r.SMTPHost, r.SMTPPort, r.SMTPUsername,
@@ -434,6 +434,7 @@ func (s *Service) verifyJob(ctx context.Context, job jobs.Job) error {
 			UPDATE mailboxes SET
 				status = CASE WHEN status = 'paused' THEN status ELSE $3 END,
 				status_reason = NULLIF($4, ''), smtp_ok = $5, imap_ok = $6,
+				sync_failures = CASE WHEN $6 THEN 0 ELSE sync_failures END,
 				last_verified_at = now(), updated_at = now()
 			WHERE id = $1 AND workspace_id = $2`,
 			acct.ID, acct.WorkspaceID, status, reason, smtpErr == nil, imapErr == nil)

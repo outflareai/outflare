@@ -137,7 +137,7 @@ var (
 	ErrNoPrompts = errors.New("the cohort has no active prompts")
 )
 
-// Settings are a workspace's AI visibility settings.
+// Settings are a brand's AI visibility settings.
 type Settings struct {
 	Models           []Target   `json:"models"`
 	SamplesPerPrompt int        `json:"samples_per_prompt"`
@@ -145,15 +145,23 @@ type Settings struct {
 	UpdatedAt        *time.Time `json:"updated_at"`
 }
 
-// DefaultLimitCents is the sampling limit of a workspace that never set
-// one: US$10 a month.
+// DefaultLimitCents is the sampling limit of a brand that never set one:
+// US$10 a month.
 const DefaultLimitCents = 1000
 
-// LoadSettings reads a workspace's settings, or the defaults.
-func LoadSettings(ctx context.Context, q jobs.Querier, ws string) (Settings, error) {
+// brandSQL is the brand a query is about: $n, or the workspace's first
+// brand when it is empty.
+func brandSQL(ws, brand string) string {
+	return "COALESCE(NULLIF(" + brand + ", '')::uuid, outflare_first_brand(" + ws + "))"
+}
+
+// LoadSettings reads a brand's settings (the first brand's when brand is
+// empty), or the defaults.
+func LoadSettings(ctx context.Context, q jobs.Querier, ws, brand string) (Settings, error) {
 	set := Settings{Models: []Target{}, SamplesPerPrompt: 1, MonthlyLimit: DefaultLimitCents}
 	var raw []byte
-	err := q.QueryRow(ctx, `SELECT models, samples_per_prompt, monthly_limit_cents, updated_at FROM ai_visibility_settings WHERE workspace_id = $1`, ws).
+	err := q.QueryRow(ctx, `SELECT models, samples_per_prompt, monthly_limit_cents, updated_at FROM ai_visibility_settings
+		WHERE workspace_id = $1 AND brand_id = `+brandSQL("$1", "$2"), ws, brand).
 		Scan(&raw, &set.SamplesPerPrompt, &set.MonthlyLimit, &set.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return set, nil
@@ -165,11 +173,13 @@ func LoadSettings(ctx context.Context, q jobs.Querier, ws string) (Settings, err
 }
 
 // MonthSpent is what sampling and checking answers against the facts
-// cost the workspace this calendar month (UTC).
-func MonthSpent(ctx context.Context, q jobs.Querier, ws string, now time.Time) (int64, error) {
+// cost the brand (the first brand when brand is empty) this calendar
+// month (UTC).
+func MonthSpent(ctx context.Context, q jobs.Querier, ws, brand string, now time.Time) (int64, error) {
 	var cents int64
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	err := q.QueryRow(ctx, `SELECT COALESCE(sum(cost_cents + facts_cost_cents), 0) FROM ai_samples WHERE workspace_id = $1 AND sampled_at >= $2`, ws, start).Scan(&cents)
+	err := q.QueryRow(ctx, `SELECT COALESCE(sum(cost_cents + facts_cost_cents), 0) FROM ai_samples
+		WHERE workspace_id = $1 AND sampled_at >= $2 AND brand_id = `+brandSQL("$1", "$3"), ws, start, brand).Scan(&cents)
 	return cents, err
 }
 
@@ -177,7 +187,11 @@ func MonthSpent(ctx context.Context, q jobs.Querier, ws string, now time.Time) (
 // model in the settings, samples_per_prompt times. trigger is manual or
 // schedule.
 func StartRun(ctx context.Context, tx pgx.Tx, ws, cohortID, trigger string, by *string) (string, error) {
-	set, err := LoadSettings(ctx, tx, ws)
+	var brand string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(brand_id::text, '') FROM ai_cohorts WHERE workspace_id = $1 AND id = $2`, ws, cohortID).Scan(&brand); err != nil {
+		return "", err
+	}
+	set, err := LoadSettings(ctx, tx, ws, brand)
 	if err != nil {
 		return "", err
 	}
@@ -260,6 +274,7 @@ func (s *Service) Schedule(ctx context.Context) error {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT c.id, c.workspace_id FROM ai_cohorts c
 		JOIN ai_visibility_settings v ON v.workspace_id = c.workspace_id AND jsonb_array_length(v.models) > 0
+			AND v.brand_id = COALESCE(c.brand_id, outflare_first_brand(c.workspace_id))
 		LEFT JOIN LATERAL (SELECT count(*) AS n, max(r.finished_at) AS at FROM ai_runs r WHERE r.cohort_id = c.id
 			AND (r.status = 'failed' OR (r.status = 'done' AND r.samples_done = 0 AND r.samples_failed > 0))
 			AND r.created_at > COALESCE((SELECT max(g.created_at) FROM ai_runs g WHERE g.cohort_id = c.id
@@ -306,4 +321,11 @@ func (s *Service) Schedule(ctx context.Context) error {
 func isUnique(err error) bool {
 	var pg interface{ SQLState() string }
 	return errors.As(err, &pg) && pg.SQLState() == "23505"
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

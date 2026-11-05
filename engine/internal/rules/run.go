@@ -216,10 +216,11 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var rec *string
 		var name, source string
+		var brand *string
 		var raw []byte
 		var occurred, received time.Time
-		err := tx.QueryRow(ctx, `SELECT record_id::text, name, properties, source, occurred_at, received_at FROM customer_events WHERE workspace_id = $1 AND id = $2`,
-			ws, in.EventID).Scan(&rec, &name, &raw, &source, &occurred, &received)
+		err := tx.QueryRow(ctx, `SELECT record_id::text, name, properties, source, occurred_at, received_at, brand_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`,
+			ws, in.EventID).Scan(&rec, &name, &raw, &source, &occurred, &received, &brand)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && rec == nil) {
 			return nil
 		}
@@ -232,8 +233,10 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 			return nil
 		}
 		var approved bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2 AND status = 'approved')`,
-			ws, name).Scan(&approved); err != nil || !approved {
+		// The event's own brand's catalog decides; another brand approving
+		// the same name changes nothing here.
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $3::uuid AND name = $2 AND status = 'approved')`,
+			ws, name, brand).Scan(&approved); err != nil || !approved {
 			return err
 		}
 		depth := 1

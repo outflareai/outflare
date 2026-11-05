@@ -515,7 +515,7 @@ func (s *Server) createPartnerPayouts(w http.ResponseWriter, r *http.Request) {
 			  AND `+partnerPayoutTermDue+` AND NOT `+heldAtSource+`
 			  AND ($2 = '' OR m.id::text = $2) AND ($3 = '' OR p.id::text = lower($3) OR p.slug = lower($3))
 			  AND ($4::uuid[] IS NULL OR p.brand_id = ANY($4))
-			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program, a.Brands)
+			GROUP BY m.id, p.id ORDER BY m.id`, a.WorkspaceID, in.PartnerID, in.Program, a.seenBrands())
 		if err != nil {
 			return err
 		}

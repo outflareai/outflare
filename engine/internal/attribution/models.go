@@ -133,20 +133,20 @@ type CreditModel struct {
 func customID(versionID string) string { return "m:" + versionID }
 
 // creditModels are the models a workspace's conversions are credited
-// under: the five built in, each custom model's latest version unless
-// archived, and every pinned version. lookback is the workspace's, given
+// under: the five built in, and of brand's own models each one's latest
+// version unless archived, and every pinned version. lookback is the workspace's, given
 // to specs without their own.
-func creditModels(ctx context.Context, q pgx.Tx, ws string, lookback int) ([]CreditModel, error) {
+func creditModels(ctx context.Context, q pgx.Tx, ws, brand string, lookback int) ([]CreditModel, error) {
 	out := make([]CreditModel, 0, len(Models))
 	for _, m := range Models {
 		out = append(out, CreditModel{ID: m, Spec: Spec{Base: m, LookbackDays: lookback}})
 	}
 	rows, err := q.Query(ctx, `
 		SELECT m.id::text, m.spec FROM attribution_models m
-		WHERE m.workspace_id = $1 AND (
-			(m.archived_at IS NULL AND m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.key = m.key))
+		WHERE m.workspace_id = $1 AND m.brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid AND (
+			(m.archived_at IS NULL AND m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.brand_id IS NOT DISTINCT FROM m.brand_id AND l.key = m.key))
 			OR EXISTS (SELECT 1 FROM attribution_model_pins p WHERE p.model_id = m.id))
-		ORDER BY m.key, m.version`, ws)
+		ORDER BY m.key, m.version`, ws, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,9 @@ func creditModels(ctx context.Context, q pgx.Tx, ws string, lookback int) ([]Cre
 
 // Model is one version of a workspace's own model.
 type Model struct {
-	ID         string     `json:"id"`
+	ID string `json:"id"`
+	// BrandID is the brand whose conversions the model credits; "" is none.
+	BrandID    string     `json:"-"`
 	Key        string     `json:"key"`
 	Version    int        `json:"version"`
 	Name       string     `json:"name"`
@@ -202,11 +204,18 @@ type Querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
+// inBrand keeps the versions of model $2 of the brand in $3: a brand id,
+// or "" for whichever brand uses the key, the workspace's first brand
+// before the others.
+const inBrand = `m.brand_id IS NOT DISTINCT FROM CASE WHEN $3 = '' THEN (SELECT x.brand_id FROM attribution_models x
+	WHERE x.workspace_id = $1 AND x.key = $2 ORDER BY x.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, x.created_at LIMIT 1) ELSE $3::uuid END`
+
 // Resolve turns a model reference into the id its credits are stored
-// under: a built-in model's id, a workspace model's key (its latest
-// version), or key@version. It also returns the version for a workspace
-// model.
-func Resolve(ctx context.Context, q Querier, ws, ref string) (string, *Model, error) {
+// under: a built-in model's id, one of the brand's models' key (its latest
+// version), or key@version. It also returns the version for a brand's
+// model. Brand "" is whichever brand uses the key, the workspace's first
+// brand before the others.
+func Resolve(ctx context.Context, q Querier, ws, brand, ref string) (string, *Model, error) {
 	if ValidModel(ref) {
 		return ref, nil, nil
 	}
@@ -219,7 +228,7 @@ func Resolve(ctx context.Context, q Querier, ws, ref string) (string, *Model, er
 		v, _ := strconv.Atoi(m[2])
 		version = &v
 	}
-	model, credited, err := loadModel(ctx, q, ws, m[1], version)
+	model, credited, err := loadModel(ctx, q, ws, brand, m[1], version)
 	if err != nil {
 		return "", nil, err
 	}
@@ -231,18 +240,18 @@ func Resolve(ctx context.Context, q Querier, ws, ref string) (string, *Model, er
 
 // loadModel reads a model's version (its latest when version is nil), and
 // whether conversions are credited under it.
-func loadModel(ctx context.Context, q Querier, ws, key string, version *int) (*Model, bool, error) {
+func loadModel(ctx context.Context, q Querier, ws, brand, key string, version *int) (*Model, bool, error) {
 	var m Model
 	var raw []byte
 	var latest bool
 	err := q.QueryRow(ctx, `
-		SELECT m.id::text, m.key, m.version, m.name, m.spec, m.created_at, m.archived_at,
-			m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.key = m.key),
+		SELECT m.id::text, coalesce(m.brand_id::text, ''), m.key, m.version, m.name, m.spec, m.created_at, m.archived_at,
+			m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.brand_id IS NOT DISTINCT FROM m.brand_id AND l.key = m.key),
 			coalesce((SELECT array_agg(p.module || ':' || p.ref ORDER BY p.module, p.ref) FROM attribution_model_pins p WHERE p.model_id = m.id), '{}')
 		FROM attribution_models m
-		WHERE m.workspace_id = $1 AND m.key = $2 AND ($3::int IS NULL OR m.version = $3)
-		ORDER BY m.version DESC LIMIT 1`, ws, key, version).
-		Scan(&m.ID, &m.Key, &m.Version, &m.Name, &raw, &m.CreatedAt, &m.ArchivedAt, &latest, &m.PinnedBy)
+		WHERE m.workspace_id = $1 AND m.key = $2 AND `+inBrand+` AND ($4::int IS NULL OR m.version = $4)
+		ORDER BY m.version DESC LIMIT 1`, ws, key, brand, version).
+		Scan(&m.ID, &m.BrandID, &m.Key, &m.Version, &m.Name, &raw, &m.CreatedAt, &m.ArchivedAt, &latest, &m.PinnedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, ErrUnknownModel
 	}
@@ -258,8 +267,8 @@ func loadModel(ctx context.Context, q Querier, ws, key string, version *int) (*M
 // Pin keeps the version ref names (key@version, or key for its latest)
 // credited for a module, such as an affiliate program, so editing the
 // model never changes what that module counted. It returns the version.
-func Pin(ctx context.Context, q Querier, ws, ref, module, refID string) (*Model, error) {
-	_, model, err := Resolve(ctx, q, ws, ref)
+func Pin(ctx context.Context, q Querier, ws, brand, ref, module, refID string) (*Model, error) {
+	_, model, err := Resolve(ctx, q, ws, brand, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +288,7 @@ func Unpin(ctx context.Context, q Querier, ws, module, refID string) error {
 	return err
 }
 
-const modelCols = `m.id::text, m.key, m.version, m.name, m.spec, m.created_at, m.archived_at,
+const modelCols = `m.id::text, coalesce(m.brand_id::text, ''), m.key, m.version, m.name, m.spec, m.created_at, m.archived_at,
 	coalesce((SELECT array_agg(p.module || ':' || p.ref ORDER BY p.module, p.ref) FROM attribution_model_pins p WHERE p.model_id = m.id), '{}')`
 
 func scanModels(rows pgx.Rows) ([]Model, error) {
@@ -288,7 +297,7 @@ func scanModels(rows pgx.Rows) ([]Model, error) {
 	for rows.Next() {
 		var m Model
 		var raw []byte
-		if err := rows.Scan(&m.ID, &m.Key, &m.Version, &m.Name, &raw, &m.CreatedAt, &m.ArchivedAt, &m.PinnedBy); err != nil {
+		if err := rows.Scan(&m.ID, &m.BrandID, &m.Key, &m.Version, &m.Name, &raw, &m.CreatedAt, &m.ArchivedAt, &m.PinnedBy); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &m.Spec); err != nil {
@@ -299,22 +308,24 @@ func scanModels(rows pgx.Rows) ([]Model, error) {
 	return out, rows.Err()
 }
 
-// LatestModels lists each of a workspace's models at its latest version,
-// archived ones too when archived is true.
-func LatestModels(ctx context.Context, q Querier, ws string, archived bool) ([]Model, error) {
+// LatestModels lists each of a brand's models at its latest version
+// (brand "": every brand's), archived ones too when archived is true.
+func LatestModels(ctx context.Context, q Querier, ws, brand string, archived bool) ([]Model, error) {
 	rows, err := q.Query(ctx, `SELECT `+modelCols+` FROM attribution_models m
 		WHERE m.workspace_id = $1 AND ($2 OR m.archived_at IS NULL)
-		  AND m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.key = m.key)
-		ORDER BY m.key`, ws, archived)
+		  AND ($3 = '' OR m.brand_id = $3::uuid)
+		  AND m.version = (SELECT max(version) FROM attribution_models l WHERE l.workspace_id = m.workspace_id AND l.brand_id IS NOT DISTINCT FROM m.brand_id AND l.key = m.key)
+		ORDER BY m.key`, ws, archived, brand)
 	if err != nil {
 		return nil, err
 	}
 	return scanModels(rows)
 }
 
-// Versions lists every version of a model, newest first.
-func Versions(ctx context.Context, q Querier, ws, key string) ([]Model, error) {
-	rows, err := q.Query(ctx, `SELECT `+modelCols+` FROM attribution_models m WHERE m.workspace_id = $1 AND m.key = $2 ORDER BY m.version DESC`, ws, key)
+// Versions lists every version of one of a brand's models, newest first
+// (brand "": see inBrand).
+func Versions(ctx context.Context, q Querier, ws, brand, key string) ([]Model, error) {
+	rows, err := q.Query(ctx, `SELECT `+modelCols+` FROM attribution_models m WHERE m.workspace_id = $1 AND m.key = $2 AND `+inBrand+` ORDER BY m.version DESC`, ws, key, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -322,16 +333,18 @@ func Versions(ctx context.Context, q Querier, ws, key string) ([]Model, error) {
 }
 
 // SaveVersion adds a model's next version (version 1 for a new key) and
-// returns it. The caller credits conversions again.
-func SaveVersion(ctx context.Context, q Querier, ws, key, name string, spec Spec, actor *string) (Model, error) {
+// returns it, in brand ("": the workspace's first). The caller credits
+// conversions again.
+func SaveVersion(ctx context.Context, q Querier, ws, brand, key, name string, spec Spec, actor *string) (Model, error) {
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return Model{}, err
 	}
 	var id string
-	if err := q.QueryRow(ctx, `INSERT INTO attribution_models (workspace_id, key, version, name, spec, created_by)
-		SELECT $1, $2, coalesce(max(version), 0) + 1, $3, $4, $5 FROM attribution_models WHERE workspace_id = $1 AND key = $2
-		RETURNING id::text`, ws, key, name, raw, actor).Scan(&id); err != nil {
+	if err := q.QueryRow(ctx, `INSERT INTO attribution_models (workspace_id, key, version, name, spec, created_by, brand_id)
+		SELECT $1, $2, coalesce(max(version), 0) + 1, $3, $4, $5, COALESCE(NULLIF($6, '')::uuid, outflare_first_brand($1))
+		FROM attribution_models WHERE workspace_id = $1 AND key = $2 AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($6, '')::uuid, outflare_first_brand($1))
+		RETURNING id::text`, ws, key, name, raw, actor, brand).Scan(&id); err != nil {
 		return Model{}, err
 	}
 	rows, err := q.Query(ctx, `SELECT `+modelCols+` FROM attribution_models m WHERE m.id = $1`, id)

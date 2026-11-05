@@ -28,9 +28,9 @@ func (s *Server) routesPartnerLeads(mux *http.ServeMux) {
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
 	mux.HandleFunc("POST /p/{program}/api/leads", s.inPortal(s.portalSubmitLead))
 	mux.HandleFunc("GET /p/{program}/api/leads", s.inPortal(s.portalLeads))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-leads", s.inBrand(read, s.listPartnerLeads))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-leads/{id}/approve", s.inBrand(manage, s.approvePartnerLead))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-leads/{id}/reject", s.inBrand(manage, s.rejectPartnerLead))
+	s.twinRoute(mux, "GET", "partner-leads", s.inBrand, read, s.listPartnerLeads)
+	s.twinRoute(mux, "POST", "partner-leads/{id}/approve", s.inBrand, manage, s.approvePartnerLead)
+	s.twinRoute(mux, "POST", "partner-leads/{id}/reject", s.inBrand, manage, s.rejectPartnerLead)
 }
 
 // portalLeadView is a submitted lead as its partner sees it: no name or

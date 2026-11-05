@@ -1,0 +1,64 @@
+id: write-new-ads
+version: 1
+title: Write new ads where the old ones are tired
+summary: Each week, write new ads and ad groups where ads are tired or searches convert with nowhere to go, for a person to check.
+description: |
+  Ads get stale and searches drift away from the keywords an account was
+  built on. This playbook reads each campaign's ads, keywords and the
+  searches people made, finds ad groups whose ads are old or far behind
+  the rest, and searches that convert with no ad group of their own. For
+  each it writes a draft from the brand's own knowledge and site: a new
+  ad, a new ad group with its keywords, or (rarely) a new search campaign,
+  with why it should do better. Nothing is made on the ad platform until
+  a person approves the draft, and then it is made paused; a person turns
+  it on.
+tier: obvious
+goals: [customers, search]
+publisher: outflare
+author: { github: outflareai }
+needs:
+  connections:
+    - capability: ads.create
+      label: An ad platform Outflare can make new ads on
+      recommended: [google_ads, meta_ads]
+    - capability: plan
+      label: An AI model, unless you run this from your own AI app
+      optional: true
+      recommended: [claude, openai]
+inputs:
+  - name: brand
+    label: Brand
+    example: Northpeak
+steps:
+  - say: Read what the brand says about itself, its offers and the words its customers use.
+    tools: [getBrandContext, findKnowledgePassages]
+  - say: Read the brand's campaigns, their ads, keywords and the searches people made, and the drafts already written, so nothing is written twice.
+    tools: [listAdCampaigns, listAdItems, listAdKeywords, listAdSearchTerms, listAdDrafts]
+  - say: For an ad group whose ads are old or far behind the others, write a new ad in the brand's own words.
+    tools: [createAdDraft]
+  - say: For searches that convert with no ad group of their own, write a new ad group with those keywords and an ad for them.
+    tools: [createAdDraft]
+  - say: A few weeks after a person turns a draft on, compare it with the ads beside it.
+    tools: [listAdDrafts, listAdItems]
+automation:
+  schedule: weekly
+guardrails:
+  - Writes drafts only; a person approves each one, it is made paused, and a person turns it on.
+  - Every claim in an ad comes from the brand's own knowledge or site; no prices, numbers or promises it can't point to.
+  - At most three drafts a week per campaign, and none for an ad group that already has one waiting.
+measure:
+  - { metric: Drafts approved, how: "Drafts a person approved divided by drafts written." }
+  - { metric: New ads' click-through and cost per conversion, how: "Each live draft's ad against the other ads in its ad group over the same weeks." }
+prompt: |
+  Read {{brand}}'s ad campaigns, ads, keywords and search terms. Where an
+  ad group's ads are old or weak, or searches convert with no ad group of
+  their own, write new ads (or a new ad group) as drafts from what
+  {{brand}} says about itself, each with why it should do better. Don't
+  approve or turn anything on: leave the drafts for me.
+example: |
+  Northpeak's "CRM software" ad group had two ads from last year with a
+  click-through rate half the account's. The agent wrote a new ad from the
+  pricing page and three customer quotes, and a new ad group for
+  "crm for small teams", which converted twice at half the target cost
+  with no ad group of its own. Both were approved, made paused, checked
+  and turned on.

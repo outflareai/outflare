@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/adsuggest"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -61,7 +62,9 @@ type payload struct {
 func (s *Syncer) Register(q *jobs.Queue) {
 	q.Handle(JobSync, s.job)
 	q.Handle(JobChange, s.changeJob)
+	q.Handle(JobDraft, s.draftJob)
 	q.Handle(JobTracking, s.trackingJob)
+	q.Handle(JobTest, s.testJob)
 }
 
 func (s *Syncer) now() time.Time {
@@ -288,6 +291,17 @@ func (s *Syncer) finish(ctx context.Context, ws, integrationID string, full bool
 		msg, code, outcome = &m, &c, c
 	}
 	metrics.SyncRun("ads", outcome)
+	// Fresh numbers: judge measured changes, suggest new ones and read
+	// running tests.
+	if runErr == nil {
+		if err := adsuggest.Enqueue(ctx, s.Pool, ws, s.now()); err != nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "ad_suggestions.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Error}, "internal", err)
+		}
+		if err := s.queueTestChecks(ctx, ws, integrationID); err != nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "ad_test.failed", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Error,
+				Props: map[string]any{"step": TestCheck}}, "internal", err)
+		}
+	}
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO ad_syncs (integration_id, workspace_id, last_run_at, last_ok_at, last_full_at, last_error, last_rows, failures, last_error_code)
 		VALUES ($1, $2, $3::timestamptz, CASE WHEN $4::text IS NULL THEN $3::timestamptz END, CASE WHEN $5::boolean THEN $3::timestamptz END, $4::text, $6::integer,

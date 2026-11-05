@@ -86,7 +86,7 @@ const reviewPageSelect = `
 		(SELECT count(*) FROM reviews r WHERE r.page_id = p.id AND r.state = 'live' AND r.sentiment = 'negative' AND r.replied_at IS NULL
 			AND r.posted_at > now() - interval '90 days')::int,
 		p.last_read_at, p.next_read_at, p.last_error, p.last_error_code, p.failures, p.last_failed_at, p.backfilled_at, p.created_at, p.updated_at
-	FROM review_pages p WHERE p.workspace_id = $1`
+	FROM review_pages p WHERE p.workspace_id = $1 AND p.competitor_id IS NULL`
 
 func scanReviewPage(row pgx.Row) (reviewPageView, error) {
 	var v reviewPageView

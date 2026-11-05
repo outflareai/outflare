@@ -256,16 +256,22 @@ never contacts a site, asks for a link or disavows anything on its own.
 
 ## Competitors
 
-Each weekly snapshot also asks every SEO connection which domains compete with
-each active SEO site in search (the 10 sharing the most keywords) and keeps
-them as **suggested** competitors (`GET /seo-competitors`, MCP
+Every day each SEO connection is asked which domains compete with each active
+SEO site in search (the 10 sharing the most keywords, one read a site a day
+within the connection's budget), and the domains ranking in the top results
+beside the site for at least two of its tracked keywords in the last week are
+added at no cost (source `rankings`; platforms such as YouTube or Reddit
+never). They are kept as **suggested** competitors (`GET /seo-competitors`, MCP
 `list_seo_competitors`). Track the ones that matter, dismiss the rest (a
 dismissed suggestion stays away), or add your own (`POST /seo-competitors`,
-at most 20 tracked a site). Each competitor is linked to the customer record
+as many as you like). Each competitor is linked to the customer record
 with its domain when the workspace has one. Give it a `name` and `aliases`
 (the other names it goes by, such as a short name AI answers use) with
 `PATCH /seo-competitors/{id}`, so features that look for it by name use the
-same list.
+same list. It is the brand's one competitor list: Presence scans it, AI
+visibility counts it, a competitor with a website named on an AI visibility
+cohort is tracked on it (source `ai_visibility`), and Reddit actions write
+the competitors they name as it names them.
 
 - **Their numbers come from your connection.** Each week the snapshot takes
   an overview of up to 10 tracked competitors a site (domain rating, organic
@@ -480,9 +486,11 @@ own, rather than at next week's snapshot: after 15 minutes, then 1 and 2
 hours, then every 4 hours, while it is still among the last 8 days' pages
 and until a read of it works. It spends at most a share of the connection's
 monthly budget a month on this: 10% by default. Change it, or turn it off,
-in the link building settings (`PATCH /link-building/settings`, MCP
+in the brand's link building settings
+(`PATCH /v1/brands/{brand}/link-building/settings`, MCP
 `update_link_building_settings`), which also hold the pitch cool-down
-(`pitch_cooldown_days`, 60 by default). Your own lost links need no paid
+(`pitch_cooldown_days`, 60 by default). Each brand has its own settings and
+its own share of the budget. Your own lost links need no paid
 read: your backlinks already name the page that dropped the link.
 
 ### Searching the web

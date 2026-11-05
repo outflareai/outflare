@@ -33,6 +33,7 @@ var errorCodes = []errorCode{
 	{"already_decided", []int{409}, "Someone already approved or rejected this suggestion.", false},
 	{"rate_limited", []int{429}, "Too many requests. Wait for Retry-After, then retry.", true},
 	{"internal", []int{500}, "A server error. Quote the request_id.", true},
+	{"client_closed", []int{499}, "Only in logs and events: the client closed the request before the answer, so no reply was sent.", false},
 	{"unavailable", []int{503}, "A dependency is down or the server is starting. Retry later.", true},
 
 	// Accounts and sign-in.
@@ -173,7 +174,7 @@ var errorCodes = []errorCode{
 	{"not_a_hand_edit", []int{409}, "Only a value someone set by hand can be pinned or unpinned. Set the value by hand first (Use this), then pin it.", false},
 	{"field_empty", []int{409}, "The record has no value for this field, so there is nothing to pin.", false},
 	{"record_changed", []int{409}, "The record changed since the version you sent. Read it again, check your change still makes sense, and send it with the new version.", false},
-	{"event_name_in_other_brand", []int{409}, "Another brand of this workspace defines this event name. Each brand has its own catalog, but until a later release an event name is defined in one brand at a time: rename the event in this brand's product, or deprecate it in the other brand.", false},
+	{"event_name_in_other_brand", []int{409}, "No longer returned: each brand has its own event catalog, so two brands can define the same event name. Kept so older clients and dashboards that know the code still find it.", false},
 	{"lead_in_other_brand", []int{409}, "This address is already a lead of another brand in this workspace. Each brand has its own leads, but until a later release an address is a lead in one brand at a time: add it in the brand that has it, or delete it there first.", false},
 	{"version_required", []int{400}, "Agents (MCP, connected AI apps and missions) send the record's version with every change to it, so one agent never overwrites another's. Read the record and send its version.", false},
 
@@ -193,6 +194,10 @@ var errorCodes = []errorCode{
 	// Partner portals.
 	{"portal_email_unavailable", []int{409}, "The partner portal can't send sign-in emails: the program has no sender on a verified sending domain of the workspace's own email provider.", false},
 	{"personal_email", []int{400}, "The partner program takes applications only from work email addresses, not free, disposable or relay ones (the portal's business_email_only).", false},
+
+	// Shared dashboards (POST /v1/shared/dashboards/{token}).
+	{"password_required", []int{401}, "This shared dashboard has a password. Send it as password, then reuse the key the answer gives.", false},
+	{"wrong_password", []int{401}, "The password for this shared dashboard is wrong. Repeated tries are rate limited per link.", false},
 }
 
 func (s *Server) listErrorCodes(w http.ResponseWriter, r *http.Request) {

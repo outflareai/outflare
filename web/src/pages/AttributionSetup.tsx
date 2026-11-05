@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AdTrackingTemplate, ConversionDefinition, ConversionPreset, Schemas, TrackingChannel } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { pickedBrandId } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Input, Menu, confirmAction, field, toast } from "../ui";
 import { ago } from "../format";
@@ -62,7 +63,7 @@ export function AttributionModels({ ws, canManage, defaultModel, onChanged }: { 
   const channels = useChannels(ws);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/attribution/models", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/attribution/models", { params: { path: { brand: pickedBrandId() } } });
     if (error) toast(errorMessage(error), "error");
     setList(data?.data ?? []);
   }, [ws]);
@@ -72,7 +73,7 @@ export function AttributionModels({ ws, canManage, defaultModel, onChanged }: { 
 
   async function archive(m: CustomModel) {
     if (!(await confirmAction(`Archive ${m.name}?`, "Reports can no longer use it. A version a module pins keeps its credit.", "Archive model"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/attribution/models/{key}", { params: { path: { ws, key: m.key } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/attribution/models/{key}", { params: { path: { brand: pickedBrandId(), key: m.key } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`${m.name} is archived.`);
     load();
@@ -133,7 +134,6 @@ export function AttributionModels({ ws, canManage, defaultModel, onChanged }: { 
       )}
       {editing && (
         <ModelDialog
-          ws={ws}
           model={editing === "new" ? null : editing}
           channels={channels}
           onClose={() => setEditing(null)}
@@ -151,7 +151,7 @@ export function AttributionModels({ ws, canManage, defaultModel, onChanged }: { 
 // days reads an optional whole number of days; "" is none.
 const days = (v: string) => (v.trim() === "" ? undefined : Number(v));
 
-function ModelDialog({ ws, model, channels, onClose, onSaved }: { ws: string; model: CustomModel | null; channels: { id: string; label: string }[]; onClose: () => void; onSaved: () => void }) {
+function ModelDialog({ model, channels, onClose, onSaved }: { model: CustomModel | null; channels: { id: string; label: string }[]; onClose: () => void; onSaved: () => void }) {
   const s = model?.spec;
   const [key, setKey] = useState("");
   const [name, setName] = useState(model?.name ?? "");
@@ -183,8 +183,8 @@ function ModelDialog({ ws, model, channels, onClose, onSaved }: { ws: string; mo
     setBusy(true);
     const body = { name: name.trim(), spec: spec() };
     const { error } = model
-      ? await api.PATCH("/v1/workspaces/{ws}/attribution/models/{key}", { params: { path: { ws, key: model.key } }, body })
-      : await api.POST("/v1/workspaces/{ws}/attribution/models", { params: { path: { ws } }, body: { ...body, key: key.trim() } });
+      ? await api.PATCH("/v1/brands/{brand}/attribution/models/{key}", { params: { path: { brand: pickedBrandId(), key: model.key } }, body })
+      : await api.POST("/v1/brands/{brand}/attribution/models", { params: { path: { brand: pickedBrandId() } }, body: { ...body, key: key.trim() } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(model ? `${body.name} is saved. ${recredit}` : `${body.name} is ready. ${recredit}`);
@@ -297,20 +297,20 @@ export function ConversionDefinitions({ ws, canManage, onChanged }: { ws: string
   const [editing, setEditing] = useState<ConversionDefinition | "new" | null>(null);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/conversion-definitions", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/conversion-definitions", { params: { path: { brand: pickedBrandId() } } });
     if (error) toast(errorMessage(error), "error");
     setList(data?.data ?? []);
   }, [ws]);
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/conversion-definitions/presets", { params: { path: { ws } } }).then(({ data }) => setPresets(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/conversion-definitions/presets", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setPresets(data?.data ?? []));
     api.GET("/v1/workspaces/{ws}/ads/tracking-templates", { params: { path: { ws } } }).then(({ data }) =>
       setNetworks((data?.data ?? []).map((n: AdTrackingTemplate) => ({ id: n.network, label: n.label }))),
     );
   }, [ws, load]);
 
   async function addPreset(p: ConversionPreset) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/conversion-definitions/presets/{preset}", { params: { path: { ws, preset: p.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/conversion-definitions/presets/{preset}", { params: { path: { brand: pickedBrandId(), preset: p.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     const added = "added" in data ? data.added.length : 0;
     toast(added > 0 ? `Added ${added} from ${p.name}. ${recredit}` : `You already have every conversion in ${p.name}.`);
@@ -320,7 +320,7 @@ export function ConversionDefinitions({ ws, canManage, onChanged }: { ws: string
 
   async function archive(d: ConversionDefinition) {
     if (!(await confirmAction(`Archive ${d.name}?`, `${d.event} events stop counting as this conversion, and conversions are credited again without it.`, "Archive conversion"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/conversion-definitions/{key}", { params: { path: { ws, key: d.key } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/conversion-definitions/{key}", { params: { path: { brand: pickedBrandId(), key: d.key } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`${d.name} is archived.`);
     load();
@@ -400,7 +400,6 @@ export function ConversionDefinitions({ ws, canManage, onChanged }: { ws: string
       )}
       {editing && (
         <DefinitionDialog
-          ws={ws}
           definition={editing === "new" ? null : editing}
           networks={networks}
           onClose={() => setEditing(null)}
@@ -429,7 +428,7 @@ function filterValue(f: FilterRow): Filter["value"] {
   return v;
 }
 
-function DefinitionDialog({ ws, definition, networks, onClose, onSaved }: { ws: string; definition: ConversionDefinition | null; networks: { id: string; label: string }[]; onClose: () => void; onSaved: () => void }) {
+function DefinitionDialog({ definition, networks, onClose, onSaved }: { definition: ConversionDefinition | null; networks: { id: string; label: string }[]; onClose: () => void; onSaved: () => void }) {
   const d = definition;
   const [key, setKey] = useState("");
   const [name, setName] = useState(d?.name ?? "");
@@ -469,8 +468,8 @@ function DefinitionDialog({ ws, definition, networks, onClose, onSaved }: { ws: 
     }
     setBusy(true);
     const { error } = d
-      ? await api.PATCH("/v1/workspaces/{ws}/conversion-definitions/{key}", { params: { path: { ws, key: d.key } }, body })
-      : await api.POST("/v1/workspaces/{ws}/conversion-definitions", { params: { path: { ws } }, body: { ...body, key: key.trim() } });
+      ? await api.PATCH("/v1/brands/{brand}/conversion-definitions/{key}", { params: { path: { brand: pickedBrandId(), key: d.key } }, body })
+      : await api.POST("/v1/brands/{brand}/conversion-definitions", { params: { path: { brand: pickedBrandId() } }, body: { ...body, key: key.trim() } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(`${body.name} is saved. ${recredit}`);

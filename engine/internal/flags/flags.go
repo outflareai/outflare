@@ -29,7 +29,7 @@ const (
 	MaxVariants    = 10
 	MaxRules       = 20
 	MaxRuleValues  = 50
-	MaxPayload     = 4 << 10
+	MaxPayload     = 16 << 10
 	MaxDescription = 1000
 	// Buckets a visitor's hash falls into: weights and rollout are in
 	// hundredths of a percent of these. An exclusion group's slices are
@@ -291,20 +291,79 @@ func CheckVariants(vs []Variant) string {
 }
 
 // Change is one edit the website script makes to the page for a version,
-// from the visual editor or written by hand in its payload's "changes":
-// the elements matching Selector get Text as their text, are hidden, or
-// get Href, Src or Alt. Text is set as text, never as HTML.
+// from the visual editor or written by hand in its payload's "changes".
+// The elements matching Selector get exactly one of: Text as their text;
+// Rich, a little formatting built as elements (never parsed as HTML);
+// hidden; Href, Src or Alt; Style, a few safe CSS properties; moved
+// before, after or into the start or end of Target; or Insert, a new text,
+// button, link or image next to the first of them. Device limits it to
+// phones (mobile, up to 767px wide) or larger screens (desktop).
 type Change struct {
-	Selector string  `json:"selector"`
-	Text     *string `json:"text,omitempty"`
-	Hide     bool    `json:"hide,omitempty"`
-	Href     *string `json:"href,omitempty"`
-	Src      *string `json:"src,omitempty"`
-	Alt      *string `json:"alt,omitempty"`
+	Selector string            `json:"selector"`
+	Text     *string           `json:"text,omitempty"`
+	Rich     *string           `json:"rich,omitempty"`
+	Hide     bool              `json:"hide,omitempty"`
+	Href     *string           `json:"href,omitempty"`
+	Src      *string           `json:"src,omitempty"`
+	Alt      *string           `json:"alt,omitempty"`
+	Style    map[string]string `json:"style,omitempty"`
+	Move     string            `json:"move,omitempty"`
+	Target   string            `json:"target,omitempty"`
+	Insert   *Insert           `json:"insert,omitempty"`
+	Device   string            `json:"device,omitempty"`
+}
+
+// Insert is a new element a change adds: Where is before or after the
+// selected element; Kind is text, button, link or image.
+type Insert struct {
+	Where string `json:"where"`
+	Kind  string `json:"kind"`
+	Text  string `json:"text,omitempty"`
+	Href  string `json:"href,omitempty"`
+	Src   string `json:"src,omitempty"`
+	Alt   string `json:"alt,omitempty"`
 }
 
 // MaxChanges is how many edits one version may make.
 const MaxChanges = 50
+
+// StyleProps are the CSS properties a change may set: looks and layout,
+// nothing that loads anything.
+var StyleProps = []string{
+	"color", "background-color", "font-size", "font-weight", "font-style", "font-family", "text-align", "text-decoration", "text-transform",
+	"line-height", "letter-spacing", "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+	"margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "border", "border-color", "border-width", "border-style",
+	"border-radius", "width", "max-width", "min-width", "height", "max-height", "min-height", "display", "opacity", "gap", "order",
+	"justify-content", "align-items", "flex-direction", "box-shadow", "visibility",
+}
+
+var styleValue = regexp.MustCompile(`^[#(),.%\-+\w\s/"']{1,100}$`)
+
+// SafeStyleValue is a CSS value with nothing that loads, runs or breaks
+// out of its declaration.
+func SafeStyleValue(v string) bool {
+	l := strings.ToLower(v)
+	return styleValue.MatchString(v) && !strings.Contains(l, "url") && !strings.Contains(l, "expression") && !strings.Contains(l, "image")
+}
+
+// MaxCSS is how long a version's own CSS may be.
+const MaxCSS = 8000
+
+// CheckCSS says what is wrong with a version's own CSS ("css" in its
+// payload), or "". It may style the page but never load anything (no
+// url(), @import or fonts from elsewhere) or end its <style>.
+func CheckCSS(css string) string {
+	if len(css) > MaxCSS {
+		return fmt.Sprintf("a version's CSS is at most %d characters", MaxCSS)
+	}
+	l := strings.ToLower(css)
+	for _, bad := range []string{"<", "\\", "url(", "@import", "@font-face", "@charset", "@namespace", "expression(", "javascript:", "behavior", "-moz-binding", "image-set(", "image("} {
+		if strings.Contains(l, bad) {
+			return "a version's CSS can style the page but can't load anything or use " + strings.TrimSuffix(bad, "(")
+		}
+	}
+	return ""
+}
 
 // Changes reads a payload's "changes", or nil when it has none.
 func Changes(payload json.RawMessage) ([]Change, bool) {
@@ -321,8 +380,51 @@ func Changes(payload json.RawMessage) ([]Change, bool) {
 	return cs, true
 }
 
-// CheckChanges says what is wrong with a payload's "changes", or "".
+// Visual says whether a payload changes the page by itself: changes, its
+// own CSS or a redirect, so the website script runs it with no code.
+func Visual(payload json.RawMessage) bool {
+	if cs, _ := Changes(payload); len(cs) > 0 {
+		return true
+	}
+	var p struct {
+		CSS      string `json:"css"`
+		Redirect string `json:"redirect"`
+	}
+	if len(payload) == 0 || payload[0] != '{' || json.Unmarshal(payload, &p) != nil {
+		return false
+	}
+	return p.CSS != "" || p.Redirect != ""
+}
+
+func badSelector(sel string) bool {
+	return sel == "" || len(sel) > 300 || strings.ContainsAny(sel, "<{}@;") || strings.Contains(sel, "/*")
+}
+
+// CheckChanges says what is wrong with a payload's "changes", "css" and
+// "redirect", or "".
 func CheckChanges(payload json.RawMessage) string {
+	if len(payload) > 0 && payload[0] == '{' {
+		var p struct {
+			CSS      *json.RawMessage `json:"css"`
+			Redirect *json.RawMessage `json:"redirect"`
+		}
+		_ = json.Unmarshal(payload, &p)
+		if p.CSS != nil {
+			var css string
+			if json.Unmarshal(*p.CSS, &css) != nil {
+				return "css is the version's own CSS, as a string"
+			}
+			if msg := CheckCSS(css); msg != "" {
+				return msg
+			}
+		}
+		if p.Redirect != nil {
+			var to string
+			if json.Unmarshal(*p.Redirect, &to) != nil || (to != "" && !SafeURL(to)) {
+				return "redirect is the page to send the version's visitors to: a path on the site, such as /pricing-b, or an http(s) address on the site's own domains"
+			}
+		}
+	}
 	cs, has := Changes(payload)
 	if !has {
 		return ""
@@ -333,26 +435,26 @@ func CheckChanges(payload json.RawMessage) string {
 		}
 		_ = json.Unmarshal(payload, &raw)
 		if string(raw.Changes) != "null" && string(raw.Changes) != "[]" {
-			return "changes is a list of {selector, and text, hide, href, src or alt}"
+			return "changes is a list of {selector, and text, rich, hide, href, src or alt, style, move or insert}"
 		}
 	}
 	if len(cs) > MaxChanges {
 		return fmt.Sprintf("at most %d changes", MaxChanges)
 	}
 	for _, c := range cs {
-		if c.Selector == "" || len(c.Selector) > 300 || strings.ContainsAny(c.Selector, "<{}") {
+		if badSelector(c.Selector) {
 			return "each change needs a CSS selector of up to 300 characters, such as h1.hero"
 		}
 		n := 0
-		for _, set := range []bool{c.Text != nil, c.Hide, c.Href != nil, c.Src != nil || c.Alt != nil} {
+		for _, set := range []bool{c.Text != nil, c.Rich != nil, c.Hide, c.Href != nil, c.Src != nil || c.Alt != nil, c.Style != nil, c.Move != "", c.Insert != nil} {
 			if set {
 				n++
 			}
 		}
 		if n != 1 {
-			return "each change does one thing: text, hide, href, or src and alt"
+			return "each change does one thing: text, rich, hide, href, src and alt, style, move or insert"
 		}
-		if c.Text != nil && len(*c.Text) > 2000 {
+		if c.Text != nil && len(*c.Text) > 2000 || c.Rich != nil && len(*c.Rich) > 2000 {
 			return "a change's text is at most 2,000 characters"
 		}
 		for _, u := range []*string{c.Href, c.Src} {
@@ -362,6 +464,53 @@ func CheckChanges(payload json.RawMessage) string {
 		}
 		if c.Alt != nil && len(*c.Alt) > 500 {
 			return "alt text is at most 500 characters"
+		}
+		if c.Style != nil {
+			if len(c.Style) == 0 || len(c.Style) > 20 {
+				return "a style change sets 1 to 20 properties"
+			}
+			for k, v := range c.Style {
+				if !slices.Contains(StyleProps, k) {
+					return "style can set " + strings.Join(StyleProps, ", ") + "; not " + k
+				}
+				if !SafeStyleValue(v) {
+					return "the style value for " + k + " can't load anything: use colours, sizes and words, such as #0f766e or 18px"
+				}
+			}
+		}
+		if (c.Move != "") != (c.Target != "") {
+			return "a move needs both move (before, after, start or end) and target, the selector of where it goes"
+		}
+		if c.Move != "" {
+			if !slices.Contains([]string{"before", "after", "start", "end"}, c.Move) {
+				return "move is before, after, start or end of the target"
+			}
+			if badSelector(c.Target) {
+				return "a move's target is a CSS selector of up to 300 characters"
+			}
+		}
+		if in := c.Insert; in != nil {
+			if in.Where != "before" && in.Where != "after" {
+				return "insert.where is before or after the selected element"
+			}
+			switch in.Kind {
+			case "text", "button", "link":
+				if in.Text == "" || len(in.Text) > 500 {
+					return "an inserted text, button or link needs text of up to 500 characters"
+				}
+				if in.Kind != "text" && !SafeURL(in.Href) {
+					return "an inserted button or link needs href: an http(s) address or a path on the site"
+				}
+			case "image":
+				if !SafeURL(in.Src) || len(in.Alt) > 500 {
+					return "an inserted image needs src (an http(s) address or a path on the site) and alt text of up to 500 characters"
+				}
+			default:
+				return "insert.kind is text, button, link or image"
+			}
+		}
+		if c.Device != "" && c.Device != "mobile" && c.Device != "desktop" {
+			return "device is mobile or desktop, or left out for both"
 		}
 	}
 	return ""

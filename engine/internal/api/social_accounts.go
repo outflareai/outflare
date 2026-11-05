@@ -74,7 +74,7 @@ const socialAccountSelect = `
 		a.followers - (SELECT d.followers FROM social_account_days d WHERE d.account_id = a.id AND d.followers IS NOT NULL
 			AND d.day <= (now() AT TIME ZONE 'UTC')::date - 28 ORDER BY d.day DESC LIMIT 1),
 		a.last_synced_at, a.next_sync_at, a.last_error, a.last_error_code, a.failures, a.last_failed_at, a.created_at, a.updated_at
-	FROM social_accounts a WHERE a.workspace_id = $1`
+	FROM social_accounts a WHERE a.workspace_id = $1 AND a.competitor_id IS NULL`
 
 func scanSocialAccount(row pgx.Row) (socialAccountView, error) {
 	var v socialAccountView
@@ -498,7 +498,7 @@ func (s *Server) socialGrowth(w http.ResponseWriter, r *http.Request) {
 	args := []any{a.WorkspaceID, days}
 	bs := sel.sql("a.brand_id", &args)
 	rows, err := s.pool.Query(ctx, `
-		WITH accts AS (SELECT a.id, a.channel, a.followers FROM social_accounts a WHERE a.workspace_id = $1 AND a.status = 'active'`+bs+`),
+		WITH accts AS (SELECT a.id, a.channel, a.followers FROM social_accounts a WHERE a.workspace_id = $1 AND a.status = 'active' AND a.competitor_id IS NULL`+bs+`),
 		before AS (
 			SELECT DISTINCT ON (d.account_id) d.account_id, d.followers FROM social_account_days d JOIN accts ON accts.id = d.account_id
 			WHERE d.followers IS NOT NULL AND d.day <= (now() AT TIME ZONE 'UTC')::date - $2::int ORDER BY d.account_id, d.day DESC),
@@ -540,7 +540,7 @@ func (s *Server) socialGrowth(w http.ResponseWriter, r *http.Request) {
 	args = []any{a.WorkspaceID, days}
 	bs = sel.sql("a.brand_id", &args)
 	rows, err = s.pool.Query(ctx, `
-		WITH accts AS (SELECT a.id FROM social_accounts a WHERE a.workspace_id = $1 AND a.status = 'active'`+bs+`),
+		WITH accts AS (SELECT a.id FROM social_accounts a WHERE a.workspace_id = $1 AND a.status = 'active' AND a.competitor_id IS NULL`+bs+`),
 		span AS (SELECT generate_series((now() AT TIME ZONE 'UTC')::date - ($2::int - 1), (now() AT TIME ZONE 'UTC')::date, interval '1 day')::date AS day)
 		SELECT to_char(span.day, 'YYYY-MM-DD'), COALESCE(sum(last.followers), 0)::bigint FROM span
 		CROSS JOIN accts

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"math"
+	"slices"
 	"strings"
 	"time"
 )
@@ -271,6 +272,45 @@ type AdsManager interface {
 	SetCampaignDailyBudget(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string, micros int64) error
 }
 
+// CapAdsKeywords marks a connector that implements AdKeywordManager.
+const CapAdsKeywords = "ads.keywords"
+
+// AdKeywordManager changes a search campaign's keywords (Google): adds a
+// keyword to an ad group, adds a negative keyword to a campaign or ad
+// group, and gives a keyword its own ad group with copies of the ads of
+// the group it came from. It also reads the platform's own
+// recommendations for the account.
+type AdKeywordManager interface {
+	Connector
+	// AddKeyword adds text with matchType (exact, phrase or broad) to an
+	// ad group, active.
+	AddKeyword(ctx context.Context, c *Client, creds Creds, acct AdAccount, adGroupID, text, matchType string) error
+	// AddNegativeKeyword stops ads showing for a search: in one ad group
+	// when adGroupID is set, else in the whole campaign.
+	AddNegativeKeyword(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID, adGroupID, text, matchType string) error
+	// SplitKeyword makes an ad group named name in the campaign with the
+	// keyword (exact) and copies of fromAdGroupID's active ads, and adds
+	// the keyword as an exact negative to fromAdGroupID, so its searches
+	// go to the new group. It returns the new group's id.
+	SplitKeyword(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID, fromAdGroupID, name, text string) (string, error)
+	// Recommendations lists what the platform itself recommends for the
+	// account, not yet applied or dismissed.
+	Recommendations(ctx context.Context, c *Client, creds Creds, acct AdAccount) ([]AdRecommendation, error)
+}
+
+// AdRecommendation is one of the platform's own recommendations.
+type AdRecommendation struct {
+	// ID is the platform's name for it (Google: its resource name).
+	ID string `json:"id"`
+	// Type is the platform's word for it, such as KEYWORD or CAMPAIGN_BUDGET.
+	Type string `json:"type"`
+	// CampaignID is the campaign it is for, when it is for one.
+	CampaignID string `json:"campaign_id,omitempty"`
+	// What it is expected to change: clicks, conversions and cost per week,
+	// before and after, when the platform says.
+	Impact map[string]float64 `json:"impact,omitempty"`
+}
+
 // CapAdsTracking marks a connector that implements AdTracker.
 const CapAdsTracking = "ads.tracking"
 
@@ -381,6 +421,33 @@ type ConversionSender interface {
 	SendConversions(ctx context.Context, c *Client, creds Creds, acct AdAccount, target ConversionTarget, convs []AdConversion) ([]ConversionResult, error)
 }
 
+// AdConversionAdjustment changes a conversion already sent, after a refund:
+// a restatement gives it its new value, a retraction takes it away.
+type AdConversionAdjustment struct {
+	// EventID is the id the conversion was sent with (Google's order id).
+	EventID string
+	// Retract takes the whole conversion away; otherwise ValueMicros is its
+	// new value, in Currency.
+	Retract     bool
+	ValueMicros int64
+	Currency    string
+	// Time is when the adjustment happened (the refund); it is after the
+	// conversion.
+	Time time.Time
+	// Index is the adjustment's place in the batch, echoed in results.
+	Index int
+}
+
+// ConversionAdjuster is a ConversionSender that can also change the value
+// of a conversion it took, so a refund lowers what bidding learns from it.
+type ConversionAdjuster interface {
+	ConversionSender
+	// AdjustConversions sends one batch of adjustments to one target and
+	// says how each went (Index, OK, Reason). An error means the whole
+	// batch was not taken.
+	AdjustConversions(ctx context.Context, c *Client, creds Creds, acct AdAccount, target ConversionTarget, adjs []AdConversionAdjustment) ([]ConversionResult, error)
+}
+
 // HashID normalises and hashes an identifier the way every platform asks:
 // trimmed, lower case, SHA-256, hex.
 func HashID(v string) string {
@@ -447,4 +514,221 @@ type AudienceSyncer interface {
 	// SyncAudience adds the person to the audience (AudienceAdd) or takes
 	// them out (AudienceRemove).
 	SyncAudience(ctx context.Context, c *Client, creds Creds, acct AdAccount, audienceID, change string, m AudienceMember) error
+}
+
+// CapAdsTests marks a connector that implements AdTester.
+const CapAdsTests = "ads.tests"
+
+// What a test changes in its trial arm.
+const (
+	// AdTestBudget gives the trial a different daily budget (Meta: a
+	// copy of the campaign in a split test).
+	AdTestBudget = "budget"
+	// AdTestBidding gives the trial a different target cost per
+	// conversion (Google: an experiment whose trial campaign bids to it).
+	AdTestBidding = "bidding"
+)
+
+// AdTestSpec is a test to start on the platform: the campaign it splits,
+// how much of its traffic or audience goes to the trial, the days it runs
+// (inclusive, in the account's time zone) and what the trial does
+// differently.
+type AdTestSpec struct {
+	Name         string
+	CampaignID   string
+	Kind         string
+	SplitPercent int
+	StartDate    string
+	EndDate      string
+	// The trial's daily budget (AdTestBudget) or target cost per
+	// conversion (AdTestBidding), in micros of the account's currency.
+	DailyBudgetMicros *int64
+	TargetCPAMicros   *int64
+}
+
+// AdTestRun is a test the platform has: its own id for it and the
+// campaign that serves the trial, once known.
+type AdTestRun struct {
+	ID              string `json:"id"`
+	TrialCampaignID string `json:"trial_campaign_id,omitempty"`
+}
+
+// Test arms.
+const (
+	ArmControl = "control"
+	ArmTrial   = "trial"
+)
+
+// AdTestDay is one arm's numbers for one day.
+type AdTestDay struct {
+	Arm         string  `json:"arm"`
+	Date        string  `json:"date"`
+	SpendMicros int64   `json:"spend_micros"`
+	Impressions int64   `json:"impressions"`
+	Clicks      int64   `json:"clicks"`
+	Conversions float64 `json:"conversions"`
+}
+
+// AdTester runs tests inside the platform: the platform itself splits the
+// campaign's traffic or audience between the campaign as it is and a
+// trial, so the two arms run on the same days and can be compared fairly
+// (Google Ads experiments, Meta split tests). Starting, keeping and
+// rolling back each change the account; reading the arms changes nothing.
+type AdTester interface {
+	Connector
+	// TestKinds lists what the platform's tests can change (AdTestBudget,
+	// AdTestBidding).
+	TestKinds() []string
+	// StartTest creates the test and schedules it to run.
+	StartTest(ctx context.Context, c *Client, creds Creds, acct AdAccount, spec AdTestSpec) (AdTestRun, error)
+	// TestDays returns each arm's numbers per day from from to to.
+	TestDays(ctx context.Context, c *Client, creds Creds, acct AdAccount, spec AdTestSpec, run AdTestRun, from, to string) ([]AdTestDay, error)
+	// EndTest stops the test. keep applies the trial's change to the
+	// campaign; otherwise the campaign stays as it was. Either way the
+	// trial stops serving.
+	EndTest(ctx context.Context, c *Client, creds Creds, acct AdAccount, spec AdTestSpec, run AdTestRun, keep bool) error
+}
+
+// CapAdsTargeting marks a connector that implements AdTargetingManager.
+const CapAdsTargeting = "ads.targeting"
+
+// Bidding methods a campaign can be switched to. Each may carry a target:
+// a cost per conversion for BidMaxConversions, a return on spend for
+// BidMaxValue.
+const (
+	BidMaxConversions = "maximize_conversions"
+	BidMaxValue       = "maximize_conversion_value"
+)
+
+// AdBidding is how a campaign bids: Strategy in the platform's own words
+// when read, one of the Bid constants when set.
+type AdBidding struct {
+	Strategy        string   `json:"strategy"`
+	TargetCPAMicros *int64   `json:"target_cpa_micros,omitempty"`
+	TargetROAS      *float64 `json:"target_roas,omitempty"`
+}
+
+// AdTargeting is who a campaign reaches and how it bids: the customer list
+// audiences it targets, the countries it shows in (ISO 3166 alpha-2), and
+// notes on what is there but can't be changed here (a city, an ad set that
+// differs from the others).
+type AdTargeting struct {
+	Bidding   AdBidding    `json:"bidding"`
+	Audiences []AdAudience `json:"audiences"`
+	Countries []string     `json:"countries"`
+	Notes     []string     `json:"notes"`
+}
+
+// AdTargetingManager changes how a campaign bids and whom it reaches. Each
+// call changes one thing; adding what is already there, or removing what
+// isn't, succeeds, so a retry changes nothing twice.
+type AdTargetingManager interface {
+	Connector
+	// BiddingMethods lists the methods SetBidding takes; empty when the
+	// platform's bidding can't be changed here.
+	BiddingMethods() []string
+	CampaignTargeting(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string) (AdTargeting, error)
+	SetBidding(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID string, b AdBidding) error
+	// SetCampaignAudience adds a customer list audience to the campaign's
+	// targeting (add) or takes it out.
+	SetCampaignAudience(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID, audienceID string, add bool) error
+	// SetCampaignCountry adds a country to where the campaign shows, or
+	// takes it out. Taking out the last one is refused: the campaign would
+	// show everywhere.
+	SetCampaignCountry(ctx context.Context, c *Client, creds Creds, acct AdAccount, campaignID, country string, add bool) error
+}
+
+// CountryCode checks an ISO 3166 alpha-2 country code and returns it in
+// capitals.
+func CountryCode(s string) (string, bool) {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	if len(s) != 2 || s[0] < 'A' || s[0] > 'Z' || s[1] < 'A' || s[1] > 'Z' {
+		return "", false
+	}
+	return s, true
+}
+
+// CapAdsCreate marks a connector that implements AdCreator.
+const CapAdsCreate = "ads.create"
+
+// What a draft makes on the platform.
+const (
+	// DraftAd is a new ad in an existing ad group (an ad set on Meta).
+	DraftAd = "ad"
+	// DraftAdGroup is a new ad group in an existing campaign, with its
+	// keywords and one ad.
+	DraftAdGroup = "ad_group"
+	// DraftCampaign is a new search campaign with its daily budget,
+	// bidding, countries and one ad group.
+	DraftCampaign = "campaign"
+)
+
+// AdDraft is new ads written for a platform: what to make and where. Kind
+// says which of the parents must be set (an ad needs AdGroupID, an ad
+// group CampaignID, a campaign neither). Everything is made paused.
+type AdDraft struct {
+	Kind       string `json:"kind"`
+	CampaignID string `json:"-"`
+	AdGroupID  string `json:"-"`
+	// Name of the new ad group or campaign (and of the ad on Meta).
+	Name string `json:"name,omitempty"`
+	// The ad: where it links, and its text. A search ad has 3 to 15
+	// headlines of at most 30 characters, 2 to 4 descriptions of at most 90
+	// and two optional display path parts of at most 15. A Meta ad has one
+	// headline, one description, its main text (PrimaryText), an image
+	// shown with it, a call to action and the Facebook page it runs as
+	// (the account's first when empty).
+	FinalURL     string   `json:"final_url"`
+	Headlines    []string `json:"headlines,omitempty"`
+	Descriptions []string `json:"descriptions,omitempty"`
+	Path1        string   `json:"path1,omitempty"`
+	Path2        string   `json:"path2,omitempty"`
+	PrimaryText  string   `json:"primary_text,omitempty"`
+	ImageURL     string   `json:"image_url,omitempty"`
+	CallToAction string   `json:"call_to_action,omitempty"`
+	PageID       string   `json:"page_id,omitempty"`
+	// A new ad group's or campaign's keywords, each "text" or with its
+	// match type (exact, phrase, broad; phrase when empty).
+	Keywords []AdDraftKeyword `json:"keywords,omitempty"`
+	// A new campaign's daily budget, how it bids, and its countries.
+	DailyBudgetMicros *int64     `json:"daily_budget_micros,omitempty"`
+	Bidding           *AdBidding `json:"bidding,omitempty"`
+	Countries         []string   `json:"countries,omitempty"`
+}
+
+// AdDraftKeyword is one keyword of a new ad group.
+type AdDraftKeyword struct {
+	Text      string `json:"text"`
+	MatchType string `json:"match_type,omitempty"`
+}
+
+// AdMade is what the platform made for a draft: the campaign, ad group
+// and ad the new ad is in, and which of them the draft made (Made, by
+// level: campaign, ad_group, ad). GoLive turns on only those.
+type AdMade struct {
+	CampaignID string   `json:"campaign_id,omitempty"`
+	AdGroupID  string   `json:"ad_group_id,omitempty"`
+	AdID       string   `json:"ad_id,omitempty"`
+	Made       []string `json:"made,omitempty"`
+}
+
+// Has reports whether the draft made something at level.
+func (m AdMade) Has(level string) bool { return slices.Contains(m.Made, level) }
+
+// AdCreator makes new ads on the platform, paused, and later turns them on.
+// Making is all or nothing where the platform allows it (Google's batch
+// mutate); otherwise what was made before a failure is returned with the
+// error, so it can be found and removed.
+type AdCreator interface {
+	Connector
+	// DraftKinds lists the kinds of draft the platform makes here.
+	DraftKinds() []string
+	// CheckDraft says what is wrong with a draft before anything is made
+	// (ErrInvalid), without calling the platform.
+	CheckDraft(d AdDraft) error
+	// CreateAds makes the draft's ads paused.
+	CreateAds(ctx context.Context, c *Client, creds Creds, acct AdAccount, d AdDraft) (AdMade, error)
+	// GoLive turns on everything a draft made: the ad, and the ad group
+	// and campaign when the draft made them.
+	GoLive(ctx context.Context, c *Client, creds Creds, acct AdAccount, made AdMade) error
 }

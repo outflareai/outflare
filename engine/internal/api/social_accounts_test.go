@@ -30,6 +30,8 @@ type fakeX struct {
 	// instead (a 429, a 503).
 	tweets     []string
 	postStatus int
+	// meStatus, when set, answers /2/users/me with it (X down: a 503).
+	meStatus int
 }
 
 func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +89,9 @@ func (f *fakeX) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.tweets = append(f.tweets, in.Text)
 		w.WriteHeader(201)
 		fmt.Fprintf(w, `{"data": {"id": "50%d", "text": %q}}`, len(f.tweets), in.Text)
+	case r.URL.Path == "/2/users/me" && f.meStatus != 0:
+		w.WriteHeader(f.meStatus)
+		io.WriteString(w, `{"title": "Service Unavailable", "status": 503}`)
 	case r.URL.Path == "/2/users/me":
 		fmt.Fprintf(w, `{"data": {"id": "2244994945", "name": "Northpeak", "username": "northpeak", "profile_image_url": "https://pbs.example/n.png",
 			"public_metrics": {"followers_count": %d, "following_count": 12, "tweet_count": 340}}}`, f.followers)
@@ -381,6 +386,25 @@ func TestSocialAccountsXAndLinkedIn(t *testing.T) {
 		t.Fatalf("sync: %v", out)
 	}
 
+	// X being down marks the accounts, which try again on their own
+	// back-off: the job isn't failed and retried on top of that.
+	fx.mu.Lock()
+	fx.meStatus = 503
+	fx.mu.Unlock()
+	e.pool.Exec(ctx, `UPDATE social_accounts SET next_sync_at = now() WHERE workspace_id = $1`, ws)
+	if err := e.srv.SyncSocialAccounts(ctx, ws, xID); err != nil {
+		t.Fatalf("an outage of a connection with accounts goes back to the accounts, not the job queue: %v", err)
+	}
+	var code string
+	var wait float64
+	e.pool.QueryRow(ctx, `SELECT last_error_code, EXTRACT(epoch FROM next_sync_at - now()) / 60 FROM social_accounts WHERE id = $1`, xa["id"]).Scan(&code, &wait)
+	if code != "connector_unavailable" || wait < 10 || wait > 20 {
+		t.Fatalf("x account after outage: %s, next in %.0f minutes", code, wait)
+	}
+	fx.mu.Lock()
+	fx.meStatus = 0
+	fx.mu.Unlock()
+
 	// X refusing the app marks the accounts, without retrying.
 	fx.mu.Lock()
 	fx.refresh = "revoked"
@@ -393,11 +417,21 @@ func TestSocialAccountsXAndLinkedIn(t *testing.T) {
 		t.Fatalf("x account after refusal: %v", xa3)
 	}
 
-	names := map[string]int{}
+	names, outcomes := map[string]int{}, map[string]string{}
 	for _, ev := range got() {
 		names[ev.Name]++
+		if ev.Name == "social_account.sync_failed" {
+			outcomes[ev.ErrorCode] = ev.Outcome
+			if ev.Props["will_retry"] != (ev.ErrorCode == "connector_unavailable") || (ev.ErrorCode == "connector_unavailable" && ev.Props["connector"] != "x") {
+				t.Fatalf("sync_failed props: %v", ev.Props)
+			}
+		}
 	}
-	if names["social_account.synced"] < 3 || names["social_account.added"] != 3 || names["social_account.updated"] != 1 || names["social_account.sync_failed"] != 1 {
+	// X down or refusing the app is X's or the workspace's, not Outflare's.
+	if outcomes["connector_unavailable"] != track.Failure || outcomes["connector_auth"] != track.Failure {
+		t.Fatalf("outcomes: %v", outcomes)
+	}
+	if names["social_account.synced"] < 3 || names["social_account.added"] != 3 || names["social_account.updated"] != 1 || names["social_account.sync_failed"] != 2 {
 		t.Fatalf("events: %v", names)
 	}
 }

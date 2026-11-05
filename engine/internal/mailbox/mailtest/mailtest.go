@@ -48,6 +48,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	users    map[string]string
+	busy     map[string]bool // users whose IMAP sign-in is turned away as busy
 	messages []Message
 	reject   map[string]bool
 	inboxes  map[string]*imapmemserver.User
@@ -212,10 +213,32 @@ func Start(t testing.TB, users map[string]string) *Server {
 	return s
 }
 
+// Busy makes the IMAP server turn user's sign-ins away with
+// NO [UNAVAILABLE], as a provider that is throttling does, until it is
+// called again with false.
+func (s *Server) Busy(user string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy == nil {
+		s.busy = map[string]bool{}
+	}
+	s.busy[user] = on
+}
+
 // imapSession adds XOAUTH2 to the in-memory server's session.
 type imapSession struct {
 	imapserver.SessionIMAP4rev2
 	srv *Server
+}
+
+func (s *imapSession) Login(user, pass string) error {
+	s.srv.mu.Lock()
+	busy := s.srv.busy[user]
+	s.srv.mu.Unlock()
+	if busy {
+		return &imap.Error{Type: imap.StatusResponseTypeNo, Code: imap.ResponseCodeUnavailable, Text: "Too many sign-ins, try again later"}
+	}
+	return s.SessionIMAP4rev2.Login(user, pass)
 }
 
 func (s *imapSession) AuthenticateMechanisms() []string { return []string{sasl.Plain, "XOAUTH2"} }

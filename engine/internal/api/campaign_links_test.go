@@ -36,7 +36,12 @@ func TestCampaignLinks(t *testing.T) {
 	if r := owner.must(201, "POST", base+"/tracking-campaigns", map[string]any{"name": "AMA", "channel": "reddit"}); r["source"] != "reddit" || r["medium"] != "social" {
 		t.Fatalf("reddit = %v", r)
 	}
-	owner.must(409, "POST", base+"/tracking-campaigns", map[string]any{"name": "Spring launch US", "channel": "seo", "source": "google"})
+	owner.must(409, "POST", base+"/tracking-campaigns", map[string]any{"name": "Spring launch US", "channel": "seo", "source": "google", "brand": "northpeak"})
+	// Another brand can use the same slug: slugs are unique per brand.
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "handle": "acme"})
+	if o := owner.must(201, "POST", base+"/tracking-campaigns", map[string]any{"name": "Spring launch US", "channel": "seo", "source": "google", "brand": "acme"}); o["slug"] != "spring-launch-us" {
+		t.Fatalf("another brand's campaign = %v", o)
+	}
 	owner.must(400, "POST", base+"/tracking-campaigns", map[string]any{"name": "X", "channel": "tv", "source": "x"})
 	owner.must(400, "POST", base+"/tracking-campaigns", map[string]any{"name": "X", "channel": "paid_ads"})
 	owner.must(400, "POST", base+"/tracking-campaigns", map[string]any{"name": "X", "channel": "paid_ads", "source": "google", "landing_url": "northpeak.example"})

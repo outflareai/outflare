@@ -1296,9 +1296,6 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if err := eventNameFree(ctx, tx, a.WorkspaceID, deref(b), *req.Name); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO event_definitions (workspace_id, brand_id, name, label, description, properties, status, sensitivity, created_by,
 				owner_id, retention_days, destinations)
@@ -1324,23 +1321,6 @@ func (s *Server) createEventDefinition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, view)
-}
-
-// eventNameFree refuses a name another brand of the workspace defines.
-// Until the contract step of plans/brands/README.md, event_definitions
-// keeps its per-workspace unique constraint (the version before this one
-// upserts against it), so a name is defined in one brand at a time.
-func eventNameFree(ctx context.Context, tx pgx.Tx, ws, brand, name string) error {
-	var other bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2
-		AND brand_id IS DISTINCT FROM NULLIF($3, '')::uuid)`, ws, name, brand).Scan(&other); err != nil {
-		return err
-	}
-	if other {
-		return recordConflict{"event_name_in_other_brand", "another brand of this workspace defines " + name +
-			"; for now an event name is defined in one brand at a time, so rename the event in this brand's product, or deprecate it in the other brand and ask support to move it"}
-	}
-	return nil
 }
 
 // catalogData is a catalog change's audit data, with the brand it belongs
@@ -1387,9 +1367,6 @@ func (s *Server) updateEventDefinition(w http.ResponseWriter, r *http.Request) {
 		err = tx.QueryRow(ctx, `SELECT status FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $3::uuid AND name = $2 FOR UPDATE`,
 			a.WorkspaceID, name, b).Scan(&before)
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err := eventNameFree(ctx, tx, a.WorkspaceID, deref(b), name); err != nil {
-				return err
-			}
 			return errNotFound
 		}
 		if err != nil {
@@ -1447,9 +1424,6 @@ func (s *Server) approveEventName(w http.ResponseWriter, r *http.Request) {
 		}
 		switch {
 		case before == nil:
-			if err := eventNameFree(ctx, tx, a.WorkspaceID, a.Brand, name); err != nil {
-				return err
-			}
 			if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, created_by) VALUES ($1, $2, $3, 'approved', $4)`,
 				a.WorkspaceID, a.Brand, name, nullIfEmpty(a.ActorID)); err != nil {
 				return err

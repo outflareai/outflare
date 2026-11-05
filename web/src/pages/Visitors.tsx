@@ -9,9 +9,11 @@ import { Switch } from "@/components/ui/switch";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, CopyButton, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago, plural } from "../format";
+import { track } from "@/lib/analytics";
 import { SiteKeysCard } from "./SiteKeys";
 import { RecordPartners } from "./Partners";
 import type { Tab } from "../App";
+import { VisitorsPanels } from "@/components/insight-panels";
 
 // Visitors: the companies and people on the workspace's website, scored for
 // buying intent. People are known from the workspace's own sign-in or from
@@ -27,13 +29,19 @@ type Totals = components["schemas"]["VisitorTotals"];
 type Settings = components["schemas"]["VisitorSettings"];
 type TimelineItem = components["schemas"]["TimelineItem"];
 type RecordView = components["schemas"]["Record"];
+type Browser = components["schemas"]["VisitorBrowser"];
+type Visit = components["schemas"]["VisitorVisit"];
+type BrowserEvent = components["schemas"]["VisitorEvent"];
 
 const tools: Record<string, string> = { rb2b: "RB2B", vector: "Vector", warmly: "Warmly" };
 
-type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void };
+// open is a visitor's anonymous id from the address (/visitors/{anonymous_id}):
+// their profile opens over the list, and onOpen keeps the address in step.
+type Props = { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void; open?: string; onOpen?: (anon: string) => void };
 
 const ranges = [7, 30, 90] as const;
 const views = [
+  { id: "everyone", label: "Everyone" },
   { id: "companies", label: "Companies" },
   { id: "people", label: "People" },
 ] as const;
@@ -43,6 +51,7 @@ const field = "h-8 rounded-md border border-input bg-transparent px-2.5 text-[13
 const how: Record<string, string> = {
   product: "Signed in",
   email_click: "Email click",
+  link: "Visitor link",
   company_ip: "IP lookup",
   provider: "Data provider",
 };
@@ -63,28 +72,37 @@ export function Visitors(props: Props) {
   return <VisitorsPage key={brand.id} {...props} />;
 }
 
-function VisitorsPage({ ws, canManage, go }: Props) {
+function VisitorsPage({ ws, canManage, go, open: openAnon, onOpen }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
-  const [view, setView] = useState<(typeof views)[number]["id"]>("companies");
+  const [view, setView] = useState<(typeof views)[number]["id"]>("everyone");
   const [days, setDays] = useState<(typeof ranges)[number]>(30);
   const [hotOnly, setHotOnly] = useState(false);
   const [rows, setRows] = useState<Visitor[] | null>(null);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [hasKeys, setHasKeys] = useState<boolean | null>(null);
   const [open, setOpen] = useState<Visitor | null>(null);
+  const [browsers, setBrowsers] = useState<Browser[] | null>(null);
+  const [openBrowser, setOpenBrowserState] = useState<string | null>(openAnon || null);
+  const setOpenBrowser = (anon: string | null) => {
+    setOpenBrowserState(anon);
+    onOpen?.(anon ?? "");
+  };
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const query = { view, days, ...(hotOnly ? { hot: true } : {}), limit: 200, ...(brandKey ? { brand: brandKey } : {}) };
-    const [v, k] = await Promise.all([
+    const query = { view: view === "everyone" ? "people" : view, days, ...(hotOnly ? { hot: true } : {}), limit: 200, ...(brandKey ? { brand: brandKey } : {}) };
+    const [v, k, b] = await Promise.all([
       api.GET("/v1/brands/{brand}/visitors", { params: { path: { brand: pickedBrandId() }, query } }),
       api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: pickedBrandId() } } }),
+      view === "everyone" ? api.GET("/v1/brands/{brand}/visitors/browsers", { params: { path: { brand: pickedBrandId() }, query: { days, limit: 200 } } }) : Promise.resolve(null),
     ]);
     if (v.error || !v.data) return setError(errorMessage(v.error));
+    if (b && (b.error || !b.data)) return setError(errorMessage(b.error));
     setError("");
     setRows(v.data.data);
+    setBrowsers(b?.data?.data ?? null);
     setTotals(v.data.totals);
     setHasKeys((k.data?.data.length ?? 0) > 0);
   }, [ws, view, days, hotOnly, brandKey]);
@@ -127,26 +145,27 @@ function VisitorsPage({ ws, canManage, go }: Props) {
         </>
       )}
 
+      {brand.brand && hasKeys && <VisitorsPanels brand={brand.brand.id} days={days} go={go} />}
+
       <Stats cols={4}>
         <Stat label={`Visitors, ${days} days`} value={totals.browsers.toLocaleString()}
           sub={totals.no_company > 0 ? `${totals.no_company.toLocaleString()} on home, phone or VPN networks: no company` : "browsers, known or not"} />
         <Stat label="Known people" value={totals.people.toLocaleString()} sub={plural(totals.known, "browser")} />
         <Stat label="Companies" value={totals.companies.toLocaleString()} />
-        <Stat label="Hot" value={totals.hot.toLocaleString()} sub={`in ${view}`} tone={totals.hot > 0 ? "green" : undefined} />
+        <Stat label="Hot" value={totals.hot.toLocaleString()} sub={`in ${view === "everyone" ? "people" : view}`} tone={totals.hot > 0 ? "green" : undefined} />
       </Stats>
 
-      <DataTable
+      {view === "everyone" && browsers && (
+        <BrowserTable rows={browsers} onOpen={(b) => { setOpenBrowser(b.anonymous_id); track("ui.visitor_profile_opened", { known: !!b.record_id }); }} toolbar={<ViewSwitch view={view} setView={setView} />} />
+      )}
+      {view !== "everyone" && <DataTable
         data={rows}
         rowId={(r) => r.record_id ?? `domain:${r.domain}`}
         onRowClick={setOpen}
         searchPlaceholder={view === "companies" ? "Search companies" : "Search people"}
         toolbar={
           <div className="flex items-center gap-3">
-            <div className="flex rounded-md border" role="group" aria-label="Show">
-              {views.map((v) => (
-                <button key={v.id} type="button" className={`px-2.5 py-1 text-[13px] ${v.id === view ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setView(v.id)}>{v.label}</button>
-              ))}
-            </div>
+            <ViewSwitch view={view} setView={setView} />
             <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
               <Switch checked={hotOnly} onCheckedChange={setHotOnly} aria-label="Only hot visitors" />
               Only hot
@@ -203,10 +222,188 @@ function VisitorsPage({ ws, canManage, go }: Props) {
           { id: "how", header: "Known by", accessorFn: (r) => r.identified_by.map((h) => how[h] ?? h).join(", ") },
         ]}
         initialSort={[{ id: "score", desc: true }]}
-      />
+      />}
 
+      {openBrowser && <BrowserSheet anon={openBrowser} onClose={() => setOpenBrowser(null)} go={go} />}
       {open && <VisitorSheet ws={ws} v={open} canManage={canManage} onClose={() => setOpen(null)} onChanged={() => { setOpen(null); load(); }} go={go} />}
     </div>
+  );
+}
+
+type View = (typeof views)[number]["id"];
+
+function ViewSwitch({ view, setView }: { view: View; setView: (v: View) => void }) {
+  return (
+    <div className="flex rounded-md border" role="group" aria-label="Show">
+      {views.map((v) => (
+        <button key={v.id} type="button" className={`px-2.5 py-1 text-[13px] ${v.id === view ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setView(v.id)}>{v.label}</button>
+      ))}
+    </div>
+  );
+}
+
+const devices: Record<string, string> = { desktop: "Desktop", mobile: "Phone", tablet: "Tablet" };
+const networks: Record<string, string> = { isp: "Home network", mobile: "Phone network", hosting: "Data centre or VPN" };
+
+// A browser's label: the person once known, else a short anonymous name.
+const browserName = (b: Browser) => b.name || (b.record_id ? "Unnamed person" : `Anonymous #${b.anonymous_id.replace(/[^A-Za-z0-9]/g, "").slice(-6)}`);
+const systems: Record<string, string> = { ios: "iOS", macos: "macOS", ipados: "iPadOS", chromeos: "ChromeOS" };
+const titled = (v: string) => systems[v] ?? (v ? v[0].toUpperCase() + v.slice(1) : "");
+const browserWhere = (b: { country: string; device: string; browser: string; os: string }) =>
+  [b.country, devices[b.device] ?? b.device, titled(b.browser), titled(b.os)].filter(Boolean).join(" · ");
+
+// Everyone: every browser on the site, anonymous or known, most recent first.
+function BrowserTable({ rows, onOpen, toolbar }: { rows: Browser[]; onOpen: (b: Browser) => void; toolbar: React.ReactNode }) {
+  return (
+    <DataTable
+      data={rows}
+      rowId={(b) => b.anonymous_id}
+      onRowClick={onOpen}
+      searchPlaceholder="Search visitors"
+      toolbar={toolbar}
+      empty="No visits in this range yet. They show here once the snippet is on your site."
+      mobile={(b) => (
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2"><span className="font-medium">{browserName(b)}</span>{b.record_id ? <Badge tone="green">Known</Badge> : <Badge tone="grey">Anonymous</Badge>}</div>
+          <div className="text-[13px] text-muted-foreground">{plural(b.pageviews, "page view")} · last {ago(b.last_seen_at)}</div>
+        </div>
+      )}
+      columns={[
+        {
+          id: "name",
+          header: "Visitor",
+          accessorFn: (b) => `${browserName(b)} ${b.company_name} ${b.company_domain} ${b.last_path}`,
+          cell: ({ row: { original: b } }) => (
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 font-medium">{browserName(b)}{b.record_id ? <Badge tone="green">Known</Badge> : <Badge tone="grey">Anonymous</Badge>}</div>
+              <div className="truncate text-[12px] text-muted-foreground">{[b.company_name || b.company_domain || networks[b.network] || "", browserWhere(b)].filter(Boolean).join(" · ")}</div>
+            </div>
+          ),
+        },
+        { id: "pageviews", header: "Page views", accessorFn: (b) => b.pageviews },
+        { id: "sessions", header: "Visits", accessorFn: (b) => b.sessions },
+        { id: "first_seen", header: "First seen", accessorFn: (b) => b.first_seen_at, cell: ({ row: { original: b } }) => <span className="text-muted-foreground">{ago(b.first_seen_at)}</span> },
+        {
+          id: "last_seen",
+          header: "Last seen",
+          accessorFn: (b) => b.last_seen_at,
+          cell: ({ row: { original: b } }) => (
+            <div className="min-w-0">
+              <div>{ago(b.last_seen_at)}</div>
+              <div className="truncate font-mono text-[12px] text-muted-foreground">{b.last_path}</div>
+            </div>
+          ),
+        },
+      ]}
+      initialSort={[{ id: "last_seen", desc: true }]}
+    />
+  );
+}
+
+// BrowserSheet is one visitor's profile: who they are if known (and how and
+// when they became known), then their visits, newest first, each opening
+// to the pages and events in it.
+function BrowserSheet({ anon, onClose, go }: { anon: string; onClose: () => void; go: (tab: Tab, item?: string) => void }) {
+  const [b, setB] = useState<Browser | null>(null);
+  const [visits, setVisits] = useState<Visit[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    api.GET("/v1/brands/{brand}/visitors/browsers/{anonymous_id}", { params: { path: { brand: pickedBrandId(), anonymous_id: anon } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setB(data.browser);
+      setVisits(data.visits);
+    });
+  }, [anon]);
+
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>{b ? browserName(b) : "Visitor"}</SheetTitle>
+          <SheetDescription>{b ? [b.company_name || b.company_domain || networks[b.network] || "", browserWhere(b)].filter(Boolean).join(" · ") || "Anonymous visitor" : ""}</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-5 px-4 pb-6 text-[13px]">
+          {error && <ErrorText>{error}</ErrorText>}
+          {!b && !error && <Loading />}
+          {b && (
+            <>
+              {b.record_id ? (
+                <div className="space-y-1 rounded-md border p-3">
+                  <div className="font-medium">Known as {b.name || "a person in your CRM"}</div>
+                  <div className="text-muted-foreground">
+                    {how[b.identified_by] ?? "Identified"}{b.identified_at ? ` ${ago(b.identified_at)}` : ""}. Their visits from before then are on their record too.
+                  </div>
+                  <button className="underline" onClick={() => go("people", b.record_id!)}>Open their record</button>
+                </div>
+              ) : (
+                <div className="rounded-md border bg-muted/40 p-3 text-muted-foreground">
+                  Nobody knows who this is yet. When they sign in to your product, click a tracked link in your email or open a visitor link, everything here joins their record.
+                </div>
+              )}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <dt className="text-muted-foreground">First seen</dt><dd>{ago(b.first_seen_at)}</dd>
+                <dt className="text-muted-foreground">Last seen</dt><dd>{ago(b.last_seen_at)}</dd>
+                <dt className="text-muted-foreground">Visits</dt><dd>{b.sessions.toLocaleString()}</dd>
+                <dt className="text-muted-foreground">Page views</dt><dd>{b.pageviews.toLocaleString()}</dd>
+                <dt className="text-muted-foreground">Key pages</dt><dd>{b.key_pageviews.toLocaleString()}</dd>
+                <dt className="text-muted-foreground">Intent score</dt><dd>{b.score}{b.hot ? " · hot" : ""}</dd>
+              </dl>
+              <div className="space-y-2">
+                <div className="font-medium">Journey</div>
+                {visits === null ? <Loading /> : visits.length === 0 ? <div className="text-muted-foreground">No visits recorded.</div> : (
+                  <ol className="space-y-2">{visits.map((v) => <VisitRow key={v.id} anon={anon} v={v} browserKnown={!!b.record_id} />)}</ol>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+const channelNames: Record<string, string> = {
+  outbound_email: "Cold email", seo: "Search", ai_answers: "AI answers", organic_social: "Social", reddit: "Reddit", paid_ads: "Paid ads",
+  affiliates: "Partners", lifecycle_email: "Your email", referral: "Referral", direct: "Direct",
+};
+
+function VisitRow({ anon, v, browserKnown }: { anon: string; v: Visit; browserKnown: boolean }) {
+  const [events, setEvents] = useState<BrowserEvent[] | null>(null);
+  const [openRow, setOpenRow] = useState(false);
+  async function toggle() {
+    setOpenRow(!openRow);
+    if (events) return;
+    const { data } = await api.GET("/v1/brands/{brand}/visitors/browsers/{anonymous_id}/events", { params: { path: { brand: pickedBrandId(), anonymous_id: anon }, query: { session: v.id, limit: 200 } } });
+    setEvents((data?.data ?? []).slice().reverse());
+  }
+  const from = [channelNames[v.channel] ?? v.channel, v.referrer_host && `from ${v.referrer_host}`, v.utm_campaign].filter(Boolean).join(" · ");
+  return (
+    <li className="rounded-md border">
+      <button type="button" className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left" onClick={toggle} aria-expanded={openRow}>
+        <div className="min-w-0">
+          <div className="truncate font-medium">{v.landing_path || "/"}</div>
+          <div className="text-muted-foreground">{[from || "Direct", plural(v.pageviews, "page"), browserWhere(v)].filter(Boolean).join(" · ")}</div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="text-muted-foreground" title={v.started_at}>{ago(v.started_at)}</div>
+          {browserKnown && !v.known && <Badge tone="grey">Before known</Badge>}
+        </div>
+      </button>
+      {openRow && (
+        <div className="border-t px-3 py-2">
+          {events === null ? <Loading /> : events.length === 0 ? <div className="text-muted-foreground">No pages recorded.</div> : (
+            <ol className="space-y-1">
+              {events.map((e) => (
+                <li key={e.id} className="flex justify-between gap-3">
+                  <span className="min-w-0 truncate">{e.kind === "page" ? <span className="font-mono">{e.path || "/"}</span> : e.kind === "identify" ? <span className="font-medium">Identified</span> : <span className="font-medium">{e.name}</span>}{e.kind === "track" && e.path ? <span className="text-muted-foreground"> on {e.path}</span> : null}</span>
+                  <span className="shrink-0 text-muted-foreground">{new Date(e.occurred_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -240,13 +437,13 @@ function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
   // provider took for its own: its visitors lose it.
   async function notACompany() {
     setBusy(true);
-    const cur = await api.GET("/v1/workspaces/{ws}/visitors/settings", { params: { path: { ws } } });
+    const cur = await api.GET("/v1/brands/{brand}/visitors/settings", { params: { path: { brand: pickedBrandId() } } });
     if (cur.error || !cur.data) {
       setBusy(false);
       return setError(errorMessage(cur.error));
     }
-    const { error } = await api.PUT("/v1/workspaces/{ws}/visitors/settings", {
-      params: { path: { ws } },
+    const { error } = await api.PUT("/v1/brands/{brand}/visitors/settings", {
+      params: { path: { brand: pickedBrandId() } },
       body: { not_companies: [...cur.data.not_companies, v.domain ?? ""] },
     });
     setBusy(false);
@@ -336,7 +533,7 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/visitors/settings", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/visitors/settings", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setS(data);
       setKeyPages(data.key_pages.join("\n"));
@@ -352,8 +549,8 @@ function SettingsCard({ ws, onSaved, go }: { ws: string; onSaved: () => void; go
     if (!s) return;
     setBusy(true);
     const split = (v: string) => v.split(/[\s,]+/).filter(Boolean);
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/visitors/settings", {
-      params: { path: { ws } },
+    const { data, error } = await api.PUT("/v1/brands/{brand}/visitors/settings", {
+      params: { path: { brand: pickedBrandId() } },
       body: {
         key_pages: split(keyPages), exclude_domains: split(exclude), hot_score: Number(hot), email_clicks: s.email_clicks, exclude_customers: s.exclude_customers,
         reveal_companies: s.reveal_companies, reveal_integration_id: s.reveal_integration_id, reveal_daily_limit: Number(limit), not_companies: split(notCompanies),

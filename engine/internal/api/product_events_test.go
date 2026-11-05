@@ -20,10 +20,10 @@ func TestProductEventSink(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT id::text FROM users`).Scan(&user); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.srv.ProductEventSink(ctx, "00000000-0000-0000-0000-000000000000"); err == nil {
+	if _, err := e.srv.ProductEventSink(ctx, "00000000-0000-0000-0000-000000000000", ""); err == nil {
 		t.Fatal("a sink for a missing workspace was made")
 	}
-	sink, err := e.srv.ProductEventSink(ctx, ws)
+	sink, err := e.srv.ProductEventSink(ctx, ws, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +32,10 @@ func TestProductEventSink(t *testing.T) {
 	sink.Send(ctx, []track.Event{
 		{Name: "mailbox.connected", UserID: user, WorkspaceID: "w-1", Surface: "web", Outcome: track.Success, At: at, Props: map[string]any{"provider": "google"}},
 		{Name: "api.called", UserID: user, Surface: "mcp", Outcome: track.Failure, ErrorCode: "forbidden", At: at},
+		// Successful calls are kept once an hour per person: the second
+		// isn't stored, the request logs keep it.
+		{Name: "api.called", UserID: user, Surface: "api", Outcome: track.Success, At: at},
+		{Name: "api.called", UserID: user, Surface: "api", Outcome: track.Success, At: at.Add(time.Second)},
 		{Name: "job.dead", WorkspaceID: "w-1", Outcome: track.Error, ErrorCode: "internal", At: at},
 	})
 	if n := len(got()); n != before {
@@ -40,14 +44,21 @@ func TestProductEventSink(t *testing.T) {
 
 	base := "/v1/workspaces/" + ws
 	list := owner.must(200, "GET", base+"/customer-events?user_id="+user, nil)["data"].([]any)
-	if len(list) != 3 {
+	if len(list) != 4 {
 		t.Fatalf("events for the person: %v", list)
 	}
 	var called map[string]any
+	calls := 0
 	for _, v := range list {
 		if m := v.(map[string]any); m["name"] == "api.called" {
-			called = m
+			calls++
+			if m["properties"].(map[string]any)["outcome"] == "failure" {
+				called = m
+			}
 		}
+	}
+	if calls != 2 {
+		t.Fatalf("api.called stored %d times, want the failure and one success", calls)
 	}
 	p := called["properties"].(map[string]any)
 	if called["source"] != "outflare" || p["outcome"] != "failure" || p["error_code"] != "forbidden" || p["surface"] != "mcp" || called["record_id"] == nil {
@@ -130,7 +141,7 @@ func TestProductEventSinkJoinsVisits(t *testing.T) {
 		t.Fatalf("signed in events: %+v", signedIn)
 	}
 
-	sink, err := e.srv.ProductEventSink(ctx, ws)
+	sink, err := e.srv.ProductEventSink(ctx, ws, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,5 +157,76 @@ func TestProductEventSinkJoinsVisits(t *testing.T) {
 	}
 	if rec == nil || *rec != person || clicks["gclid"] != "Cj0-test-click" {
 		t.Fatalf("visit record %v, person %s, clicks %v", rec, person, clicks)
+	}
+}
+
+// The operator's own events land in the brand whose website tag counts
+// its site, and any call a signed-in person makes joins their visits.
+func TestProductEventSinkBrand(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	ctx := context.Background()
+	base := "/v1/workspaces/" + ws
+	if _, err := e.srv.ProductEventSink(ctx, ws, "no-such-brand"); err == nil {
+		t.Fatal("a sink for a missing brand was made")
+	}
+
+	// A call with the visitor cookie carries it, once signed in.
+	owner.extra = append(owner.extra, &http.Cookie{Name: "of_aid", Value: "visitor-in-app-1"})
+	before := len(got())
+	app := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak App", "website": "https://app.northpeak.example/"})
+	appID, handle := app["id"].(string), app["handle"].(string)
+	var call *track.Event
+	for _, ev := range got()[before:] {
+		if ev.Name == "api.called" {
+			call = &ev
+		}
+	}
+	if call == nil || call.AnonymousID != "visitor-in-app-1" || call.UserID == "" {
+		t.Fatalf("api.called: %+v", call)
+	}
+
+	sink, err := e.srv.ProductEventSink(ctx, ws, handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.Send(ctx, []track.Event{*call, *call})
+	var brand string
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT min(brand_id::text), count(DISTINCT brand_id) + count(*) FILTER (WHERE kind = 'track') - 1 FROM customer_events WHERE workspace_id = $1 AND source = 'outflare'`, ws).Scan(&brand, &n); err != nil {
+		t.Fatal(err)
+	}
+	// The second successful call in the same hour isn't stored.
+	if brand != appID || n != 1 {
+		t.Fatalf("stored under %s (%d), want %s", brand, n, appID)
+	}
+	var joined int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM record_identities WHERE workspace_id = $1 AND namespace = 'anonymous_id' AND value = 'visitor-in-app-1'`, ws).Scan(&joined); err != nil {
+		t.Fatal(err)
+	}
+	if joined != 1 {
+		t.Fatalf("visitor joined %d times", joined)
+	}
+}
+
+// Opening a signed-in page joins the browser's visits without any action:
+// the first read sends visitor.linked, later reads send nothing.
+func TestVisitorLinkedOnRead(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	owner.extra = append(owner.extra, &http.Cookie{Name: "of_aid", Value: "visitor-reading-1"})
+	before := len(got())
+	owner.must(200, "GET", "/v1/workspaces/"+ws+"/brands", nil)
+	owner.must(200, "GET", "/v1/workspaces/"+ws+"/brands", nil)
+	var linked []track.Event
+	for _, ev := range got()[before:] {
+		if ev.Name == "visitor.linked" {
+			linked = append(linked, ev)
+		}
+	}
+	if len(linked) != 1 || linked[0].AnonymousID != "visitor-reading-1" || linked[0].UserID == "" {
+		t.Fatalf("visitor.linked: %+v", linked)
 	}
 }

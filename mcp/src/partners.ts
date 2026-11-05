@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller, brandRef } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -85,7 +86,6 @@ const proposalConfig = z.object({
 
 const programSettings = {
   name: z.string().max(120).optional(),
-  brand: z.string().optional().describe("A brand's id or handle."),
   landing_url: z.string().max(2000).optional().describe("Where partner links land."),
   currency: z.string().length(3).optional(),
   credit_window_days: z.number().int().min(1).max(365).optional(),
@@ -119,24 +119,25 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   const program = z.string().describe("The program's id or slug.");
   const partner = id.describe("The partner's id (their membership in one program), from list_partners.");
   const path = () => ({ ws: workspace() });
+  const onBrand = brandCaller(gtm, workspace);
 
-  server.registerTool("list_partner_proposals",{title:"List one-to-one partnership proposals",inputSchema:{program},annotations:read},({program:id})=>call(()=>gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/proposals",{params:{path:{...path(),id}}})));
+  server.registerTool("list_partner_proposals",{title:"List one-to-one partnership proposals",inputSchema: { brand: brandRef,program},annotations:read},({ brand, program:id})=>call(()=>onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/proposals",{params:{path: { brand: b, id}}}))));
   if(!readOnly){
-    server.registerTool("create_partner_proposal",{title:"Draft a private partnership proposal",description:"One named recipient, cross-platform deliverables and manually approved milestones. No outreach is sent. Use invite after reviewing the draft.",inputSchema:{program,partner_id:id.optional(),email:z.string().optional(),name:z.string().optional(),config:proposalConfig},annotations:write},({program:id,...body})=>call(()=>gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/proposals",{params:{path:{...path(),id}},body})));
-    server.registerTool("update_partner_proposal",{title:"Manage a partnership proposal",description:"Revise before acceptance, generate an invitation link, explicitly verify submitted work, or approve an eligible milestone. Time never automatically releases payment.",inputSchema:{program,proposal:id,version:z.number().int(),action:z.enum(["revise","invite","verify","approve","complete"]),config:proposalConfig.optional(),deliverable_id:z.string().optional(),milestone_id:z.string().optional(),note:z.string().max(4000).optional()},annotations:write},({program:id,proposal,...body})=>call(()=>gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}",{params:{path:{...path(),id,proposal}},body})));
+    server.registerTool("create_partner_proposal",{title:"Draft a private partnership proposal",description:"One named recipient, cross-platform deliverables and manually approved milestones. No outreach is sent. Use invite after reviewing the draft.",inputSchema: { brand: brandRef,program,partner_id:id.optional(),email:z.string().optional(),name:z.string().optional(),config:proposalConfig},annotations:write},({ brand, program:id,...body})=>call(()=>onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/proposals",{params:{path: { brand: b, id}},body}))));
+    server.registerTool("update_partner_proposal",{title:"Manage a partnership proposal",description:"Revise before acceptance, generate an invitation link, explicitly verify submitted work, or approve an eligible milestone. Time never automatically releases payment.",inputSchema: { brand: brandRef,program,proposal:id,version:z.number().int(),action:z.enum(["revise","invite","verify","approve","complete"]),config:proposalConfig.optional(),deliverable_id:z.string().optional(),milestone_id:z.string().optional(),note:z.string().max(4000).optional()},annotations:write},({ brand, program:id,proposal,...body})=>call(()=>onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/proposals/{proposal}",{params:{path: { brand: b, id,proposal}},body}))));
   }
   server.registerTool("list_partner_tasks", {
     title: "List partner tasks", description: "Paid and voluntary opportunities, private website proposals and their assignments.",
-    inputSchema: { program }, annotations: read,
-  }, ({ program: id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/tasks", { params: { path: { ...path(), id } } })));
+    inputSchema: { brand: brandRef, program }, annotations: read,
+  }, ({ brand, program: id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/tasks", { params: { path: { brand: b, id } } }))));
   server.registerTool("list_partner_audiences", {
     title: "List partner audience profiles", description: "Partner websites, channels and communities, with reach sources and website ownership status. Scraped reach is not proof of ownership.",
-    inputSchema: { program }, annotations: read,
-  }, ({ program: id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/audiences", { params: { path: { ...path(), id } } })));
+    inputSchema: { brand: brandRef, program }, annotations: read,
+  }, ({ brand, program: id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/audiences", { params: { path: { brand: b, id } } }))));
   if (!readOnly) {
     server.registerTool("create_partner_task", {
       title: "Create a partner task", description: "Create a paid or voluntary opportunity. target_host makes it a private proposal unlocked by verified website ownership. Ranged/custom prices require an accepted offer. Automatic verification checks a required link on a verified website using the workspace's own page reader.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         program, title: z.string().min(1).max(160), description: z.string().min(1).max(6000),
         category: z.enum(["blog","video","social","newsletter","banner","community","other"]).optional(),
         reward_kind: z.enum(["free","cash","action"]).optional(), pricing: z.enum(["fixed","range","custom"]).optional(),
@@ -146,14 +147,14 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         hold_days: z.number().int().min(0).max(365).optional(), asset_kind: z.enum(["","website","youtube","x","linkedin","instagram","tiktok","newsletter","reddit","facebook","discord","podcast","other"]).optional(),
         min_reach: z.number().int().min(0).optional(), target_host: z.string().max(253).optional(), required_link: z.string().max(2000).optional(), slots: z.number().int().min(1).max(10000).optional(),
       }, annotations: write,
-    }, ({ program: id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/tasks", { params: { path: { ...path(), id } }, body })));
+    }, ({ brand, program: id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/tasks", { params: { path: { brand: b, id } }, body }))));
     server.registerTool("update_partner_task", {
-      title: "Pause or resume a partner task", inputSchema: { program, task: id, action: z.enum(["pause","resume"]) }, annotations: write,
-    }, ({ program: id, task, action }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}", { params: { path: { ...path(), id, task } }, body: { action } })));
+      title: "Pause or resume a partner task", inputSchema: { brand: brandRef, program, task: id, action: z.enum(["pause","resume"]) }, annotations: write,
+    }, ({ brand, program: id, task, action }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/tasks/{task}", { params: { path: { brand: b, id, task } }, body: { action } }))));
     server.registerTool("review_partner_task", {
       title: "Review partner work or offer a price", description: "Offer a fixed price for an application, approve submitted work into the reward ledger, or reject it. Partners accept offered prices before doing the work.",
-      inputSchema: { program, submission: id, action: z.enum(["offer","approve","reject"]), amount_cents: z.number().int().min(0).max(100000000).optional(), note: z.string().max(2000).optional() }, annotations: write,
-    }, ({ program: id, submission, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}", { params: { path: { ...path(), id, submission } }, body })));
+      inputSchema: { brand: brandRef, program, submission: id, action: z.enum(["offer","approve","reject"]), amount_cents: z.number().int().min(0).max(100000000).optional(), note: z.string().max(2000).optional() }, annotations: write,
+    }, ({ brand, program: id, submission, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/task-submissions/{submission}", { params: { path: { brand: b, id, submission } }, body }))));
   }
 
   server.registerTool(
@@ -161,10 +162,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List partner programs",
       description: "Referral, affiliate and influencer programs with their credit rule, hold, minimum payout and reward rules.",
-      inputSchema: { status: z.enum(["active", "paused", "archived"]).optional() },
+      inputSchema: { brand: brandRef, status: z.enum(["active", "paused", "archived"]).optional() },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -183,10 +184,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Get a partner program's totals",
       description: "Partners by status, and clicks, referred customers, sales, rewards on hold, due and paid across all of the program's partners.",
-      inputSchema: { program },
+      inputSchema: { brand: brandRef, program },
       annotations: read,
     },
-    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws: workspace(), id: program } } })),
+    ({ brand, program }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/stats", { params: { path: { brand: b, id: program } } }))),
   );
 
   server.registerTool(
@@ -194,10 +195,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Get a partner program",
       description: "One program with its reward rules and groups.",
-      inputSchema: { program },
+      inputSchema: { brand: brandRef, program },
       annotations: read,
     },
-    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws: workspace(), id: program } } })),
+    ({ brand, program }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: b, id: program } } }))),
   );
 
   server.registerTool(
@@ -207,7 +208,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Partners newest first, each with their program, ref code, short link, campaign link, promo codes and totals: clicks, referrals, " +
         "customers, sales, and cash pending, approved, paid and in their balance.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         program: z.string().optional().describe("A program's id or slug."),
         status: z.enum(["pending", "active", "suspended", "rejected"]).optional(),
         record_id: id.optional().describe("The partner's customer record."),
@@ -216,13 +217,13 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partners", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partners", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
     "get_partner",
-    { title: "Get a partner", description: "One partner with their links, promo codes and totals.", inputSchema: { partner_id: partner }, annotations: read },
-    ({ partner_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws: workspace(), id: partner_id } } })),
+    { title: "Get a partner", description: "One partner with their links, promo codes and totals.", inputSchema: { brand: brandRef, partner_id: partner }, annotations: read },
+    ({ brand, partner_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: b, id: partner_id } } }))),
   );
 
   server.registerTool(
@@ -230,10 +231,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List partner conversions",
       description: "Sign-ups, sales, refunds and custom conversions credited to partners, newest first.",
-      inputSchema: { type: z.enum(["signup", "sale", "refund", "custom"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
+      inputSchema: { brand: brandRef, type: z.enum(["signup", "sale", "refund", "custom"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-conversions", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -244,7 +245,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "Every conversion the workspace's backend or tracker reported in the last 30 days (API or postback URL), newest first, " +
         "with what it sent, the answer and the outcome (credited, not_credited with its reason, duplicate, rejected, error). " +
         "Use it to find out why a sale wasn't credited. q finds a call by external_id, customer_id, ref, promo code, email or request id.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         program: z.string().optional(),
         source: z.enum(["api", "postback"]).optional(),
         outcome: z.enum(["credited", "not_credited", "duplicate", "rejected", "error"]).optional(),
@@ -254,7 +255,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-conversion-log", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-conversion-log", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -262,7 +263,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List referred customers",
       description: "Each customer a partner was credited with (once per program), how (ref, click, promo_code, visit), and their net sales.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         partner_id: id.optional(),
         record_id: id.optional().describe("The referred customer."),
         status: z.enum(["lead", "customer", "refunded", "rejected"]).optional(),
@@ -270,7 +271,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-referrals", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-referrals", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -280,7 +281,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Cash, fees, actions and adjustments, newest first. pending is on hold or waiting for a person; approved cash counts toward the next " +
         "payout; an approved action waits for the workspace's system to carry it out.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         status: z.enum(["pending", "approved", "rejected", "paid", "fulfilled"]).optional(),
         kind: z.enum(["cash", "fee", "action", "adjustment"]).optional(),
         partner_id: id.optional(),
@@ -290,7 +291,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-rewards", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -298,10 +299,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List partner payouts",
       description: "Payouts newest first: due ones are waiting to be paid from the workspace's own account.",
-      inputSchema: { status: z.enum(["due", "paid", "canceled"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
+      inputSchema: { brand: brandRef, status: z.enum(["due", "paid", "canceled"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-payouts", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -309,10 +310,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List a partner's postbacks to their tracker",
       description: "The last 50 calls to the partner's postback URL: queued, sent, or failed with the tracker's answer.",
-      inputSchema: { partner_id: partner },
+      inputSchema: { brand: brandRef, partner_id: partner },
       annotations: read,
     },
-    ({ partner_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partners/{id}/postbacks", { params: { path: { ws: workspace(), id: partner_id } } })),
+    ({ brand, partner_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partners/{id}/postbacks", { params: { path: { brand: b, id: partner_id } } }))),
   );
 
   server.registerTool(
@@ -322,28 +323,28 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Due payouts (or paid, canceled, all) as CSV, with each partner's payout details, for paying them from the workspace's own account " +
         "or a payout tool. Needs partners.manage; the export is recorded in the audit log. Never paste the payout details anywhere public.",
-      inputSchema: { status: z.enum(["due", "paid", "canceled", "all"]).optional(), program: z.string().max(100).optional() },
+      inputSchema: { brand: brandRef, status: z.enum(["due", "paid", "canceled", "all"]).optional(), program: z.string().max(100).optional() },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-payouts/export", { params: { path: path(), query }, parseAs: "text" })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-payouts/export", { params: { path: { brand: b }, query }, parseAs: "text" }))),
   );
 
   server.registerTool(
     "list_partner_assets",
-    { title: "List a program's assets for partners", description: "Banners, copy and links shown on the portal.", inputSchema: { program }, annotations: read },
-    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/assets", { params: { path: { ws: workspace(), id: program } } })),
+    { title: "List a program's assets for partners", description: "Banners, copy and links shown on the portal.", inputSchema: { brand: brandRef, program }, annotations: read },
+    ({ brand, program }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/assets", { params: { path: { brand: b, id: program } } }))),
   );
 
   server.registerTool(
     "list_partner_imports",
-    { title: "List a program's imports from Tolt", description: "Newest first: status, counts per kind (created, updated, unchanged, skipped) and issues by Tolt id and reason.", inputSchema: { program }, annotations: read },
-    ({ program }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws: workspace(), id: program } } })),
+    { title: "List a program's imports from Tolt", description: "Newest first: status, counts per kind (created, updated, unchanged, skipped) and issues by Tolt id and reason.", inputSchema: { brand: brandRef, program }, annotations: read },
+    ({ brand, program }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/imports", { params: { path: { brand: b, id: program } } }))),
   );
 
   server.registerTool(
     "get_partner_import",
-    { title: "Get an import from Tolt", description: "Its status, counts per kind and issues.", inputSchema: { program, import_id: id }, annotations: read },
-    ({ program, import_id }) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports/{import}", { params: { path: { ws: workspace(), id: program, import: import_id } } })),
+    { title: "Get an import from Tolt", description: "Its status, counts per kind and issues.", inputSchema: { brand: brandRef, program, import_id: id }, annotations: read },
+    ({ brand, program, import_id }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/imports/{import}", { params: { path: { brand: b, id: program, import: import_id } } }))),
   );
 
   if (readOnly) return;
@@ -355,11 +356,11 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Reads the programs in the workspace's connected Tolt account (id, name, currency, active or inactive), to pass one as " +
         "start_partner_import's source_program. suggested is the one an import takes when none is named. Needs partners.manage; changes nothing.",
-      inputSchema: { program, integration_id: id.optional() },
+      inputSchema: { brand: brandRef, program, integration_id: id.optional() },
       annotations: read,
     },
-    ({ program, integration_id }) =>
-      call(() => gtm.GET("/v1/workspaces/{ws}/partner-programs/{id}/import-sources", { params: { path: { ws: workspace(), id: program }, query: { integration_id } } })),
+    ({ brand, program, integration_id }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-programs/{id}/import-sources", { params: { path: { brand: b, id: program }, query: { integration_id } } }))),
   );
 
   server.registerTool(
@@ -369,10 +370,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Only once the platform the program was imported from (Tolt) no longer pays it. Until then its imported commissions keep Tolt's " +
         "status and are never approved or paid here, so nobody is paid twice; afterwards they are approved and paid here like any other.",
-      inputSchema: { program },
+      inputSchema: { brand: brandRef, program },
       annotations: write,
     },
-    ({ program }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/switch-over", { params: { path: { ws: workspace(), id: program } } })),
+    ({ brand, program }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/switch-over", { params: { path: { brand: b, id: program } } }))),
   );
 
   server.registerTool(
@@ -384,10 +385,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Safe to run again until switch-over day: " +
         "each run adds only what is new and brings over status changes. Sends no reward webhooks. Poll get_partner_import for the result. " +
         "source_program is the Tolt program id (list_partner_import_sources), needed only when the account has more than one active program.",
-      inputSchema: { program, source_program: z.string().max(200).optional(), integration_id: id.optional() },
+      inputSchema: { brand: brandRef, program, source_program: z.string().max(200).optional(), integration_id: id.optional() },
       annotations: write,
     },
-    ({ program, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws: workspace(), id: program } }, body })),
+    ({ brand, program, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/imports", { params: { path: { brand: b, id: program } }, body }))),
   );
 
   server.registerTool(
@@ -399,10 +400,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "workspace's own system grants (such as credit), partners accepted at once. affiliate: 20% of every sale, 30-day hold, $50 minimum " +
         "payout. influencer: track only; log fees with log_partner_fee. The credit rule is the program's own and never follows the " +
         "workspace's attribution settings.",
-      inputSchema: { ...programSettings, name: z.string().max(120), kind: z.enum(["referral", "affiliate", "influencer"]), slug: z.string().max(60).optional(), rules: z.array(rule).max(50).optional() },
+      inputSchema: { brand: brandRef, ...programSettings, name: z.string().max(120), kind: z.enum(["referral", "affiliate", "influencer"]), slug: z.string().max(60).optional(), rules: z.array(rule).max(50).optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -410,10 +411,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Change a partner program",
       description: "Change settings, or pause, archive or restore it. Send only what changes. A paused program credits nothing new.",
-      inputSchema: { program, ...programSettings, status: z.enum(["active", "paused", "archived"]).optional() },
+      inputSchema: { brand: brandRef, program, ...programSettings, status: z.enum(["active", "paused", "archived"]).optional() },
       annotations: write,
     },
-    ({ program, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws: workspace(), id: program } }, body })),
+    ({ brand, program, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: b, id: program } }, body }))),
   );
 
   server.registerTool(
@@ -436,10 +437,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "their group's, then the highest tier reached, then the narrower recurrence (first sale, then months, then every sale), then " +
         "product-specific, then the higher payout. Send every rule: this replaces them all, so read the program first. [] makes the program " +
         "track only. Rewards already earned keep their amounts.",
-      inputSchema: { program, rules: z.array(rule).max(50) },
+      inputSchema: { brand: brandRef, program, rules: z.array(rule).max(50) },
       annotations: write,
     },
-    ({ program, rules }) => call(() => gtm.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws: workspace(), id: program } }, body: { rules } })),
+    ({ brand, program, rules }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/partner-programs/{id}/rules", { params: { path: { brand: b, id: program } }, body: { rules } }))),
   );
 
   server.registerTool(
@@ -449,10 +450,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "A group (tier) with its own rates: give it rules with set_partner_rules (group_id) and move partners into it with " +
         "assign_partner_group. default: true makes it the group new partners join.",
-      inputSchema: { program, name: z.string().max(80), default: z.boolean().optional() },
+      inputSchema: { brand: brandRef, program, name: z.string().max(80), default: z.boolean().optional() },
       annotations: write,
     },
-    ({ program, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups", { params: { path: { ws: workspace(), id: program } }, body })),
+    ({ brand, program, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/groups", { params: { path: { brand: b, id: program } }, body }))),
   );
 
   const group = z.string().uuid().describe("A group's id, from get_partner_program.");
@@ -461,11 +462,11 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Rename a partner group or make it the default",
       description: "default: true makes it the group new partners join; false stops that. Returns the program.",
-      inputSchema: { program, group_id: group, name: z.string().min(1).max(80).optional(), default: z.boolean().optional() },
+      inputSchema: { brand: brandRef, program, group_id: group, name: z.string().min(1).max(80).optional(), default: z.boolean().optional() },
       annotations: write,
     },
-    ({ program, group_id, ...body }) =>
-      call(() => gtm.PATCH("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws: workspace(), id: program, group: group_id } }, body })),
+    ({ brand, program, group_id, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/partner-programs/{id}/groups/{group}", { params: { path: { brand: b, id: program, group: group_id } }, body }))),
   );
 
   server.registerTool(
@@ -473,11 +474,11 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Move partners into a group",
       description: "A partner is in one group at a time, and its rules apply to them. group_id none takes them out of every group.",
-      inputSchema: { program, group_id: z.string().describe('A group\'s id, or "none".'), partner_ids: z.array(id).min(1).max(1000) },
+      inputSchema: { brand: brandRef, program, group_id: z.string().describe('A group\'s id, or "none".'), partner_ids: z.array(id).min(1).max(1000) },
       annotations: write,
     },
-    ({ program, group_id, partner_ids }) =>
-      call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", { params: { path: { ws: workspace(), id: program, group: group_id } }, body: { partner_ids } })),
+    ({ brand, program, group_id, partner_ids }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/groups/{group}/partners", { params: { path: { brand: b, id: program, group: group_id } }, body: { partner_ids } }))),
   );
 
   server.registerTool(
@@ -485,11 +486,11 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Remove a partner group",
       description: "Its own rules go with it; its partners move to no group.",
-      inputSchema: { program, group_id: group },
+      inputSchema: { brand: brandRef, program, group_id: group },
       annotations: { ...write, destructiveHint: true },
     },
-    ({ program, group_id }) =>
-      call(() => gtm.DELETE("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws: workspace(), id: program, group: group_id } } })),
+    ({ brand, program, group_id }) =>
+      call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/partner-programs/{id}/groups/{group}", { params: { path: { brand: b, id: program, group: group_id } } }))),
   );
 
   server.registerTool(
@@ -499,7 +500,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "A partner is a customer record: pass record_id, or an email (the person with it, made when nobody has it). Returns their ref code, " +
         "short link and campaign link to share.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         program,
         record_id: id.optional(),
         email: z.string().optional(),
@@ -512,7 +513,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partners", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partners", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -520,7 +521,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Approve, suspend or change a partner",
       description: "status active approves a pending partner; suspended or rejected stops new credit (their links still land). Or change their group, payout method or note.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         partner_id: partner,
         status: z.enum(["pending", "active", "suspended", "rejected"]).optional(),
         group_id: z.string().optional().describe('A group of the program; "" for none.'),
@@ -534,7 +535,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    ({ partner_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws: workspace(), id: partner_id } }, body })),
+    ({ brand, partner_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: b, id: partner_id } }, body }))),
   );
 
   server.registerTool(
@@ -542,7 +543,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Tie a promo code to a partner",
       description: "The code as customers type it at checkout; conversions reporting it credit the partner. With coupon, Outflare makes it in the connected Stripe account; otherwise make it there yourself.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         rules: promoRules.optional(),
         partner_id: partner,
         code: z.string().max(64),
@@ -550,7 +551,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    ({ partner_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partners/{id}/promo-codes", { params: { path: { ws: workspace(), id: partner_id } }, body })),
+    ({ brand, partner_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partners/{id}/promo-codes", { params: { path: { brand: b, id: partner_id } }, body }))),
   );
 
   server.registerTool(
@@ -558,10 +559,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Log a fixed fee for a partner",
       description: "Such as an influencer's fee for a post. Approved at once, counted toward their next payout and logged as a cost on the affiliates channel.",
-      inputSchema: { partner_id: partner, amount_cents: z.number().int().min(1), note: z.string().max(2000).optional() },
+      inputSchema: { brand: brandRef, partner_id: partner, amount_cents: z.number().int().min(1), note: z.string().max(2000).optional() },
       annotations: write,
     },
-    ({ partner_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partners/{id}/fees", { params: { path: { ws: workspace(), id: partner_id } }, body })),
+    ({ brand, partner_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partners/{id}/fees", { params: { path: { brand: b, id: partner_id } }, body }))),
   );
 
   server.registerTool(
@@ -569,10 +570,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Correct what a partner is owed",
       description: "Positive adds, negative takes away; it nets in their next payout. Say why in note.",
-      inputSchema: { partner_id: partner, amount_cents: z.number().int(), note: z.string().min(1).max(2000) },
+      inputSchema: { brand: brandRef, partner_id: partner, amount_cents: z.number().int(), note: z.string().min(1).max(2000) },
       annotations: write,
     },
-    ({ partner_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partners/{id}/adjustments", { params: { path: { ws: workspace(), id: partner_id } }, body })),
+    ({ brand, partner_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partners/{id}/adjustments", { params: { path: { brand: b, id: partner_id } }, body }))),
   );
 
   server.registerTool(
@@ -584,7 +585,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "payment.refunded or the custom event_name). The partner is found from promo_code, ref or click_id, then a referral already bound " +
         "to the customer, then the customer's own visits with a ref inside the program's window. Not credited is not an error: credited " +
         "false comes with a reason.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         type: z.enum(["signup", "sale", "refund", "custom"]),
         event_name: z.string().max(80).optional().describe("custom only, such as trial_started."),
         recurring: z.boolean().optional().describe("Sales: a subscription renewal."),
@@ -604,7 +605,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-conversions", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-conversions", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -612,10 +613,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "List leads partners submitted",
       description: "People partners say they referred, submitted on the portal: pending ones wait for approval, approved ones are referrals via manual, rejected ones say why.",
-      inputSchema: { program: z.string().optional(), status: z.enum(["pending", "approved", "rejected"]).optional(), ...page },
+      inputSchema: { brand: brandRef, program: z.string().optional(), status: z.enum(["pending", "approved", "rejected"]).optional(), ...page },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: path(), query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-leads", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
@@ -623,10 +624,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Approve a submitted lead",
       description: "Make the person the partner's referred customer (via manual), under the program's rules. If another partner has them already, the lead is rejected with that reason.",
-      inputSchema: { lead_id: id },
+      inputSchema: { brand: brandRef, lead_id: id },
       annotations: write,
     },
-    ({ lead_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-leads/{id}/approve", { params: { path: { ws: workspace(), id: lead_id } }, body: {} })),
+    ({ brand, lead_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-leads/{id}/approve", { params: { path: { brand: b, id: lead_id } }, body: {} }))),
   );
 
   server.registerTool(
@@ -634,10 +635,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Reject a submitted lead",
       description: "Turn down a lead a partner submitted; the partner sees the reason.",
-      inputSchema: { lead_id: id, reason: z.string().max(500).optional() },
+      inputSchema: { brand: brandRef, lead_id: id, reason: z.string().max(500).optional() },
       annotations: write,
     },
-    ({ lead_id, reason }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-leads/{id}/reject", { params: { path: { ws: workspace(), id: lead_id } }, body: { reason } })),
+    ({ brand, lead_id, reason }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-leads/{id}/reject", { params: { path: { brand: b, id: lead_id } }, body: { reason } }))),
   );
 
   server.registerTool(
@@ -645,10 +646,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Approve a held partner reward",
       description: "Approve now, even before its hold ends. Cash counts toward the next payout and is logged as a cost; an action is sent to the workspace's system.",
-      inputSchema: { reward_id: id },
+      inputSchema: { brand: brandRef, reward_id: id },
       annotations: write,
     },
-    ({ reward_id }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/{id}/approve", { params: { path: { ws: workspace(), id: reward_id } }, body: {} })),
+    ({ brand, reward_id }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-rewards/{id}/approve", { params: { path: { brand: b, id: reward_id } }, body: {} }))),
   );
 
   server.registerTool(
@@ -656,10 +657,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Reject a held partner reward",
       description: "Only a pending one. Say why in note; the partner sees it.",
-      inputSchema: { reward_id: id, note: z.string().max(2000).optional() },
+      inputSchema: { brand: brandRef, reward_id: id, note: z.string().max(2000).optional() },
       annotations: write,
     },
-    ({ reward_id, note }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/{id}/reject", { params: { path: { ws: workspace(), id: reward_id } }, body: { note } })),
+    ({ brand, reward_id, note }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-rewards/{id}/reject", { params: { path: { brand: b, id: reward_id } }, body: { note } }))),
   );
 
   server.registerTool(
@@ -669,7 +670,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "Approve or reject pending rewards: those in ids, or every pending one of a program or partner (optionally one kind). Each is " +
         "recorded as if done alone. Up to 1,000 a call; more: true means call again. skipped lists any that weren't pending or visible, with why.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         action: z.enum(["approve", "reject"]),
         ids: z.array(z.string()).max(1000).optional().describe("Reward ids, from list_partner_rewards."),
         program: z.string().optional().describe("A program's id or slug: all its pending rewards."),
@@ -679,7 +680,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/bulk", { params: { path: { ws: workspace() } }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-rewards/bulk", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -687,10 +688,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Mark an action reward done",
       description: "After the workspace's system carried out an approved action reward (granted the credit).",
-      inputSchema: { reward_id: id, note: z.string().max(2000).optional() },
+      inputSchema: { brand: brandRef, reward_id: id, note: z.string().max(2000).optional() },
       annotations: write,
     },
-    ({ reward_id, note }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-rewards/{id}/fulfil", { params: { path: { ws: workspace(), id: reward_id } }, body: { note } })),
+    ({ brand, reward_id, note }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-rewards/{id}/fulfil", { params: { path: { brand: b, id: reward_id } }, body: { note } }))),
   );
 
   server.registerTool(
@@ -700,10 +701,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       description:
         "One payout per partner whose approved balance reaches the program's minimum (one partner, one program, or all). Outflare sends no " +
         "money: the workspace pays from its own account, then mark_partner_payout_paid.",
-      inputSchema: { partner_id: id.optional(), program: z.string().optional() },
+      inputSchema: { brand: brandRef, partner_id: id.optional(), program: z.string().optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-payouts", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-payouts", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -711,19 +712,19 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Mark a partner payout paid",
       description: "Only once the workspace has actually paid it. reference is the payment's id (a transfer id or invoice number).",
-      inputSchema: { payout_id: id, note: z.string().max(2000).optional(), reference: z.string().max(200).optional() },
+      inputSchema: { brand: brandRef, payout_id: id, note: z.string().max(2000).optional(), reference: z.string().max(200).optional() },
       annotations: write,
     },
-    ({ payout_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-payouts/{id}/paid", { params: { path: { ws: workspace(), id: payout_id } }, body })),
+    ({ brand, payout_id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-payouts/{id}/paid", { params: { path: { brand: b, id: payout_id } }, body }))),
   );
 
   server.registerTool("create_partner_portal_session", {
     title: "Open a hosted partner portal session", description: "Backend-only one-use sign-in URL valid for 60 seconds. Provisions a brand-authenticated customer using their stable customer_id. Terms acceptance still applies. Never expose workspace tokens in a browser.",
-    inputSchema: { program, customer_id: z.string().min(1), email: z.string().optional(), name: z.string().optional() }, annotations: write,
-  }, ({ program: id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/portal-sessions", { params: { path: { ws: workspace(), id } }, body })));
+    inputSchema: { brand: brandRef, program, customer_id: z.string().min(1), email: z.string().optional(), name: z.string().optional() }, annotations: write,
+  }, ({ brand, program: id, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/portal-sessions", { params: { path: { brand: b, id } }, body }))));
   server.registerTool("update_partner_promo_code", {
-    title: "Enable or disable a partner coupon", inputSchema: { partner, code: z.string(), enabled: z.boolean() }, annotations: write,
-  }, ({ partner: id, code, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", { params: { path: { ws: workspace(), id, code } }, body })));
+    title: "Enable or disable a partner coupon", inputSchema: { brand: brandRef, partner, code: z.string(), enabled: z.boolean() }, annotations: write,
+  }, ({ brand, partner: id, code, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/partners/{id}/promo-codes/{code}", { params: { path: { brand: b, id, code } }, body }))));
 
   server.registerTool(
     "set_partner_portal",
@@ -733,7 +734,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         "The portal is where partners apply, sign in with a link emailed through the workspace's own email provider (email_from, on a " +
         "verified sending domain) and see their links, masked referred customers, rewards and payouts. settings replace the stored ones; " +
         "left-out fields take the kind's defaults. portal_url in the answer is its address.",
-      inputSchema: {
+      inputSchema: { brand: brandRef,
         program,
         enabled: z.boolean().optional(),
         subdomain: z.string().max(63).optional().describe("Its subdomain of the server's partners domain; \"\" for none."),
@@ -764,7 +765,7 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       },
       annotations: write,
     },
-    ({ program, ...body }) => call(() => gtm.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", { params: { path: { ws: workspace(), id: program } }, body })),
+    ({ brand, program, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/partner-programs/{id}/portal", { params: { path: { brand: b, id: program } }, body }))),
   );
 
   server.registerTool(
@@ -772,10 +773,10 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Add an asset for partners",
       description: "Shown on the portal's Assets page. image: a banner's https address. text: copy or an email swipe. link: a page to promote.",
-      inputSchema: { program, kind: z.enum(["image", "text", "link"]), title: z.string().max(200), body: z.string().max(10000).optional(), url: z.string().max(2000).optional() },
+      inputSchema: { brand: brandRef, program, kind: z.enum(["image", "text", "link"]), title: z.string().max(200), body: z.string().max(10000).optional(), url: z.string().max(2000).optional() },
       annotations: write,
     },
-    ({ program, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-programs/{id}/assets", { params: { path: { ws: workspace(), id: program } }, body })),
+    ({ brand, program, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-programs/{id}/assets", { params: { path: { brand: b, id: program } }, body }))),
   );
 
   server.registerTool(
@@ -783,9 +784,9 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Cancel a due partner payout",
       description: "Its rewards go back into the partner's balance.",
-      inputSchema: { payout_id: id, note: z.string().max(2000).optional() },
+      inputSchema: { brand: brandRef, payout_id: id, note: z.string().max(2000).optional() },
       annotations: write,
     },
-    ({ payout_id, note }) => call(() => gtm.POST("/v1/workspaces/{ws}/partner-payouts/{id}/cancel", { params: { path: { ws: workspace(), id: payout_id } }, body: { note } })),
+    ({ brand, payout_id, note }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partner-payouts/{id}/cancel", { params: { path: { brand: b, id: payout_id } }, body: { note } }))),
   );
 }

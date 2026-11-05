@@ -160,20 +160,22 @@ func (s *Service) eventJob(ctx context.Context, job jobs.Job) error {
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var rec *string
 		var name string
+		var brand *string
 		var props []byte
-		err := tx.QueryRow(ctx, `SELECT record_id, name, properties FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
-			Scan(&rec, &name, &props)
+		err := tx.QueryRow(ctx, `SELECT record_id, name, properties, brand_id::text FROM customer_events WHERE workspace_id = $1 AND id = $2`, ws, in.EventID).
+			Scan(&rec, &name, &props, &brand)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && rec == nil) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		// Only approved events drive journeys: a name the workspace never
-		// defined arrives quarantined (the event catalog).
+		// Only approved events drive journeys: a name the event's brand never
+		// defined arrives quarantined (the brand's event catalog). Another
+		// brand approving the same name changes nothing here.
 		var approved bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2 AND status = 'approved')`,
-			ws, name).Scan(&approved); err != nil || !approved {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $3::uuid AND name = $2 AND status = 'approved')`,
+			ws, name, brand).Scan(&approved); err != nil || !approved {
 			return err
 		}
 		// Goals first: an event that ends a run never also restarts it.

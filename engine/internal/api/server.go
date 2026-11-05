@@ -113,6 +113,7 @@ type Server struct {
 	menuBadges      []MenuBadges
 	aiTools         []AITool
 	supportAuto     func(ctx context.Context, workspaceID string) bool
+	adAutoApprove   func(ctx context.Context, workspaceID, brandID, kind string) bool
 	middleware      []func(http.Handler) http.Handler
 	capabilities    []string
 	posthog         *posthogProxy
@@ -154,6 +155,7 @@ type Server struct {
 	// Which hosts are tracking domains, for trackingHostsOnly.
 	trackingHosts trackingHostCache
 	mcp           *MCPUpstream
+	mcpTransport  http.RoundTripper
 	privacyURL    string
 	community     []communityLink
 	termsURL      string
@@ -291,6 +293,10 @@ type Options struct {
 	// SupportAuto says which workspaces the support assistant may answer
 	// customers in without a person; nil for none (it only drafts).
 	SupportAuto func(ctx context.Context, workspaceID string) bool
+	// AdAutoApprove says whether an agent may approve a paid ads
+	// suggestion that saves money, for a brand and kind, without a person;
+	// nil for never (only a person approves).
+	AdAutoApprove func(ctx context.Context, workspaceID, brandID, kind string) bool
 	// TrackingTarget is the host tracking domains' CNAME records point at;
 	// empty for PUBLIC_URL's host.
 	TrackingTarget string
@@ -393,6 +399,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
 		mcp:              opts.MCP,
+		mcpTransport:     newMCPTransport(),
 		privacyURL:       opts.PrivacyURL,
 		termsURL:         opts.TermsURL,
 		community:        communityLinksFor(opts.CommunityLinks, opts.CommunityXURL, opts.CommunityBuilderURL),
@@ -426,6 +433,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		menuBadges:       opts.MenuBadges,
 		aiTools:          opts.AITools,
 		supportAuto:      opts.SupportAuto,
+		adAutoApprove:    opts.AdAutoApprove,
 		middleware:       opts.Middleware,
 		capabilities:     append([]string{"mailboxes", "domains", "leads", "suppression", "sequences", "inbox", "oauth", "warmup", "infrastructure", "allocation", "platforms", "connectors", "verification", "classification", "mailbox_suppliers", "mailbox_health", "imports", "reports", "outcomes", "tracking", "missions", "lists", "webhooks", "emails"}, opts.Capabilities...),
 		alloc:            alloc,
@@ -516,6 +524,10 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesConnectionBrands(mux)
 	s.routesAds(mux)
 	s.routesAdChanges(mux)
+	s.routesAdSuggestions(mux)
+	s.routesAdTests(mux)
+	s.routesAdTargeting(mux)
+	s.routesAdDrafts(mux)
 	s.routesAdTargets(mux)
 	s.routesAdTrackingFix(mux)
 	s.routesFindings(mux)
@@ -539,6 +551,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLists(mux)
 	s.routesSmartLists(mux)
 	s.routesTransactions(mux)
+	s.routesDeveloperSetup(mux)
+	s.routesInsights(mux)
+	s.routesDashboards(mux)
+	s.routesDashboardShares(mux)
+	s.routesInsightAlerts(mux)
 	s.routesRules(mux)
 	s.routesProducts(mux)
 	s.routesLifecycle(mux)
@@ -569,6 +586,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSEOSearch(mux)
 	s.routesSearchInsights(mux)
 	s.routesCompetitors(mux)
+	s.routesCompetition(mux)
+	s.routesCompetitorProfiles(mux)
 	s.routesLinkProspects(mux)
 	s.routesNews(mux)
 	s.routesBrandCoverage(mux)
@@ -612,6 +631,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesABTests(mux)
 	s.routesABTestAI(mux)
 	s.routesVisitors(mux)
+	s.routesVisitorBrowsers(mux)
+	s.routesSiteAnalytics(mux)
 	s.routesHealth(mux)
 	s.routesReports(mux)
 	s.routesTracking(mux)

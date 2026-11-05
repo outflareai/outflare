@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/aivis"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/crawl"
@@ -23,9 +25,6 @@ import (
 // light look from OutflareBot (crawl.Glance: robots.txt, sitemaps and the
 // home page only) and its numbers from the workspace's own SEO
 // connections, and what changed is a feed of events.
-
-// maxTrackedCompetitors is how many competitors one site may track.
-const maxTrackedCompetitors = 20
 
 var errAlreadyTracked = errors.New("already tracked")
 
@@ -167,19 +166,6 @@ func (s *Server) listCompetitors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next)})
 }
 
-// trackable checks a site may track one more competitor.
-func trackable(r *http.Request, tx pgx.Tx, ws, site string) error {
-	var n int
-	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM seo_competitors WHERE workspace_id = $1 AND site_id = $2 AND status = 'tracked'`,
-		ws, site).Scan(&n); err != nil {
-		return err
-	}
-	if n >= maxTrackedCompetitors {
-		return errInvalid("a site tracks at most " + strconv.Itoa(maxTrackedCompetitors) + " competitors; dismiss one first")
-	}
-	return nil
-}
-
 // competitorNames checks a competitor's name and other names: at most 100
 // characters each and 10 others, trimmed, without repeats.
 func competitorNames(w http.ResponseWriter, r *http.Request, name *string, aliases *[]string) bool {
@@ -265,9 +251,6 @@ func (s *Server) addCompetitor(w http.ResponseWriter, r *http.Request) {
 		if was == "tracked" {
 			return errAlreadyTracked
 		}
-		if err := trackable(r, tx, a.WorkspaceID, site.ID); err != nil {
-			return err
-		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, name, aliases, status, source, created_by)
 			VALUES ($1, $2, $3, $4, COALESCE($6, ''), COALESCE($7::text[], '{}'), 'tracked', 'manual', $5)
@@ -338,9 +321,6 @@ func (s *Server) updateCompetitor(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		if req.Status == "tracked" && c.Status != "tracked" {
-			if err := trackable(r, tx, a.WorkspaceID, c.SiteID); err != nil {
-				return err
-			}
 			if err := crawl.StartGlance(ctx, tx, a.WorkspaceID, c.ID, time.Now()); err != nil {
 				return err
 			}
@@ -779,4 +759,110 @@ func cmpNum(a, b *float64) int {
 		return 1
 	}
 	return 0
+}
+
+// trackCompetitors adds competitors named elsewhere (an AI visibility
+// cohort's) to the brand's one competitor list: each with a website is
+// tracked for the brand's first active SEO site, keeping a name already
+// set. A brand without an SEO site keeps them where they were named. It
+// returns how many were newly tracked.
+func trackCompetitors(ctx context.Context, tx pgx.Tx, a *access, brand *string, list []aivis.Entity, via string) (int, error) {
+	if brand == nil || len(list) == 0 {
+		return 0, nil
+	}
+	var site, siteHost string
+	err := tx.QueryRow(ctx, `SELECT id::text, host FROM seo_sites WHERE workspace_id = $1 AND brand_id = $2 AND status = 'active'
+		ORDER BY created_at, host LIMIT 1`, a.WorkspaceID, *brand).Scan(&site, &siteHost)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	own := seosync.LinkTarget(siteHost)
+	added := 0
+	for _, e := range list {
+		if len(e.Domains) == 0 {
+			continue
+		}
+		host := seosync.CompetitorHost(e.Domains[0])
+		if host == "" || host == own || strings.HasSuffix(host, "."+own) {
+			continue
+		}
+		aliases := e.Aliases
+		if aliases == nil {
+			aliases = []string{}
+		}
+		if len(aliases) > 10 {
+			aliases = aliases[:10]
+		}
+		var id, was string
+		err := tx.QueryRow(ctx, `WITH before AS (SELECT status FROM seo_competitors WHERE site_id = $2 AND host = $4)
+			INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, name, aliases, status, source, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, 'tracked', $8, $7)
+			ON CONFLICT (site_id, host) DO UPDATE SET status = 'tracked', name = COALESCE(NULLIF(seo_competitors.name, ''), EXCLUDED.name),
+				aliases = CASE WHEN cardinality(seo_competitors.aliases) = 0 THEN EXCLUDED.aliases ELSE seo_competitors.aliases END, updated_at = now()
+			RETURNING id::text, COALESCE((SELECT status FROM before), '')`,
+			a.WorkspaceID, site, *brand, host, e.Name, aliases, a.ActorID, via).Scan(&id, &was)
+		if err != nil {
+			return added, err
+		}
+		if was == "tracked" {
+			continue
+		}
+		if err := crawl.StartGlance(ctx, tx, a.WorkspaceID, id, time.Now()); err != nil {
+			return added, err
+		}
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "seo_competitor.added", "seo_competitor", id, map[string]any{
+			"site_id": site, "brand_id": *brand, "was": was, "via": via,
+		}); err != nil {
+			return added, err
+		}
+		added++
+	}
+	return added, nil
+}
+
+// competitorNamesFor writes names of competitors as the brand's one list
+// knows them: a name, other name or domain of a tracked competitor becomes
+// its name, so a post's competitors line up with the list. Names it
+// doesn't know stay as given.
+func competitorNamesFor(ctx context.Context, tx pgx.Tx, ws string, brand *string, names []string) ([]string, error) {
+	out := []string{}
+	if len(names) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT host, name, aliases FROM seo_competitors
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid AND status = 'tracked'`, ws, brand)
+	if err != nil {
+		return nil, err
+	}
+	known := map[string]string{}
+	var host, name string
+	var aliases []string
+	if _, err := pgx.ForEachRow(rows, []any{&host, &name, &aliases}, func() error {
+		canon := name
+		if canon == "" {
+			canon = host
+		}
+		for _, k := range append([]string{host, name}, aliases...) {
+			if k = strings.ToLower(strings.TrimSpace(k)); k != "" {
+				if _, ok := known[k]; !ok {
+					known[k] = canon
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	for _, n := range names {
+		if c, ok := known[strings.ToLower(strings.TrimSpace(n))]; ok {
+			n = c
+		}
+		if !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, n) }) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import type { AdAccount, AdTrackingHealth, AdTrackingPlan, AdTrackingTemplate } from "@outflare/sdk";
+import type { AdAccount, AdTrackingHealth, AdTrackingPlan, AdTrackingRun, AdTrackingTemplate } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
+import { ago } from "../format";
 import { Badge, Button, Card, CopyButton, ErrorText, field, Loading } from "../ui";
 
 // The tracking template for each ad network: pasted once into the network,
@@ -67,7 +68,7 @@ export function AdTrackingHealthCard({ ws, brand }: { ws: string; brand?: string
   }, [ws, brand]);
   if (error) return <Card title="Tracking health"><ErrorText>{error}</ErrorText></Card>;
   if (!h) return null;
-  if (h.networks.length === 0 && h.sends.length === 0 && h.campaigns_without_visits.length === 0 && h.ads_without_template.length === 0) return null;
+  if (h.networks.length === 0 && h.sends.length === 0 && h.campaigns_without_visits.length === 0 && h.ads_without_template.length === 0 && h.issues.length === 0) return null;
   const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n * 100) / of)}%` : "—");
   return (
     <Card
@@ -154,9 +155,28 @@ const levelWord: Record<string, string> = { account: "Account", campaign: "Campa
 // shows what it would change, and changes them only when you confirm.
 function AddTracking({ ws, account }: { ws: string; account: AdAccount }) {
   const [plan, setPlan] = useState<AdTrackingPlan | null>(null);
-  const [state, setState] = useState<"idle" | "reading" | "ready" | "adding" | "queued">("idle");
+  const [state, setState] = useState<"idle" | "reading" | "ready" | "adding">("idle");
   const [error, setError] = useState("");
+  // The latest request and how it went, polled while it runs.
+  const [run, setRun] = useState<AdTrackingRun | null>(null);
   const path = { params: { path: { ws, id: account.id } } };
+  const running = run?.status === "queued" || run?.status === "running" || run?.status === "retrying";
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () =>
+      api.GET("/v1/workspaces/{ws}/ads/accounts/{id}/tracking/run", { params: { path: { ws, id: account.id } } }).then(({ data }) => {
+        if (stop || !data) return;
+        setRun(data.run ?? null);
+        const r = data.run;
+        if (r && (r.status === "queued" || r.status === "running" || r.status === "retrying")) timer = setTimeout(poll, 3000);
+      });
+    poll();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [ws, account.id, state]);
   const read = () => {
     setState("reading");
     setError("");
@@ -179,7 +199,9 @@ function AddTracking({ ws, account }: { ws: string; account: AdAccount }) {
         setState("ready");
         return;
       }
-      setState("queued");
+      setPlan(null);
+      // Starts polling the run.
+      setState("idle");
     });
   };
   const changes = plan?.changes ?? [];
@@ -193,7 +215,7 @@ function AddTracking({ ws, account }: { ws: string; account: AdAccount }) {
             Google uses an ad's own URL suffix, else its ad group's, its campaign's, then the account's. Outflare adds the template to each one that needs it and keeps the parameters already there.
           </div>
         </div>
-        {state === "idle" && <Button variant="ghost" onClick={read}>See what changes</Button>}
+        {state === "idle" && !running && <Button variant="ghost" onClick={read}>{run ? "Check again" : "See what changes"}</Button>}
         {state === "reading" && <Loading />}
       </div>
       {error && <ErrorText>{error}</ErrorText>}
@@ -231,8 +253,54 @@ function AddTracking({ ws, account }: { ws: string; account: AdAccount }) {
           </>
         )
       )}
-      {state === "queued" && (
-        <p>Queued. Outflare changes them in Google Ads now, then syncs the account; reload this page in a minute to see every ad with the template. Each change is in the audit log.</p>
+      {state === "idle" && run && <TrackingRun run={run} />}
+    </div>
+  );
+}
+
+// How the latest request went: a spinner while it runs, then what changed,
+// what Google refused and why, or why it failed.
+function TrackingRun({ run }: { run: AdTrackingRun }) {
+  if (run.status === "queued" || run.status === "running" || run.status === "retrying")
+    return (
+      <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+        <span className="size-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" aria-hidden />
+        <span>
+          {run.status === "queued" ? "Waiting to start…" : run.status === "running" ? "Adding the template in Google Ads…" : "Google didn't answer. Trying again shortly…"}
+        </span>
+        {run.error && <span className="truncate text-[12px] text-muted-foreground">{run.error}</span>}
+      </div>
+    );
+  if (run.status === "failed")
+    return (
+      <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 dark:border-red-900 dark:bg-red-950/40">
+        <div className="font-medium text-red-700 dark:text-red-400">Couldn't add the template {ago(run.finished_at ?? run.requested_at)}. Nothing was changed.</div>
+        {run.error && <div className="mt-0.5 break-words text-[12px] text-muted-foreground">{run.error}</div>}
+      </div>
+    );
+  const none = run.changed === 0 && run.failed === 0;
+  return (
+    <div className="space-y-2">
+      <div className={`rounded-md border px-3 py-2 ${run.failed > 0 ? "border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40" : "border-green-300 bg-green-50 dark:border-green-900 dark:bg-green-950/40"}`}>
+        <div className="font-medium">
+          {none
+            ? `Nothing needed changing ${ago(run.finished_at)}: every URL suffix already had the template.`
+            : `Done ${ago(run.finished_at)}: ${run.changed} ${run.changed === 1 ? "suffix" : "suffixes"} changed${run.failed > 0 ? `, ${run.failed} refused by Google` : ""}.`}
+        </div>
+        {!none && <div className="text-[12px] text-muted-foreground">The account syncs now; the ads list below updates within a few minutes. Each change is in the audit log.</div>}
+      </div>
+      {run.errors.length > 0 && (
+        <div className="max-h-60 divide-y overflow-y-auto rounded-md border">
+          {run.errors.map((c) => (
+            <div key={c.level + c.id} className="space-y-0.5 px-3 py-1.5">
+              <div className="flex items-baseline gap-2">
+                <Badge tone="red">{levelWord[c.level] ?? c.level}</Badge>
+                <span className="min-w-0 truncate">{c.name || c.id}</span>
+              </div>
+              <div className="break-words text-[12px] text-muted-foreground">{c.error}</div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

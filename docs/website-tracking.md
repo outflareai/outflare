@@ -18,7 +18,7 @@ The quickest way is **Analytics → Website tracking** (the same step as **Compa
 
 ## Feature flags
 
-With `data-flags` on the tag, the script also asks for the visitor's [feature flags](feature-flags.md): `outflare.onFlags(fn)`, `outflare.flag("key")` and a class on `<html>` per version, for switches and A/B tests.
+The script also runs [A/B tests made with the visual editor](feature-flags.md#change-a-page-without-code) by itself, with nothing added to the tag (turn **Run A/B tests on this site** off in the site's settings to stop it). With `data-flags` on the tag, the script also asks for the visitor's [feature flags](feature-flags.md) for your own code: `outflare.onFlags(fn)`, `outflare.flag("key")` and a class on `<html>` per version, for switches and A/B tests.
 
 ## Keeping it current
 
@@ -35,7 +35,7 @@ On every page, including in-app navigation, the snippet sends a `page` event on 
 - `properties.ofc` (an Outflare campaign link) and `properties.ref` (a referral or partner code, from `ref` or `via`).
 - `properties.ofclk` on page views: the click key a [redirect link](campaign-links.md#redirect-links) adds to the page it sends people to. The visit claims that click, once, so the link can show how many of its clicks reached the site.
 
-`outflare.track("Signup Started", {plan: "pro"})` sends a track event and returns its message id, which you can give an ad pixel as its event id so a conversion sent back from [Paid ads](paid-media.md#sending-conversions-back) counts once. Its name must be a plain one: dotted names such as `payment.succeeded` belong to Outflare and its connectors, and a browser can't send them. A name the workspace hasn't defined arrives quarantined in the catalog, like any other. Once 100 names are waiting for approval, the browser can only send names that are already there.
+`outflare.track("Signup Started", {plan: "pro"})` sends a track event and returns its message id, which you can give an ad pixel as its event id so a conversion sent back from [Paid ads](paid-media.md#sending-conversions-back) counts once. To send the same event from your server too, set the id yourself with a third argument, `outflare.track("Signed Up", {}, {messageId: "signup-" + userId})`, and send the server's copy with the same `messageId`: conversions are then sent to ad platforms once. Its name must be a plain one: dotted names such as `payment.succeeded` belong to Outflare and its connectors, and a browser can't send them. A name the workspace hasn't defined arrives quarantined in the catalog, like any other. Once 100 names are waiting for approval, the browser can only send names that are already there.
 
 ## Visits, touches and devices
 
@@ -65,7 +65,7 @@ There are templates for Google Ads and Microsoft Advertising (the final URL suff
 
 ### Adding the template to Google Ads for you
 
-Google Ads uses the lowest Final URL suffix that is set: an ad's own, else its ad group's, its campaign's, then the account's. So a suffix on the account alone isn't enough when campaigns have suffixes of their own. On a connected Google Ads account, Outflare can add the template everywhere it is needed: **Paid ads → Tracking → Fix tracking links** first shows each suffix it would change, and what it would say, then changes them when you confirm. It adds the template to the account's suffix (so new campaigns get it) and to every campaign, ad group or ad suffix that lacks it, keeping the parameters already there and adding only the keys missing. Nothing else changes. An ad with a suffix of its own goes back to Google's review; account, campaign and ad group suffixes don't. The changes run on the workspace's own Google sign-in, are listed in one `ad_account.tracking_added` audit event, and the account syncs afterwards so tracking health shows the result. By API: `GET /v1/workspaces/{ws}/ads/accounts/{id}/tracking` (scope `analytics.read`) shows the changes and `POST` to the same path (scope `ads.manage`) makes them; MCP `plan_ad_tracking` and `add_ad_tracking`. Other networks' templates are pasted in by hand.
+Google Ads uses the lowest Final URL suffix that is set: an ad's own, else its ad group's, its campaign's, then the account's. So a suffix on the account alone isn't enough when campaigns have suffixes of their own. On a connected Google Ads account, Outflare can add the template everywhere it is needed: **Paid ads → Tracking → Fix tracking links** first shows each suffix it would change, and what it would say, then changes them when you confirm. It adds the template to the account's suffix (so new campaigns get it) and to every campaign, ad group or ad suffix that lacks it, keeping the parameters already there and adding only the keys missing. Nothing else changes. An ad with a suffix of its own goes back to Google's review; account, campaign and ad group suffixes don't. The changes run on the workspace's own Google sign-in, are listed in one `ad_account.tracking_added` audit event, and the account syncs afterwards so tracking health shows the result. While it runs the box shows its progress, then how many suffixes changed and each one Google refused with its reason, or why it failed. By API: `GET /v1/workspaces/{ws}/ads/accounts/{id}/tracking` (scope `analytics.read`) shows the changes, `POST` to the same path (scope `ads.manage`) makes them, and `GET .../tracking/run` says how the latest one went; MCP `plan_ad_tracking`, `add_ad_tracking` and `get_ad_tracking_run`. Other networks' templates are pasted in by hand.
 
 The script reads click ids and `of_` parameters on any page, and the pixel cookies only after consent (see [Consent](#consent)).
 
@@ -85,7 +85,8 @@ A list of issues comes first, worst first, each with what to do. An issue is rai
 - a network has at least 20 paid visits and a fifth or more of them are untracked;
 - any campaign spent without a tracked visit;
 - any live or spending ad's links lack the template;
-- a platform refused a tenth or more of the conversions sent to it.
+- a platform refused a tenth or more of the conversions sent to it;
+- an event a conversion rule sends came from both the website and your server without the same `messageId` (`events_without_shared_id`, one per event name, with how many pairs). Each pair was still sent once, matched on the person and the time, but the same id on both sides is exact. An order's copies with the same `order_id` are matched on it and raise nothing.
 
 ## Serve it from your own domain
 
@@ -109,7 +110,9 @@ or with nginx:
 location /ofx/ { proxy_pass https://app.outflare.ai/; proxy_set_header Host app.outflare.ai; proxy_ssl_server_name on; }
 ```
 
-Cloudflare Workers, Vercel and Netlify rewrites work the same way. `data-api` sets where events go when it isn't next to the script.
+Cloudflare Workers, Vercel and Netlify rewrites work the same way. `data-api` sets where events go when it isn't next to the script. **Website tracking** has the steps for each, ready to copy with your key: open **Set up own domain** under the script.
+
+Outflare checks it from the events themselves: a request through your own path comes from the page's own origin (the browser says so in `Sec-Fetch-Site`, which proxies pass on). Each site key reports, for the last 7 days, how many events came through your own domain, how many came from Safari or an iPhone or iPad straight to Outflare (visitors those browsers forget after 7 days), and a status: `working` (95% or more through your domain), `partly`, `not_set_up` or `no_traffic` (`own_domain` on the site key). A subdomain pointed at Outflare doesn't count: Safari still cuts its cookies to 7 days, because the server answering isn't your site's.
 
 Every event then comes from your server's address, so Outflare can't see the visitor's own address (which per-visitor limits use, and features that work out a visitor's company may too). To pass it on, make the key a **proxy secret** (**Proxy secret** on the key, `POST .../site-keys/{id}/proxy-secret` or MCP `create_site_proxy_secret`). It starts `ofp_` and is shown once. Keep it in your proxy's configuration, never in a page. Have the proxy send it in `X-Outflare-Proxy` and the visitor's address in `X-Outflare-Client-IP`, replacing any value the browser sent. For example, with nginx:
 

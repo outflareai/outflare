@@ -14,9 +14,12 @@ lives under the brand, `/v1/brands/{brand}/...` with the brand's id:
 `/journeys` (with their versions, drafts, test mode, runs and step keys)
 and `/automation-map`. A brand's journeys and broadcasts send only its own
 templates to its own people, and another brand's template, broadcast,
-journey or email is `404` there. Topics are still the workspace's, so
-every brand can use them, but each brand's people choose them in that
-brand. A token made for one brand gets `404` for every other brand's.
+journey or email is `404` there. Topics are per brand too: each brand has
+its own, and another brand's topic is `404`. Topics that were every
+brand's moved to the workspace's first brand. Topic keys and template
+handles are unique per brand, so two brands can each have a `news` topic
+and a `welcome` template. A token made for one brand gets `404` for every other
+brand's.
 
 What people choose is per brand too (decision 5): an unsubscribe, a topic
 choice or turning off all marketing email applies to the brand whose email

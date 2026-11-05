@@ -36,7 +36,8 @@ A campaign has a name, a channel, a source, an optional brand and an optional
 landing page. Outflare gives it:
 
 - a **slug**, made from the name and used as `utm_campaign`
-  (`Spring launch, US` becomes `spring-launch-us`), unique in the workspace;
+  (`Spring launch, US` becomes `spring-launch-us`), unique in its brand (two brands can each
+  have a `spring-launch-us`);
 - a **code**, a random 10-character id sent as `ofc`. The code still
   identifies the campaign when a platform or a person strips the other tags.
 

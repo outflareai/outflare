@@ -103,7 +103,19 @@ Add `?of_flag=pricing-headline:faster` to any page's address to see that version
 
 ### Change a page without code
 
-For a version of a split, open the flag under **Analytics → Feature flags**, enter a page of your site under **Page to edit on**, and choose **Edit visually** next to the version. The page opens in a new tab with that version previewed and an editor over it: click anything to change its text, hide it, or change a link or an image (its address and alt text). **Save** in the editor, and visitors who get that version see the changes, within a minute. The page needs the website script (version 8 or later) with `data-flags`.
+For a version of a split, open the flag under **Analytics → Feature flags**, enter a page of your site under **Page to edit on**, and choose **Edit visually** next to the version. The page opens in a new tab with that version previewed and an editor over it: click anything, then:
+
+- **Content:** change its text, plain or with simple formatting (`**bold**`, `*italic*`, `[a link](/page)` and new lines), or a link or an image (its address and alt text).
+- **Style:** its text colour, background, size, weight, alignment, case, padding, margin, corners, border, width and display.
+- **Move:** up or down among the elements around it.
+- **Add:** a new piece of text, a button, a link or an image before or after it.
+- **Hide it.**
+
+**New changes apply to** limits the next changes to phones (up to 767px wide) or wider screens. **Undo last** takes back the newest change, and **Preview on a phone** opens the page in a phone-sized window with what you've saved. Under **Version settings**, a version can have its own CSS (looks only: no `url()`, `@import` or fonts) and can send its visitors to another page instead (below). **Save** in the editor, and visitors who get that version see the changes, within a minute.
+
+Nobody needs to touch the site for this: the page only needs the website script (version 12 or later), without `data-flags`. While a flag that is on has changes from the editor, the script asks for each visitor's versions by itself, on every page. When none has, it checks again every half hour or so, so a site with no tests makes almost no extra requests. To turn this off for a site, switch off **Run A/B tests on this site** in its tracking settings (the site key's `tests`), or put `data-flags="off"` on the tag; pages whose own code asks for flags still get them.
+
+**No flicker without code.** The script remembers what the visitor's versions change. When it runs before those parts show, it hides just them until the visitor's version is in, for a second at most. To make sure a returning visitor never sees the original, paste the optional guard from the site's tracking settings (**Optional: stop A/B tests flashing the original**, the site key's `flicker_guard`) once at the very top of the site's `<head>`: on the visitor's next visit it hides only the parts their test changes, until their version shows. It does nothing for visitors in no test. A visitor's very first page view can't be guarded this way; decide on your server for that (above).
 
 The changes are kept in the version's content, as `changes`, beside anything else it has:
 
@@ -112,14 +124,25 @@ The changes are kept in the version's content, as `changes`, beside anything els
   { "selector": "#hero > h1", "text": "Ship faster" },
   { "selector": ".promo-banner", "hide": true },
   { "selector": "a.cta", "href": "/signup?plan=pro" },
-  { "selector": "img.hero", "src": "https://cdn.example.com/hero-b.png", "alt": "The dashboard" }
-] }
+  { "selector": "img.hero", "src": "https://cdn.example.com/hero-b.png", "alt": "The dashboard" },
+  { "selector": "#hero p", "rich": "**Free** for 14 days" },
+  { "selector": "a.cta", "style": { "background-color": "#0f766e", "font-size": "18px" } },
+  { "selector": ".reviews", "move": "before", "target": ".pricing" },
+  { "selector": "#hero > h1", "insert": { "where": "after", "kind": "button", "text": "Start free", "href": "/signup" } },
+  { "selector": ".sidebar", "hide": true, "device": "mobile" }
+], "css": ".pricing h2 { letter-spacing: -0.02em; }" }
 ```
 
 - Each change has a CSS selector and one action. It applies to every element the selector finds.
-- Text is set as text, never HTML. Links and images only go to `https://`, `http://` or a path on your site.
+- Text is set as text, never HTML; `rich` builds its bold, italic, links and line breaks as elements. Links and images only go to `https://`, `http://` or a path on your site.
+- `style` sets only the properties above (and their sides, such as `padding-top`), with values that can't load anything. `move` is `before`, `after`, `start` or `end` of `target`. `insert` adds a `text`, `button` (an `a.of-button` your site's CSS can style), `link` or `image` once. `device` is `mobile` or `desktop`.
+- Nothing the editor saves can run code: there is no way to add a script or HTML from the dashboard. Code-level tests stay with your developers, using the flag in code (above).
+- On pages that change without reloading (single-page apps), the script applies the changes again when new content appears.
+- When the page has settled and some changes found nothing (usually because the page was redesigned since), the script sends Experiment Change Missed (`experiment_change_missed`, with `flag`, `variant`, `path`, `missed`, `found` and up to five `selectors`) once per visit and page. The test's checklist, and a running test's page, then say which version, page and parts to pick again in the editor.
 - The script applies them when the flags arrive, again once the page has loaded and a moment later for content that loads late. Making one counts as showing the version, so the [A/B test](ab-tests.md) counts the visitor.
-- A version has up to 50 changes, within its 4 KB of content. You can also write them by hand in the version's content, or with `PATCH .../flags/{flag}`.
+- A version has up to 50 changes, within its 16 KB of content. You can also write them by hand in the version's content, or with `PATCH .../flags/{flag}`.
+
+**Split URL tests.** A version's `redirect` sends its visitors to another page instead, keeping the address's query string: a path on your site (`/pricing-b`), or an address on one of the brand's domains (its website or **Domains** in the brand's settings). The script counts the visitor in the version as it sends them, never sends someone already on that page, and doesn't redirect while you edit the version. Set it in the editor's **Version settings** or in the version's content (`"redirect": "/pricing-b"`).
 
 The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a person signed in to Outflare, not an API token. It works for 2 hours, only on that version, and only while you can still manage analytics. It carries a secret token, kept for your visit in the tab: don't share it. The editor reads and saves with it (`GET/POST /v1/site/flags/edits`).
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { pickedBrandId } from "@/lib/brand";
 import type { PartnerProgram } from "@outflare/sdk";
 import { Plus, FileText, ArrowLeft, Copy, CheckCircle2 } from "lucide-react";
 import { api, errorMessage } from "@/api";
@@ -42,8 +43,8 @@ export function PartnerProposals({
     [filter, setFilter] = useState("all");
   const load = useCallback(async () => {
     const { data, error } = await api.GET(
-      "/v1/workspaces/{ws}/partner-programs/{id}/proposals",
-      { params: { path: { ws, id: program.id } } },
+      "/v1/brands/{brand}/partner-programs/{id}/proposals",
+      { params: { path: { brand: pickedBrandId(), id: program.id } } },
     );
     if (error) throw error;
     setRows((data?.data || []) as unknown as Proposal[]);
@@ -60,9 +61,9 @@ export function PartnerProposals({
     setBusy(true);
     setError("");
     const { data, error } = await api.POST(
-      "/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}",
+      "/v1/brands/{brand}/partner-programs/{id}/proposals/{proposal}",
       {
-        params: { path: { ws, id: program.id, proposal: p.id } },
+        params: { path: { brand: pickedBrandId(), id: program.id, proposal: p.id } },
         body: { action, version: p.version, ...extra },
       },
     );
@@ -406,7 +407,6 @@ export function PartnerProposals({
   );
 }
 function ProposalComposer({
-  ws,
   program,
   existing,
   onClose,
@@ -453,16 +453,16 @@ function ProposalComposer({
     e.preventDefault();
     setBusy(true);
     setError("");
-    const path = { ws, id: program.id };
+    const path = { brand: pickedBrandId(), id: program.id };
     const res = existing
       ? await api.POST(
-          "/v1/workspaces/{ws}/partner-programs/{id}/proposals/{proposal}",
+          "/v1/brands/{brand}/partner-programs/{id}/proposals/{proposal}",
           {
             params: { path: { ...path, proposal: existing.id } },
             body: { action: "revise", version: existing.version, config },
           },
         )
-      : await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/proposals", {
+      : await api.POST("/v1/brands/{brand}/partner-programs/{id}/proposals", {
           params: { path },
           body: { email, name, config },
         });

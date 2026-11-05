@@ -26,6 +26,10 @@ import (
 // ExposureEvent is the catalog name of Experiment Viewed.
 const ExposureEvent = "experiment_viewed"
 
+// MissedEvent is the catalog name of Experiment Change Missed: the website
+// script found nothing on a page for some of a version's visual changes.
+const MissedEvent = "experiment_change_missed"
+
 // MaxGoals is the most goals a test watches, and MaxGuardrails the most
 // guardrails.
 const (
@@ -403,7 +407,15 @@ func goalSQL(g Goal) (string, any) {
 // where val is what the hit adds to their value. $ws is the workspace and
 // $arg the goal's argument; they and $end, $window and $prop are numbered
 // placeholders the caller fills in.
-func hitsSQL(g Goal, ws, end, arg, window, prop string) string {
+// brand, when not "", is a SQL expression for the brand whose events
+// count (a text uuid; ” counts every brand's).
+func hitsSQL(g Goal, ws, end, arg, window, prop string, brand ...string) string {
+	inBrand := func(col string) string {
+		if len(brand) == 0 || brand[0] == "" {
+			return ""
+		}
+		return " AND (" + brand[0] + " = '' OR " + col + " = NULLIF(" + brand[0] + ", '')::uuid)"
+	}
 	within := func(at string) string {
 		return "AND (" + window + "::int IS NULL OR " + at + " < seen.occurred_at + " + window + "::int * interval '1 hour')"
 	}
@@ -418,7 +430,7 @@ func hitsSQL(g Goal, ws, end, arg, window, prop string) string {
 			FROM seen
 			JOIN site_visitors sv ON sv.workspace_id = ` + ws + ` AND sv.anonymous_id = seen.anonymous_id AND sv.record_id IS NOT NULL
 			JOIN deals d ON d.workspace_id = ` + ws + ` AND d.record_id = sv.record_id AND d.state = 'won' AND d.currency = 'USD'
-			WHERE d.closed_at >= seen.occurred_at AND d.closed_at < ` + end + ` ` + within("d.closed_at")
+			WHERE d.closed_at >= seen.occurred_at AND d.closed_at < ` + end + ` ` + within("d.closed_at") + inBrand("d.brand_id")
 	}
 	cond, _ := goalSQL(g)
 	cond = fmt.Sprintf(cond, arg)
@@ -428,7 +440,7 @@ func hitsSQL(g Goal, ws, end, arg, window, prop string) string {
 	}
 	return `SELECT seen.anonymous_id, seen.variant, e.occurred_at AS at, ` + val + ` AS val
 		FROM customer_events e JOIN seen ON seen.anonymous_id = e.anonymous_id AND e.occurred_at >= seen.occurred_at
-		WHERE e.workspace_id = ` + ws + ` AND ` + cond + ` AND e.occurred_at < ` + end + ` ` + within("e.occurred_at")
+		WHERE e.workspace_id = ` + ws + ` AND ` + cond + ` AND e.occurred_at < ` + end + ` ` + within("e.occurred_at") + inBrand("e.brand_id")
 }
 
 // preHitsSQL is hitsSQL for the PreDays before each visitor in seen

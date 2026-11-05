@@ -214,8 +214,8 @@ var (
 	// "apply these records?" screen.
 	domainConnectLookups = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "domain_connect", Name: "lookups_total",
-		Help: "Domain Connect lookups, by outcome: available, or why not (not_configured, no_provider, not_onboarded, no_template, nothing_to_add, lookup_failed, conflict).",
-	}, []string{"outcome"})
+		Help: "Domain Connect lookups, by outcome: available, or why not (not_configured, no_provider, not_onboarded, no_template, nothing_to_add, lookup_failed, conflict), and by the step a failed one stopped at (discover_dns, settings_http, settings_status, template_http, template_status, conflict_dns, sign; none otherwise).",
+	}, []string{"outcome", "step"})
 	domainConnectDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "domain_connect", Name: "lookup_seconds",
 		Help:    "How long a Domain Connect lookup took, DNS and the provider's API included (cached answers are near zero).",
@@ -316,6 +316,27 @@ var (
 		Namespace: namespace, Subsystem: "ads", Name: "changes_total",
 		Help: "Changes Outflare made to campaigns on ad platforms (pausing, resuming, setting a daily budget, adding the tracking template to URL suffixes), by connector (google_ads, meta_ads, microsoft_ads, linkedin_ads, tiktok_ads), kind (pause, resume, budget, tracking) and outcome (applied, unverified when the platform did not show the change afterwards, failed, error for a database failure).",
 	}, []string{"connector", "kind", "outcome"})
+	adSuggestRuns = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "suggest_run_seconds",
+		Help:    "Runs of the paid ads suggestions job for a workspace (judging measured changes, then suggesting), by outcome (success, error), and how long each took.",
+		Buckets: []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 30},
+	}, []string{"outcome"})
+	adSuggestions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "suggestions_total",
+		Help: "Changes Outflare suggested for ad campaigns, by connector and kind (budget_up, budget_down, pause, resume).",
+	}, []string{"connector", "kind"})
+	adVerdicts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "suggestion_verdicts_total",
+		Help: "Approved suggestions judged after their measuring window, by connector, kind and verdict (worked, did_not_work, not_sure).",
+	}, []string{"connector", "kind", "verdict"})
+	adTestSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "test_steps_total",
+		Help: "Steps of tests run inside ad networks (Google Ads experiments, Meta split tests), by connector, step (start, check, end) and outcome (success, failed when the network refused, error for a failure Outflare retries).",
+	}, []string{"connector", "step", "outcome"})
+	adDraftSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ads", Name: "draft_steps_total",
+		Help: "Steps of new ads approved in Outflare (making them paused on the platform, turning them on), by connector, step (create, go_live) and outcome (success, failed when the platform refused, error for a failure Outflare retries).",
+	}, []string{"connector", "step", "outcome"})
 	adAudienceSyncs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ads", Name: "audience_syncs_total",
 		Help: "People journeys added to or removed from ad platform audiences, by connector (google_ads, meta_ads) and outcome (added, removed, skipped for consent or nothing to match on, error).",
@@ -349,6 +370,14 @@ var (
 		Namespace: namespace, Subsystem: "transactions", Name: "save_seconds",
 		Help: "How long saving one transaction took, its conversion to the brand's currency included.", Buckets: requestBuckets,
 	})
+	insightRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "insights", Name: "runs_total",
+		Help: "Insight queries run, by kind (funnel, funnel_people, trend, retention, shared for a shared dashboard's tile, alert_check for an alert on a number, digest for a dashboard in the digest) and outcome (success; invalid: a spec the caller can fix; timeout: stopped at the time limit; error).",
+	}, []string{"kind", "outcome"})
+	insightSeconds = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "insights", Name: "run_seconds",
+		Help: "How long one insight query took, by kind.", Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60},
+	}, []string{"kind"})
 	handEditsExpired = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "hand_edits", Name: "expired_total",
 		Help: "Hand edits whose time to win ran out, by outcome (switched: another source's value took over; kept: no other source had a value, so the next one to write replaces it; error).",
@@ -548,6 +577,10 @@ var (
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "total",
 		Help: "Conversions sent back to ad platforms, by connector and outcome (sent, skipped, failed).",
 	}, []string{"connector", "outcome"})
+	adConversionAdjustments = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ad_conversion_adjustments", Name: "total",
+		Help: "Changes to conversions already sent, after a refund (restated or retracted), by connector and outcome (sent, skipped, failed).",
+	}, []string{"connector", "outcome"})
 	adConversionsOldest = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "ad_conversions", Name: "oldest_queued_seconds",
 		Help: "How long the oldest conversion waiting to be sent has waited, as of this process's last round.",
@@ -567,7 +600,7 @@ var (
 	// page reader.
 	reviewReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
-		Help: "Review page reads, by platform and outcome (success, pending, blocked, slow_page, page_not_found, not_a_review_page, save_failed, connector_error).",
+		Help: "Review page reads, by platform and outcome (success, pending, blocked, slow_page, page_failed, page_not_found, not_a_review_page, save_failed, connector_error).",
 	}, []string{"platform", "outcome"})
 	// Scheduled syncs of connections (analytics, Search Console, page
 	// conversions, ads, SEO snapshots).
@@ -584,7 +617,7 @@ var (
 	// public profiles in brand links.
 	socialReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "social", Name: "account_reads_total",
-		Help: "Social account reads, by channel and outcome (success, blocked, slow_page, page_not_found, invalid_address, no_follower_count, save_failed, connector_error).",
+		Help: "Social account reads, by channel and outcome (success, blocked, slow_page, page_failed, page_not_found, invalid_address, no_follower_count, save_failed, connector_error).",
 	}, []string{"channel", "outcome"})
 	reviewsFound = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "reviews", Name: "new_total",
@@ -611,7 +644,7 @@ var (
 	// own SEO connection.
 	linkReads = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "seo", Name: "link_reads_total",
-		Help: "Reads of who links to a page or domain, by reason (requested, dead_page) and outcome (success, budget_reached, connector_auth, invalid_request, provider_error, internal).",
+		Help: "Reads of who links to a page or domain, by reason (requested, dead_page, competitor_presence) and outcome (success, budget_reached, connector_auth, invalid_request, provider_error, internal).",
 	}, []string{"reason", "outcome"})
 
 	// Partner programs: short link clicks, conversions reported by the
@@ -647,9 +680,15 @@ var (
 
 	// News watch: saved news searches run through the workspace's own
 	// web search connection.
-	coverageReviews = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
-	coverageChecks  = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
-	newsRuns        = prometheus.NewCounterVec(prometheus.CounterOpts{
+	coverageReviews   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
+	coverageChecks    = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
+	coverageFound     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "found_total", Help: "Pages Presence discovery added to a brand's review list for the first time, by source (news, backlinks, link_prospects, social, ai_citations, web_search)."}, []string{"source"})
+	coverageSearches  = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "search_runs_total", Help: "Presence web search runs by outcome (done, connector_needed, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable)."}, []string{"outcome"})
+	competitorScans   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "competitor_scans_total", Help: "Presence scans of where a competitor appears, by source (web_search, backlinks, ai_citations) and outcome (done, connector_needed, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable, provider_error, internal)."}, []string{"source", "outcome"})
+	competitorFound   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "competitor_found_total", Help: "Pages where a competitor appears that a Presence scan found for the first time, by arrangement (likely_paid, unknown)."}, []string{"arrangement"})
+	competitorSuggest = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "seo", Name: "competitor_suggestions_total", Help: "Daily looks for new competitors of an SEO site, by source (a connector id, or rankings) and outcome: ok and error count looks, suggested counts the competitors they suggested."}, []string{"source", "outcome"})
+	opportunities     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "opportunities_total", Help: "Presence opportunities, by event: suggested (new) and won (the brand is there now, or the link is back)."}, []string{"event"})
+	newsRuns          = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "news", Name: "search_runs_total",
 		Help: "News search runs, by purpose (topic, coverage) and outcome (success, connector_needed, usage_limit_reached, connector_error, internal).",
 	}, []string{"purpose", "outcome"})
@@ -897,23 +936,23 @@ var own = []prometheus.Collector{
 	connectionLimitAlerts, connectionLimitStops,
 	hooksReceived, hookEvents, hookLag,
 	domainConnectLookups, domainConnectDuration,
-	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds,
+	queryEndpointCalls, queryEndpointSeconds, queryEndpointRows, handEditsExpired, transactionsSaved, transactionSeconds, insightRuns, insightSeconds,
 	queryRuns, queryDuration, queryRows, queryTypeTablesFailed, querySavedRuns, queryExports, queryExportRows,
-	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, browserSessions, mailSignInsMoved,
+	mcpClientCalls, mcpClientDuration, ruleEvaluations, recordMetricUpdates, recordMetricBackfills, recordMetricSweeps, lifecycleEvaluations, lifecycleSweepDuration, emailsGuarded, journeyCalls, journeyCallDuration, journeyEntriesRefused, excluded, sequencerPushes, crmContactPushes, adAudienceSyncs, adChanges, adSuggestRuns, adSuggestions, adVerdicts, adTestSteps, adDraftSteps, contentPublishes, accountAttempts, accountTakeovers, browserTasks, browserSteps, browserSessions, mailSignInsMoved,
 	actionsDecided, actionsFinished, agentRunTurns,
 	semanticRuns, semanticItems, semanticDuration, semanticAvailable, semanticWorkspaces, knowledgeAsks, knowledgeAskDuration,
 	dataNetworkLookups, dataNetworkShared, dataNetworkShareRuns, dataNetworkMembers, dataNetworkWithdrawals, dataNetworkOverdue, dataNetworkLag,
 	helpPages, helpRender,
 	knowledgeSuggestions,
 	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
-	adConversions, adConversionsOldest,
+	adConversions, adConversionsOldest, adConversionAdjustments,
 	meetingEvents, meetingEventsPending,
 	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches,
 	socialPublishes,
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
-	coverageChecks, coverageReviews, newsRuns, newsFound, newsReads, storyAIRuns,
+	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
 	connectionsUnassigned,
@@ -1193,6 +1232,32 @@ func ContentPublished(connector, kind, outcome string) {
 	contentPublishes.WithLabelValues(connector, kind, outcome).Inc()
 }
 
+// AdSuggestRun records one run of the suggestions job.
+func AdSuggestRun(outcome string, took time.Duration) {
+	adSuggestRuns.WithLabelValues(outcome).Observe(took.Seconds())
+}
+
+// AdSuggested records one new suggestion.
+func AdSuggested(connector, kind string) {
+	adSuggestions.WithLabelValues(connector, kind).Inc()
+}
+
+// AdSuggestionJudged records one verdict on an approved suggestion.
+func AdSuggestionJudged(connector, kind, verdict string) {
+	adVerdicts.WithLabelValues(connector, kind, verdict).Inc()
+}
+
+// AdTestStep records one step of a test inside an ad network.
+func AdTestStep(connector, step, outcome string) {
+	adTestSteps.WithLabelValues(connector, step, outcome).Inc()
+}
+
+// AdDraftStep records one step of a new ad: made paused on the platform
+// (create) or turned on (go_live), and how it ended.
+func AdDraftStep(connector, step, outcome string) {
+	adDraftSteps.WithLabelValues(connector, step, outcome).Inc()
+}
+
 // AdChanged records one change to a campaign on an ad platform and how it
 // ended (applied, unverified, failed, error).
 func AdChanged(connector, kind, outcome string) {
@@ -1241,6 +1306,14 @@ func ABResults(outcome string, d time.Duration) {
 func TransactionSaved(from, outcome string, d time.Duration) {
 	transactionsSaved.WithLabelValues(from, outcome).Inc()
 	transactionSeconds.Observe(d.Seconds())
+}
+
+// InsightRun counts one insight query, by kind (funnel, funnel_people,
+// trend, retention, shared, alert_check, digest) and outcome, with how long
+// it took.
+func InsightRun(kind, outcome string, d time.Duration) {
+	insightRuns.WithLabelValues(kind, outcome).Inc()
+	insightSeconds.WithLabelValues(kind).Observe(d.Seconds())
 }
 
 // HandEditExpired counts a hand edit whose time ran out, by outcome
@@ -1564,9 +1637,13 @@ func RedditChecked(outcome string, redditRead bool) {
 }
 
 // DomainConnectLookup records a Domain Connect lookup: available, or the
-// reason it isn't, and how long it took.
-func DomainConnectLookup(outcome string, d time.Duration) {
-	domainConnectLookups.WithLabelValues(outcome).Inc()
+// reason it isn't, the step a failed one stopped at ("none" otherwise),
+// and how long it took.
+func DomainConnectLookup(outcome, step string, d time.Duration) {
+	if step == "" {
+		step = "none"
+	}
+	domainConnectLookups.WithLabelValues(outcome, step).Inc()
 	domainConnectDuration.Observe(d.Seconds())
 }
 
@@ -1575,6 +1652,13 @@ func AdConversions(connector string, sent, skipped, failed int) {
 	adConversions.WithLabelValues(connector, "sent").Add(float64(sent))
 	adConversions.WithLabelValues(connector, "skipped").Add(float64(skipped))
 	adConversions.WithLabelValues(connector, "failed").Add(float64(failed))
+}
+
+// AdConversionAdjustments counts what one round of a rule's adjustments did.
+func AdConversionAdjustments(connector string, sent, skipped, failed int) {
+	adConversionAdjustments.WithLabelValues(connector, "sent").Add(float64(sent))
+	adConversionAdjustments.WithLabelValues(connector, "skipped").Add(float64(skipped))
+	adConversionAdjustments.WithLabelValues(connector, "failed").Add(float64(failed))
 }
 
 // AdConversionsOldest records how long the oldest waiting conversion has
@@ -1797,3 +1881,43 @@ func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }
 func CoverageCheck(health string) { coverageChecks.WithLabelValues(health).Inc() }
 
 func CoverageReview(status string) { coverageReviews.WithLabelValues(status).Inc() }
+
+// CoverageFound counts pages discovery added to a review list for the
+// first time, by source.
+func CoverageFound(source string, n int) {
+	if n > 0 {
+		coverageFound.WithLabelValues(source).Add(float64(n))
+	}
+}
+
+// CoverageSearch counts a Presence web search run by outcome.
+func CoverageSearch(outcome string) { coverageSearches.WithLabelValues(outcome).Inc() }
+
+// CompetitorScan counts one source of a competitor presence scan by outcome.
+func CompetitorScan(source, outcome string) { competitorScans.WithLabelValues(source, outcome).Inc() }
+
+// CompetitorSuggest counts one daily look for new competitors and, when it
+// worked, the suggestions it made.
+func CompetitorSuggest(source, outcome string, suggested int) {
+	competitorSuggest.WithLabelValues(source, outcome).Inc()
+	if suggested > 0 {
+		competitorSuggest.WithLabelValues(source, "suggested").Add(float64(suggested))
+	}
+}
+
+// CoverageOpportunities counts opportunities suggested and won.
+func CoverageOpportunities(suggested, won int) {
+	if suggested > 0 {
+		opportunities.WithLabelValues("suggested").Add(float64(suggested))
+	}
+	if won > 0 {
+		opportunities.WithLabelValues("won").Add(float64(won))
+	}
+}
+
+// CompetitorFound counts new pages where a competitor appears.
+func CompetitorFound(arrangement string, n int) {
+	if n > 0 {
+		competitorFound.WithLabelValues(arrangement).Add(float64(n))
+	}
+}

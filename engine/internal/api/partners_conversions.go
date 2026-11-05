@@ -159,7 +159,13 @@ func (c *conversionRun) customerEvent(ctx context.Context, rec string, amount *i
 	if c.source == "manual" {
 		return nil // a lead a partner submitted didn't do anything themselves
 	}
+	if c.source == "events" {
+		return nil // the conversion is an event the workspace sent
+	}
 	in := c.in
+	if done, err := c.transaction(ctx, rec, amount, currency); done || err != nil {
+		return err
+	}
 	props := map[string]any{"source": c.source}
 	if in.ProductID != "" {
 		props["product_id"] = in.ProductID
@@ -200,6 +206,49 @@ func (c *conversionRun) customerEvent(ctx context.Context, rec string, amount *i
 	_, err := customers.Record(ctx, c.tx, c.ws, customers.Event{RecordID: rec, Name: name, Properties: props, Source: "conversions",
 		OccurredAt: in.at, MessageID: msg, RequestID: RequestID(ctx)})
 	return err
+}
+
+// transaction saves a sale or refund the workspace's backend reported as a
+// transaction of the customer's brand, the same as one sent to the
+// transactions API with source_id set to its external_id, so revenue and a
+// program taking its sales from transactions count it once
+// (docs/transactions.md). done is false when it can't be one (no
+// external_id or amount, or a customer of no brand): it is then only an
+// event, as before.
+func (c *conversionRun) transaction(ctx context.Context, rec string, amount *int64, currency string) (bool, error) {
+	in := c.in
+	if (in.Type != "sale" && in.Type != "refund") || in.ExternalID == "" || amount == nil || (c.source != "api" && c.source != "postback") {
+		return false, nil
+	}
+	var brand, brandCurrency string
+	err := c.tx.QueryRow(ctx, `SELECT b.id::text, b.currency FROM records r JOIN brands b ON b.id = r.brand_id WHERE r.id = $1 AND r.workspace_id = $2`,
+		rec, c.ws).Scan(&brand, &brandCurrency)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if currency == "" {
+		currency = in.Currency
+	}
+	if currency == "" && c.program != "" {
+		if err := c.tx.QueryRow(ctx, `SELECT currency FROM partner_programs WHERE id = $1`, c.program).Scan(&currency); err != nil {
+			return false, err
+		}
+	}
+	if currency == "" {
+		currency = brandCurrency
+	}
+	n := newTransaction{RecordID: rec, Kind: "payment", Status: "succeeded", AmountMinor: *amount, Currency: currency, Source: "api",
+		SourceID: in.ExternalID, Description: "Partner conversion", OccurredAt: in.at}
+	if in.Type == "refund" {
+		n.Kind, n.RefundOf = "refund", in.RefundOf
+	}
+	if _, _, _, err := addTransaction(ctx, c.tx, c.p, c.ws, brand, n); err != nil && !errors.Is(err, errTransactionDeleted) {
+		return false, err
+	}
+	return true, nil
 }
 
 type partnerRewardView struct {
@@ -326,6 +375,7 @@ type conversionRun struct {
 	in      conversionInput
 	source  string
 	program string // the program's id when the caller named one
+	brand   string // on a brand route, the brand: only its programs take the conversion
 	res     conversionResult
 }
 
@@ -336,12 +386,16 @@ func (c *conversionRun) audit(ctx context.Context, action, targetType, id string
 // recordPartnerConversion records a conversion and the rewards it earns.
 func (s *Server) recordPartnerConversion(ctx context.Context, ws string, p *principal, in conversionInput, source string) (conversionResult, error) {
 	c := &conversionRun{s: s, p: p, ws: ws, in: in, source: source, res: conversionResult{Rewards: []partnerRewardView{}}}
+	if a := accessFrom(ctx); a != nil {
+		c.brand = a.Brand
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		c.tx = tx
 		c.res = conversionResult{Rewards: []partnerRewardView{}}
 		if in.Program != "" {
-			err := tx.QueryRow(ctx, `SELECT id::text FROM partner_programs WHERE workspace_id = $1 AND (id::text = lower($2) OR slug = lower($2))`,
-				ws, in.Program).Scan(&c.program)
+			err := tx.QueryRow(ctx, `SELECT id::text FROM partner_programs WHERE workspace_id = $1 AND (id::text = lower($2) OR slug = lower($2))
+				AND ($3 = '' OR brand_id = $3::uuid) ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, created_at LIMIT 1`,
+				ws, in.Program, c.brand).Scan(&c.program)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errInvalid("program: no such partner program")
 			}
@@ -457,7 +511,9 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 			return
 		}
 	}
-	inProgram := func(x *membershipRow) bool { return x != nil && (c.program == "" || x.programID == c.program) }
+	inProgram := func(x *membershipRow) bool {
+		return x != nil && (c.program == "" || x.programID == c.program) && (c.brand == "" || (x.brandID != nil && *x.brandID == c.brand))
+	}
 	order := []struct {
 		m   *membershipRow
 		via string
@@ -487,8 +543,9 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref)
 		JOIN partner_programs p ON p.id = m.program_id
 		WHERE s.workspace_id = $1 AND (s.record_id = $2 OR ($5 <> '' AND s.anonymous_id = $5)) AND s.ref <> '' AND ($3 = '' OR m.program_id::text = $3)
+		  AND ($6 = '' OR p.brand_id = $6::uuid)
 		  AND s.started_at >= $4::timestamptz - interval '366 days' AND s.started_at <= $4::timestamptz + interval '1 hour'`,
-		c.ws, rec, c.program, c.in.at, c.in.AnonymousID)
+		c.ws, rec, c.program, c.in.at, c.in.AnonymousID, c.brand)
 	if err != nil {
 		return nil, err
 	}
@@ -559,8 +616,9 @@ type referralRow struct {
 func (c *conversionRun) existingReferral(ctx context.Context, rec, program string) (*referralRow, error) {
 	var f referralRow
 	err := c.tx.QueryRow(ctx, `SELECT id::text, membership_id::text, first_sale_at, created_at FROM partner_referrals
-		WHERE workspace_id = $1 AND record_id = $2 AND ($3 = '' OR program_id::text = $3) ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
-		c.ws, rec, program).Scan(&f.id, &f.membershipID, &f.firstSaleAt, &f.createdAt)
+		WHERE workspace_id = $1 AND record_id = $2 AND ($3 = '' OR program_id::text = $3) AND ($4 = '' OR brand_id = $4::uuid)
+		ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+		c.ws, rec, program, c.brand).Scan(&f.id, &f.membershipID, &f.firstSaleAt, &f.createdAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -674,16 +732,21 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			"partner_id": m.id, "record_id": rec, "via": via, "source": c.source}); err != nil {
 			return err
 		}
+		if err := requeueReferredPayments(ctx, tx, c.ws, m.programID, rec, f.id, in.at); err != nil {
+			return err
+		}
 	}
 	c.res.ReferralID = &f.id
 
 	// A retry of the same conversion is stored once.
+	// A customer signs up once in a program, however many ways it is
+	// reported (an event, the API, an import).
 	var dup string
-	if in.ExternalID != "" {
+	if in.Type == "signup" {
+		err = tx.QueryRow(ctx, `SELECT id::text FROM partner_conversions WHERE referral_id = $1 AND type = 'signup' ORDER BY created_at LIMIT 1`, f.id).Scan(&dup)
+	} else if in.ExternalID != "" {
 		err = tx.QueryRow(ctx, `SELECT id::text FROM partner_conversions WHERE program_id = $1 AND type = $2 AND external_id = $3`,
 			m.programID, in.Type, in.ExternalID).Scan(&dup)
-	} else if in.Type == "signup" {
-		err = tx.QueryRow(ctx, `SELECT id::text FROM partner_conversions WHERE referral_id = $1 AND type = 'signup' LIMIT 1`, f.id).Scan(&dup)
 	} else {
 		err = pgx.ErrNoRows
 	}
@@ -845,7 +908,8 @@ func (c *conversionRun) refund(ctx context.Context) error {
 	var sale partnerConversionView
 	sale, err := scanPartnerConversion(tx.QueryRow(ctx, partnerConversionSelect+`
 		WHERE v.workspace_id = $1 AND v.type = 'sale' AND v.external_id = $2 AND ($3 = '' OR v.program_id::text = $3)
-		ORDER BY v.created_at DESC LIMIT 1 FOR UPDATE OF v`, c.ws, in.RefundOf, c.program))
+		  AND ($4 = '' OR v.brand_id = $4::uuid)
+		ORDER BY v.created_at DESC LIMIT 1 FOR UPDATE OF v`, c.ws, in.RefundOf, c.program, c.brand))
 	if errors.Is(err, pgx.ErrNoRows) {
 		c.res.Reason = "sale_not_found"
 		// Not a referred sale, but still a refund for attribution.

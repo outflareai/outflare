@@ -33,7 +33,7 @@ func TestChannelsAndTheirReadiness(t *testing.T) {
 	if r := ads["readiness"].(map[string]any); r["state"] != "connect_first" || len(r["missing_connections"].([]any)) != 1 {
 		t.Fatalf("paid ads with nothing connected: %v", r)
 	}
-	if acts := ads["actions"].([]any); len(acts) != 4 || acts[0].(map[string]any)["category"] != "spend" {
+	if acts := ads["actions"].([]any); len(acts) != 5 || acts[0].(map[string]any)["category"] != "spend" {
 		t.Fatalf("paid ads actions: %v", acts)
 	}
 

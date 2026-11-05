@@ -62,16 +62,65 @@ func TestFlagVisualEditor(t *testing.T) {
 	if p["headline"] != "Ship faster" || len(p["changes"].([]any)) != 2 {
 		t.Fatalf("payload: %v", p)
 	}
+	// Richer changes, the version's CSS and a split URL redirect save too;
+	// a redirect off the brand's domains and CSS that loads anything don't.
+	site.must(400, "POST", path, map[string]any{"token": edit, "changes": []any{}, "redirect": "https://elsewhere.example/"})
+	site.must(400, "POST", path, map[string]any{"token": edit, "changes": []any{}, "css": "h1{background:url(https://x.example/a.png)}"})
+	site.must(400, "POST", path, map[string]any{"token": edit, "changes": []map[string]any{{"selector": "h1", "style": map[string]string{"background-image": "none"}}}})
+	rich := site.must(200, "POST", path, map[string]any{"token": edit, "css": "h1{letter-spacing:-.02em}", "redirect": "/pricing-b", "changes": []map[string]any{
+		{"selector": "h1", "rich": "**Ship** faster"}, {"selector": "h1", "style": map[string]string{"color": "#0f766e"}, "device": "mobile"},
+		{"selector": ".cta", "move": "before", "target": "h1"}, {"selector": "h1", "insert": map[string]any{"where": "after", "kind": "button", "text": "Start", "href": "/signup"}},
+	}})
+	if rich["css"] != "h1{letter-spacing:-.02em}" || rich["redirect"] != "/pricing-b" || len(rich["changes"].([]any)) != 4 {
+		t.Fatalf("rich save: %v", rich)
+	}
+	// Absent css and redirect stay; "" removes them.
+	kept := site.must(200, "POST", path, map[string]any{"token": edit, "changes": rich["changes"], "redirect": ""})
+	if kept["css"] != "h1{letter-spacing:-.02em}" || kept["redirect"] != "" {
+		t.Fatalf("kept: %v", kept)
+	}
+	saved = site.must(200, "POST", path, map[string]any{"token": edit, "css": "", "changes": []map[string]any{
+		{"selector": "h1", "text": "Ship faster"}, {"selector": ".promo", "hide": true},
+	}})
+	if saved["css"] != "" {
+		t.Fatalf("css not removed: %v", saved)
+	}
+
 	// Visitors in the version get them.
-	key := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Site"})["key"].(string)
-	for i := 0; i < 40; i++ {
-		_, out := askSiteFlags(t, e, "https://northpeak.example", key, "visitor-"+strings.Repeat("a", i+1), "https://northpeak.example/")
+	// The site runs tests on its own (no data-flags needed), and those in
+	// the version are told what to hide on their next visit.
+	sk := owner.must(201, "POST", base+"/site-keys", map[string]any{"name": "Site"})
+	key := sk["key"].(string)
+	if sk["tests"] != true || !strings.Contains(sk["flicker_guard"].(string), "of_hide") {
+		t.Fatalf("site key: %v", sk)
+	}
+	var faster, control string
+	for i := 0; i < 40 && (faster == "" || control == ""); i++ {
+		anon := "visitor-" + strings.Repeat("a", i+1)
+		_, out := askSiteFlags(t, e, "https://northpeak.example", key, anon, "https://northpeak.example/")
+		if out["tests"] != true {
+			t.Fatalf("tests not on: %v", out)
+		}
+		hide := out["hide"].([]any)
 		if out["flags"].(map[string]any)["hero"] == "faster" {
 			if cs := out["payloads"].(map[string]any)["hero"].(map[string]any)["changes"]; cs == nil {
 				t.Fatalf("no changes served: %v", out)
 			}
-			break
+			if len(hide) != 2 || hide[0] != ".promo" || hide[1] != "h1" {
+				t.Fatalf("hide: %v", hide)
+			}
+			faster = anon
+		} else {
+			if len(hide) != 0 {
+				t.Fatalf("control told to hide: %v", hide)
+			}
+			control = anon
 		}
+	}
+	// Turned off, the script no longer asks by itself.
+	owner.must(200, "PATCH", base+"/site-keys/"+sk["id"].(string), map[string]any{"tests": false})
+	if _, out := askSiteFlags(t, e, "https://northpeak.example", key, faster, "https://northpeak.example/"); out["tests"] != false {
+		t.Fatalf("tests still on: %v", out)
 	}
 
 	// Someone who can no longer manage analytics can't use their link.

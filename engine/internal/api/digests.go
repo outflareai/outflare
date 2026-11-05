@@ -181,11 +181,19 @@ func (s *Server) putDigestSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Insert without naming a key, then update: the per-workspace key
+		// gives way to one per brand in the next contract step.
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO digest_settings (workspace_id, frequency, weekday, hour, timezone, recipients, provider_id, from_address, updated_by, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-			ON CONFLICT (workspace_id) DO UPDATE SET frequency = $2, weekday = $3, hour = $4, timezone = $5, recipients = $6,
-				provider_id = $7, from_address = $8, updated_by = $9, updated_at = now()`,
+			ON CONFLICT DO NOTHING`,
+			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE digest_settings SET frequency = $2, weekday = $3, hour = $4, timezone = $5, recipients = $6,
+				provider_id = $7, from_address = $8, updated_by = $9, updated_at = now()
+			WHERE workspace_id = $1`,
 			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID); err != nil {
 			return err
 		}

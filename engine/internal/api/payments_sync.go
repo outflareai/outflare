@@ -365,6 +365,12 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 			if rec == "" {
 				continue // a payment with no customer, such as a one-off guest checkout
 			}
+			// Already in from the API or an order event: that one counts.
+			if dup, err := r.counted(ctx, tx, rec, ch); err != nil {
+				return err
+			} else if dup {
+				continue
+			}
 			added, err := customers.Record(ctx, tx, r.ws, customers.Event{RecordID: rec, Name: evPaymentSucceeded, Source: r.provider,
 				OccurredAt: ch.Created, MessageID: r.provider + ":charge:" + ch.ID, RequestID: RequestID(ctx),
 				Properties: map[string]any{"amount_minor": ch.AmountMinor, "currency": ch.Currency, "provider": r.provider,
@@ -441,6 +447,35 @@ func (r *paymentRun) apply(ctx context.Context, page connectors.PaymentPage) err
 
 func (r *paymentRun) namespace() string { return r.provider + ".customer" }
 
+// counted reports whether a charge is a payment the payer's brand already
+// has from the API or an order event (docs/transactions.md, "One payment,
+// counted once"), so the sync neither saves nor counts it again.
+func (r *paymentRun) counted(ctx context.Context, tx pgx.Tx, rec string, ch connectors.PaymentCharge) (bool, error) {
+	brand, err := r.payerBrand(ctx, tx, rec)
+	if err != nil || brand == "" {
+		return false, err
+	}
+	known, found, err := samePayment(ctx, tx, brand, r.provider, ch.ID, rec, ch.AmountMinor, strings.ToUpper(ch.Currency), ch.Created)
+	if err != nil || !found {
+		return false, err
+	}
+	if known.source != "api" && known.source != orderSource {
+		return false, nil
+	}
+	metrics.TransactionSaved("connector", "merged", 0)
+	return true, nil
+}
+
+// payerBrand is the brand a payer's transactions belong to.
+func (r *paymentRun) payerBrand(ctx context.Context, tx pgx.Tx, rec string) (string, error) {
+	var brand *string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(r.brand_id, NULLIF($3, '')::uuid, outflare_first_brand($1))::text FROM records r WHERE r.id = $2`,
+		r.ws, rec, r.brand).Scan(&brand); err != nil || brand == nil {
+		return "", err
+	}
+	return *brand, nil
+}
+
 // transaction saves a payment or refund the billing account reported as a
 // transaction of the payer's brand (docs/transactions.md). Only from the
 // changes after the first full read: transactions start when the brand
@@ -450,9 +485,8 @@ func (r *paymentRun) transaction(ctx context.Context, tx pgx.Tx, rec string, t n
 	if r.st.Phase != "changes" {
 		return nil
 	}
-	var brand *string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(r.brand_id, NULLIF($3, '')::uuid, outflare_first_brand($1))::text FROM records r WHERE r.id = $2`,
-		r.ws, rec, r.brand).Scan(&brand); err != nil || brand == nil {
+	brand, err := r.payerBrand(ctx, tx, rec)
+	if err != nil || brand == "" {
 		return err
 	}
 	t.RecordID, t.Status, t.Source = rec, "succeeded", r.provider
@@ -462,7 +496,7 @@ func (r *paymentRun) transaction(ctx context.Context, tx pgx.Tx, rec string, t n
 		return nil
 	}
 	start := time.Now()
-	_, created, err := saveTransaction(ctx, tx, nil, r.ws, *brand, t)
+	_, created, err := saveTransaction(ctx, tx, nil, r.ws, brand, t)
 	outcome := map[bool]string{true: "created", false: "duplicate"}[created]
 	if errors.Is(err, errTransactionDeleted) {
 		// Deleted by someone in this brand: the sync leaves it deleted.

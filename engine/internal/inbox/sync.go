@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,6 +39,22 @@ const (
 	// connecting an old inbox does not import its history.
 	firstSyncBack = 24 * time.Hour
 	session       = 3 * time.Minute
+	// fetchChunk is how many messages one FETCH asks for. Each chunk is
+	// stored before the next is fetched, so a slow server or a burst of
+	// large mail keeps the progress made instead of starting over.
+	fetchChunk = 25
+	// syncBudget is how long one sync keeps fetching chunks. Past it, the
+	// sync ends cleanly and the next one carries on from the last stored
+	// message, well inside the connection's session.
+	syncBudget = 2 * time.Minute
+	// maxBackoff is the most times syncEvery doubles for a mailbox whose
+	// syncs keep failing: 2, 4, 8 ... up to 64 minutes between tries.
+	maxBackoff = 5
+	// RejectedLimit is how many syncs in a row a mailbox's server may
+	// refuse its sign-in before the mailbox turns to error and asks to be
+	// connected again. A refusal now and then (a short-lived token error)
+	// stays a note on the mailbox.
+	RejectedLimit = 5
 
 	// MinWarmupTag is the shortest warm-up tag matched, so a short one
 	// cannot hide real mail.
@@ -74,13 +91,16 @@ type syncPayload struct {
 	MailboxID string `json:"mailbox_id"`
 }
 
-// QueueDue queues a sync for each active mailbox not synced recently. The
-// idempotency key stops a slow sync being queued twice.
+// QueueDue queues a sync for each active mailbox not synced recently. A
+// mailbox whose syncs keep failing waits twice as long after each failure,
+// up to maxBackoff doublings. The idempotency key stops a slow sync being
+// queued twice.
 func (s *Syncer) QueueDue(ctx context.Context) (int, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id::text, workspace_id::text FROM mailboxes
-		WHERE status = 'active' AND has_login AND (last_synced_at IS NULL OR last_synced_at < now() - $1::interval)`,
-		strconv.Itoa(int(syncEvery.Seconds()))+" seconds")
+		WHERE status = 'active' AND has_login
+		  AND (last_synced_at IS NULL OR last_synced_at < now() - make_interval(secs => $1 * power(2, least(sync_failures, $2))))`,
+		syncEvery.Seconds(), maxBackoff)
 	if err != nil {
 		return 0, err
 	}
@@ -148,7 +168,7 @@ func (s *Syncer) Sync(ctx context.Context, workspaceID, mailboxID string) (int, 
 		}
 		return n, s.failed(ctx, workspaceID, acct.ID, syncErr)
 	}
-	_, err = s.Pool.Exec(ctx, `UPDATE mailboxes SET last_synced_at = now(), sync_error = NULL WHERE id = $1`, acct.ID)
+	_, err = s.Pool.Exec(ctx, `UPDATE mailboxes SET last_synced_at = now(), sync_error = NULL, sync_failures = 0 WHERE id = $1`, acct.ID)
 	return n, err
 }
 
@@ -157,29 +177,74 @@ const EventSyncFailed = "mailbox.sync_failed"
 
 // failed records a sync that could not reach the mailbox: on the mailbox
 // as sync_error, and as an event. A lost sign-in also turns the mailbox to
-// error, as a failed sign-in check does.
+// error, as a failed sign-in check does. So does a sign-in the server
+// refused RejectedLimit syncs in a row: a password that no longer works
+// would otherwise fail every sync, unseen. A server that is only busy
+// (throttled) never counts as lost.
+//
+// A sign-in the server or provider refused is the mailbox's own
+// credentials, not something broken in Outflare, so its event has outcome
+// failure; a refusal that turns the mailbox to error says so once, with
+// turned_to_error. Network trouble and server errors stay outcome error.
 func (s *Syncer) failed(ctx context.Context, ws, id string, syncErr error) error {
 	lost := mailbox.SignInLost(syncErr)
-	code, props := "mailbox_unreachable", map[string]any{"mailbox_id": id, "sign_in_lost": lost}
+	throttled, rejected := Throttled(syncErr), Rejected(syncErr)
+	reason := syncErr.Error()
+	var failures int
+	if err := s.Pool.QueryRow(ctx, `UPDATE mailboxes SET last_synced_at = now(), sync_error = $3, sync_failures = sync_failures + 1
+		WHERE id = $1 AND workspace_id = $2 RETURNING sync_failures`, id, ws, reason).Scan(&failures); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if !lost && rejected && failures >= RejectedLimit {
+		lost = true
+		reason = fmt.Sprintf("the mail server refused the sign-in %d times in a row; connect the mailbox again (%s)", failures, reason)
+	}
+	// Turn the mailbox to error first, so the event below says whether
+	// this failure is the one that did it.
+	turned := false
+	if lost {
+		var err error
+		if turned, err = s.markLost(ctx, ws, id, reason); err != nil {
+			s.Log.Error("inbox sync: mark mailbox lost", "mailbox", id, "workspace_id", ws, "err", err)
+			return err
+		}
+	}
+	code, props := "mailbox_unreachable", map[string]any{"mailbox_id": id, "sign_in_lost": lost, "failures": failures, "turned_to_error": turned}
 	var ce *mailbox.ConnError
 	if errors.As(syncErr, &ce) {
 		code = "mailbox_" + string(ce.Stage)
 		props["protocol"], props["stage"] = ce.Protocol, string(ce.Stage)
 	}
-	if lost {
-		code = "mailbox_sign_in_lost"
+	var oe *opError
+	if errors.As(syncErr, &oe) {
+		props["op"] = oe.op
 	}
-	track.Fail(ctx, s.Log, track.Event{Name: EventSyncFailed, WorkspaceID: ws, ActorType: "system", Surface: "job", Props: props},
+	var ne net.Error
+	props["timeout"] = errors.As(syncErr, &ne) && ne.Timeout()
+	switch {
+	case lost:
+		code = "mailbox_sign_in_lost"
+	case throttled:
+		code = "mailbox_throttled"
+	}
+	outcome := track.Error
+	if lost || rejected {
+		outcome = track.Failure
+	}
+	track.Fail(ctx, s.Log, track.Event{Name: EventSyncFailed, WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: outcome, Props: props},
 		code, fmt.Errorf("inbox sync of mailbox %s: %w", id, syncErr))
-	reason := syncErr.Error()
-	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE mailboxes SET last_synced_at = now(), sync_error = $3 WHERE id = $1 AND workspace_id = $2`,
-			id, ws, reason); err != nil || !lost {
-			return err
-		}
+	return nil
+}
+
+// markLost turns an active mailbox to error with the reason, and records
+// it. It reports false when the mailbox was not active (paused, or
+// already marked), so a mailbox says it was lost only once.
+func (s *Syncer) markLost(ctx context.Context, ws, id, reason string) (bool, error) {
+	turned := false
+	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var email string
 		err := tx.QueryRow(ctx, `
-			UPDATE mailboxes SET status = 'error', status_reason = $3, smtp_ok = false, imap_ok = false, updated_at = now()
+			UPDATE mailboxes SET status = 'error', status_reason = $3, sync_error = $3, smtp_ok = false, imap_ok = false, updated_at = now()
 			WHERE id = $1 AND workspace_id = $2 AND status = 'active'
 			RETURNING email`, id, ws, reason).Scan(&email)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -188,12 +253,52 @@ func (s *Syncer) failed(ctx context.Context, ws, id string, syncErr error) error
 		if err != nil {
 			return err
 		}
+		turned = true
 		return audit.Record(ctx, tx, audit.Event{
 			WorkspaceID: ws, ActorType: "system", Action: "mailbox.verify_failed",
 			TargetType: "mailbox", TargetID: id,
 			Data: map[string]any{"email": email, "smtp_ok": false, "imap_ok": false, "reason": reason, "via": "sync"},
 		})
 	})
+	return turned && err == nil, err
+}
+
+// opError names the IMAP command (select, search or fetch) that failed
+// after sign-in, so the event can say which. Its text is the error's own.
+type opError struct {
+	op  string
+	err error
+}
+
+func (e *opError) Error() string { return e.err.Error() }
+func (e *opError) Unwrap() error { return e.err }
+
+// mailboxErr is a failed command after sign-in, at the mailbox stage.
+func mailboxErr(op string, err error) error {
+	return &mailbox.ConnError{Protocol: "IMAP", Stage: mailbox.StageMailbox, Err: &opError{op, err}}
+}
+
+// Throttled reports a sign-in or command the IMAP server turned away for
+// now ([UNAVAILABLE], [LIMIT] or [INUSE]): busy, not a bad password.
+func Throttled(err error) bool {
+	var ie *imap.Error
+	if !errors.As(err, &ie) {
+		return false
+	}
+	switch ie.Code {
+	case imap.ResponseCodeUnavailable, imap.ResponseCodeLimit, imap.ResponseCodeInUse:
+		return true
+	}
+	return false
+}
+
+// Rejected reports the IMAP server answered the sign-in itself with NO
+// (for example [AUTHENTICATIONFAILED]), as opposed to a network error, an
+// OAuth token that couldn't be fetched, or a throttle.
+func Rejected(err error) bool {
+	var ce *mailbox.ConnError
+	var ie *imap.Error
+	return errors.As(err, &ce) && ce.Stage == mailbox.StageAuth && errors.As(err, &ie) && ie.Type == imap.StatusResponseTypeNo && !Throttled(err)
 }
 
 func (s *Syncer) sync(ctx context.Context, acct *mailbox.Account) (int, error) {
@@ -213,9 +318,10 @@ func (s *Syncer) sync(ctx context.Context, acct *mailbox.Account) (int, error) {
 		return 0, err
 	}
 	defer c.Close()
+	started := time.Now()
 	sel, err := c.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
-		return 0, &mailbox.ConnError{Protocol: "IMAP", Stage: mailbox.StageMailbox, Err: err}
+		return 0, mailboxErr("select", err)
 	}
 	uv := int64(sel.UIDValidity)
 	criteria := &imap.SearchCriteria{}
@@ -229,7 +335,7 @@ func (s *Syncer) sync(ctx context.Context, acct *mailbox.Account) (int, error) {
 	}
 	res, err := c.UIDSearch(criteria, nil).Wait()
 	if err != nil {
-		return 0, &mailbox.ConnError{Protocol: "IMAP", Stage: mailbox.StageMailbox, Err: err}
+		return 0, mailboxErr("search", err)
 	}
 	var uids []imap.UID
 	for _, u := range res.AllUIDs() {
@@ -251,13 +357,28 @@ func (s *Syncer) sync(ctx context.Context, acct *mailbox.Account) (int, error) {
 	}
 
 	section := &imap.FetchItemBodySection{Peek: true, Partial: &imap.SectionPartial{Offset: 0, Size: 2 << 20}}
-	msgs, err := c.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{UID: true, InternalDate: true, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
-	if err != nil {
-		return 0, &mailbox.ConnError{Protocol: "IMAP", Stage: mailbox.StageMailbox, Err: err}
+	n := 0
+	for len(uids) > 0 && time.Since(started) < syncBudget {
+		chunk := uids[:min(fetchChunk, len(uids))]
+		uids = uids[len(chunk):]
+		msgs, err := c.Fetch(imap.UIDSetNum(chunk...), &imap.FetchOptions{UID: true, InternalDate: true, BodySection: []*imap.FetchItemBodySection{section}}).Collect()
+		if err != nil {
+			return n, mailboxErr("fetch", err)
+		}
+		slices.SortFunc(msgs, func(a, b *imapclient.FetchMessageBuffer) int { return int(a.UID) - int(b.UID) })
+		added, err := s.storeAll(ctx, acct, uv, section, msgs)
+		n += added
+		if err != nil {
+			return n, err
+		}
 	}
 	c.Logout().Wait() //nolint:errcheck
-	slices.SortFunc(msgs, func(a, b *imapclient.FetchMessageBuffer) int { return int(a.UID) - int(b.UID) })
+	return n, nil
+}
 
+// storeAll stores fetched messages in UID order, moving imap_last_uid past
+// each one as it is stored. It returns how many were new.
+func (s *Syncer) storeAll(ctx context.Context, acct *mailbox.Account, uv int64, section *imap.FetchItemBodySection, msgs []*imapclient.FetchMessageBuffer) (int, error) {
 	n := 0
 	for _, m := range msgs {
 		p, err := Parse(m.FindBodySection(section))

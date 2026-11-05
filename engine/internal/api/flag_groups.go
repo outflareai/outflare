@@ -44,34 +44,34 @@ type flagGroupView struct {
 }
 
 // loadFlagGroups lists a brand's exclusion groups (brand "": every
-// brand's) with their flags. flag_groups has no brand_id yet (the version
-// before 0411 lists every group), so a group's own row counts for every
-// brand: to_jsonb reads the column once a later migration adds it.
+// brand's) with their flags. A group's holdout row is its brand's (0423).
 func (s *Server) loadFlagGroups(ctx context.Context, ws, brand, only string) ([]flagGroupView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT g.name, coalesce(fg.holdout, 0), f.key, f.name, f.status, f.group_from, f.group_to
-		FROM (SELECT DISTINCT exclusion_group AS name FROM flags WHERE workspace_id = $1 AND exclusion_group <> '' AND status <> 'archived'
+		SELECT g.name, coalesce(g.brand_id::text, ''), coalesce(fg.holdout, 0), f.key, f.name, f.status, f.group_from, f.group_to
+		FROM (SELECT DISTINCT exclusion_group AS name, brand_id FROM flags WHERE workspace_id = $1 AND exclusion_group <> '' AND status <> 'archived'
 				AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid)
-			UNION SELECT name FROM flag_groups g WHERE workspace_id = $1 AND ($3 = '' OR COALESCE(to_jsonb(g) ->> 'brand_id', $3) = $3)) g
-		LEFT JOIN flag_groups fg ON fg.workspace_id = $1 AND fg.name = g.name
+			UNION SELECT name, brand_id FROM flag_groups g WHERE workspace_id = $1 AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid)) g
+		LEFT JOIN flag_groups fg ON fg.workspace_id = $1 AND fg.name = g.name AND fg.brand_id IS NOT DISTINCT FROM g.brand_id
 		LEFT JOIN flags f ON f.workspace_id = $1 AND f.exclusion_group = g.name AND f.status <> 'archived'
-			AND ($3 = '' OR f.brand_id = NULLIF($3, '')::uuid)
+			AND f.brand_id IS NOT DISTINCT FROM g.brand_id
 		WHERE $2 = '' OR g.name = $2
-		ORDER BY g.name, f.group_from`, ws, only, brand)
+		ORDER BY g.name, g.brand_id, f.group_from`, ws, only, brand)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []flagGroupView{}
+	var brands []string // each group's brand, as out lists them
 	for rows.Next() {
-		var name string
+		var name, gb string
 		var holdout int
 		var key, fname, status *string
 		var from, to *int
-		if err := rows.Scan(&name, &holdout, &key, &fname, &status, &from, &to); err != nil {
+		if err := rows.Scan(&name, &gb, &holdout, &key, &fname, &status, &from, &to); err != nil {
 			return nil, err
 		}
-		if len(out) == 0 || out[len(out)-1].Name != name {
+		if len(out) == 0 || out[len(out)-1].Name != name || brands[len(out)-1] != gb {
+			brands = append(brands, gb)
 			out = append(out, flagGroupView{Name: name, Holdout: holdout, Flags: []flagGroupMember{}, Free: 100 - holdout})
 		}
 		g := &out[len(out)-1]
@@ -118,10 +118,10 @@ func (s *Server) setFlagGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// A group's flags are the brand's: the route's, else the workspace's
-	// first. Its holdout row is still the workspace's (flag_groups has no
-	// brand_id yet), so a name is one group across brands.
-	brand, err := s.defaultBrand(ctx, a)
+	// A group's flags and holdout are the brand's: the route's, else the
+	// workspace's first. Until the contract step drops flag_groups'
+	// per-workspace key, a group name is used in one brand at a time.
+	brand, err := s.rowBrand(ctx, a)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -130,15 +130,16 @@ func (s *Server) setFlagGroup(w http.ResponseWriter, r *http.Request) {
 		limit := flags.Buckets - *in.Holdout*100
 		var clash string
 		err := tx.QueryRow(ctx, `SELECT key FROM flags WHERE workspace_id = $1 AND exclusion_group = $2 AND status <> 'archived' AND group_to > $3
-			ORDER BY group_to DESC LIMIT 1 FOR UPDATE`, a.WorkspaceID, name, limit).Scan(&clash)
+			  AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid
+			ORDER BY group_to DESC LIMIT 1 FOR UPDATE`, a.WorkspaceID, name, limit, brand).Scan(&clash)
 		switch {
 		case err == nil:
 			return errABConflict(fmt.Sprintf("flag %s's slice reaches into a %d%% holdout: give it a smaller group_share, or take it out of the group, first", clash, *in.Holdout))
 		case err != pgx.ErrNoRows:
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO flag_groups (workspace_id, name, holdout) VALUES ($1, $2, $3)
-			ON CONFLICT (workspace_id, name) DO UPDATE SET holdout = EXCLUDED.holdout, updated_at = now()`, a.WorkspaceID, name, *in.Holdout); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO flag_groups (workspace_id, brand_id, name, holdout) VALUES ($1, NULLIF($4, '')::uuid, $2, $3)
+			ON CONFLICT (brand_id, name) DO UPDATE SET holdout = EXCLUDED.holdout, updated_at = now()`, a.WorkspaceID, name, *in.Holdout, brand); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "flag_group.updated", "flag_group", "", map[string]any{"holdout": *in.Holdout, "brand_id": brand})
@@ -203,12 +204,21 @@ func (s *Server) flagGroupHoldout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	to := time.Now()
-	res, err := abtests.Holdout(ctx, s.pool, a.WorkspaceID, name, list[0].Holdout, g, to.AddDate(0, 0, -days), to)
+	res, err := abtests.Holdout(ctx, s.pool, a.WorkspaceID, groupBrand(sel), name, list[0].Holdout, g, to.AddDate(0, 0, -days), to)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// oneBrand is the brand whose settings a report reads: the filter's one
+// brand, else "" (the workspace's first).
+func oneBrand(sel brandSel) string {
+	if sel.id == "none" {
+		return ""
+	}
+	return sel.id
 }
 
 // groupBrand is the brand a group list keeps to: the filter's one brand,

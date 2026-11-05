@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/customers"
 )
 
 // Background work runs as jobs on the Postgres queue. These routes let a
@@ -107,10 +108,39 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
 
-// PruneJobs deletes finished jobs after 14 days. Jobs with an idempotency
-// key stay: the key is what stops that work being queued twice.
+// PruneJobs deletes finished jobs after 14 days, a batch at a time, and
+// returns how many it deleted. Jobs with an idempotency key stay, because
+// the key is what stops that work being queued twice, except the kinds in
+// prunableKeyedJobs: one runs per event or per batch of events, so they
+// grow with traffic, and their keys name an id made in the same
+// transaction (an event, a batch) or a time slot long past, so nothing
+// asks for them again after a day, let alone 14.
 func (s *Server) PruneJobs(ctx context.Context) (int64, error) {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM jobs WHERE status IN ('succeeded', 'dead') AND idempotency_key IS NULL
-		AND updated_at < now() - interval '14 days'`)
-	return tag.RowsAffected(), err
+	var total int64
+	for range 100 {
+		tag, err := s.pool.Exec(ctx, `DELETE FROM jobs WHERE id IN (
+			SELECT id FROM jobs WHERE status IN ('succeeded', 'dead') AND updated_at < now() - interval '14 days'
+				AND (idempotency_key IS NULL OR kind = ANY($1))
+			LIMIT 5000)`, prunableKeyedJobs)
+		if err != nil {
+			return total, err
+		}
+		total += tag.RowsAffected()
+		if tag.RowsAffected() < 5000 {
+			break
+		}
+	}
+	return total, nil
+}
+
+// prunableKeyedJobs are the job kinds with an idempotency key that
+// PruneJobs still deletes once finished; see PruneJobs. Add a kind only
+// when nothing could queue the same key again after it finished.
+var prunableKeyedJobs = []string{
+	jobEventsProcess,            // "batch:<new id>", "more:<brand>:<now>", "stale:<brand>:<5-minute slot>", "replay:<new id>"
+	customers.JobMetricEvent,    // "metric-event:<event id>", queued where the event is stored
+	customers.JobLifecycleEvent, // "lifecycle-event:<event id>"
+	customers.JobJourneyEvent,   // "journey-event:<event id>"
+	customers.JobRuleEvent,      // "rule-event:<event id>"
+	customers.JobRuleAudience,   // "rule-audience:<list>:<change>:<time>:<offset>"
 }

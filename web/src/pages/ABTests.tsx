@@ -5,11 +5,11 @@ import { pickedBrandId } from "@/lib/brand";
 // were shown each version and how many of them converted, and says which
 // version wins, in plain words.
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { ABTest, ABTestBreakdown, ABTestComparison, ABTestGoal, ABTestPreviews, ABTestResults, Flag } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, Empty, ErrorText, field, Loading, PageHeader, toast, type tones } from "../ui";
-import { ago } from "../format";
+import { ago, plural } from "../format";
 import { useBrand } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
@@ -87,7 +87,7 @@ function ABTestsPage({ ws, canManage, go }: Props) {
     <div className="space-y-6">
       <PageHeader
         title="A/B tests"
-        description="Pick a feature flag with two or more versions, say what counts as success, and see which version wins. The numbers stay honest however often you check."
+        description="Pick a page, change it right there for each version, say what counts as success, and see which version wins. No code needed. The numbers stay honest however often you check."
         action={
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => setLearnings(true)}>Learnings</Button>
@@ -101,7 +101,7 @@ function ABTestsPage({ ws, canManage, go }: Props) {
         <Loading />
       ) : tests.length === 0 ? (
         <Empty title="No A/B tests yet" action={canManage && <Button onClick={newTest}>New test</Button>}>
-          A test is built on a <button className="underline underline-offset-2" onClick={() => go("flags")}>feature flag</button> that splits visitors between versions, such as a new headline for half of them. Visitors join when a page shows them their version.
+          Pick a page and change it for half your visitors, such as a new headline, with the visual editor. Developers can also test a <button className="underline underline-offset-2" onClick={() => go("flags")}>feature flag</button> their code reads. Visitors join when a page shows them their version.
         </Empty>
       ) : (
         <DataTable
@@ -285,6 +285,14 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
   const [writing, setWriting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // No code: test a page, and Outflare makes the flag. A flag: test one a
+  // developer already made.
+  const [mode, setMode] = useState<"page" | "flag">(initial ? "flag" : "page");
+  const [page, setPage] = useState("");
+  const [versions, setVersions] = useState(1);
+  // A split URL test: each new version is another page visitors are sent to.
+  const [split, setSplit] = useState(false);
+  const [targets, setTargets] = useState<string[]>(["", "", "", ""]);
 
   useEffect(() => {
     if (!flagKey && flags[0]) setFlagKey(flags[0].key);
@@ -296,6 +304,23 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
     e.preventDefault();
     setBusy(true);
     setError("");
+    if (mode === "page") {
+      if (!/^https?:\/\/[^/\s]+/i.test(page.trim())) {
+        setBusy(false);
+        return setError("Enter the address of the page to test, starting with https://.");
+      }
+      const redirects = split ? targets.slice(0, versions).map((t) => t.trim()) : undefined;
+      if (redirects && redirects.some((t) => !/^(\/(?!\/)|https?:\/\/)\S+$/i.test(t))) {
+        setBusy(false);
+        return setError("Enter the page for each version, such as /pricing-b.");
+      }
+      const { data, error } = await api.POST("/v1/brands/{brand}/ab-tests", { params: { path: { brand: pickedBrandId() } }, body: { page: { url: page.trim(), versions, redirects }, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect } });
+      setBusy(false);
+      if (error) return setError(errorMessage(error));
+      onFlagChanged();
+      toast(split ? `Added ${data!.name}. Start it when the pages are ready.` : `Added ${data!.name}. Now edit each version on your page.`);
+      return onSaved(data!);
+    }
     const { data, error } = await api.POST("/v1/brands/{brand}/ab-tests", { params: { path: { brand: pickedBrandId() } }, body: { flag: flagKey, control: ctl, name: name.trim() || undefined, hypothesis, goals, guardrails, min_effect: minEffect, factors: factors.filter((k) => k && k !== flagKey).map((k) => ({ flag: k })) } });
     setBusy(false);
     if (error) return setError(errorMessage(error));
@@ -308,14 +333,51 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <SheetTitle>New A/B test</SheetTitle>
-          <SheetDescription>Choose a flag that splits visitors between versions, the version to compare with, and what counts as success.</SheetDescription>
+          <SheetDescription>Pick the page, say what counts as success, then change each version right on your page. No code needed.</SheetDescription>
         </SheetHeader>
-        {flags.length === 0 ? (
+        <div className="px-4 text-[13px]">
+          <div role="tablist" className="inline-flex overflow-hidden rounded-md border text-[12px]">
+            {([["page", "Test a page"], ["flag", "Use a feature flag"]] as const).map(([m, label]) => (
+              <button key={m} type="button" role="tab" aria-selected={mode === m} className={`px-2.5 py-1 ${mode === m ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => setMode(m)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {mode === "flag" && flags.length === 0 ? (
           <div className="px-4 pb-6 text-[13px]">
-            <p className="text-muted-foreground">No flag splits visitors between versions yet. <button className="underline underline-offset-2" onClick={() => go("flags")}>Add a flag</button> with two or more versions first.</p>
+            <p className="text-muted-foreground">No flag splits visitors between versions yet. <button className="underline underline-offset-2" onClick={() => go("flags")}>Add a flag</button> with two or more versions, or test a page instead.</p>
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-5 px-4 pb-6 text-[13px]">
+            {mode === "page" && (
+              <>
+                <label className="block">
+                  <span className="mb-1 block font-medium">Page</span>
+                  <input className={`${field} w-full`} type="url" required placeholder="https://northpeak.example/pricing" value={page} onChange={(e) => setPage(e.target.value)} />
+                  <span className="mt-1 block text-[12px] text-muted-foreground">The page visitors see the versions on. End it with * for every page under it, such as /blog/*. Your site only needs the Outflare tracking script.</span>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block font-medium">New versions</span>
+                  <select className={`${field} w-full`} value={versions} onChange={(e) => setVersions(Number(e.target.value))}>
+                    {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n === 1 ? "1 (an A/B test)" : `${n} (A/B/${"CDE".slice(0, n - 1).split("").join("/")})`}</option>)}
+                  </select>
+                  <span className="mt-1 block text-[12px] text-muted-foreground">Visitors are split evenly between today's page and each new version. {split ? "" : "You edit the versions next."}</span>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-0.5" checked={split} onChange={(e) => setSplit(e.target.checked)} />
+                  <span>
+                    <span className="block font-medium">The versions are other pages</span>
+                    <span className="block text-[12px] text-muted-foreground">A split URL test: visitors to the page above are sent to another page for their version. Pages must be on your own site.</span>
+                  </span>
+                </label>
+                {split && Array.from({ length: versions }, (_, i) => (
+                  <label key={i} className="block">
+                    <span className="mb-1 block font-medium">Version {String.fromCharCode(66 + i)} page</span>
+                    <input className={`${field} w-full`} required placeholder={`/pricing-${String.fromCharCode(98 + i)}`} value={targets[i]} onChange={(e) => setTargets((t) => t.map((x, j) => (j === i ? e.target.value : x)))} />
+                  </label>
+                ))}
+              </>
+            )}
+            {mode === "flag" && (<>
             <label className="block">
               <span className="mb-1 block font-medium">Flag</span>
               <select className={`${field} w-full`} value={flagKey} onChange={(e) => setFlagKey(e.target.value)}>
@@ -337,6 +399,7 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
             ) : (
               <Button type="button" variant="ghost" onClick={() => setWriting(true)}>Write more versions with AI</Button>
             ))}
+            </>)}
             <div className="space-y-2">
               <span className="block font-medium">Goals</span>
               <GoalsEditor goals={goals} setGoals={setGoals} events={events} />
@@ -348,7 +411,8 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
               <p className="text-[12px] text-muted-foreground">Metrics a winner mustn't hurt, such as errors or refunds. You get an alert when a version clearly makes one worse; they never decide the winner.</p>
             </div>
             <EffectPicker value={minEffect} onChange={setMinEffect} />
-            <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />
+            {mode === "flag" && <PlanPanel ws={ws} flag={flagKey} goal={goals[0]} minEffect={minEffect} />}
+            {mode === "flag" && (
             <div className="space-y-1">
               <span className="block font-medium">Also test <span className="font-normal text-muted-foreground">(optional, multivariate)</span></span>
               {[0, 1].map((i) => (
@@ -362,9 +426,10 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
               ))}
               <p className="text-[12px] text-muted-foreground">Test up to two other flags at once: every combination of versions gets visitors, and you see which combination does best. Each combination needs enough visitors, so it takes longer.</p>
             </div>
+            )}
             <label className="block">
               <span className="mb-1 block font-medium">Name <span className="font-normal text-muted-foreground">(optional)</span></span>
-              <input className={`${field} w-full`} maxLength={200} placeholder={flag?.name} value={name} onChange={(e) => setName(e.target.value)} />
+              <input className={`${field} w-full`} maxLength={200} placeholder={mode === "page" ? "Pricing headline" : flag?.name} value={name} onChange={(e) => setName(e.target.value)} />
             </label>
             <label className="block">
               <span className="mb-1 block font-medium">Hypothesis <span className="font-normal text-muted-foreground">(optional)</span></span>
@@ -372,13 +437,57 @@ function NewTestSheet({ ws, flags, flag: initial, seed, go, onClose, onSaved, on
             </label>
             <ErrorText>{error}</ErrorText>
             <div className="flex gap-2 border-t pt-4">
-              <Button disabled={busy || !flagKey}>{busy ? "Adding…" : "Add test"}</Button>
+              <Button disabled={busy || (mode === "flag" && !flagKey)}>{busy ? "Adding…" : mode === "page" && !split ? "Add test and edit versions" : "Add test"}</Button>
               <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
             </div>
           </form>
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+// EditVersionsPanel opens the visual editor on the test's page for each
+// version other than the control, so a marketer changes the page itself.
+function EditVersionsPanel({ test, flag }: { test: ABTest; flag: Flag }) {
+  const [page, setPage] = useState(test.page.replace(/\*$/, ""));
+  const [error, setError] = useState("");
+  const versions = flag.variants.filter((v) => v.key !== test.control);
+  const changes = (p: unknown) => (p && typeof p === "object" && Array.isArray((p as { changes?: unknown[] }).changes) ? (p as { changes: unknown[] }).changes.length : 0);
+
+  async function edit(variant: string) {
+    setError("");
+    if (!/^https?:\/\/[^/\s]+/i.test(page.trim())) return setError("Enter the address of a page on your site to edit, starting with https://.");
+    const win = window.open("about:blank", "_blank");
+    const { data, error } = await api.POST("/v1/brands/{brand}/flags/{flag}/edit-link", { params: { path: { brand: pickedBrandId(), flag: flag.id } }, body: { variant, url: page.trim() } });
+    if (error || !data) {
+      win?.close();
+      return setError(errorMessage(error));
+    }
+    if (win) {
+      win.opener = null;
+      win.location.href = data.url;
+    } else window.location.href = data.url;
+    toast(`The editor is open on your page for ${variant}. Save there, then come back to preview and start.`);
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <span className="block font-medium">Edit the versions</span>
+      {(!test.page || test.page.endsWith("*")) && (
+        <input className={`${field} w-full`} type="url" aria-label="Page to edit on" placeholder="https://northpeak.example/pricing" value={page} onChange={(e) => setPage(e.target.value)} />
+      )}
+      <ul className="divide-y">
+        {versions.map((v) => (
+          <li key={v.key} className="flex items-center justify-between gap-2 py-1.5">
+            <span><span className="font-mono">{v.key}</span> <span className="text-muted-foreground">{changes(v.payload) ? `${plural(changes(v.payload), "change")}` : "No changes yet"}</span></span>
+            <Button type="button" variant="ghost" onClick={() => edit(v.key)}>Edit visually</Button>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-muted-foreground">Opens your page with an editor over it: click anything to change it. Today's page ({test.control}) stays as it is.</p>
+      <ErrorText>{error}</ErrorText>
+    </div>
   );
 }
 
@@ -514,6 +623,7 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
         <div className="space-y-5 px-4 pb-6 text-[13px]">
           {test.hypothesis && <p className="text-muted-foreground italic">{test.hypothesis}</p>}
           <ErrorText>{error}</ErrorText>
+          {test.status === "running" && <MissedChangesNotice testID={test.id} edit={canManage && flag ? <EditVersionsPanel test={test} flag={flag} /> : null} />}
 
           {test.status === "draft" ? (
             <>
@@ -535,9 +645,10 @@ function TestSheet({ ws, test, flag, canManage, onClose, onChanged, onFlagChange
                   <VersionsPanel ws={ws} flag={flag} onAdded={onFlagChanged} />
                 </div>
               )}
+              {canManage && flag && <EditVersionsPanel test={test} flag={flag} />}
               <PreviewPanel ws={ws} testID={test.id} canManage={canManage} onChecked={() => setChecked((n) => n + 1)} />
               <ChecklistPanel ws={ws} testID={test.id} deps={JSON.stringify([goals, guardrails, minEffect, checked])} />
-              <p className="text-muted-foreground">Make sure the pages read the flag (<span className="font-mono">outflare.flag("{test.flag_key}")</span>, or <span className="font-mono">data-flags</span> and its class), so visitors join when they see their version.</p>
+              <p className="text-muted-foreground">Versions made with Edit visually need nothing more: visitors join when they see theirs. For versions shown by your own code, make sure the pages read the flag (<span className="font-mono">outflare.flag("{test.flag_key}")</span>, or <span className="font-mono">data-flags</span> and its class).</p>
               {canManage && (
                 <div className="flex gap-2 border-t pt-4">
                   <Button disabled={busy} onClick={start}>{busy ? "Starting…" : "Start test"}</Button>
@@ -953,6 +1064,29 @@ function RegistrationCard({ reg }: { reg: NonNullable<ABTest["registration"]> })
         )}
       </div>
     </details>
+  );
+}
+
+// MissedChangesNotice warns, on a running test, when visual changes found
+// nothing on the page for some visitors (the page changed since), with the
+// editor links to pick those parts again.
+function MissedChangesNotice({ testID, edit }: { testID: string; edit: ReactNode }) {
+  const [text, setText] = useState("");
+  useEffect(() => {
+    let live = true;
+    api.GET("/v1/brands/{brand}/ab-tests/{test}/checklist", { params: { path: { brand: pickedBrandId(), test: testID } } }).then(({ data }) => {
+      if (live) setText(data?.checks.find((c) => c.id === "changes_found")?.text ?? "");
+    });
+    return () => {
+      live = false;
+    };
+  }, [testID]);
+  if (!text) return null;
+  return (
+    <div role="status" className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-[12px]">
+      <p>{text}</p>
+      {edit}
+    </div>
   );
 }
 

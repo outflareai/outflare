@@ -199,6 +199,7 @@ Read (always available):
 | `get_consent_banner`, `update_consent_banner`, `reask_consent_banner` | The cookie consent banner a site key's script shows: region rules (EEA opt-in, US opt-out), Global Privacy Control, Google Consent Mode v2, the Meta, TikTok and Microsoft signals, categories, look and words; visitors' choices are consents on their records |
 | `list_site_cookies`, `scan_site_cookies`, `classify_site_cookie`, `get_cookie_policy` | The cookie policy that keeps itself up to date: every cookie, storage key and third-party script found on a site (scans and visitors' browsers, names only), matched to a vendor catalogue, with unknown ones to classify, and the published policy as Markdown, text or HTML |
 | `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company` | The companies and people on the website, scored for buying intent (key pages, return visits), known from the product, from clicks on tracked links in Outflare email, or (when turned on) from the company behind their address with the workspace's own People Data Labs or Snitcher key, or by name from the workspace's own RB2B, Vector or Warmly; key pages, hot score, lookups, people reveal and who is left out; add a looked-up company to the CRM |
+| `list_visitor_browsers`, `get_visitor_browser`, `list_visitor_browser_events`, `create_visitor_link` | Every visitor on a brand's site, anonymous ones included, with their journey (visits, pages and events) and the person they turned out to be; and links to the brand's site for one person, for messages the business sends itself, that join the device they're opened on to that person |
 | `get_ai_settings`, `list_ai_models` | Which AI model (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway, Requesty) runs Outflare's agent, its price, the monthly AI limit and spend; the models a connection can use |
 | `get_ai_usage` | Where the workspace's AI spend goes in a month: by tool, provider, model and day, each tool's own limit, and the latest calls with tokens and cost |
 | `list_connection_usage` | What each paid connection (SEO data, lead data, email verification, page reads) used today and this month, with its daily and monthly limits |
@@ -233,6 +234,7 @@ Read (always available):
 | `get_analytics_catalog` | Per website: the analytics and SEO tools, the metrics each has stored, history stored, budget left and gaps (also the resource `outflare://analytics/catalog`) |
 | `get_analytics_overview` | Every website lined up by domain: each analytics tool side by side, search clicks added up, latest SEO figures. Take `brand`: they belong to one brand |
 | `query_analytics_history`, `compare_analytics_tools` | Stored daily analytics: grouped by day, tool or key, and each tool's daily series for one website |
+| `get_site_analytics` | A brand's traffic from Outflare's own tag: totals, days, top pages, sources, websites, countries and devices, live and free |
 | `list_seo` | DataForSEO and Ahrefs connections: domains, country, budget left this month, snapshot status |
 | `get_seo_overview` | Each brand's search growth: weekly branded search, clicks and visitors, domain rating, backlinks and referring domains with trends, site health and open fixes; free |
 | `get_seo_history` | Stored weekly SEO snapshots (overview, keywords with their previous position); free |
@@ -281,6 +283,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |
 | `list_record_field_values`, `pin_record_field` | What every source last said about a record's fields, and pinning a value set by hand so it wins for good |
 | `list_transactions`, `record_transaction` | A brand's payments, refunds, chargebacks and credits, and recording one from your own billing (never twice for the same id) |
+| `get_developer_setup`, `link_refund` | A live checklist of what a brand's developer sends, with the fix for anything that's off, and linking a refund to its payment |
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
@@ -326,6 +329,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_ab_test_previews`, `check_ab_test_version` | Get links that show each version of a test on its pages, and record what the person saw when they checked one |
 | `create_reddit_experiment`, `close_reddit_experiment`, `place_reddit_action`, `approve_reddit_action`, `cancel_reddit_action`, `check_reddit_action`, `set_reddit_project` | Run Reddit experiments: place comments, replies, posts, thread groups and upvotes through Engain (spending its credits, within the brand's limits a person set), send or withdraw drafts, check one now, and close an experiment with its conclusion |
 | `create_ab_test`, `update_ab_test`, `get_ab_test_checklist`, `start_ab_test`, `end_ab_test`, `freeze_ab_test`, `duplicate_ab_test`, `ship_ab_test` | Set up an A/B test of a flag with its control, goals and guardrails, check it before it starts, start measuring, stop new visitors joining, end it with the version chosen, copy it into a new draft, or ship a version to everyone |
+| `get_ab_test_version`, `set_ab_test_version` | Read or build a no-code test's version: text, formatting, styles, moves, new elements, CSS or a redirect to another page (an agent's change to a version visitors can see, and starting or shipping a test, wait for a person) |
 | `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, summarise results (the engine decides the recommendation), write what a finished test taught, or answer a question over past tests |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |
@@ -425,6 +429,17 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_attribution_customers`, `get_attribution_cohorts` | New or known people and first or repeat revenue per channel, and what the people each channel first brought have paid to date |
 | `get_attribution_accounts`, `get_attribution_deals` | Credit rolled up to each company with the deals it won, and won deal value spread across channels by the credit of its people |
 | `get_attribution_ads` | Per paid ad campaign, ad set or ad: first-party visits, credited conversions and revenue beside the platform's spend and its own conversion count |
+| `get_insights_catalog`, `run_funnel`, `list_funnel_people` | Funnels across ad clicks, website visits, events, conversions and payments, counted per person so later steps only include people who did step 1: counts, drop-off and time per step, a breakdown, conversion over time, and the people behind any step or drop-off. Take `brand` |
+| `run_trend` | Any number over time: visits, events, people, revenue, the ad networks' clicks and spend, by day, week or month, with a breakdown, a formula between series (cost per sign-up) and the period before. Takes `brand` |
+| `run_retention` | Of the people who first did something in each day, week or month, how many came back and did it (or something else) in each period after: a triangle of cohorts and the average curve. Takes `brand` |
+| `run_lifecycle` | In each day, week or month, how many active people were new, returning or resurrected, and how many went dormant. Takes `brand` |
+| `save_funnel_people`, `run_funnel_correlation` | Save the people at a funnel step, or who dropped off before it, as a static list; and what the people who reached a step did differently from those who didn't (events, pages and person properties, with an odds ratio). Take `brand` |
+| `run_paths` | Where people went step by step, from a start, towards an end, or from their first page or event: nodes per step with drop-off and the links between them. Takes `brand` |
+| `list_annotations`, `create_annotation`, `delete_annotation` | Notes that mark a day on every chart of a brand (a launch, a campaign, an outage). Take `brand` |
+| `list_insights`, `get_insight`, `save_insight`, `update_insight`, `delete_insight` | Saved funnels, trends, retention, paths and lifecycle questions for a brand, as the team sees them on the Funnels, Trends, Retention and Paths pages |
+| `list_dashboards`, `get_dashboard`, `create_dashboard`, `update_dashboard`, `delete_dashboard`, `add_dashboard_tile`, `remove_dashboard_tile` | Dashboards: saved funnels, trends and retention questions as tiles on a 12-column grid, all over the dashboard's dates, with notes between them. `update_dashboard` with `settings.digest` puts its trends in the digest |
+| `share_dashboard`, `unshare_dashboard` | A dashboard's share link, with a password and an expiry if wanted: anyone with it sees the dashboard read-only, every tile live, and nothing else |
+| `create_insight_alert`, `list_insight_alerts`, `delete_insight_alert` | Alerts on a number: a saved trend's total checked every hour, raising an alert once when it crosses a line (above, below, or up or down by a percentage against the period before) |
 | `list_attribution_conversions` | Credited sign-ups, payments and refunds with the visits that got the credit |
 | `list_ad_connections` | List connected ad platforms and what each still needs |
 | `list_ad_accounts` | List ad accounts with currency, brand and sync status |
@@ -439,9 +454,14 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_ad_tracking_templates` | The tracking template to paste into each ad network, with its click ids and macros |
 | `plan_ad_tracking` | Which of an ad account's URL suffixes need the tracking template, read from the platform (Google Ads), with what each would say. Changes nothing |
 | `add_ad_tracking` | Add the tracking template to every ad of an ad account, keeping the parameters already there. Needs `ads.manage` |
+| `get_ad_tracking_run` | How the latest `add_ad_tracking` went: queued, running, done with what changed and what the platform refused, or failed with why |
 | `get_ad_tracking_health` | Whether paid traffic is tracked per network, campaigns spending without tracked visits, send-back failures, and what to fix |
 | `sync_ads` | Sync ad platforms now instead of within six hours |
 | `pause_ad_campaign`, `resume_ad_campaign`, `set_ad_campaign_budget` | Pause or resume a campaign, or set its daily budget, on the workspace's own Google Ads, Meta, Microsoft, LinkedIn or TikTok account: the change is queued, made by a job and read back from the platform. On the action layer a raise past a fifth always waits for a person, and so does anything over the grant's spend caps. Needs `ads.manage` |
+| `get_ad_campaign_targeting` | A campaign's bidding, customer list audiences and countries, read live from Google Ads or Meta |
+| `set_ad_campaign_bidding`, `change_ad_campaign_audience`, `change_ad_campaign_country` | Change how a campaign bids (Google), or add or take out a customer list audience or a country (Google and Meta): queued, made by a job, and always approved by a person first. Needs `ads.manage` |
+| `list_ad_drafts` | New ads written for a brand, waiting for a person first, then made paused, live, failed or dismissed. Needs `analytics.read` |
+| `write_ad_draft`, `update_ad_draft`, `dismiss_ad_draft` | Write a new ad, ad group or search campaign for a person to check (Google; ads on Meta), rewrite one before it is approved, or leave one unmade. A person approves it in Outflare, which makes it paused, then turns it on. Needs `ads.manage` |
 | `pause_all_ads` | The kill switch: pause every active campaign of a brand at once. Needs `ads.manage` |
 | `list_channels` | Every channel an agent can work on (paid ads, content, social, communities, outreach, link building, press, SEO, reviews) with its actions, reads, measures, playbooks and readiness for the workspace or a brand: ready, connect first or needs data |
 | `list_accounts`, `create_account` | The brand's external accounts (social profiles, community and review sites, partner platforms, sites with no API): how each signs in, whether access works, what it depends on, and which secret kinds its vault holds, never the values. Record a new one; secrets are set by a person in the app |
@@ -455,6 +475,11 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `publish_content` | Put a post or page on the brand's own CMS (WordPress, Ghost), as a draft there or live. Needs `content.manage`; an agent's publication may be held for a person |
 | `deliver_content` | Report a post or page live on the brand's own site after the `content.approved` webhook, so the item is published and measured. Needs `content.manage` |
 | `list_ad_changes` | Every change asked for, whether it applied, and whether the platform showed it afterwards |
+| `list_ad_suggestions` | Changes Outflare suggests for campaigns, and the verdict on approved ones |
+| `dismiss_ad_suggestion` | Dismiss a suggested change |
+| `list_ad_recommendations` | The ad platform's own recommendations for an account (Google Ads) |
+| `list_ad_tests` | Tests inside Google Ads and Meta on a campaign, with both arms' numbers and the verdict |
+| `refresh_ad_suggestions` | Read the campaigns again for suggestions now |
 | `list_ad_conversion_targets` | Where an ad account's conversions can go (conversion actions, pixels, goals) |
 | `list_ad_audiences` | An ad account's customer list audiences, for a journey's sync_audience step |
 | `list_ad_conversion_rules`, `create_ad_conversion_rule`, `update_ad_conversion_rule`, `delete_ad_conversion_rule` | Send a customer event to an ad platform as a conversion |
@@ -473,6 +498,10 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_backlinks`, `list_backlink_events`, `get_backlinks_summary` | Links to the SEO sites merged from Ahrefs and DataForSEO (filter by follow, link type, DR, traffic, page type, new or lost since a date; one link per domain), the feed of links gained, lost and regained, and each site's totals and weekly trend |
 | `review_backlink`, `get_disavow_file` | Mark a link ok or to disavow (one link or its whole domain), and get the site's disavow file of what people marked |
 | `list_seo_competitors`, `add_seo_competitor`, `update_seo_competitor`, `remove_seo_competitor`, `check_seo_competitor`, `list_competitor_events` | The sites each SEO site competes with (suggested by the SEO connection, tracked or dismissed), their numbers and OutflareBot's light look, and the feed of what changed at them |
+| `get_competition` | Who is dominating: the brand's and each tracked competitor's share and rank in search, keywords, links, AI answers, placements, social followers and reviews, an overall score and rank, where the brand leads or trails, and when it passes the one ahead |
+| `list_competitor_profiles` | A competitor's social profiles and review pages: followed, suggested from its home page, or dismissed, with followers, rating and reviews from the last daily read |
+| `follow_competitor_profile` | Follow one of a competitor's social profiles or review pages, read daily from now on |
+| `answer_competitor_profile` | Say yes (confirmed) or no (dismissed) to a competitor's suggested profile |
 | `get_seo_competitor_gaps` | Keywords tracked competitors rank for that the site doesn't (or ranks well below), and domains that link to them but not to the site, from stored snapshots |
 | `list_link_prospects`, `add_link_prospects`, `update_link_prospect`, `delete_link_prospect` | One list of pages that could link to an SEO site, from every way of earning links: scored, kept out when the website already links or opted out, and followed from pitched to live, one pitch per website at a time |
 | `list_news_searches`, `create_news_search`, `update_news_search`, `delete_news_search`, `run_news_search` | The news watch: saved searches that run on a schedule through the workspace's own web search connection, following a topic or looking for a brand |
@@ -488,7 +517,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `search_web` | One search results page for any query (Google operators work) from the workspace's own DataForSEO or Geonode; costs money within the connection's budget, so estimate first |
 | `list_link_sequences`, `create_link_sequence`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence; without it, a daily limit applies and pitches the AI is unsure about still wait), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
 | `read_links`, `list_link_reads`, `get_link_read`, `list_dead_pages`, `list_top_linked_pages` | Who links to any page or domain, from the workspace's own Ahrefs or DataForSEO (paid; estimate first), and free reports over earlier reads: competitors' dead pages with links, a domain's most linked pages |
-| `get_link_building_settings`, `update_link_building_settings` | The pitch cool-down, the weekly read of competitors' dead pages with its share of the budget, and how often broken-link prospects are checked again |
+| `get_link_building_settings`, `update_link_building_settings` | A brand's pitch cool-down, the weekly read of competitors' dead pages with its share of the budget, and how often broken-link prospects are checked again |
 | `list_link_assets`, `publish_link_asset` | Mark a page of yours published (`asset.published`), which can start the "Promote a new page" playbook by itself. Needs `seo.read`, and `seo.manage` to publish |
 | `get_site_search`, `get_site_search_history`, `get_site_indexing`, `get_site_sitemaps` | A site's Google Search Console data stored by Outflare: clicks, impressions, CTR and position by page and query for 16 months, day by day history, how Google indexed each page (URL Inspection) and the sitemaps it read |
 | `get_site_indexability`, `list_indexability_pages` | A site's indexability report: every page from the crawl, its sitemaps, Search Console and an SEO tool, whether it can be indexed and whether Google indexed it, the issues where they disagree, and daily history |
@@ -507,7 +536,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `start_fix`, `get_fix_autonomy`, `update_fix_autonomy` | Take a fix before changing the site, held for a person unless fix autonomy lets it through, and read or change that setting |
 | `get_digest_settings`, `update_digest_settings`, `list_digests`, `preview_digest`, `send_digest` | The daily or weekly digest of the whole workspace: when it is made, who gets it by email through your own provider, and what it says |
 | `get_ai_visibility` | How often AI answers name each brand, its share of voice against competitors, its position, the pages they cite, by model and week |
-| `get_ai_visibility_settings`, `update_ai_visibility_settings` | Which models AI visibility samples (on the workspace's own AI connections), answers per prompt, and its monthly spending limit |
+| `get_ai_visibility_settings`, `update_ai_visibility_settings` | Which models a brand's AI visibility samples (on the workspace's own AI connections), answers per prompt, and its monthly spending limit |
 | `list_ai_cohorts`, `create_ai_cohort`, `update_ai_cohort`, `delete_ai_cohort` | Prompt cohorts: a brand's set of questions people ask AI, with aliases, competitors, locale and schedule |
 | `list_ai_prompts`, `add_ai_prompts`, `update_ai_prompt`, `delete_ai_prompt` | The prompts in a cohort |
 | `run_ai_prompts`, `list_ai_runs`, `get_ai_run`, `stop_ai_run` | Ask every model a cohort's prompts now, follow the run, stop it |
@@ -582,6 +611,7 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | --- | --- |
 | `list_coverage_publishers`, `get_coverage_publishers`, `create_coverage_publishers`, `update_coverage_publishers` | Manage publishers through the brand-scoped API. |
 | `list_coverage_placements`, `get_coverage_placements`, `create_coverage_placements`, `update_coverage_placements` | Manage placements through the brand-scoped API. |
+| `list_coverage_parties`, `get_coverage_parties`, `create_coverage_parties`, `update_coverage_parties`, `delete_coverage_parties` | The CRM companies and people on a placement: the agency or partner that delivered it, the creator, author or editor. |
 | `list_coverage_agreements`, `get_coverage_agreements`, `create_coverage_agreements`, `update_coverage_agreements` | Manage agreements through the brand-scoped API. |
 | `list_coverage_deliverables`, `get_coverage_deliverables`, `create_coverage_deliverables`, `update_coverage_deliverables` | Manage deliverables through the brand-scoped API. |
 | `list_coverage_invoices`, `get_coverage_invoices`, `create_coverage_invoices`, `update_coverage_invoices` | Manage invoices through the brand-scoped API. |
@@ -597,7 +627,15 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | `get_coverage_history` | Read record activity. |
 | `get_coverage_observations` | Read page and backlink evidence. |
 | `check_coverage_placement` | Queue a polite page check. |
-| `reconcile_coverage_discovery` | Review existing discoveries without duplicates. |
+| `reconcile_coverage_discovery` | Bring new finds from news, backlinks, link prospects, social watches and AI-cited pages into the review list now, each with the type its address suggests. It also runs once a day by itself. |
+| `list_coverage_searches`, `get_coverage_searches`, `create_coverage_searches`, `update_coverage_searches` | The brand's Presence web searches, run every day (or every few days) on the workspace's own search results connection. |
+| `run_coverage_search` | Run one of those searches now. |
+| `list_coverage_competitors` | The brand's tracked competitors, how often each is scanned for where it appears, and the brand's scan settings. |
+| `update_coverage_competitor_settings`, `update_coverage_competitor` | Change how many competitors count as top and how often top and other competitors are scanned, or give one competitor its own cadence. |
+| `scan_coverage_competitor` | Scan where a competitor appears now, on the workspace's own connections. |
+| `list_coverage_competitor_placements` | Where competitors appear: type, likely paid with evidence, domain rating and traffic, and the sites where the brand has no publisher yet (`gap`). |
+| `list_coverage_opportunities` | Places worth the team's effort, highest leverage (SEO and AI answers together) first, with the reason, the next action and the evidence. |
+| `update_coverage_opportunity`, `refresh_coverage_opportunities` | Pick, dismiss or win an opportunity and set its owner; suggest opportunities now. |
 | `confirm_coverage_candidate` | Create or reuse a placement from a discovery. |
 | `import_coverage_placements` | Preview and import up to 200 rows. |
 | `review_coverage_accuracy` | Queue a version-cited Knowledge accuracy review with the workspace model. |

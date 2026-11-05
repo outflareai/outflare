@@ -104,6 +104,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_record_metrics_due`, `outflare_record_metrics_oldest_due_seconds`, `outflare_record_metrics_backfilling` | | Metric values whose window moved and wait for the sweep, how long the oldest waited (normal: near 0, minutes at most), and metrics being refilled now. |
 | `outflare_ad_conversions_total` | `connector`, `outcome` (`sent`, `skipped`, `failed`) | Conversions sent back to ad platforms ([paid-media.md](paid-media.md#sending-conversions-back)). |
 | `outflare_ad_conversions_oldest_queued_seconds` | | How long the oldest conversion waiting to be sent has waited. |
+| `outflare_ad_conversion_adjustments_total` | `connector`, `outcome` (`sent`, `skipped`, `failed`) | Refunds sent to ad platforms as changes to conversions already sent ([paid-media.md](paid-media.md#refunds)). |
 | `outflare_meeting_events_total` | `status` (`booked`, `held`, `no_show`, `canceled`) | Meeting events recorded on people's timelines ([customers.md](customers.md#meetings-as-events)). |
 | `outflare_meeting_events_pending` | | Meetings tied to a person whose latest status isn't recorded as an event yet. |
 | `outflare_event_inbox_received_total` | | Product events sent to `POST /v1/brands/{brand}/events` and saved in the event inbox ([customers.md](customers.md#product-events)). |
@@ -138,16 +139,16 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_cookie_scan_new_total` | `known` (`known`, `unknown`) | Things found on a site for the first time, by whether the vendor catalogue knew them. |
 | `outflare_ab_results_total` | `outcome` (`ok`, `error`) | [A/B test](ab-tests.md) results counted from product events: when someone opens a running test's results or ends it. |
 | `outflare_ab_results_seconds` | | Time to count them, every goal included. |
-| `outflare_reviews_page_reads_total` | `platform`, `outcome` (`success`, `pending` (still being read; the next round picks it up), `blocked`, `slow_page`, `page_not_found`, `not_a_review_page`, `save_failed`, `connector_error`) | Reads of brands' [review pages](reviews.md). |
+| `outflare_reviews_page_reads_total` | `platform`, `outcome` (`success`, `pending` (still being read; the next round picks it up), `blocked`, `slow_page`, `page_failed`, `page_not_found`, `not_a_review_page`, `save_failed`, `connector_error`) | Reads of brands' [review pages](reviews.md). |
 | `outflare_reviews_new_total` | `platform` | Reviews kept for the first time. |
-| `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`) | Active review pages, and how many failed their last read. |
+| `outflare_reviews_pages` | `platform`, `state` (`ok`, `failing`, `no_reader`) | Active review pages, how many failed their last read, and how many are in a workspace with no page reader connected. |
 | `outflare_sync_runs_total` | `module` (`analytics`, `search_console`, `page_conversions`, `ads`, `seo`), `outcome` (`success`, `internal`, `budget_reached`, `connector_*`) | Scheduled sync runs of connections. |
 | `outflare_ads_item_days_synced_total` | `level` (`ad_group`, `ad`, `keyword`, `search_term`) | Days of numbers stored for ad sets, ad groups and ads (Meta and Google), and Google keywords and search terms. |
 | `outflare_sync_stuck` | `module`, `code` | Scheduled reads whose last 3 or more runs failed, retries included, by the last error code: connections' syncs, SEO site competitor and backlink reads (`seo_site_competitors`, `seo_site_backlinks`), news searches (`news`) and competitor looks (`competitor_glances`, always `crawl_failed`). |
 | `outflare_social_account_reads_total` | `channel`, `outcome` (`success`, `blocked`, `page_not_found`, `invalid_address`, `no_follower_count`, `save_failed`, `connector_error`) | Reads of social accounts' followers ([social](social.md)). |
 | `outflare_social_stuck_accounts` | `channel`, `code` | Active social accounts whose last 3 or more reads failed, retries included, by the last error code. |
 | `outflare_reviews_stuck_pages` | `platform`, `code` | Active review pages whose last 3 or more reads failed, retries included, by the last error code. |
-| `outflare_reviews_oldest_read_seconds` | `platform` | Time since the least recently read active review page was read. |
+| `outflare_reviews_oldest_read_seconds` | `platform` | Time since a read of the least recently tried active review page ended, read or failed. Pages without a connected page reader are left out. |
 | `outflare_news_search_runs_total` | `purpose` (`topic`, `coverage`), `outcome` (`success`, `connector_needed`, `usage_limit_reached`, `connector_error`, `internal`) | Runs of saved [news searches](news-watch.md). |
 | `outflare_news_found_total` | `kind` (`article`, `coverage`) | Articles and coverage items news searches kept for the first time. |
 | `outflare_inbound_email_received_total` | `purpose` (`support`, `ai_receipts`, `none`), `outcome` (`accepted`, `duplicate`, `unknown_address`, `bad_signature`, `too_large`, `error`) | Messages the operator's mail receiver delivered to [inbound email](inbound-email.md). |
@@ -221,6 +222,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
 - `OutflareCoverageChecksFailing`: a Coverage check exhausted its retries.
 - `OutflareCoveragePagesUnreachable`: most recent Coverage page reads could not reach their site.
+- `OutflarePresenceSearchesFailing`: Presence web searches fail with connector errors more often than they work.
+- `OutflarePresenceCompetitorScansFailing`: scans of where competitors appear fail with connector, provider or internal errors more often than they work.
+- `OutflareCompetitorSuggestionsFailing`: the daily look for new competitors (SEO connections and rankings) fails more often than it works.
 - `OutflareMCPClientFailing`: over half of Outflare's calls to MCP servers failed in 30 minutes.
 - `OutflareActionsWaiting`: an agent's change has waited over two days for a person.
 - `OutflareActionsStuckRunning`: an agent change started running and never recorded how it ended.
@@ -230,8 +234,13 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - `OutflareAccountIncidentsCritical` (warning): a critical incident on a brand's external account has been open for a day; automated use of it is stopped until a person resolves it.
 - `OutflareAccountTakeoverWaiting` (warning): a takeover of a brand's external account (MFA, a CAPTCHA, a passkey or a consent screen) has waited more than four hours for a person to start it.
 - `OutflareBrowserTasksWaiting` (warning): a browser task has waited more than 30 minutes for a worker with a browser; none is running (`OUTFLARE_ROLE=browser`), or they are all busy.
+- `OutflareFunnelsTimingOut` (warning): more than three insight queries (funnels, trends, retention, shared dashboards, alert checks or the digest) hit their 30-second limit in half an hour.
+- `OutflareFunnelsFailing` (warning): more than three insight queries failed with an error in half an hour.
 - `OutflareBrowserTasksFailing` (warning): more than half of browser task runs in six hours failed; the tasks' logs say where (a site that changed, no AI, no Chrome).
 - `OutflareAdChangesUnverified`: over five campaign changes in six hours were applied but the platform did not show them when read back.
+- `OutflareAdSuggestionsFailing`: more than three runs of the paid ads suggestions job failed in six hours, so suggestions and verdicts are not updated.
+- `OutflareAdTestsFailing`: more than three steps of tests inside ad networks (starting, reading or ending a Google Ads experiment or Meta split test) failed in six hours.
+- `OutflareAdDraftsFailing`: more than three steps of approved new ads (making them paused on Google Ads or Meta, or turning them on) failed in six hours.
 - `OutflareAgentRunsOverdue`: a running agent run's next turn is over 15 minutes overdue.
 - `OutflareAgentRunTurnsFailing`: more agent run turns fail than finish.
 
@@ -285,6 +294,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over half of the people journeys create or update in one CRM failing in 30 minutes
 - over half of the people journeys add to or remove from one ad platform's audiences failing in 30 minutes
 - over a quarter of conversions sent to one ad platform failing
+- refunds sent to an ad platform as conversion adjustments failing on every try
 - a conversion waiting over 30 minutes to be sent
 - over 500 meetings waiting 30 minutes for their meeting event on people's timelines
 - a partner reward waiting over 30 minutes past its hold to be approved
@@ -318,9 +328,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over half of link reads failing for reasons other than a budget
 - over half of link prospect page checks failing
 - over half of Internet Archive lookups failing (info)
-- review pages that keep failing after retries with an error Outflare has to fix (`slow_page`, `not_a_review_page`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
+- review pages that keep failing after retries with an error Outflare has to fix (`slow_page`, `page_failed`, `not_a_review_page`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
 - review page reads that couldn't be saved
-- social accounts that keep failing after retries with an error Outflare has to fix (`slow_page`, `no_follower_count`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
+- social accounts that keep failing after retries with an error Outflare has to fix (`slow_page`, `page_failed`, `no_follower_count`, `save_failed`; a site blocking the page reader, `blocked`, is the reader's to get past and doesn't alert)
 - over half of social account reads failing
 - over half of link pitch openers or of replies to pitches failing to be read by the AI
 - link pitches waiting behind sequences' daily limits three times faster than they go out (info)
@@ -371,7 +381,7 @@ The Review invitations dashboard row shows dispatch results, due-job delay and b
 
 - `OutflareCoverageReviewsFailing`: repeated Coverage AI review failures need provider or response investigation.
 
-Coverage records page outcomes in `outflare_coverage_checks_total{health}` and accuracy outcomes in `outflare_coverage_reviews_total{status}`. Page checks, accuracy reviews and commercial extraction use the shared job duration, backlog and error metrics. Fixed accuracy schedules reuse unchanged analyses before calling a model.
+Coverage records page outcomes in `outflare_coverage_checks_total{health}` and accuracy outcomes in `outflare_coverage_reviews_total{status}`. Presence discovery counts new finds in `outflare_coverage_found_total{source}` and web search runs in `outflare_coverage_search_runs_total{outcome}`. Scans of where competitors appear count each source's outcome in `outflare_coverage_competitor_scans_total{source,outcome}` and new pages in `outflare_coverage_competitor_found_total{arrangement}`; opportunities suggested and won are `outflare_coverage_opportunities_total{event}`. Page checks, daily discovery, web searches, accuracy reviews and commercial extraction use the shared job duration, backlog and error metrics. Fixed accuracy schedules reuse unchanged analyses before calling a model.
 
 Partner task ownership, reach and evidence checks use the `partners.task_check`
 queue kind. The partner panels show outcome rate and oldest due age; future

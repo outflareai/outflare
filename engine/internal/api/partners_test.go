@@ -25,7 +25,7 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	if prog["slug"] != "geonode-affiliates" || prog["hold_days"] != float64(30) || len(rules) != 1 || rules[0].(map[string]any)["percent_bp"] != float64(2000) {
 		t.Fatalf("program = %v", prog)
 	}
-	owner.must(409, "POST", base+"/partner-programs", map[string]any{"name": "Geonode affiliates", "kind": "affiliate"})
+	owner.must(409, "POST", base+"/partner-programs", map[string]any{"name": "Geonode affiliates", "kind": "affiliate", "brand": "geonode"})
 	owner.must(400, "POST", base+"/partner-programs", map[string]any{"name": "X", "kind": "loyalty"})
 	owner.must(400, "PUT", base+"/partner-programs/geonode-affiliates/rules", map[string]any{"rules": []any{
 		map[string]any{"trigger": "lead", "kind": "percent", "percent_bp": 1000}}})

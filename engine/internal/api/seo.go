@@ -23,7 +23,7 @@ import (
 // has a monthly budget, and the cost of every call lands in Outcomes.
 func (s *Server) routesSEO(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeIntegrationsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/seo", s.inWorkspace(read, s.listSEO))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/seo", s.inBrand(read, s.listSEO))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo/history", s.inWorkspace(read, s.seoHistory))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo/overview", s.inBrand(read, s.seoOverview))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/seo/{id}/settings", s.inWorkspace(manage, s.setSEOSettings))

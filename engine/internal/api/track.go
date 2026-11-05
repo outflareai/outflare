@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.yaml.in/yaml/v4"
@@ -165,6 +166,12 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 			if p.ViewerID != "" {
 				e.UserID = p.ViewerID
 			}
+			// A signed-in person's browser joins its website visits to
+			// them on any call, not only at sign-in, so people signed in
+			// before the tag arrived are joined too.
+			if e.UserID != "" && p.ActorType == "human" {
+				e.AnonymousID = visitorID(r.Context())
+			}
 		}
 		release(rec.status < 400, e)
 
@@ -187,6 +194,13 @@ func (s *Server) logRequests(pattern func(*http.Request) string, next http.Handl
 		}
 
 		if !tracked(r, rec.status, route) {
+			// Reading a signed-in page isn't an api.called event, but the
+			// first one from a browser joins its website visits to the
+			// person, so nobody needs to do anything for it.
+			if e.AnonymousID != "" && rec.status < 400 && visitorLinks.first(e.UserID, e.AnonymousID) {
+				track.Emit(r.Context(), track.Event{Name: "visitor.linked", UserID: e.UserID, AnonymousID: e.AnonymousID,
+					ActorID: e.ActorID, ActorType: e.ActorType, WorkspaceID: e.WorkspaceID, Surface: e.Surface, RequestID: e.RequestID, Outcome: track.Success})
+			}
 			return
 		}
 		switch {
@@ -233,6 +247,32 @@ func tokenIDOf(p *principal) string {
 		return ""
 	}
 	return p.TokenID
+}
+
+// visitorLinks remembers which person and website visitor pairs this
+// process has linked, so a signed-in read sends visitor.linked once per
+// browser, not on every page. It starts over past maxVisitorLinks.
+var visitorLinks = &linkSet{seen: map[string]bool{}}
+
+const maxVisitorLinks = 100_000
+
+type linkSet struct {
+	mu   sync.Mutex
+	seen map[string]bool
+}
+
+func (l *linkSet) first(user, anon string) bool {
+	k := user + " " + anon
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.seen[k] {
+		return false
+	}
+	if len(l.seen) >= maxVisitorLinks {
+		l.seen = map[string]bool{}
+	}
+	l.seen[k] = true
+	return true
 }
 
 // tracked is whether a request is an api.called event: everything except

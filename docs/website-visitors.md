@@ -20,6 +20,24 @@ The email-click token is safe to sit in a URL:
 
 Turn it off with **Know people from email clicks** in the page's settings (`email_clicks: false`).
 
+- **Visitor links.** For messages you send yourself (your product's own email, a text message, a push notification, a QR code), make a visitor link for the person: `POST /v1/brands/{brand}/visitors/links` with the address on your site and one of `user_id`, `email` or `record_id` (MCP `create_visitor_link`). The link carries a token in the same `ofvisit` parameter, so the snippet needs nothing new. The first browser that opens it joins the person, with its visits from before, so a phone or second computer where they never sign in still counts as theirs. It works like an email click: one browser per link, a sign-in on that browser as someone else takes it back, and it lasts 30 days unless you set `expires_in_days` (up to 365). Making one is in the audit log as `visitor_link.created`.
+
+### Other devices
+
+A visitor is a browser, so the same person on a laptop and a phone is two visitors until something joins them. Outflare never guesses: it doesn't fingerprint devices or match people by address. Each browser joins the person when one of these happens on it:
+
+1. **They sign in.** Send `identify` with the `userId` and that browser's `anonymousId` on every sign-up and every sign-in, on every device, including your mobile web app. This is the one that matters most: a sign-in that doesn't send `anonymousId` never joins that browser's visits.
+2. **They click a link in email Outflare sent** (above).
+3. **They open a visitor link** you sent them yourself (above).
+
+## When a visitor becomes known
+
+When a browser joins a person, everything it did before (page views, events, visits and consent choices on the banner) moves onto their record, and their first and last touch are worked out again. The person's timeline shows the moment as **Went from anonymous visitor to known** (`identified` in `GET .../records/{record}/timeline`): when, how (signed in to your product, clicked a link in your email, or opened a visitor link), the device, when the browser was first seen, and how many visits and events from before joined them. If someone else later signs in on that browser, it goes back, and the timeline shows that too (`change: released`).
+
+## Everyone, and a visitor's journey
+
+**Everyone** on the Visitors page lists every browser on the site, anonymous ones included, most recent first, with its company (from a lookup), country, device, page views and visits. Open one to see its profile: who it is once known (and how and when that happened), its counts, and its journey: each visit with where it came from (channel, referrer, campaign) and its landing page, marked **Before known** for visits before the browser was identified. Open a visit for its pages and events in order.
+
 ## Company lookups
 
 Visitors nobody knows yet can be matched to a company from their IP address, with the workspace's own data provider: People Data Labs (IP Enrichment) or Snitcher (IP to Company). It is off until you turn on **Look up companies from visitors' addresses** in the page's settings (`reveal_companies`), and it needs one of those connections. Outflare never looks anything up on its own account.
@@ -65,8 +83,11 @@ Set **Leave out these domains** to your own company's domains so your team doesn
 ## API and MCP
 
 - `GET /v1/workspaces/{ws}/visitors` (`customers.read`): `view` (`companies` or `people`), `days`, `hot`, `limit`, `brand`.
-- `GET` and `PUT /v1/workspaces/{ws}/visitors/settings` (`customers.read`, `customers.manage`). A change is in the audit log as `visitor_settings.updated`.
+- `GET` and `PUT /v1/brands/{brand}/visitors/settings` (`customers.read`, `customers.manage`): each brand has its own; the workspace route is deprecated and acts on the first brand. A change is in the audit log as `visitor_settings.updated`.
 - `POST /v1/workspaces/{ws}/visitors/companies` (`customers.manage`): add a looked-up company to the CRM.
 - `POST /v1/visitor-hooks/{id}/{token}` (public, the address is the authority): where RB2B, Vector or Warmly send people. One person or up to 100 per call; field names as the tool sends them.
 - `POST /v1/workspaces/{ws}/records/{record}/review` (`customers.manage`): approve or reject a record held for review.
-- MCP: `list_website_visitors`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company`, `review_record`.
+- `GET /v1/brands/{brand}/visitors/browsers` (`customers.read`): every browser, `known` `true` or `false` to keep known or anonymous ones, `days`, `limit`, `cursor`.
+- `GET /v1/brands/{brand}/visitors/browsers/{anonymous_id}` (`customers.read`): one visitor and its visits. `.../events` lists its pages and events, `session` for one visit's.
+- `POST /v1/brands/{brand}/visitors/links` (`customers.manage`): make a visitor link.
+- MCP: `list_website_visitors`, `list_visitor_browsers`, `get_visitor_browser`, `list_visitor_browser_events`, `create_visitor_link`, `get_visitor_settings`, `update_visitor_settings`, `add_visitor_company`, `review_record`.

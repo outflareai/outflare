@@ -83,7 +83,7 @@ func (s *Server) bulkPartnerRewards(w http.ResponseWriter, r *http.Request) {
 			  AND (cardinality($2::uuid[]) > 0 OR w.status = 'pending')
 			  AND ($7::uuid[] IS NULL OR p.brand_id = ANY($7) OR (p.brand_id IS NULL AND cardinality($2::uuid[]) > 0))
 			ORDER BY w.created_at, w.id LIMIT $6 FOR UPDATE OF w`,
-			a.WorkspaceID, ids, in.Program, in.PartnerID, in.Kind, maxBulkRewards+1, a.Brands)
+			a.WorkspaceID, ids, in.Program, in.PartnerID, in.Kind, maxBulkRewards+1, a.seenBrands())
 		if err != nil {
 			return err
 		}

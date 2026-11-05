@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -46,6 +47,8 @@ func (s *Server) routesABTests(mux *http.ServeMux) {
 		mux.HandleFunc("POST "+t.path+"/{test}/duplicate", t.on(s.inWorkspace)(manage, s.duplicateABTest))
 		mux.HandleFunc("GET "+t.path+"/{test}/checklist", t.on(s.inWorkspace)(read, s.abTestChecklist))
 		mux.HandleFunc("POST "+t.path+"/{test}/ship", t.on(s.inWorkspace)(manage, s.shipABTest))
+		mux.HandleFunc("GET "+t.path+"/{test}/versions/{version}", t.on(s.inWorkspace)(read, s.getABTestVersion))
+		mux.HandleFunc("PUT "+t.path+"/{test}/versions/{version}", t.on(s.inWorkspace)(manage, s.setABTestVersion))
 		mux.HandleFunc("GET "+t.path+"/{test}/previews", t.on(s.inWorkspace)(read, s.abTestPreviews))
 		mux.HandleFunc("POST "+t.path+"/{test}/checks", t.on(s.inWorkspace)(manage, s.checkABTestVersion))
 		mux.HandleFunc("GET "+t.path+"/{test}/results", t.on(s.inWorkspace)(read, s.abTestResults))
@@ -72,6 +75,9 @@ type abTestView struct {
 	FrozenAt   *time.Time     `json:"frozen_at"`
 	EndedAt    *time.Time     `json:"ended_at"`
 	Decision   string         `json:"decision"`
+	// Page is the page a no-code test was made for (its flag shows there);
+	// "" for a test of a flag made elsewhere.
+	Page string `json:"page"`
 	// Factors are the other flags a multivariate test adds to its own.
 	Factors []abFactor `json:"factors"`
 	// Learning is what a finished test taught, when the AI wrote it.
@@ -95,10 +101,23 @@ type abTestInput struct {
 	// Factors makes it a multivariate test: up to two other flags, each
 	// with its control (default "control", else its first version).
 	Factors *[]abFactorInput `json:"factors"`
+	// Page makes a no-code test without a flag of its own: Outflare adds a
+	// flag that shows only on that page, with the control and versions
+	// to edit visually. Only when adding, instead of flag.
+	Page *abPageInput `json:"page"`
+}
+
+// abPageInput is the page a no-code test runs on and how many new versions
+// it compares with what visitors see today. Redirects makes it a split URL
+// test: each new version sends its visitors to one of these pages.
+type abPageInput struct {
+	URL       string   `json:"url"`
+	Versions  int      `json:"versions"`
+	Redirects []string `json:"redirects"`
 }
 
 const abTestCols = `t.id::text, t.flag_id::text, f.key, t.brand_id::text, t.name, t.hypothesis, t.status, t.control, t.goals, t.guardrails, t.min_effect, t.baselines,
-	t.started_at, t.frozen_at, t.ended_at, t.decision, t.factors, t.learning, t.registration, t.created_at, t.updated_at, t.result`
+	t.started_at, t.frozen_at, t.ended_at, t.decision, t.page, t.factors, t.learning, t.registration, t.created_at, t.updated_at, t.result`
 
 func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args ...any) ([]abTestView, error) {
 	rows, err := q.Query(ctx, `SELECT `+abTestCols+` FROM ab_tests t JOIN flags f ON f.id = t.flag_id AND f.workspace_id = t.workspace_id
@@ -110,7 +129,7 @@ func loadABTests(ctx context.Context, q abtests.Querier, ws, where string, args 
 		var v abTestView
 		var goals, guardrails, factors []byte
 		if err := row.Scan(&v.ID, &v.FlagID, &v.FlagKey, &v.BrandID, &v.Name, &v.Hypothesis, &v.Status, &v.Control, &goals, &guardrails, &v.MinEffect, &v.Baselines,
-			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &factors, &v.Learning, &v.Registration, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
+			&v.StartedAt, &v.FrozenAt, &v.EndedAt, &v.Decision, &v.Page, &factors, &v.Learning, &v.Registration, &v.CreatedAt, &v.UpdatedAt, &v.result); err != nil {
 			return v, err
 		}
 		if err := json.Unmarshal(factors, &v.Factors); err != nil {
@@ -319,13 +338,35 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var id string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if in.Flag == nil {
-			return errInvalid("flag is required: the id or key of a live feature flag")
+	var id, page string
+	var pageFlag *flagView
+	if in.Page != nil {
+		if in.Flag != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "send flag or page, not both: page makes a flag for the test")
+			return
 		}
-		f, err := s.abFlag(ctx, tx, a.WorkspaceID, *in.Flag)
-		if err != nil {
+		f, u, err := s.pageTestFlag(ctx, a, in)
+		if s.abWriteError(w, r, err) {
+			return
+		}
+		pageFlag, page = &f, u
+	}
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if in.Flag == nil && pageFlag == nil {
+			return errInvalid("flag is required: the id or key of a live feature flag, or send page to test a page without one")
+		}
+		var f flagView
+		var err error
+		if pageFlag != nil {
+			fid, err := s.insertFlag(ctx, tx, a, pageFlag)
+			if err != nil {
+				return err
+			}
+			f, err = s.abFlag(ctx, tx, a.WorkspaceID, fid)
+			if err != nil {
+				return err
+			}
+		} else if f, err = s.abFlag(ctx, tx, a.WorkspaceID, *in.Flag); err != nil {
 			return err
 		}
 		if f.Status == "archived" {
@@ -355,9 +396,9 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 		}
 		goals, _ := json.Marshal(t.Goals)
 		guardrails, _ := json.Marshal(t.Guardrails)
-		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
-			a.WorkspaceID, t.BrandID, t.FlagID, t.Name, t.Hypothesis, t.Control, goals, guardrails, t.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by, page)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id::text`,
+			a.WorkspaceID, t.BrandID, t.FlagID, t.Name, t.Hypothesis, t.Control, goals, guardrails, t.MinEffect, nullIfEmpty(a.ActorID), page).Scan(&id); err != nil {
 			return err
 		}
 		t.ID = id
@@ -372,7 +413,113 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 	if s.abWriteError(w, r, err) {
 		return
 	}
+	if pageFlag != nil {
+		s.flagCache.forget(a.WorkspaceID)
+	}
 	s.writeABTest(w, r, id, http.StatusCreated)
+}
+
+// maxPageVersions is how many new versions a no-code test can start with.
+const maxPageVersions = 4
+
+// pageTestFlag builds the flag a no-code test of a page runs on: off until
+// the test starts, shown only on that page (or every page under it, for an
+// address ending in *), with an even split between the control and each
+// new version, ready for the visual editor.
+func (s *Server) pageTestFlag(ctx context.Context, a *access, in abTestInput) (flagView, string, error) {
+	p := *in.Page
+	raw := strings.TrimSpace(p.URL)
+	prefix := strings.HasSuffix(raw, "*")
+	u, err := url.Parse(strings.TrimSuffix(raw, "*"))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || len(raw) > 2000 {
+		return flagView{}, "", errInvalid("page.url is the page's address, such as https://northpeak.example/pricing (end it with * for every page under it)")
+	}
+	if len(p.Redirects) > 0 {
+		if prefix {
+			return flagView{}, "", errInvalid("a split URL test runs on one page: take the * off page.url")
+		}
+		if p.Versions != 0 && p.Versions != len(p.Redirects) {
+			return flagView{}, "", errInvalid("page.redirects has one page per new version")
+		}
+		p.Versions = len(p.Redirects)
+	}
+	if p.Versions == 0 {
+		p.Versions = 1
+	}
+	if p.Versions < 1 || p.Versions > maxPageVersions {
+		return flagView{}, "", errInvalid("page.versions is how many new versions to compare with today's page, 1 to 4")
+	}
+	path := u.Path
+	if path == "" {
+		path = "/"
+	}
+	rule := flags.Rule{Attribute: "path", Op: "is", Values: []string{path}}
+	if prefix {
+		rule.Op = "starts_with"
+	}
+	weight := 100 / (p.Versions + 1)
+	variants := []flags.Variant{{Key: "control", Weight: 100 - weight*p.Versions}}
+	for i := 0; i < p.Versions; i++ {
+		v := flags.Variant{Key: string(rune('b' + i)), Weight: weight}
+		if i < len(p.Redirects) {
+			to := strings.TrimSpace(p.Redirects[i])
+			if !flags.SafeURL(to) {
+				return flagView{}, "", errInvalid("each of page.redirects is a path on the site, such as /pricing-b, or an address on the brand's domains")
+			}
+			v.Payload, _ = json.Marshal(map[string]string{"redirect": to})
+		}
+		variants = append(variants, v)
+	}
+	name := ""
+	if in.Name != nil {
+		name = strings.TrimSpace(*in.Name)
+	}
+	if name == "" {
+		name = "Test of " + path
+		if prefix {
+			name += "*"
+		}
+	}
+	base := slugKey(name)
+	if len(base) > 50 {
+		base = strings.TrimRight(base[:50], "-")
+	}
+	key := strings.Trim(base+"-"+newID()[:6], "-")
+	f := flagView{Status: "off", Rollout: 100, OnSite: true}
+	fname := name
+	if len(fname) > 100 {
+		fname = fname[:100]
+	}
+	rules := []flags.Rule{rule}
+	if err := s.applyFlagInput(ctx, a, &f, flagInput{Key: &key, Name: &fname, Variants: &variants, Rules: &rules}, true); err != nil {
+		return flagView{}, "", err
+	}
+	page := u.Scheme + "://" + u.Host + path
+	if prefix {
+		page += "*"
+	}
+	return f, page, nil
+}
+
+// slugKey turns a name into a flag key's letters: lowercase letters and
+// digits, with dashes between words.
+func slugKey(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	out := strings.TrimRight(b.String(), "-")
+	if out == "" {
+		out = "test"
+	}
+	return out
 }
 
 func (s *Server) writeABTest(w http.ResponseWriter, r *http.Request, id string, code int) {
@@ -608,7 +755,7 @@ func abSpec(ctx context.Context, q abtests.Querier, ws string, t abTestView, f f
 	// The split is checked against the weights the test started with.
 	spec.Weights = registeredWeights(t.Registration, spec.Variants, spec.Weights)
 	spec.VarianceReduction = t.Registration != nil && t.Registration.VarianceReduction
-	err := q.QueryRow(ctx, `SELECT coalesce((SELECT exclude_domains FROM visitor_settings WHERE workspace_id = $1), '{}')`, ws).Scan(&spec.ExcludeDomains)
+	err := q.QueryRow(ctx, `SELECT coalesce((SELECT exclude_domains FROM visitor_settings WHERE workspace_id = $1 ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand(workspace_id) DESC LIMIT 1), '{}')`, ws).Scan(&spec.ExcludeDomains)
 	return spec, err
 }
 
@@ -838,9 +985,9 @@ func (s *Server) duplicateABTest(w http.ResponseWriter, r *http.Request) {
 		}
 		goals, _ := json.Marshal(cur.Goals)
 		guardrails, _ := json.Marshal(cur.Guardrails)
-		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text`,
-			a.WorkspaceID, f.BrandID, f.ID, name, cur.Hypothesis, cur.Control, goals, guardrails, cur.MinEffect, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO ab_tests (workspace_id, brand_id, flag_id, name, hypothesis, control, goals, guardrails, min_effect, created_by, page)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id::text`,
+			a.WorkspaceID, f.BrandID, f.ID, name, cur.Hypothesis, cur.Control, goals, guardrails, cur.MinEffect, nullIfEmpty(a.ActorID), cur.Page).Scan(&id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE ab_tests SET factors = (SELECT factors FROM ab_tests WHERE id = $3 AND workspace_id = $2) WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID, cur.ID); err != nil {

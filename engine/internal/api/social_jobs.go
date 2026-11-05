@@ -48,10 +48,12 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerBrandLinkJobs(q)
 	s.registerReviewJobs(q)
 	s.registerABTestJobs(q)
+	s.registerInsightAlertJobs(q)
 	s.registerNewsJobs(q)
 	q.Handle(jobCoverageCheck, s.coverageCheckJob)
 	q.Handle(jobCoverageReview, s.coverageReviewJob)
 	q.Handle(jobCoverageExtract, s.coverageExtractJob)
+	s.registerPresenceJobs(q)
 	s.registerStoryJobs(q)
 	s.registerStoryPitchJobs(q)
 }

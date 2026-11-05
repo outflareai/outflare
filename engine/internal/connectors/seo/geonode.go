@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	neturl "net/url"
 	"strconv"
@@ -207,23 +209,47 @@ func geonodePageFailed(status int, raw []byte) error {
 	if e.Code == "" {
 		return c.HTTPError("Geonode", status, string(raw))
 	}
+	if status >= 500 && !geonodePageOwn(e.Code) {
+		// Geonode itself failed (a 5xx with a code of its own): an outage.
+		return c.Errf(c.ErrUnavailable, "Geonode could not read the page (%s, HTTP %d)", e.Code, status)
+	}
 	return geonodePageCode(e.Code)
 }
 
-// geonodePageCode sorts a page read's failure: a bot check or a slow page
-// is the page's own (a *c.PageError, tried again the same day), never a
-// wrong address or an outage. Geonode reports a Cloudflare challenge as
-// UNPROCESSABLE_CONTENT (a page without its content, the challenge named
-// in the message), not CAPTCHA_CHALLENGE. The message may quote the site,
-// so only the code is kept.
+// geonodePageOwn says whether code names a failure of the page itself (a
+// bot check, a login wall, a slow page) rather than of Geonode.
+func geonodePageOwn(code string) bool {
+	_, ok := geonodePageCodes[code]
+	return ok
+}
+
+// geonodePageCodes are the codes of a page's own failure, true for a site
+// that turned Geonode away (blocked).
+var geonodePageCodes = map[string]bool{
+	"CAPTCHA_CHALLENGE": true, "TEMPORARY_BLOCK": true, "PERMANENT_BLOCK": true, "UNPROCESSABLE_CONTENT": true,
+	"AUTH_REQUIRED": true,
+	"TIMEOUT":       false, "WAIT_FOR_SELECTOR_TIMEOUT": false, "FAILED": false,
+}
+
+// geonodePageCode sorts a page read's failure: a bot check, a login wall
+// or a slow page is the page's own (a *c.PageError, tried again the same
+// day), never a wrong address or an outage. Geonode reports a Cloudflare
+// challenge as UNPROCESSABLE_CONTENT (a page without its content, the
+// challenge named in the message), not CAPTCHA_CHALLENGE, and a page
+// behind a login as AUTH_REQUIRED. A code it has for a bad request, its
+// key or its quota keeps that kind. Any other code (the site failed, or
+// refused the page in a way Geonode has a new code for) is the page's own
+// too (Failed): one page Geonode couldn't read is never an outage of
+// Geonode, so it never fails the round or is retried as one. The message
+// may quote the site, so only the code is kept.
 func geonodePageCode(code string) error {
-	switch code {
-	case "CAPTCHA_CHALLENGE", "TEMPORARY_BLOCK", "PERMANENT_BLOCK", "UNPROCESSABLE_CONTENT":
-		return &c.PageError{Blocked: true, Code: code}
-	case "TIMEOUT", "WAIT_FOR_SELECTOR_TIMEOUT", "FAILED":
-		return &c.PageError{Code: code}
+	if blocked, ok := geonodePageCodes[code]; ok {
+		return &c.PageError{Blocked: blocked, Code: code}
 	}
-	return c.Errf(geonodeKind(code), "Geonode could not read the page (%s)", code)
+	if k := geonodeKind(code); k != c.ErrUnavailable {
+		return c.Errf(k, "Geonode could not read the page (%s)", code)
+	}
+	return &c.PageError{Failed: true, Code: code}
 }
 
 // geonodeSearchUSD is Geonode's list price per search, used when an answer
@@ -463,6 +489,13 @@ func (g Geonode) postWithin(ctx context.Context, cl *c.Client, creds c.Creds, pa
 	req.Header.Set("Accept", "application/json")
 	resp, err := cl.DoWithin(req, wait)
 	if err != nil {
+		var ne net.Error
+		if wait > 0 && ctx.Err() == nil && errors.As(err, &ne) && ne.Timeout() {
+			// A page read Geonode was told to end within its timeout,
+			// still unanswered: the page (a bot check, a slow site) took
+			// too long, not an outage.
+			return 0, nil, &c.PageError{Code: "TIMEOUT"}
+		}
 		return 0, nil, c.Errf(c.ErrUnavailable, "could not reach Geonode: %v", err)
 	}
 	defer resp.Body.Close()

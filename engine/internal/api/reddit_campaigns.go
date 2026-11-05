@@ -1114,9 +1114,9 @@ func (s *Server) createRedditAction(w http.ResponseWriter, r *http.Request) {
 		if m := missions.ID(ctx); m != "" {
 			mission = &m
 		}
-		competitors := req.Competitors
-		if competitors == nil {
-			competitors = []string{}
+		competitors, err := competitorNamesFor(ctx, tx, a.WorkspaceID, &brand, req.Competitors)
+		if err != nil {
+			return err
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO reddit_actions (workspace_id, brand_id, experiment_id, kind, strategy, target_url, target_kind, subreddit,
 				title, content, children, link_url, link_type, brand_mentioned, competitors, tone, account_tier, upvotes_goal, upvotes_per_day, upvotes_start,

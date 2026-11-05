@@ -9,12 +9,13 @@ import { PickBrand } from "@/components/pick-brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBrand } from "@/lib/brand";
 import { isID } from "@/lib/paths";
-import { ago, stamp, when } from "../format";
+import { ago, plural, stamp, when } from "../format";
 import type { Tab } from "../App";
 import { displayName, fieldLabelValue, identity, nameItem, namespaces, originPhrases, origins, useCatalog, type CatalogInfo } from "@/lib/records";
 import { AddIdentity, eraseRecord, RecordConsent, RecordDialog, softDeleteEvent, softDeleteRecord } from "./RecordEdit";
 import { Duplicates } from "./Duplicates";
 import { BrandEvents } from "./BrandEvents";
+import { DeveloperSetup } from "./DeveloperSetup";
 import { Products, RecordLifecycle, RecordMetrics } from "./Products";
 import { RecentlyDeleted } from "./RecentlyDeleted";
 import { Batches, RecordMerges } from "./Undo";
@@ -35,7 +36,8 @@ type PrivacyExport = Schemas["PrivacyExport"];
 // People and Companies are the two built-in record types; the item part of
 // the URL picks the view: "" for people, "companies", "duplicates", "events"
 // (the brand's product events as received), "products" (its products and
-// lifecycle stages), "batches" (imports and sends
+// lifecycle stages), "setup" (Developer setup: the live checklist of
+// what the brand's developer sends), "batches" (imports and sends
 // of events, each undoable in one step), "deleted" (Recently deleted,
 // restorable for 7 days), or a record's id.
 type View = "person" | "account";
@@ -49,9 +51,10 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
-  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" || open === "transactions" || open === "metrics" ? open : viewOf(open)} onOpen={onOpen} />;
+  const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" || open === "transactions" || open === "metrics" || open === "setup" ? open : viewOf(open)} onOpen={onOpen} />;
   if (open === "duplicates") return <Duplicates ws={ws} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
   if (open === "events") return <BrandEvents ws={ws} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
+  if (open === "setup") return <DeveloperSetup ws={ws} canManage={canManage} tabs={tabs} />;
   // Products and lifecycle stages are part of the catalog: catalog.manage.
   if (open === "products") return <Products ws={ws} canManage={canConfigure} tabs={tabs} />;
   if (open === "metrics") return <Metrics ws={ws} canManage={canConfigure} tabs={tabs} />;
@@ -61,9 +64,9 @@ export function People({ ws, canManage, canConfigure = false, open, onOpen, go }
   return <RecordList ws={ws} view={viewOf(open)} cat={cat} canManage={canManage} tabs={tabs} onOpen={onOpen} />;
 }
 
-function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted" | "transactions" | "metrics"; onOpen: (item: string) => void }) {
+function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "products" | "batches" | "deleted" | "transactions" | "metrics" | "setup"; onOpen: (item: string) => void }) {
   return (
-    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" || v === "transactions" || v === "metrics" ? v : itemOf(v as View))}>
+    <Tabs value={value} onValueChange={(v) => onOpen(v === "duplicates" || v === "events" || v === "products" || v === "batches" || v === "deleted" || v === "transactions" || v === "metrics" || v === "setup" ? v : itemOf(v as View))}>
       <TabsList className="h-8">
         <TabsTrigger value="person" className="px-3 text-[12px]">People</TabsTrigger>
         <TabsTrigger value="account" className="px-3 text-[12px]">Companies</TabsTrigger>
@@ -74,6 +77,7 @@ function ViewTabs({ value, onOpen }: { value: View | "duplicates" | "events" | "
         <TabsTrigger value="metrics" className="px-3 text-[12px]">Metrics</TabsTrigger>
         <TabsTrigger value="batches" className="px-3 text-[12px]">Imports</TabsTrigger>
         <TabsTrigger value="deleted" className="px-3 text-[12px]">Recently deleted</TabsTrigger>
+        <TabsTrigger value="setup" className="px-3 text-[12px]">Developer setup</TabsTrigger>
       </TabsList>
     </Tabs>
   );
@@ -827,6 +831,7 @@ const kinds: Record<TimelineItem["kind"], string> = {
   event: "Product event",
   attribute_change: "Field changed",
   identity: "Email or id",
+  identified: "Identified",
   consent: "Consent",
   message: "Email",
   meeting: "Meeting",
@@ -912,6 +917,13 @@ function Timeline({ brand, rec, cat, names, onOpen, canManage }: { brand: string
   );
 }
 
+const deviceNames: Record<string, string> = { desktop: "Desktop", mobile: "Phone", tablet: "Tablet" };
+const systemNames: Record<string, string> = { ios: "iOS", macos: "macOS", ipados: "iPadOS", chromeos: "ChromeOS" };
+const titled = (v: string) => systemNames[v] ?? (v ? v[0].toUpperCase() + v.slice(1) : "");
+
+// How an anonymous browser became the person.
+const identifiedBy: Record<string, string> = { product: "Signed in to your product", email_click: "Clicked a link in your email", link: "Opened a visitor link" };
+
 const text = (v: unknown) => (v === null || v === undefined || v === "" ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
 
 // On a company's timeline, the items of its people are about a person.
@@ -923,6 +935,8 @@ function itemTitle(it: TimelineItem, type: string, cat: CatalogInfo): string {
       return it.title === "name" ? "Name" : it.title === "archived" ? "Archived" : (cat.fields(type).find((f) => f.key === it.title)?.label ?? it.title);
     case "identity":
       return namespaces[it.title] ?? it.title;
+    case "identified":
+      return (it.detail as Record<string, unknown>).change === "released" ? "A browser stopped being theirs" : "Went from anonymous visitor to known";
     case "message":
       return it.title || "(no subject)";
   }
@@ -939,6 +953,13 @@ function itemDetail(it: TimelineItem, type: string, cat: CatalogInfo, names: Rec
     }
     case "identity":
       return [text(d.value), text(d.change), d.verified ? "verified" : ""].filter(Boolean).join(" · ");
+    case "identified": {
+      const how = identifiedBy[text(d.by)] ?? text(d.by);
+      if (d.change === "released") return `Someone else signed in on a browser that joined them through ${how.toLowerCase()}, so it went back to them`;
+      const device = [deviceNames[text(d.device)] ?? text(d.device), titled(text(d.browser)), titled(text(d.os))].filter(Boolean).join(", ");
+      const before = Number(d.visits_before) > 0 ? `${plural(Number(d.visits_before), "visit")} and ${plural(Number(d.events_before), "page view or event", "page views and events")} from before joined them` : "Known from their first visit";
+      return [how, device, d.first_seen_at && Number(d.visits_before) > 0 ? `first seen ${stamp(text(d.first_seen_at))}` : "", before].filter(Boolean).join(" · ");
+    }
     case "consent":
       return [text(d.status), text(d.topic), text(d.purpose)].filter(Boolean).join(" · ");
     case "message":

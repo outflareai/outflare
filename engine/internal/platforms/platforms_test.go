@@ -20,6 +20,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/platforms"
 	"github.com/outflareai/outflare/engine/internal/policy"
 	"github.com/outflareai/outflare/engine/internal/secrets"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // fake is a platform account held in memory.
@@ -30,9 +31,15 @@ type fake struct {
 	calls     []string
 	blocked   []connectors.Blocked // the platform's blocklist
 	pushed    []connectors.Blocked // what Outflare wrote to it
+	listErr   error                // what reading the blocklist answers
+	lists     int                  // how many times it was read
 }
 
 func (f *fake) ListBlocked(context.Context, *connectors.Client, connectors.Creds) ([]connectors.Blocked, error) {
+	f.lists++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.blocked, nil
 }
 
@@ -412,5 +419,72 @@ func TestBlocklistSyncsBothWays(t *testing.T) {
 	}
 	if res, err = svc.Sync(ctx, ws, integration); err != nil || res.OptOutsPushed != 0 {
 		t.Fatalf("push off = %+v, %v", res, err)
+	}
+}
+
+// A sequencer's blocklist is read every few hours, not on every mailbox
+// sync. When reading it fails, the opt-out list still goes out, the
+// failure is the platform's (provider_<kind>), and the next try waits.
+func TestBlocklistPullFailsOpen(t *testing.T) {
+	pool, svc, f, ws, integration := setup(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	svc.Now = func() time.Time { return now }
+	if _, err := pool.Exec(ctx, `INSERT INTO suppressions (workspace_id, kind, value, reason, method) VALUES
+		($1, 'email', 'zed@example.org', 'manual', 'manual')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	got := track.Capture(t)
+	f.listErr = connectors.Errf(connectors.ErrUnavailable, "FakeSeq timed out")
+	res, err := svc.Sync(ctx, ws, integration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OptOutsPushed != 1 || len(f.pushed) != 1 || f.pushed[0].Value != "zed@example.org" {
+		t.Fatalf("pull failed, push = %+v, %v", res, f.pushed)
+	}
+	var code, last *string
+	var pulledAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT error_code, last_error, pulled_at FROM suppression_syncs WHERE integration_id = $1`, integration).
+		Scan(&code, &last, &pulledAt); err != nil || code == nil || *code != "provider_unavailable" || last == nil || pulledAt != nil {
+		t.Fatalf("sync = %v %v %v, %v", code, last, pulledAt, err)
+	}
+	var failed []track.Event
+	for _, e := range got() {
+		if e.Name == "suppression.sync_failed" {
+			failed = append(failed, e)
+		}
+	}
+	if len(failed) != 1 || failed[0].ErrorCode != "provider_unavailable" {
+		t.Fatalf("events = %+v", failed)
+	}
+
+	// A few minutes later nothing is tried: the last try failed.
+	now = now.Add(5 * time.Minute)
+	if _, err := svc.Sync(ctx, ws, integration); err != nil || f.lists != 1 {
+		t.Fatalf("retried too soon: lists = %d, %v", f.lists, err)
+	}
+	// Half an hour on it tries again, works, and the error clears.
+	now = now.Add(30 * time.Minute)
+	f.listErr = nil
+	f.blocked = []connectors.Blocked{{Value: "old@example.org"}}
+	if res, err = svc.Sync(ctx, ws, integration); err != nil || f.lists != 2 || res.OptOutsPulled != 1 {
+		t.Fatalf("retry = %+v, lists = %d, %v", res, f.lists, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT error_code FROM suppression_syncs WHERE integration_id = $1`, integration).Scan(&code); err != nil || code != nil {
+		t.Fatalf("error kept = %v, %v", code, err)
+	}
+	// The list isn't read again until pullEvery has passed; opt-outs
+	// still go out meanwhile.
+	if _, err := pool.Exec(ctx, `INSERT INTO suppressions (workspace_id, kind, value, reason) VALUES ($1, 'email', 'ivy@example.org', 'unsubscribed')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Hour)
+	if res, err = svc.Sync(ctx, ws, integration); err != nil || f.lists != 2 || res.OptOutsPushed != 1 {
+		t.Fatalf("read again = %+v, lists = %d, %v", res, f.lists, err)
+	}
+	now = now.Add(6 * time.Hour)
+	if _, err = svc.Sync(ctx, ws, integration); err != nil || f.lists != 3 {
+		t.Fatalf("not read after 6h: lists = %d, %v", f.lists, err)
 	}
 }

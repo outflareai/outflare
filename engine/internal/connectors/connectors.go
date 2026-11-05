@@ -416,6 +416,11 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
+// ErrorCode is the error's code in the API's catalog (connector_quota,
+// connector_unavailable ...). A job that fails with it records that code on
+// its job.failed event instead of the generic job_error.
+func (e *Error) ErrorCode() string { return "connector_" + e.Kind }
+
 // Error kinds.
 const (
 	ErrAuth        = "auth"

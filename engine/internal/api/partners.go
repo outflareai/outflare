@@ -36,43 +36,43 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 	read, manage, conv := auth.ScopePartnersRead, auth.ScopePartnersManage, auth.ScopePartnersConversions
 	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-settings", s.inWorkspace(read, s.getPartnerSettings))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-settings", s.inWorkspace(manage, s.updatePartnerSettings))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs", s.inBrand(read, s.listPartnerPrograms))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs", s.inBrand(manage, s.createPartnerProgram))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(read, s.getPartnerProgram))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/stats", s.inBrand(read, s.getPartnerProgramStats))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}", s.inBrand(manage, s.updatePartnerProgram))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/rules", s.inBrand(manage, s.setPartnerRules))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups", s.inBrand(manage, s.createPartnerGroup))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.updatePartnerGroup))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", s.inBrand(manage, s.deletePartnerGroup))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", s.inBrand(manage, s.assignPartnerGroup))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/postback", s.inBrand(manage, s.rotatePartnerPostback))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/switch-over", s.inBrand(manage, s.switchOverPartnerProgram))
+	s.twinRoute(mux, "GET", "partner-programs", s.inBrand, read, s.listPartnerPrograms)
+	s.twinRoute(mux, "POST", "partner-programs", s.inBrand, manage, s.createPartnerProgram)
+	s.twinRoute(mux, "GET", "partner-programs/{id}", s.inBrand, read, s.getPartnerProgram)
+	s.twinRoute(mux, "GET", "partner-programs/{id}/stats", s.inBrand, read, s.getPartnerProgramStats)
+	s.twinRoute(mux, "PATCH", "partner-programs/{id}", s.inBrand, manage, s.updatePartnerProgram)
+	s.twinRoute(mux, "PUT", "partner-programs/{id}/rules", s.inBrand, manage, s.setPartnerRules)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/groups", s.inBrand, manage, s.createPartnerGroup)
+	s.twinRoute(mux, "PATCH", "partner-programs/{id}/groups/{group}", s.inBrand, manage, s.updatePartnerGroup)
+	s.twinRoute(mux, "DELETE", "partner-programs/{id}/groups/{group}", s.inBrand, manage, s.deletePartnerGroup)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/groups/{group}/partners", s.inBrand, manage, s.assignPartnerGroup)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/postback", s.inBrand, manage, s.rotatePartnerPostback)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/switch-over", s.inBrand, manage, s.switchOverPartnerProgram)
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partners", s.inBrand(read, s.listPartners))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners", s.inBrand(manage, s.createPartner))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partners/{id}", s.inBrand(read, s.getPartner))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partners/{id}", s.inBrand(manage, s.updatePartner))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/promo-codes", s.inBrand(manage, s.addPartnerPromoCode))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", s.inBrand(manage, s.removePartnerPromoCode))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/fees", s.inBrand(manage, s.addPartnerFee))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/adjustments", s.inBrand(manage, s.addPartnerAdjustment))
+	s.twinRoute(mux, "GET", "partners", s.inBrand, read, s.listPartners)
+	s.twinRoute(mux, "POST", "partners", s.inBrand, manage, s.createPartner)
+	s.twinRoute(mux, "GET", "partners/{id}", s.inBrand, read, s.getPartner)
+	s.twinRoute(mux, "PATCH", "partners/{id}", s.inBrand, manage, s.updatePartner)
+	s.twinRoute(mux, "POST", "partners/{id}/promo-codes", s.inBrand, manage, s.addPartnerPromoCode)
+	s.twinRoute(mux, "DELETE", "partners/{id}/promo-codes/{code}", s.inBrand, manage, s.removePartnerPromoCode)
+	s.twinRoute(mux, "POST", "partners/{id}/fees", s.inBrand, manage, s.addPartnerFee)
+	s.twinRoute(mux, "POST", "partners/{id}/adjustments", s.inBrand, manage, s.addPartnerAdjustment)
 
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-conversions", s.inWorkspace(conv, s.createPartnerConversion))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversions", s.inBrand(read, s.listPartnerConversions))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-conversion-log", s.inBrand(read, s.listPartnerConversionLog))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-referrals", s.inBrand(read, s.listPartnerReferrals))
+	s.twinRoute(mux, "POST", "partner-conversions", s.inWorkspace, conv, s.createPartnerConversion)
+	s.twinRoute(mux, "GET", "partner-conversions", s.inBrand, read, s.listPartnerConversions)
+	s.twinRoute(mux, "GET", "partner-conversion-log", s.inBrand, read, s.listPartnerConversionLog)
+	s.twinRoute(mux, "GET", "partner-referrals", s.inBrand, read, s.listPartnerReferrals)
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-rewards", s.inBrand(read, s.listPartnerRewards))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/bulk", s.inBrand(manage, s.bulkPartnerRewards))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/approve", s.inBrand(manage, s.approvePartnerReward))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/reject", s.inBrand(manage, s.rejectPartnerReward))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-rewards/{id}/fulfil", s.inBrand(conv, s.fulfilPartnerReward))
+	s.twinRoute(mux, "GET", "partner-rewards", s.inBrand, read, s.listPartnerRewards)
+	s.twinRoute(mux, "POST", "partner-rewards/bulk", s.inBrand, manage, s.bulkPartnerRewards)
+	s.twinRoute(mux, "POST", "partner-rewards/{id}/approve", s.inBrand, manage, s.approvePartnerReward)
+	s.twinRoute(mux, "POST", "partner-rewards/{id}/reject", s.inBrand, manage, s.rejectPartnerReward)
+	s.twinRoute(mux, "POST", "partner-rewards/{id}/fulfil", s.inBrand, conv, s.fulfilPartnerReward)
 
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-payouts", s.inBrand(read, s.listPartnerPayouts))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts", s.inBrand(manage, s.createPartnerPayouts))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/paid", s.inBrand(manage, s.markPartnerPayoutPaid))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-payouts/{id}/cancel", s.inBrand(manage, s.cancelPartnerPayout))
+	s.twinRoute(mux, "GET", "partner-payouts", s.inBrand, read, s.listPartnerPayouts)
+	s.twinRoute(mux, "POST", "partner-payouts", s.inBrand, manage, s.createPartnerPayouts)
+	s.twinRoute(mux, "POST", "partner-payouts/{id}/paid", s.inBrand, manage, s.markPartnerPayoutPaid)
+	s.twinRoute(mux, "POST", "partner-payouts/{id}/cancel", s.inBrand, manage, s.cancelPartnerPayout)
 
 	// Public. A postback's secret names its program; a short link's code
 	// (with the host or workspace) names its partner.
@@ -243,7 +243,10 @@ func partnerRules(ctx context.Context, q partnerQuerier, ws, program string) ([]
 func (s *Server) findPartnerProgram(w http.ResponseWriter, r *http.Request, ws, ref string) (*partnerProgramView, bool) {
 	ctx := r.Context()
 	ref = strings.ToLower(strings.TrimSpace(ref))
-	v, err := scanPartnerProgram(s.pool.QueryRow(ctx, partnerProgramSelect+` AND (p.id::text = $2 OR p.slug = $2)`, ws, ref))
+	// A slug is unique within a brand: the route's brand's program, else
+	// the first brand's before the others.
+	v, err := scanPartnerProgram(s.pool.QueryRow(ctx, partnerProgramSelect+` AND (p.id::text = $2 OR p.slug = $2) AND ($3 = '' OR p.brand_id = $3::uuid)
+		ORDER BY p.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, p.created_at LIMIT 1`, ws, ref, accessFrom(ctx).Brand))
 	if err == nil {
 		err = partnerBrandAccess(r, accessFrom(ctx), v.BrandID)
 	}
@@ -465,12 +468,12 @@ func cleanList(in *[]string) []string {
 
 // checkSalesSource reports whether src is "" or a payment connector.
 func (s *Server) checkSalesSource(src *string) error {
-	if src == nil || *src == "" {
+	if src == nil || *src == "" || *src == salesFromTransactions {
 		return nil
 	}
 	d, ok := s.integrations.Registry.Definition(*src)
 	if !ok || !slices.Contains(d.Capabilities, connectors.CapPayments) {
-		return errInvalid("sales_source is a billing connector's id, such as stripe, or \"\" for none")
+		return errInvalid("sales_source is a billing connector's id, such as stripe, transactions for the brand's payments sent to Outflare, or \"\" for none")
 	}
 	return nil
 }
@@ -532,6 +535,14 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	brand, err := s.campaignBrand(r, a.WorkspaceID, in.Brand)
+	if err == nil && brand == nil {
+		// A program is one brand's: its partners, links and money are
+		// never another brand's.
+		var rb string
+		if rb, err = s.rowBrand(r.Context(), a); rb != "" {
+			brand = &rb
+		}
+	}
 	if err == nil {
 		err = checkPartnerBrandWrite(a, brand)
 	}
@@ -564,6 +575,12 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 	if in.Currency != nil {
 		currency = *in.Currency
 	}
+	// A brand's program takes its sales from the brand's transactions
+	// unless told otherwise: the payments the backend already sends.
+	salesSource := deref(in.SalesSource)
+	if in.SalesSource == nil && brand != nil {
+		salesSource = salesFromTransactions
+	}
 	ctx := r.Context()
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -579,9 +596,9 @@ func (s *Server) createPartnerProgram(w http.ResponseWriter, r *http.Request) {
 				codes_win, hold_days, auto_approve, auto_accept, min_payout_cents, terms_url, created_by, sales_source, block_self_referrals,
 				payout_term_days, payout_methods, payout_tokens)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19::int, COALESCE($20::text[], '{}'), COALESCE($21::text[], '{}'))
-			ON CONFLICT (workspace_id, slug) DO NOTHING RETURNING id::text`,
+			ON CONFLICT DO NOTHING RETURNING id::text`,
 			a.WorkspaceID, brand, name, slug, *in.Kind, deref(landing), currency, p.CreditWindowDays, p.CreditModel,
-			codesWin, p.HoldDays, p.AutoApprove, p.AutoAccept, p.MinPayoutCents, deref(terms), nullIfEmpty(a.ActorID), deref(in.SalesSource), blockSelf,
+			codesWin, p.HoldDays, p.AutoApprove, p.AutoAccept, p.MinPayoutCents, deref(terms), nullIfEmpty(a.ActorID), salesSource, blockSelf,
 			in.PayoutTermDays.Value, cleanList(in.PayoutMethods), cleanList(in.PayoutTokens)).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
@@ -682,6 +699,9 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 	brand := cur.BrandID
 	if in.Brand != nil {
 		brand, err = s.campaignBrand(r, a.WorkspaceID, in.Brand)
+		if err == nil && brand == nil && cur.BrandID != nil {
+			err = errInvalid("brand: a program belongs to one brand; name the brand to move it to")
+		}
 		if err == nil {
 			err = checkPartnerBrandWrite(a, brand)
 		}

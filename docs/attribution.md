@@ -62,10 +62,14 @@ every conversion again in the background.
 
 ## Your own models
 
-The five models are a starting point. A workspace can make its own from any
+Each brand credits its own conversions on its own: a conversion counts only
+its brand's visits, its brand's conversion definitions and its brand's own
+models. A visit from before brands, with none, counts for any brand.
+
+The five models are a starting point. A brand can make its own from any
 of them (**Analytics → Channels → Attribution models**, where the model
 switch lists them too;
-`POST /v1/workspaces/{ws}/attribution/models` or MCP
+`POST /v1/brands/{brand}/attribution/models` or MCP
 `create_attribution_model`, scope `analytics.manage`), changing:
 
 | Option | What it does |
@@ -145,9 +149,10 @@ archived.
   people's conversions' brand.
 - `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
-- `GET` and `PATCH /v1/workspaces/{ws}/attribution/settings`: the default
-  model (built in or the workspace's own), `lookback_days` and
-  `conversion_events`.
+- `GET` and `PATCH /v1/brands/{brand}/attribution/settings`: the brand's
+  default model (built in or one of the brand's own), `lookback_days` and
+  `conversion_events`. Each brand has its own; the workspace route is
+  deprecated and acts on the first brand.
 
 Each takes `from`, `to`, `model`, `brand` and `match`. `match=identified`
 keeps only the visits the person was identified on (signed in, or named by

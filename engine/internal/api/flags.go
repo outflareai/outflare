@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -183,7 +184,13 @@ func (s *Server) oneFlag(w http.ResponseWriter, r *http.Request) (flagView, bool
 	if validUUID(ref) {
 		list, err = s.loadFlags(r.Context(), nil, a.WorkspaceID, ` AND id = $2`, ref)
 	} else if flags.ValidKey(ref) {
-		list, err = s.loadFlags(r.Context(), nil, a.WorkspaceID, ` AND key = $2 AND status <> 'archived'`, ref)
+		// A key is the route's brand's; another brand may use the same key.
+		// A workspace route takes the first brand's, else whichever brand
+		// uses it.
+		list, err = s.loadFlags(r.Context(), nil, a.WorkspaceID, ` AND key = $2 AND status <> 'archived'
+			AND brand_id IS NOT DISTINCT FROM CASE WHEN $3 = '' THEN (SELECT x.brand_id FROM flags x
+				WHERE x.workspace_id = $1 AND x.key = $2 AND x.status <> 'archived'
+				ORDER BY x.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, x.created_at LIMIT 1) ELSE $3::uuid END`, ref, a.Brand)
 	}
 	if err != nil {
 		s.internal(w, r, err)
@@ -257,6 +264,9 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 	if msg := flags.CheckVariants(f.Variants); msg != "" {
 		return errInvalid(msg)
 	}
+	if err := s.checkRedirects(ctx, a.WorkspaceID, f.BrandID, f.Variants); err != nil {
+		return err
+	}
 	if in.Rollout != nil {
 		f.Rollout = *in.Rollout
 	}
@@ -300,13 +310,15 @@ func (s *Server) applyFlagInput(ctx context.Context, a *access, f *flagView, in 
 
 // placeInGroup gives f a slice of its exclusion group when it needs one
 // (GroupStart -1, or a group just joined), inside tx with the group's
-// flags locked, so two flags can't take the same slice.
+// flags locked, so two flags can't take the same slice. A group is its
+// brand's: another brand's group of the same name is a different group.
 func placeInGroup(ctx context.Context, tx pgx.Tx, ws string, f *flagView) error {
 	if f.ExclusionGroup == "" || f.GroupStart >= 0 && f.GroupShare > 0 {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `SELECT group_from, group_to FROM flags
-		WHERE workspace_id = $1 AND exclusion_group = $2 AND status <> 'archived' AND id::text <> $3 FOR UPDATE`, ws, f.ExclusionGroup, f.ID)
+		WHERE workspace_id = $1 AND exclusion_group = $2 AND status <> 'archived' AND id::text <> $3
+		  AND brand_id IS NOT DISTINCT FROM $4::uuid FOR UPDATE`, ws, f.ExclusionGroup, f.ID, f.BrandID)
 	if err != nil {
 		return err
 	}
@@ -318,7 +330,8 @@ func placeInGroup(ctx context.Context, tx pgx.Tx, ws string, f *flagView) error 
 		return err
 	}
 	var holdout int
-	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT holdout FROM flag_groups WHERE workspace_id = $1 AND name = $2), 0)`, ws, f.ExclusionGroup).Scan(&holdout); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT coalesce((SELECT holdout FROM flag_groups WHERE workspace_id = $1 AND name = $2
+		AND brand_id IS NOT DISTINCT FROM $3::uuid), 0)`, ws, f.ExclusionGroup, f.BrandID).Scan(&holdout); err != nil {
 		return err
 	}
 	from, _, ok := flags.Allocate(taken, f.GroupShare, flags.Buckets-holdout*100)
@@ -356,27 +369,11 @@ func (s *Server) createFlag(w http.ResponseWriter, r *http.Request) {
 	if err := s.applyFlagInput(ctx, a, &f, in, true); s.flagWriteError(w, r, err) {
 		return
 	}
-	variants, _ := json.Marshal(f.Variants)
-	rules, _ := json.Marshal(f.Rules)
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM flags WHERE workspace_id = $1 AND status <> 'archived'`, a.WorkspaceID).Scan(&n); err != nil {
-			return err
-		}
-		if n >= maxFlags {
-			return errInvalid("a workspace can have at most 200 flags; archive the ones you no longer use")
-		}
-		if err := placeInGroup(ctx, tx, a.WorkspaceID, &f); err != nil {
-			return err
-		}
-		from, to := groupRange(f)
-		if err := tx.QueryRow(ctx, `INSERT INTO flags (workspace_id, brand_id, key, name, description, status, variants, rollout, rules, on_site, exclusion_group, group_from, group_to, salt, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text`,
-			a.WorkspaceID, f.BrandID, f.Key, f.Name, f.Description, f.Status, variants, f.Rollout, rules, f.OnSite, f.ExclusionGroup, from, to, newID(), nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
-			return err
-		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "flag.created", "flag", id, flagAuditData(f))
+		var err error
+		id, err = s.insertFlag(ctx, tx, a, &f)
+		return err
 	})
 	if s.flagWriteError(w, r, err) {
 		return
@@ -388,6 +385,59 @@ func (s *Server) createFlag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, list[0])
+}
+
+// checkRedirects keeps a split URL test on the brand's own site: a
+// version's redirect is a path, or an address on one of the brand's
+// domains (any brand's, for a flag without one), so a test can never send
+// visitors somewhere else.
+func (s *Server) checkRedirects(ctx context.Context, ws string, brand *string, vs []flags.Variant) error {
+	for _, v := range vs {
+		var p struct {
+			Redirect string `json:"redirect"`
+		}
+		if len(v.Payload) == 0 || v.Payload[0] != '{' || json.Unmarshal(v.Payload, &p) != nil || p.Redirect == "" || strings.HasPrefix(p.Redirect, "/") {
+			continue
+		}
+		u, err := url.Parse(p.Redirect)
+		if err != nil {
+			return errInvalid("redirect is a path on the site or an address on the brand's domains")
+		}
+		host := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+		var ok bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM brands b, LATERAL unnest(b.domains || ARRAY[regexp_replace(lower(b.website), '^https?://(www\.)?([^/:]+).*$', '\2')]) d
+			WHERE b.workspace_id = $1 AND ($2::uuid IS NULL OR b.id = $2) AND d <> '' AND ($3 = lower(d) OR $3 LIKE '%.' || lower(d)))`, ws, brand, host).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return errInvalid("version " + v.Key + ": a redirect only goes to the brand's own domains (" + host + " isn't one); add it to the brand's domains first, or use a path such as /pricing-b")
+		}
+	}
+	return nil
+}
+
+// insertFlag adds a checked flag in tx and records flag.created.
+func (s *Server) insertFlag(ctx context.Context, tx pgx.Tx, a *access, f *flagView) (string, error) {
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM flags WHERE workspace_id = $1 AND status <> 'archived'`, a.WorkspaceID).Scan(&n); err != nil {
+		return "", err
+	}
+	if n >= maxFlags {
+		return "", errInvalid("a workspace can have at most 200 flags; archive the ones you no longer use")
+	}
+	if err := placeInGroup(ctx, tx, a.WorkspaceID, f); err != nil {
+		return "", err
+	}
+	variants, _ := json.Marshal(f.Variants)
+	rules, _ := json.Marshal(f.Rules)
+	from, to := groupRange(*f)
+	var id string
+	if err := tx.QueryRow(ctx, `INSERT INTO flags (workspace_id, brand_id, key, name, description, status, variants, rollout, rules, on_site, exclusion_group, group_from, group_to, salt, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text`,
+		a.WorkspaceID, f.BrandID, f.Key, f.Name, f.Description, f.Status, variants, f.Rollout, rules, f.OnSite, f.ExclusionGroup, from, to, newID(), nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, record(ctx, tx, &a.principal, a.WorkspaceID, "flag.created", "flag", id, flagAuditData(*f))
 }
 
 // flagAuditData is what the audit log and product events keep of a flag:
@@ -504,6 +554,9 @@ type liveFlag struct {
 	flags.Flag
 	brandID *string
 	onSite  bool
+	// visual: a version has changes from the visual editor, so the website
+	// script asks for this flag on its own (a no-code test).
+	visual bool
 }
 
 // flagCache keeps each workspace's live flags in memory for a few
@@ -544,7 +597,7 @@ func (s *Server) liveFlags(ctx context.Context, ws string) ([]liveFlag, error) {
 	for _, f := range list {
 		out = append(out, liveFlag{Flag: flags.Flag{Key: f.Key, Status: f.Status, Variants: f.Variants, Rollout: f.Rollout, Rules: f.Rules, Salt: f.salt,
 			Group: f.ExclusionGroup, GroupFrom: f.GroupStart * 100, GroupTo: (f.GroupStart + f.GroupShare) * 100},
-			brandID: f.BrandID, onSite: f.OnSite})
+			brandID: f.BrandID, onSite: f.OnSite, visual: hasVisualChanges(f.Variants)})
 	}
 	c.mu.Lock()
 	if c.byWS == nil || len(c.byWS) > 10_000 {
@@ -603,6 +656,29 @@ func decideFlags(list []liveFlag, v flags.Visitor, keep func(liveFlag) bool, pre
 	return out
 }
 
+func hasVisualChanges(vs []flags.Variant) bool {
+	for _, v := range vs {
+		if flags.Visual(v.Payload) {
+			return true
+		}
+	}
+	return false
+}
+
+// siteFlagAnswer is the website script's answer. tests says whether the
+// script should keep asking on every page by itself: the site runs tests
+// and a flag that is on has visual changes. hide lists the selectors the
+// visitor's versions change, which the script remembers so the head guard
+// (flickerGuard) can hide just those parts on their next visit.
+type siteFlagAnswer struct {
+	flagAnswer
+	Tests bool     `json:"tests"`
+	Hide  []string `json:"hide"`
+}
+
+// maxHide is how many selectors one answer asks the page to hide.
+const maxHide = 50
+
 // siteFlags answers the website script: the visitor's variant of every
 // flag that is on, served to the site and for the key's brand. Like
 // events, it is public, and the key in the body is the authority.
@@ -637,10 +713,11 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var k siteKeyRow
+	testsOn := false
 	if strings.HasPrefix(in.Key, auth.PrefixSiteKey) && len(in.Key) <= 100 {
-		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins FROM site_keys
+		err = s.pool.QueryRow(ctx, `SELECT id::text, workspace_id::text, brand_id::text, origins, tests = 'on' FROM site_keys
 			WHERE revoked_at IS NULL AND (key = $1 OR (previous_key = $1 AND previous_expires_at > now()))`, in.Key).
-			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins)
+			Scan(&k.id, &k.workspaceID, &k.brandID, &k.origins, &testsOn)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			outcome = "error"
 			s.internal(w, r, err)
@@ -674,11 +751,29 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 	}
 	device, _, _ := parseUA(r.Header.Get("User-Agent"))
 	v := flags.Visitor{Subject: anon, URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000), Language: clip(in.Language, 35), Device: device}
+	visual := false
 	ans := decideFlags(list, v, func(f liveFlag) bool {
-		return f.onSite && (k.brandID == nil || f.brandID == nil || *f.brandID == *k.brandID)
+		keep := f.onSite && (k.brandID == nil || f.brandID == nil || *f.brandID == *k.brandID)
+		if keep && f.visual && f.Status == "on" {
+			visual = true
+		}
+		return keep
 	}, in.Preview, false)
+	out := siteFlagAnswer{flagAnswer: ans, Tests: testsOn && visual, Hide: []string{}}
+	for k := range ans.Payloads {
+		if _, previewed := in.Preview[k]; previewed {
+			continue
+		}
+		cs, _ := flags.Changes(ans.Payloads[k])
+		for _, c := range cs {
+			if c.Insert == nil && len(out.Hide) < maxHide && !slices.Contains(out.Hide, c.Selector) && !strings.ContainsAny(c.Selector, "<{}@;") && !strings.Contains(c.Selector, "/*") {
+				out.Hide = append(out.Hide, c.Selector)
+			}
+		}
+	}
+	slices.Sort(out.Hide)
 	outcome = "ok"
-	writeJSON(w, http.StatusOK, ans)
+	writeJSON(w, http.StatusOK, out)
 }
 
 // evaluateFlags decides flags for a server: the variant a visitor or user

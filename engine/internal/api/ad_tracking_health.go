@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/adconv"
 	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/attribution"
 	"github.com/outflareai/outflare/engine/internal/utm"
@@ -60,7 +61,8 @@ type trackingHealthSends struct {
 }
 
 type trackingHealthIssue struct {
-	// Code is untracked_clicks, campaigns_without_visits or sends_failing.
+	// Code is untracked_clicks, campaigns_without_visits, ads_without_template,
+	// sends_failing or events_without_shared_id.
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
 	// Subject is the network or connector it is about.
@@ -296,6 +298,41 @@ func (s *Server) adTrackingHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(out.Sends, func(i, j int) bool { return out.Sends[i].Connector < out.Sends[j].Connector })
 	out.Issues = healthIssues(out.Networks, campaigns, untemplated, out.Sends)
+
+	// Events a conversion rule sends that arrive from both the website and
+	// the server without a shared messageId: each pair is sent once (the
+	// server's copy), but the developer should add the id.
+	dargs := []any{a.WorkspaceID, since}
+	drow, err := s.pool.Query(ctx, `SELECT b.name, count(*)::int FROM customer_events b
+		WHERE b.workspace_id = $1 AND b.source = 'browser' AND b.occurred_at >= $2`+brand.sql(`b.brand_id`, &dargs)+`
+		  AND b.name IN (SELECT COALESCE(d.event_name, r.event_name) FROM ad_conversion_rules r
+			LEFT JOIN conversion_definitions d ON d.id = r.conversion_id WHERE r.workspace_id = $1 AND r.enabled)
+		  AND NOT EXISTS (SELECT 1 FROM customer_events s WHERE s.workspace_id = b.workspace_id AND s.message_id = substr(b.message_id, 9))
+		  AND EXISTS (SELECT 1 FROM customer_events s WHERE `+adconv.SameEvent("s", "b")+`)
+		  AND NOT EXISTS (SELECT 1 FROM customer_events s WHERE s.workspace_id = b.workspace_id AND s.name = b.name AND s.source <> 'browser'
+			AND `+adconv.SameOrder("s", "b")+`)
+		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5`, dargs...)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	for drow.Next() {
+		var name string
+		var n int
+		if err := drow.Scan(&name, &n); err != nil {
+			drow.Close()
+			s.internal(w, r, err)
+			return
+		}
+		out.Issues = append(out.Issues, trackingHealthIssue{Code: "events_without_shared_id", Severity: "warning", Subject: name,
+			Message: strconv.Itoa(n) + " " + name + " events came from both the website and your server without a shared messageId. Each was sent to your ad networks once, matched on the person and time, but an exact id is safer.",
+			Fix:     "Send the same messageId from both: outflare.track(name, properties, { messageId }) on the website, and messageId on the server's event."})
+	}
+	drow.Close()
+	if err := drow.Err(); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

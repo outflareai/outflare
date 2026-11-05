@@ -5769,7 +5769,8 @@ export interface paths {
         };
         /**
          * Get how conversions are credited to channels
-         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions.
+         * @deprecated
+         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getAttributionSettings"];
         put?: never;
@@ -5779,9 +5780,37 @@ export interface paths {
         head?: never;
         /**
          * Change the default model, the lookback or which events count
-         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the workspace's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+         * @deprecated
+         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the workspace's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         patch: operations["updateAttributionSettings"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/attribution/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get how conversions are credited to channels
+         * @description Scope: analytics.read. The default model reports use (last non-direct touch unless changed), how many days before a conversion a visit can get credit (30), and which customer events count as conversions.
+         */
+        get: operations["getBrandAttributionSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the default model, the lookback or which events count
+         * @description Scope: analytics.manage. Every model's credits are kept, so changing the model only changes what reports show by default. model can be a built-in model or the key of one of the brand's own models. Changing the lookback or the events credits every conversion again in the background, within a few minutes.
+         */
+        patch: operations["updateBrandAttributionSettings"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/attribution/models": {
@@ -5796,11 +5825,46 @@ export interface paths {
         };
         /**
          * List attribution models
+         * @deprecated
          * @description Scope: analytics.read. The five built-in models, and the workspace's own models at their latest version
          *     (archived ones too with archived=true). A workspace's model starts from a built-in one and changes its windows,
          *     channels left out, position weights or time-decay half-life. Reports take its key as model.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listAttributionModels"];
+        put?: never;
+        /**
+         * Make an attribution model
+         * @deprecated
+         * @description Scope: analytics.manage. Makes version 1 of a model, from a built-in one with your own options, such as
+         *     `{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}`.
+         *     Every conversion is credited again in the background, so the model covers the past too.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createAttributionModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/attribution/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List attribution models
+         * @description Scope: analytics.read. The five built-in models, and the brand's own models at their latest version
+         *     (archived ones too with archived=true). A workspace's model starts from a built-in one and changes its windows,
+         *     channels left out, position weights or time-decay half-life. Reports take its key as model.
+         */
+        get: operations["listBrandAttributionModels"];
         put?: never;
         /**
          * Make an attribution model
@@ -5808,7 +5872,7 @@ export interface paths {
          *     `{"key": "paid-7-day", "name": "Paid ads 7 days", "spec": {"base": "last_non_direct", "channel_lookback_days": {"paid_ads": 7}}}`.
          *     Every conversion is credited again in the background, so the model covers the past too.
          */
-        post: operations["createAttributionModel"];
+        post: operations["createBrandAttributionModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5828,16 +5892,53 @@ export interface paths {
         };
         /**
          * Every version of an attribution model
-         * @description Scope: analytics.read. Newest first, with the modules that pin each version.
+         * @deprecated
+         * @description Scope: analytics.read. Newest first, with the modules that pin each version. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getAttributionModel"];
         put?: never;
         post?: never;
         /**
          * Archive an attribution model
-         * @description Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived.
+         * @deprecated
+         * @description Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         delete: operations["archiveAttributionModel"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an attribution model
+         * @deprecated
+         * @description Scope: analytics.manage. A new spec makes the next version and credits every conversion again; the old version
+         *     stays credited only while a module pins it. A new name alone keeps the version.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        patch: operations["updateAttributionModel"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/attribution/models/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Every version of an attribution model
+         * @description Scope: analytics.read. Newest first, with the modules that pin each version.
+         */
+        get: operations["getBrandAttributionModel"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive an attribution model
+         * @description Scope: analytics.manage. Reports can no longer read it, except a version a module pins. The workspace's default model can't be archived.
+         */
+        delete: operations["archiveBrandAttributionModel"];
         options?: never;
         head?: never;
         /**
@@ -5845,7 +5946,7 @@ export interface paths {
          * @description Scope: analytics.manage. A new spec makes the next version and credits every conversion again; the old version
          *     stays credited only while a module pins it. A new name alone keeps the version.
          */
-        patch: operations["updateAttributionModel"];
+        patch: operations["updateBrandAttributionModel"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/ai-accounts": {
@@ -6087,13 +6188,50 @@ export interface paths {
         };
         /**
          * List conversion definitions
+         * @deprecated
          * @description Scope: analytics.read. What the workspace counts as a conversion, defined on the customer events stream and never
          *     tied to one integration: a customer event (signed_up, payment.succeeded, meeting.held, call.completed), filters on
          *     its properties, what it is worth, and each ad network's own name for it. Attribution credits channels with every
          *     definition that has attribution on, besides the events in GET .../attribution/settings. Archived ones too with
          *     archived=true.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listConversionDefinitions"];
+        put?: never;
+        /**
+         * Define a conversion
+         * @deprecated
+         * @description Scope: analytics.manage. Such as a call over a minute:
+         *     `{"key": "qualified_call", "name": "Qualified call", "event": "call.completed", "filters": [{"property": "duration_s", "op": "gt", "value": 60}], "value_mode": "fixed", "fixed_value_minor": 5000, "currency": "USD"}`.
+         *     Every conversion is credited again in the background.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createConversionDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/conversion-definitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List conversion definitions
+         * @description Scope: analytics.read. What the brand counts as a conversion, defined on the customer events stream and never
+         *     tied to one integration: a customer event (signed_up, payment.succeeded, meeting.held, call.completed), filters on
+         *     its properties, what it is worth, and each ad network's own name for it. Attribution credits channels with every
+         *     definition that has attribution on, besides the events in GET .../attribution/settings. Archived ones too with
+         *     archived=true.
+         */
+        get: operations["listBrandConversionDefinitions"];
         put?: never;
         /**
          * Define a conversion
@@ -6101,7 +6239,7 @@ export interface paths {
          *     `{"key": "qualified_call", "name": "Qualified call", "event": "call.completed", "filters": [{"property": "duration_s", "op": "gt", "value": 60}], "value_mode": "fixed", "fixed_value_minor": 5000, "currency": "USD"}`.
          *     Every conversion is credited again in the background.
          */
-        post: operations["createConversionDefinition"];
+        post: operations["createBrandConversionDefinition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6120,9 +6258,33 @@ export interface paths {
         };
         /**
          * Starting points for conversion definitions
-         * @description Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards.
+         * @deprecated
+         * @description Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listConversionPresets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/conversion-definitions/presets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Starting points for conversion definitions
+         * @description Scope: analytics.read. Sets of definitions a kind of business usually starts from (SaaS, booked calls, e-commerce, lead generation). Adding one copies them; change anything afterwards.
+         */
+        get: operations["listBrandConversionPresets"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6146,9 +6308,34 @@ export interface paths {
         put?: never;
         /**
          * Add a preset's conversion definitions
-         * @description Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added.
+         * @deprecated
+         * @description Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["addConversionPreset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/conversion-definitions/presets/{preset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                preset: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a preset's conversion definitions
+         * @description Scope: analytics.manage. Adds the preset's definitions whose keys the workspace doesn't use yet, so adding it twice changes nothing. Conversions are credited again when any is added.
+         */
+        post: operations["addBrandConversionPreset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6168,23 +6355,58 @@ export interface paths {
         };
         /**
          * Get a conversion definition
-         * @description Scope: analytics.read.
+         * @deprecated
+         * @description Scope: analytics.read. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getConversionDefinition"];
         put?: never;
         post?: never;
         /**
          * Archive a conversion definition
-         * @description Scope: analytics.manage. It stops counting, and conversions are credited again without it.
+         * @deprecated
+         * @description Scope: analytics.manage. It stops counting, and conversions are credited again without it. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         delete: operations["archiveConversionDefinition"];
         options?: never;
         head?: never;
         /**
          * Change a conversion definition
-         * @description Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again.
+         * @deprecated
+         * @description Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         patch: operations["updateConversionDefinition"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/conversion-definitions/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a conversion definition
+         * @description Scope: analytics.read.
+         */
+        get: operations["getBrandConversionDefinition"];
+        put?: never;
+        post?: never;
+        /**
+         * Archive a conversion definition
+         * @description Scope: analytics.manage. It stops counting, and conversions are credited again without it.
+         */
+        delete: operations["archiveBrandConversionDefinition"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a conversion definition
+         * @description Scope: analytics.manage. Fields left out keep their values; the key never changes. Switching value_mode clears the other mode's fields. Every conversion is credited again.
+         */
+        patch: operations["updateBrandConversionDefinition"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/attribution/channels": {
@@ -6862,6 +7084,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/analytics/tracking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The brand's traffic from Outflare's own tag
+         * @description Scope: analytics.read. Visitors, visits, page views, bounce rate and visit length from the brand's own website tracking (the site.js tag), day by day, with its top pages, sources, websites, countries and devices. Counted live from the visits, today included, so a brand needs no connected analytics tool. Dates default to the last 28 days; the range is at most a year.
+         */
+        get: operations["getSiteAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/analytics/syncs": {
         parameters: {
             query?: never;
@@ -7313,6 +7558,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ads/accounts/{id}/tracking/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * See how the latest request to add the tracking template went
+         * @description Scope: analytics.read. The latest addAdAccountTracking for the
+         *     account, read from Outflare alone (the platform isn't called, so
+         *     it can be polled): `queued`, `running`, `retrying` (the platform
+         *     was unreachable and it will try again), `done` with how many
+         *     suffixes changed and the ones the platform refused, or `failed`
+         *     with why. Null when none was asked for.
+         */
+        get: operations["getAdAccountTrackingRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ads/campaigns/{id}/target": {
         parameters: {
             query?: never;
@@ -7618,6 +7892,120 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ads/campaigns/{id}/targeting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * How a campaign bids and whom it reaches
+         * @description Scope: analytics.read. Reads the campaign's bidding, customer list
+         *     audiences and countries live from the platform. supported is false
+         *     for a platform whose targeting Outflare can't read yet;
+         *     bidding_methods lists what POST .../bidding can set (empty on Meta,
+         *     which bids per ad set).
+         */
+        get: operations["getAdCampaignTargeting"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/campaigns/{id}/bidding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change how a campaign bids
+         * @description Scope: ads.manage. Switches the campaign to maximize_conversions
+         *     (optionally with target_cpa_micros) or maximize_conversion_value
+         *     (optionally with target_roas), on Google Ads, and answers 202 with
+         *     the queued change. Google's bidding takes one to two weeks to settle
+         *     afterwards. An agent's change always waits for a person.
+         */
+        post: operations["setAdCampaignBidding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/campaigns/{id}/audiences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add or take out a customer list audience
+         * @description Scope: ads.manage. Adds a customer list audience (listAdAudiences:
+         *     the lists journeys fill from smart lists) to the campaign's
+         *     targeting, or takes it out, and answers 202 with the queued change.
+         *     On Google, a list added to a Search campaign is observed (bids learn
+         *     from it) unless the campaign narrows to its audiences; on Meta it is
+         *     added to every ad set, which narrows whom they reach. An agent's
+         *     change always waits for a person.
+         */
+        post: operations["changeAdCampaignAudience"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/campaigns/{id}/countries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add or take out a country
+         * @description Scope: ads.manage. Adds a country to where the campaign shows, or
+         *     takes it out (on Meta, on every ad set), and answers 202 with the
+         *     queued change. Taking out the last place fails on the platform,
+         *     since the campaign would show everywhere. An agent's change always
+         *     waits for a person.
+         */
+        post: operations["changeAdCampaignCountry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/ads/changes": {
         parameters: {
             query?: never;
@@ -7630,9 +8018,261 @@ export interface paths {
         };
         /**
          * Changes made to campaigns
-         * @description Scope: analytics.read. Every pause, resume and budget change asked for, newest first: what the campaign was before, what was asked, whether the job applied it, and whether the platform showed it afterwards. Page with cursor=next_cursor.
+         * @description Scope: analytics.read. Every pause, resume and budget change asked for, newest first: what the campaign was before, what was asked, whether the job applied it, and whether the platform showed it afterwards. connector and account_id narrow it to one network or one account. Page with cursor=next_cursor.
          */
         get: operations["listAdChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Suggested changes to campaigns, and how approved ones did
+         * @description Scope: analytics.read. After each sync Outflare reads every campaign
+         *     it can change and suggests at most one change for it: raise its
+         *     daily budget by a fifth (a good cost per conversion and a budget
+         *     that runs out), lower it by a fifth (conversions cost over 1.3 times
+         *     the target), pause it (three targets' worth spent with no
+         *     conversion) or resume it (it did well while it ran); and on Google
+         *     search campaigns, over 30 days: add a search that converts at or
+         *     under target as an exact keyword (keyword_add), add a search with
+         *     10 clicks, two targets' spend and no conversion as an exact negative
+         *     (negative_add), or give a keyword with 10 conversions and two
+         *     fifths of its ad group's spend its own ad group with copies of the
+         *     group's ads (keyword_split); and on Google, give a campaign that
+         *     maximises conversions with no target a target at its last four
+         *     weeks' cost per conversion once it had 30 (bidding_target). Open ones wait
+         *     for a person; approved ones are measured over a window (the
+         *     platform's learning period, at least a week, about 30 conversions
+         *     and three days for late ones, at most six weeks) and judged:
+         *     worked, did_not_work or not_sure. Open first, then measuring,
+         *     judged, and the rest. connector and account_id narrow it to one
+         *     network or one account.
+         */
+        get: operations["listAdSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/suggestions/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the campaigns again for suggestions now
+         * @description Scope: ads.manage. Queues the suggestions run that otherwise follows each sync: it judges measured changes, then suggests. At most one run an hour.
+         */
+        post: operations["refreshAdSuggestions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/suggestions/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a suggestion, making its change
+         * @description Scope: ads.manage, from a person's session (403 for an API token:
+         *     agents change campaigns with pauseAdCampaign, resumeAdCampaign and
+         *     updateAdCampaign, which follow their grants). The one exception: on
+         *     a server whose extension lets a brand's savings apply on their own
+         *     (capability `ad_suggestions_auto`), an agent may approve a
+         *     suggestion that only spends less (`budget_down`, `pause`,
+         *     `negative_add`) on that brand's campaigns. Makes the change as
+         *     those calls do (its change_id is in listAdChanges) and starts its
+         *     measuring window. With `{"test": true}`, a budget or bidding_target
+         *     suggestion is tested inside the network instead (createAdTest; the
+         *     trial gets the suggested budget or target), its status is testing and test_id names the
+         *     test, and it is judged when the test is kept or rolled back. 409
+         *     `not_active` when it isn't open, the campaign is already that way,
+         *     or a change of the kind is queued (or the campaign has a test).
+         */
+        post: operations["approveAdSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/suggestions/{id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss a suggestion
+         * @description Scope: ads.manage. The campaign is left as it is; the next run may suggest it again if it still holds. 409 `not_active` when it isn't open.
+         */
+        post: operations["dismissAdSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Tests inside the ad networks, and how they did
+         * @description Scope: analytics.read. Each test splits one campaign's traffic
+         *     (Google Ads experiments) or audience (Meta split tests) between the
+         *     campaign as it is (control) and a trial that tries a different
+         *     target cost per conversion (bidding, Google) or daily budget
+         *     (budget, Meta), on the same days. Outflare reads both arms after
+         *     each sync (result: control and trial with spend_micros,
+         *     conversions, clicks, impressions and days, z, through) and, once
+         *     the test has run and three more days have passed for late
+         *     conversions, gives a verdict: worked, did_not_work or not_sure
+         *     (bidding at 95% on conversions for the money; budget against the
+         *     target). A trial over twice the target three days running is
+         *     judged early. Judged first, then running, then ended.
+         */
+        get: operations["listAdTests"];
+        put?: never;
+        /**
+         * Start a test inside the ad network
+         * @description Scope: ads.manage, from a person's session (403 for an API token).
+         *     Starts tomorrow on the campaign's own account: a Google Ads custom
+         *     experiment on a search or display campaign whose trial bids to
+         *     target_cpa_micros (kind bidding), or a Meta split test against a
+         *     copy of the campaign with daily_budget_micros (kind budget; the ad
+         *     account must belong to a business). split_percent is the trial's
+         *     share (10 to 90, default 50). It runs long enough for about 30
+         *     conversions in the smaller arm after the trial settles, two to six
+         *     weeks (window_note). 409 `not_active` when the campaign isn't
+         *     running or already has a test; 422 `connector_invalid` when its
+         *     network can't run that kind of test.
+         */
+        post: operations["createAdTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/tests/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep a test's trial
+         * @description Scope: ads.manage, from a person's session. Applies the trial's
+         *     change to the campaign (Google promotes the experiment; on Meta the
+         *     campaign gets the trial's budget and the copy is paused) and ends
+         *     the test. A suggestion it tested is judged with the test's verdict.
+         *     409 `not_active` unless it is running or judged.
+         */
+        post: operations["keepAdTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/tests/{id}/roll-back": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Roll a test back
+         * @description Scope: ads.manage, from a person's session. Ends the test and
+         *     leaves the campaign as it was (Google ends the experiment; on Meta
+         *     the copy is paused). A suggestion it tested is judged with the
+         *     test's verdict. 409 `not_active` unless it is running or judged.
+         */
+        post: operations["rollBackAdTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{ws}/ads/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        /**
+         * The ad platform's own recommendations for an account
+         * @description Scope: analytics.read. Asks the platform live (Google Ads) for its recommendations not yet applied or dismissed, with their expected impact. supported is false, with none, for a platform that has none to read.
+         */
+        get: operations["listAdRecommendations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7662,6 +8302,156 @@ export interface paths {
          *     pauseAdCampaign's is.
          */
         post: operations["pauseAllAds"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * New ads waiting for a person, and what became of them
+         * @description Scope: analytics.read. The brand's drafts of new ads, those waiting
+         *     for a person first, then those being made or paused on the platform,
+         *     then live, failed and dismissed ones. account_id, campaign_id and
+         *     status narrow it.
+         */
+        get: operations["listAdDrafts"];
+        put?: never;
+        /**
+         * Write a new ad for a person to check
+         * @description Scope: ads.manage. Writes a draft: a new ad in an ad group (ad set
+         *     on Meta), a new ad group with keywords and an ad in a campaign, or
+         *     a new search campaign with its daily budget, bidding, countries and
+         *     an ad group (Google Ads). It is checked against the platform's
+         *     rules (a Google search ad has 3 to 15 headlines of at most 30
+         *     characters and 2 to 4 descriptions of at most 90; a Meta ad has one
+         *     headline, its main text and an image) and waits for a person:
+         *     nothing is made on the platform until approveAdDraft. Writing one
+         *     spends nothing, so an agent writes it under its grant.
+         */
+        post: operations["createAdDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/drafts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One draft of a new ad
+         * @description Scope: analytics.read.
+         */
+        get: operations["getAdDraft"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rewrite a draft before it is approved
+         * @description Scope: ads.manage. Replaces what the draft makes (its names, link,
+         *     text, keywords and, for a campaign, budget, bidding and countries),
+         *     checked as createAdDraft checks it, and its reason when one is
+         *     sent. Where it goes and its kind stay. Only a draft that waits for
+         *     a person changes.
+         */
+        patch: operations["updateAdDraft"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/drafts/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a new ad on the platform, paused
+         * @description Scope: ads.manage; a person's session only. Makes the draft on the
+         *     workspace's own ad account, everything paused (on Google in one
+         *     batch, all or nothing), and answers 202 with the draft as creating.
+         *     It becomes paused once made, or failed with the platform's reason
+         *     (approve a failed draft again to retry). Check it on the platform,
+         *     then turn it on with goLiveAdDraft.
+         */
+        post: operations["approveAdDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/drafts/{id}/go-live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn on a new ad made paused
+         * @description Scope: ads.manage; a person's session only, since a live ad spends.
+         *     Turns on what the draft made (the ad, and the ad group and campaign
+         *     when it made them) and answers 202 with the draft as going_live; it
+         *     becomes live, or stays paused with the platform's reason.
+         */
+        post: operations["goLiveAdDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/drafts/{id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leave a draft unmade
+         * @description Scope: ads.manage. Only a draft not yet made (waiting or failed); once made, pause or remove it on the platform.
+         */
+        post: operations["dismissAdDraft"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8540,14 +9330,43 @@ export interface paths {
         };
         /**
          * Read the paid media settings
-         * @description Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed.
+         * @deprecated
+         * @description Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getAdSettings"];
         /**
          * Change the paid media settings
-         * @description Scope: integrations.manage. Sets consent_mode.
+         * @deprecated
+         * @description Scope: integrations.manage. Sets consent_mode. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         put: operations["setAdSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ads/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read the paid media settings
+         * @description Scope: analytics.read. consent_mode decides who conversions are sent for outside the EEA, the UK and Switzerland: opt_out (the default) sends unless the person withdrew consent for ad data, opt_in only when they granted it. Inside those countries, and when a person's country is unknown, a grant is always needed.
+         */
+        get: operations["getBrandAdSettings"];
+        /**
+         * Change the paid media settings
+         * @description Scope: integrations.manage. Sets consent_mode.
+         */
+        put: operations["setBrandAdSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -9486,7 +10305,7 @@ export interface paths {
         /**
          * Track a competitor
          * @description Scope: seo.manage. Tracks a domain as one of a site's competitors
-         *     (a suggestion or dismissed one becomes tracked), at most 20 a site,
+         *     (a suggestion or dismissed one becomes tracked), with no limit,
          *     and queues OutflareBot's first light look at it. Its numbers come
          *     with the connection's next weekly snapshot (or POST .../seo/{id}/sync).
          *     `host` may be a URL; it is kept as the domain without www.
@@ -9584,7 +10403,7 @@ export interface paths {
         head?: never;
         /**
          * Track, dismiss or name a competitor
-         * @description Scope: seo.manage. `tracked` starts the weekly look and numbers (at most 20 a site); `dismissed` stops them and keeps a suggestion from coming back. `name` and `aliases` say what it is called, for features that look for it by name, such as AI answers.
+         * @description Scope: seo.manage. `tracked` starts the weekly look and numbers; `dismissed` stops them and keeps a suggestion from coming back. `name` and `aliases` say what it is called, for features that look for it by name, such as AI answers.
          */
         patch: operations["updateSEOCompetitor"];
         trace?: never;
@@ -9625,9 +10444,49 @@ export interface paths {
         };
         /**
          * Get link building settings
-         * @description Scope: seo.read. The pitch cool-down and the weekly read of competitors' dead pages, with the defaults until someone changes them.
+         * @deprecated
+         * @description Scope: seo.read. The pitch cool-down and the weekly read of competitors' dead pages, with the defaults until someone changes them. Deprecated: use the same route under /v1/brands/{brand}/; this one acts on ?brand= or the first brand.
          */
         get: operations["getLinkBuildingSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change link building settings
+         * @deprecated
+         * @description Deprecated: use the same route under /v1/brands/{brand}/; this one
+         *     acts on ?brand= or the first brand. Scope: seo.manage. `pitch_cooldown_days` is how long after a declined
+         *     pitch its website may be pitched again (0 to 365, default 60).
+         *     `weekly_reads` has the weekly SEO snapshot read who links to pages
+         *     that just went from tracked competitors' sitemaps (default on),
+         *     spending at most `weekly_budget_percent` of the connection's monthly
+         *     budget a month on it (1 to 100, default 10). `recheck_days` is how
+         *     often the pages of broken-link prospects nobody has pitched are
+         *     checked again, so links that break later are found
+         *     (`outbound_link.broken`): 0 is never, default 30. A check is free
+         *     apart from the workspace's own AI reading the page. Send only what
+         *     changes.
+         */
+        patch: operations["updateLinkBuildingSettings"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-building/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get link building settings
+         * @description Scope: seo.read. The pitch cool-down and the weekly read of competitors' dead pages, with the defaults until someone changes them.
+         */
+        get: operations["getBrandLinkBuildingSettings"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9647,7 +10506,7 @@ export interface paths {
          *     apart from the workspace's own AI reading the page. Send only what
          *     changes.
          */
-        patch: operations["updateLinkBuildingSettings"];
+        patch: operations["updateBrandLinkBuildingSettings"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/link-building/assets": {
@@ -11847,9 +12706,48 @@ export interface paths {
         };
         /**
          * Read AI visibility settings
-         * @description Scope: seo.read. The models each prompt is asked, how often, and the most sampling may spend in a month.
+         * @deprecated
+         * @description Scope: seo.read. The models each prompt is asked, how often, and the most sampling may spend in a month. Deprecated: use the same route under /v1/brands/{brand}/; this one acts on ?brand= or the first brand.
          */
         get: operations["getAIVisibilitySettings"];
+        /**
+         * Choose the AI models to sample
+         * @deprecated
+         * @description Deprecated: use the same route under /v1/brands/{brand}/; this one
+         *     acts on ?brand= or the first brand. Scope: seo.manage. Send only what changes. Each model is one of the
+         *     workspace's own AI model connections (Claude, OpenAI, Gemini,
+         *     Mistral, xAI, DeepSeek or a router, with its own key) and a model id from GET
+         *     .../integrations/{id}/models. OpenRouter reaches many vendors'
+         *     models with one key. `web_search` lets the model search the web
+         *     before it answers, as AI assistants do for people, so its answer
+         *     cites pages: Claude, OpenRouter and OpenAI's search models can.
+         *     Samples are billed by the provider to the workspace and count
+         *     towards both the workspace's monthly AI limit and
+         *     the brand's own `monthly_limit_cents` here.
+         */
+        put: operations["updateAIVisibilitySettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ai-visibility/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Read AI visibility settings
+         * @description Scope: seo.read. The models each prompt is asked, how often, and the most sampling may spend in a month.
+         */
+        get: operations["getBrandAIVisibilitySettings"];
         /**
          * Choose the AI models to sample
          * @description Scope: seo.manage. Send only what changes. Each model is one of the
@@ -11861,9 +12759,9 @@ export interface paths {
          *     cites pages: Claude, OpenRouter and OpenAI's search models can.
          *     Samples are billed by the provider to the workspace and count
          *     towards both the workspace's monthly AI limit and
-         *     `monthly_limit_cents` here.
+         *     the brand's own `monthly_limit_cents` here.
          */
-        put: operations["updateAIVisibilitySettings"];
+        put: operations["updateBrandAIVisibilitySettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -20044,7 +20942,10 @@ export interface paths {
          * @deprecated
          * @description Scope: customers.read. One timeline per person or company, newest first, across every module: their
          *     product events (and, for a company, the group calls that named it), changes to their attributes,
-         *     identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
+         *     identities added and closed, the moment an anonymous browser became them (`identified`: how, with detail.by
+         *     product, email_click or link, when the browser was first seen, and the visits and events from before that they
+         *     took over; `released` when a sign-in as someone else took the browser back), consent given or withdrawn, the
+         *     cold email Outflare sent them and their
          *     replies (`message`, with `direction` out or in), meetings, deals, website visits (`visit`), opt-out list
          *     entries (`opt_out`) and journeys entered and finished (`journey`). Lifecycle email and payments show as the
          *     events Outflare records for them (`email.sent`, `email.delivered` and so on, with `source: lifecycle`).
@@ -20793,6 +21694,121 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/visitors/browsers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List every visitor, known or not
+         * @description Scope: customers.read. Every browser seen on the brand's site in the last `days`, most recent first: anonymous
+         *     visitors as well as known ones, each with its counts, where it was last seen from (country, device, browser,
+         *     system), the company a lookup named from its address, and the person it turned out to be. Open one with
+         *     GET .../visitors/browsers/{anonymous_id}. `known=false` lists only anonymous visitors, `known=true` only known
+         *     ones. Needs the site snippet (site keys).
+         */
+        get: operations["listVisitorBrowsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/visitors/browsers/{anonymous_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The site snippet's id for the browser (outflare.anonymousId()). */
+                anonymous_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a visitor's profile and journey
+         * @description Scope: customers.read. One browser on the brand's site, anonymous or known: its counts, where it is from, the
+         *     company a lookup named, and, once known, the person and how and when they became known. `visits` are its
+         *     visits, newest first (up to 100), each with where it came from (channel, referrer, campaign tags), its landing
+         *     page and its counts; `known` is false for a visit made before the browser was known. The pages and events
+         *     themselves are at GET .../events.
+         */
+        get: operations["getVisitorBrowser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/visitors/browsers/{anonymous_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                anonymous_id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a visitor's pages and events
+         * @description Scope: customers.read. The page views and events one browser sent, newest first: from before anyone knew who
+         *     it was, and, once known, the ones on the person that came from it. `session` keeps one visit's (a visit's id
+         *     from GET .../visitors/browsers/{anonymous_id}).
+         */
+        get: operations["listVisitorBrowserEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/visitors/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a visitor link
+         * @description Scope: customers.manage. A link to your own site for one person, to put in a message you send yourself: your
+         *     product's own email, a text message, a push notification or a QR code. The first browser that opens it joins
+         *     the person, with its visits from before, so a phone or a second computer where they never sign in still
+         *     counts as theirs. The address gets an `ofvisit` token, which the site snippet takes and removes; nothing new
+         *     is needed on the site.
+         *
+         *     Name the person with one of `user_id`, `email` or `record_id`, in this brand. `url` must be on one of the
+         *     workspace's brands' domains or a site key's origins. A link names one browser only (the first to open it),
+         *     lasts `expires_in_days` (default 30), and a sign-in on that browser as someone else takes it back, as for a
+         *     forwarded email. Links in email Outflare sends need none of this: their clicks do it already. Recorded as
+         *     `visitor_link.created`.
+         */
+        post: operations["createVisitorLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws}/visitors/settings": {
         parameters: {
             query?: never;
@@ -20805,14 +21821,43 @@ export interface paths {
         };
         /**
          * Get visitor settings
-         * @description Scope: customers.read. Key pages, the hot score, email click matching and who is left out.
+         * @deprecated
+         * @description Scope: customers.read. Key pages, the hot score, email click matching and who is left out. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getVisitorSettings"];
         /**
          * Change visitor settings
-         * @description Scope: customers.manage. Fields left out keep their value.
+         * @deprecated
+         * @description Scope: customers.manage. Fields left out keep their value. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         put: operations["updateVisitorSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/visitors/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get visitor settings
+         * @description Scope: customers.read. Key pages, the hot score, email click matching and who is left out.
+         */
+        get: operations["getBrandVisitorSettings"];
+        /**
+         * Change visitor settings
+         * @description Scope: customers.manage. Fields left out keep their value.
+         */
+        put: operations["updateBrandVisitorSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -20963,8 +22008,10 @@ export interface paths {
          * Save a version's visual changes with an edit link
          * @description Public: the signed edit token is the authority, and its person must still manage analytics on every brand. The
          *     changes replace the version's payload `changes`; the rest of its payload stays. Each change has a CSS selector and
-         *     one action: text (set as text, never HTML), hide, href, or src and alt. Links and images go only to https://, http://
-         *     or a path on the site. Up to 50 changes, within the version's 4 KB payload. Send the JSON as text/plain to skip the
+         *     one action: text (set as text, never HTML), rich (simple formatting), hide, href, src and alt, style, move or insert,
+         *     optionally only on phones or wider screens. Links and images go only to https://, http:// or a path on the site. Up to
+         *     50 changes, within the version's 16 KB payload. css and redirect set the version's own CSS and a page to send its
+         *     visitors to (only the brand's own domains). Send the JSON as text/plain to skip the
          *     CORS preflight. Recorded as flag.updated, by the link's person.
          */
         post: operations["saveSiteFlagEdits"];
@@ -22372,6 +23419,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws}/ab-tests/{test}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a test version's visual changes
+         * @deprecated
+         * @description Scope: analytics.read. The version's visual changes, CSS and redirect, as the visual editor saves them; live is true
+         *     while visitors can see it (the test runs or its flag is on).
+         *     Deprecated: use /v1/brands/{brand}/ab-tests/{test}/versions/{version}. This workspace route stays until the brands contract step.
+         */
+        get: operations["getABTestVersion"];
+        /**
+         * Set a test version's visual changes
+         * @deprecated
+         * @description Scope: analytics.manage. What the visual editor saves, for people and agents: changes replace the version's visual
+         *     changes (FlagChange), and css and redirect, when sent, replace its CSS and the page it sends visitors to ("" removes
+         *     them). The rest of its payload stays. The control is today's page and can't be changed; 409 once the test has ended.
+         *     An agent token can build a draft's versions under its grants, but a change to a version visitors can see (the test
+         *     runs or its flag is on) always waits for a person (202), as do starting and shipping a test. Recorded as
+         *     flag.updated.
+         *     Deprecated: use /v1/brands/{brand}/ab-tests/{test}/versions/{version}. This workspace route stays until the brands contract step.
+         */
+        put: operations["setABTestVersion"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/ab-tests/{test}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read a test version's visual changes
+         * @description Scope: analytics.read. The version's visual changes, CSS and redirect, as the visual editor saves them; live is true
+         *     while visitors can see it (the test runs or its flag is on).
+         */
+        get: operations["getBrandABTestVersion"];
+        /**
+         * Set a test version's visual changes
+         * @description Scope: analytics.manage. What the visual editor saves, for people and agents: changes replace the version's visual
+         *     changes (FlagChange), and css and redirect, when sent, replace its CSS and the page it sends visitors to ("" removes
+         *     them). The rest of its payload stays. The control is today's page and can't be changed; 409 once the test has ended.
+         *     An agent token can build a draft's versions under its grants, but a change to a version visitors can see (the test
+         *     runs or its flag is on) always waits for a person (202), as do starting and shipping a test. Recorded as
+         *     flag.updated.
+         */
+        put: operations["setBrandABTestVersion"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/ab-tests/{test}/ship": {
         parameters: {
             query?: never;
@@ -22921,6 +24044,20 @@ export interface paths {
          *     messageId the brand already has), rejected (code and reason say what to fix; fix it and replay) or held (a
          *     track name the catalog hasn't approved yet: approve it, then replay). Follow them with GET .../events or GET
          *     .../events/{event}. Events belong to the brand in the URL; a brand_id in the body is ignored.
+         *
+         *     An Order Completed track event from a known person, with revenue (or total, or value) in major units and a
+         *     currency, is a payment: it is saved as a transaction (source events, source_id its order_id) and counted as a
+         *     payment.succeeded event, for revenue, attribution and the conversions sent to ad networks. When the same
+         *     payment is already in, as a transaction with that order_id as its source_id (or, without one, the same person,
+         *     amount and currency within 15 minutes) or from a billing connector, the order is counted as that one; either way
+         *     its properties get outflare_payment, the message id of the payment.succeeded it counts as. Count payment.succeeded
+         *     (not Order Completed) in conversion definitions and ad conversion rules, so a payment sent both ways counts once.
+         *
+         *     An Order Refunded track event from a known person is a refund of the payment its order_id names (or
+         *     transaction_id or payment_id: the payment's source_id, its order's messageId or Outflare's transaction id), of
+         *     amount (or revenue, total, value) in major units, the whole payment when none is given. Its id is refund_id,
+         *     else its messageId; the same refund sent as a transaction counts once. Its properties get outflare_refund, the
+         *     refund's transaction id.
          */
         post: operations["ingestBrandEvents"];
         delete?: never;
@@ -23614,9 +24751,8 @@ export interface paths {
         put?: never;
         /**
          * Define a product event for a brand
-         * @description Scope: catalog.manage. Names are lowercase words joined by dots, such as product.activated. For now an event
-         *     name is defined in one brand of a workspace at a time: a name another brand defines is refused with 409
-         *     event_name_in_other_brand.
+         * @description Scope: catalog.manage. Names are lowercase words joined by dots, such as product.activated. Each brand has
+         *     its own catalog, so another brand of the workspace can define the same name.
          */
         post: operations["createBrandEventDefinition"];
         delete?: never;
@@ -23669,8 +24805,8 @@ export interface paths {
          * @description Scope: customers.manage. Approves a track name for the brand, defining it when the brand has only held it,
          *     so its held events can be replayed (POST /v1/brands/{brand}/events/replay). It changes nothing else about the
          *     event: labels, properties and deprecating need catalog.manage (PATCH .../catalog/events/{event}). Approving
-         *     is part of fixing the brand's data, so customers.manage is enough. 409 event_name_in_other_brand when another
-         *     brand of the workspace defines the name.
+         *     is part of fixing the brand's data, so customers.manage is enough. Another brand defining the same name
+         *     changes nothing: each brand approves its own.
          */
         post: operations["approveBrandEventName"];
         delete?: never;
@@ -24374,6 +25510,610 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/insights/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List what funnels can use
+         * @description Scope: analytics.read. What a funnel in this brand can be built from: the events it has seen in the last 90 days
+         *     (with counts), its saved conversions, the ad networks (and whether one is connected), the fields each step kind can
+         *     be filtered by, what a funnel starting with each kind can be broken down by, the filter ops and the date presets.
+         */
+        get: operations["getInsightsCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a funnel
+         * @description Scope: analytics.read. A people funnel: steps from website visits, page views, product events, saved conversions and
+         *     payments. Someone counts at a step only when they did every step before it, in order, inside each step's time limit,
+         *     so dropped is the people who stopped there. A person is a customer record once known, otherwise a browser; identifying
+         *     a browser joins its earlier visits and events to the person. Each person counts once, from their first step 1 in the
+         *     dates. Optional: a breakdown by a field of step 1, conversion over time by when people did step 1, and the ad
+         *     networks' clicks, impressions and spend over the dates (ad_clicks), which are daily totals and never join the people.
+         *     Runs for at most 30 seconds (query_timeout).
+         */
+        post: operations["runFunnel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/funnel/people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the people at a funnel step
+         * @description Scope: customers.read. The people who reached a step (counted from 1), or with dropped, who reached the step before it
+         *     but not it, the latest first. breakdown keeps one breakdown value ("" for people whose step 1 had none). A person not
+         *     yet identified is a browser: anonymous_id is set and record_id is null.
+         */
+        post: operations["listFunnelPeople"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/funnel/people/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save a funnel step's people as a list
+         * @description Scope: customers.manage. Puts the identified people who reached a step, or with dropped, who dropped off before
+         *     it, into a new static list of the brand, so they can be mailed, scored or compared. Browsers nobody has identified
+         *     have no record and are skipped (skipped_anonymous). At most 10,000 people. A company funnel can't be saved: lists
+         *     hold people. Recorded as insight.people_saved.
+         */
+        post: operations["saveFunnelPeople"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/funnel/correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What converters did differently
+         * @description Scope: analytics.read. Of everyone at step 1, compares the events and pages of the people who reached a step
+         *     (the last when unset) against those who didn't, between their step 1 and that step (or step 1's deadline). Each
+         *     item has both groups' counts and rates and an odds ratio: over 1 goes with converting, under 1 with dropping off.
+         *     Items fewer than 3 people did, and the funnel's own step events, are left out. For funnels of people, not companies.
+         *     Runs for at most 30 seconds (query_timeout).
+         */
+        post: operations["runFunnelCorrelation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a paths question
+         * @description Scope: analytics.read. What people did step by step: the pages they viewed and the events they caused, in order,
+         *     from a start (every path begins there), towards an end (every path ends there), or from each person's first page or
+         *     event in the dates. The answer is a graph: the pages and events at each step with how many people were there and
+         *     how many went nowhere, and the links between steps. Past the top pages or events of a step the rest fold into
+         *     "other". Runs for at most 30 seconds (query_timeout).
+         */
+        post: operations["runPaths"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List a brand's chart annotations
+         * @description Scope: analytics.read. The notes that mark a day on every chart of the brand ("new pricing page"), between from
+         *     and to (dates, both included; the last year when left out), oldest first, at most 1,000.
+         */
+        get: operations["listAnnotations"];
+        put?: never;
+        /**
+         * Annotate a day
+         * @description Scope: analytics.manage. Marks a day on every chart of the brand with a note. Recorded as annotation.created.
+         */
+        post: operations["createAnnotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/annotations/{annotation}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                annotation: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an annotation
+         * @description Scope: analytics.manage. Recorded as annotation.deleted.
+         */
+        delete: operations["deleteAnnotation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a trend
+         * @description Scope: analytics.read. One to six series over time from website visits, page views, product events, saved conversions,
+         *     payments and the ad networks' daily numbers (clicks, impressions, spend, conversions), each counted as rows, people,
+         *     a sum or an average, by day, week or month. Optional: a breakdown by a field of each series' rows, a formula between
+         *     series ("A / B" for cost per sign-up), and the period just before (compare). A number tile is a trend read by its totals.
+         *     Runs for at most 30 seconds (query_timeout).
+         */
+        post: operations["runTrend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a retention question
+         * @description Scope: analytics.read. Of the people who first did the start in each day, week or month of the dates (the cohort),
+         *     how many did the return in that period and each period after, as a triangle of cohorts and the average curve across
+         *     them. The return is the start again when left out, so "came back and visited" needs only a start. Runs for at most
+         *     30 seconds (query_timeout).
+         */
+        post: operations["runRetention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a lifecycle question
+         * @description Scope: analytics.read. In each day, week or month of the dates, how many of the people who did the step were doing
+         *     it for the first time ever (new), had also done it the period before (returning) or came back after a gap
+         *     (resurrected), and how many who did it the period before did not this time (dormant). New, returning and
+         *     resurrected add up to everyone active in the period; dormant is the people lost. Runs for at most 30 seconds
+         *     (query_timeout).
+         */
+        post: operations["runLifecycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/dashboards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List dashboards
+         * @description Scope: analytics.read. The brand's dashboards, the latest changed first.
+         */
+        get: operations["listDashboards"];
+        put?: never;
+        /**
+         * Create a dashboard
+         * @description Scope: analytics.manage. An empty dashboard; add tiles with its tiles endpoint. Audited as dashboard.created.
+         */
+        post: operations["createDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/dashboards/{dashboard}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a dashboard
+         * @description Scope: analytics.read. The dashboard with its tiles, each with its saved insight (and spec) or note. Run each tile with the insight's run endpoint, with the dashboard's date range.
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a dashboard
+         * @description Scope: analytics.manage. Deletes it and its tiles; the saved insights stay. Audited as dashboard.deleted.
+         */
+        delete: operations["deleteDashboard"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a dashboard
+         * @description Scope: analytics.manage. Renames it, changes its description or settings, or moves tiles (layout). Audited as dashboard.updated.
+         */
+        patch: operations["updateDashboard"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/dashboards/{dashboard}/tiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a tile
+         * @description Scope: analytics.manage. A saved insight of the brand (insight_id) or a note. Placed below everything unless x, y, w and h say where, on a 12-column grid.
+         */
+        post: operations["addDashboardTile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/dashboards/{dashboard}/tiles/{tile}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+                tile: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a tile
+         * @description Scope: analytics.manage. Takes the tile off the dashboard; the saved insight stays.
+         */
+        delete: operations["removeDashboardTile"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a tile
+         * @description Scope: analytics.manage. Moves or resizes a tile, or changes its note. A tile's insight can't change.
+         */
+        patch: operations["updateDashboardTile"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/dashboards/{dashboard}/share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Share a dashboard by link
+         * @description Scope: analytics.manage. Makes the dashboard's link, replacing one it had (the old link stops working). Anyone
+         *     with the link, and the password when one is set, sees the dashboard read-only at the app's /share/<token> page,
+         *     every tile run live; nothing else of the brand. The token is shown once. Audited as dashboard.shared.
+         */
+        post: operations["shareDashboard"];
+        /**
+         * Take a dashboard's link back
+         * @description Scope: analytics.manage. The link stops working at once. Audited as dashboard.share_revoked.
+         */
+        delete: operations["unshareDashboard"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared/dashboards/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The link's token (ofd_...). */
+                token: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a shared dashboard
+         * @description The dashboard behind a share link, for anyone with the link: its name, settings and tiles (without their
+         *     specs; run each with its tiles endpoint). A link with a password answers 401 password_required until the
+         *     password comes in the body, then gives a key to run the tiles with. Wrong passwords are limited per link and
+         *     network (429). Unknown, expired and revoked links are 404.
+         */
+        post: operations["openSharedDashboard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/shared/dashboards/{token}/tiles/{tile}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The link's token (ofd_...). */
+                token: string;
+                tile: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a tile of a shared dashboard
+         * @description Runs one tile's saved insight with the dashboard's dates, or date_range when the viewer picked other dates. The
+         *     answer is a FunnelResult, TrendResult or RetentionResult by the tile's kind. A link with a password needs the
+         *     key from opening the dashboard (or the password).
+         */
+        post: operations["runSharedTile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insight-alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List alerts on a number
+         * @description Scope: analytics.read. The brand's alerts on saved trends, the newest first; insight_id keeps one trend's.
+         */
+        get: operations["listInsightAlerts"];
+        put?: never;
+        /**
+         * Alert on a number
+         * @description Scope: analytics.manage. Watches a saved trend's number (its formula's total, else its first series' total, over
+         *     the trend's own dates): checked every hour, and an alert (kind insight.threshold) is raised once when it goes
+         *     above or below the threshold, or rises_by or falls_by more than the threshold per cent against the period before.
+         *     It is raised again only after the number came back. The alert goes to whoever set it up, by the alerts settings.
+         *     Audited as insight_alert.created.
+         */
+        post: operations["createInsightAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insight-alerts/{alert}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                alert: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an alert on a number
+         * @description Scope: analytics.manage. Audited as insight_alert.deleted.
+         */
+        delete: operations["deleteInsightAlert"];
+        options?: never;
+        head?: never;
+        /**
+         * Change an alert on a number
+         * @description Scope: analytics.manage. A new condition or threshold; the alert starts over from a clean state. The trend can't change. Audited as insight_alert.updated.
+         */
+        patch: operations["updateInsightAlert"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List saved insights
+         * @description Scope: analytics.read. The brand's saved insights, the latest changed first.
+         */
+        get: operations["listInsights"];
+        put?: never;
+        /**
+         * Save an insight
+         * @description Scope: analytics.manage. Saves a question so it opens again: its spec is the same JSON its run endpoint takes (a
+         *     FunnelSpec for a funnel). A date_range preset such as last_30_days moves with today. Recorded as insight.created.
+         */
+        post: operations["createInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/insights/{insight}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                insight: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a saved insight
+         * @description Scope: analytics.read.
+         */
+        get: operations["getInsight"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a saved insight
+         * @description Scope: analytics.manage. Recorded as insight.deleted.
+         */
+        delete: operations["deleteInsight"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a saved insight
+         * @description Scope: analytics.manage. Changes its name, description or spec; its kind stays. Recorded as insight.updated.
+         */
+        patch: operations["updateInsight"];
+        trace?: never;
+    };
     "/v1/brands/{brand}/transactions": {
         parameters: {
             query?: never;
@@ -24397,6 +26137,17 @@ export interface paths {
          *     sending the same one again never adds it twice, answers the one saved (200) and updates its status when it changed
          *     (transaction.updated). The amount is kept in its currency and converted to the brand's at the day's rate
          *     (brand_amount_minor, null until that rate is known).
+         *
+         *     One payment counts once, whichever way it arrives. A succeeded payment or refund with a person (record_id or
+         *     user_id) is also a payment.succeeded or payment.refunded event, which revenue, attribution and the conversions
+         *     sent to ad networks count. When the same payment is already in, from an Order Completed event with the same
+         *     order_id (or, without one, the same person, amount and currency within 15 minutes) or from a billing connector
+         *     with the same source_id, the answer is that transaction (200) and nothing is added or counted again.
+         *
+         *     Refunds work the same way. refund_of names the payment by any id it has (see TransactionInput). A refund already
+         *     in from an Order Refunded event with the same refund id (its refund_id, else its messageId), or of the same
+         *     payment and amount within 15 minutes, is that one (200). A refund counts once its payment is known, and lowers
+         *     the conversion sent to ad networks for that payment (Google: a conversion adjustment).
          */
         post: operations["createBrandTransaction"];
         delete?: never;
@@ -24451,6 +26202,62 @@ export interface paths {
          *     again. After 7 days it is purged for good. Sends transaction.deleted.
          */
         post: operations["deleteBrandTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/transactions/{transaction}/refund-of": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                transaction: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link a refund to its payment
+         * @description Scope: customers.manage. Names the payment a refund or chargeback gives back, for one whose refund_of named a
+         *     payment Outflare doesn't have (GET .../developer-setup lists them as unmatched_refunds). payment is any id the
+         *     payment has: its source_id (an order's order_id), its Order Completed event's messageId, or Outflare's
+         *     transaction id. The refund's refund_of becomes the payment's source_id; a refund saved without an amount takes
+         *     the payment's. It then counts as payment.refunded, comes off that payment's revenue, and lowers the
+         *     conversion sent to ad networks. Sends transaction.refund_linked.
+         */
+        post: operations["linkBrandRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/developer-setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Check what a brand's developer sends
+         * @description Scope: customers.read. A live checklist of the brand's integration: sign-ups and orders arriving from the
+         *     server, payments counted once (with a person), refunds finding their payment, the website's copies of sign-ups
+         *     and orders matching the server's, and refunds reaching ad networks. Each check says ok, warning or missing,
+         *     what it found and how to fix it. unmatched_refunds are refunds whose payment Outflare doesn't have: link each
+         *     with POST .../transactions/{transaction}/refund-of.
+         */
+        get: operations["getBrandDeveloperSetup"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -25123,7 +26930,10 @@ export interface paths {
          * A record's timeline
          * @description Scope: customers.read. One timeline per person or company, newest first, across every module: their
          *     product events (and, for a company, the group calls that named it), changes to their attributes,
-         *     identities added and closed, consent given or withdrawn, the cold email Outflare sent them and their
+         *     identities added and closed, the moment an anonymous browser became them (`identified`: how, with detail.by
+         *     product, email_click or link, when the browser was first seen, and the visits and events from before that they
+         *     took over; `released` when a sign-in as someone else took the browser back), consent given or withdrawn, the
+         *     cold email Outflare sent them and their
          *     replies (`message`, with `direction` out or in), meetings, deals, website visits (`visit`), opt-out list
          *     entries (`opt_out`) and journeys entered and finished (`journey`). Lifecycle email and payments show as the
          *     events Outflare records for them (`email.sent`, `email.delivered` and so on, with `source: lifecycle`).
@@ -29768,9 +31578,43 @@ export interface paths {
         };
         /**
          * List partner programs
-         * @description Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules.
+         * @deprecated
+         * @description Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerPrograms"];
+        put?: never;
+        /**
+         * Create a partner program from a preset
+         * @deprecated
+         * @description Scope: partners.manage. kind picks the preset; every setting it fills in can be changed. referral: two-sided
+         *     action rewards on the first sale (your system grants them), a 60-day window, a 14-day hold, partners accepted
+         *     at once. affiliate: 20% of every sale, a 30-day window, a 30-day hold, a $50 minimum payout. influencer: track
+         *     only (log fees by hand), no hold. The credit rule (window, first or last, codes_win) belongs to the program and
+         *     never follows the workspace's attribution settings. Pass rules to start with your own.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createPartnerProgram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner programs
+         * @description Scope: partners.read. Referral, affiliate and influencer programs, oldest first, with their reward rules.
+         */
+        get: operations["listBrandPartnerPrograms"];
         put?: never;
         /**
          * Create a partner program from a preset
@@ -29780,7 +31624,7 @@ export interface paths {
          *     only (log fees by hand), no hold. The credit rule (window, first or last, codes_win) belongs to the program and
          *     never follows the workspace's attribution settings. Pass rules to start with your own.
          */
-        post: operations["createPartnerProgram"];
+        post: operations["createBrandPartnerProgram"];
         delete?: never;
         options?: never;
         head?: never;
@@ -29801,9 +31645,35 @@ export interface paths {
         };
         /**
          * A program's totals
-         * @description Scope: partners.read. The program's figures across all its partners: partners by status, and the sum of every partner's stats.
+         * @deprecated
+         * @description Scope: partners.read. The program's figures across all its partners: partners by status, and the sum of every partner's stats. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getPartnerProgramStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * A program's totals
+         * @description Scope: partners.read. The program's figures across all its partners: partners by status, and the sum of every partner's stats.
+         */
+        get: operations["getBrandPartnerProgramStats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -29826,7 +31696,8 @@ export interface paths {
         };
         /**
          * Get a partner program
-         * @description Scope: partners.read. With its reward rules and groups.
+         * @deprecated
+         * @description Scope: partners.read. With its reward rules and groups. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getPartnerProgram"];
         put?: never;
@@ -29836,9 +31707,39 @@ export interface paths {
         head?: never;
         /**
          * Change a partner program's settings, or pause, archive or restore it
-         * @description Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land.
+         * @deprecated
+         * @description Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         patch: operations["updatePartnerProgram"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a partner program
+         * @description Scope: partners.read. With its reward rules and groups.
+         */
+        get: operations["getBrandPartnerProgram"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a partner program's settings, or pause, archive or restore it
+         * @description Scope: partners.manage. Send only what changes. kind and slug can't change; currency can't once there are rewards. A paused program credits nothing new; its links still land.
+         */
+        patch: operations["updateBrandPartnerProgram"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partner-programs/{id}/rules": {
@@ -29856,6 +31757,38 @@ export interface paths {
         get?: never;
         /**
          * Replace a partner program's reward rules
+         * @deprecated
+         * @description Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
+         *     or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
+         *     for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
+         *     every); then a rule for named product_ids; then the one paying more. A cash flow with stacking adds pays on top.
+         *     Flows can also have conditions, their own approval, overrides per partner or product, and kind group (move the
+         *     partner to a group). [] makes the program track only. Rewards already in the ledger keep what they earned.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        put: operations["setPartnerRules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a partner program's reward rules
          * @description Scope: partners.manage. Every action rule a conversion matches gives a reward, but only one cash rule (percent
          *     or fixed) pays, whatever the rules' order: a partner's own rule (partner_id) beats their group's, which beats one
          *     for everyone; then the highest tier (min_sales) reached; then the narrower recurrence (first, then months, then
@@ -29863,7 +31796,7 @@ export interface paths {
          *     Flows can also have conditions, their own approval, overrides per partner or product, and kind group (move the
          *     partner to a group). [] makes the program track only. Rewards already in the ledger keep what they earned.
          */
-        put: operations["setPartnerRules"];
+        put: operations["setBrandPartnerRules"];
         post?: never;
         delete?: never;
         options?: never;
@@ -29887,9 +31820,35 @@ export interface paths {
         put?: never;
         /**
          * Add a partner group (a tier with its own rates)
-         * @description Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it.
+         * @deprecated
+         * @description Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["createPartnerGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a partner group (a tier with its own rates)
+         * @description Scope: partners.manage. Then give the group its own rules (group_id) and move partners into it.
+         */
+        post: operations["createBrandPartnerGroup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -29914,16 +31873,48 @@ export interface paths {
         post?: never;
         /**
          * Remove a partner group
-         * @description Scope: partners.manage. Its own rules go with it; its partners move to no group.
+         * @deprecated
+         * @description Scope: partners.manage. Its own rules go with it; its partners move to no group. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         delete: operations["deletePartnerGroup"];
         options?: never;
         head?: never;
         /**
          * Rename a partner group or make it the default
-         * @description Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program.
+         * @deprecated
+         * @description Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         patch: operations["updatePartnerGroup"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/groups/{group}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a partner group
+         * @description Scope: partners.manage. Its own rules go with it; its partners move to no group.
+         */
+        delete: operations["deleteBrandPartnerGroup"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a partner group or make it the default
+         * @description Scope: partners.manage. default: true makes it the group new partners join (when none is given); false stops that. Returns the program.
+         */
+        patch: operations["updateBrandPartnerGroup"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners": {
@@ -29944,9 +31935,37 @@ export interface paths {
         put?: never;
         /**
          * Move partners into a group
-         * @description Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone.
+         * @deprecated
+         * @description Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["assignPartnerGroup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/groups/{group}/partners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+                /** @description The group's id, or none to take partners out of every group. */
+                group: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move partners into a group
+         * @description Scope: partners.manage. A partner is in one group at a time; its rules (group_id) apply to them. Partners of other programs are left alone.
+         */
+        post: operations["assignBrandPartnerGroup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -29969,12 +31988,42 @@ export interface paths {
         put?: never;
         /**
          * Switch a program over from the platform it was imported from
+         * @deprecated
+         * @description Scope: partners.manage. Say that the platform the program was imported from (Tolt) no longer pays it. Until then,
+         *     commissions the import brought in keep that platform's status, re-runs bring its changes, and Outflare never approves
+         *     them after its hold or puts them in a payout, so nobody is paid twice. From now on they are approved and paid here like
+         *     any other. 409 when it has already switched over.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["switchOverPartnerProgram"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/switch-over": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch a program over from the platform it was imported from
          * @description Scope: partners.manage. Say that the platform the program was imported from (Tolt) no longer pays it. Until then,
          *     commissions the import brought in keep that platform's status, re-runs bring its changes, and Outflare never approves
          *     them after its hold or puts them in a payout, so nobody is paid twice. From now on they are approved and paid here like
          *     any other. 409 when it has already switched over.
          */
-        post: operations["switchOverPartnerProgram"];
+        post: operations["switchOverBrandPartnerProgram"];
         delete?: never;
         options?: never;
         head?: never;
@@ -29997,11 +32046,40 @@ export interface paths {
         put?: never;
         /**
          * Make the program's incoming postback URL
+         * @deprecated
+         * @description Scope: partners.manage. Shown once; making another retires the last. Partners' trackers and backends that can
+         *     only call a URL report conversions to it (GET or POST /v1/partner-postbacks/{token}). Treat it like a password:
+         *     anyone with it can report conversions to this program.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["rotatePartnerPostback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/postback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the program's incoming postback URL
          * @description Scope: partners.manage. Shown once; making another retires the last. Partners' trackers and backends that can
          *     only call a URL report conversions to it (GET or POST /v1/partner-postbacks/{token}). Treat it like a password:
          *     anyone with it can report conversions to this program.
          */
-        post: operations["rotatePartnerPostback"];
+        post: operations["rotateBrandPartnerPostback"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30022,9 +32100,49 @@ export interface paths {
         };
         /**
          * List a program's imports, newest first
-         * @description Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't.
+         * @deprecated
+         * @description Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerImports"];
+        put?: never;
+        /**
+         * Import a partner program from Tolt
+         * @deprecated
+         * @description Scope: partners.manage. Queues an import into this program from the workspace's partner platform connection (Tolt,
+         *     with your own API key). It brings partners with the code of their first link, so old links keep working (a code
+         *     that is taken or not allowed here gets a new one, noted in the summary), their payout details, promo codes,
+         *     referred customers, transactions with refunds, and commissions with their status, paid ones in paid payouts.
+         *     Run it as often as you like until switch-over day: every object is matched by its id there, so a run adds only
+         *     what is new and brings over status changes. Importing sends no reward webhooks and imported sales are not
+         *     customer events. One import runs at a time per program (409 conflict); 409 connector_needed when Tolt isn't
+         *     connected. With no source_program, the account's only program is used, or its only active one
+         *     (listPartnerImportSources lists them).
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["startPartnerImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a program's imports, newest first
+         * @description Scope: partners.read. The last 50 imports into the program, with what each brought and what it couldn't.
+         */
+        get: operations["listBrandPartnerImports"];
         put?: never;
         /**
          * Import a partner program from Tolt
@@ -30038,7 +32156,7 @@ export interface paths {
          *     connected. With no source_program, the account's only program is used, or its only active one
          *     (listPartnerImportSources lists them).
          */
-        post: operations["startPartnerImport"];
+        post: operations["startBrandPartnerImport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30059,12 +32177,42 @@ export interface paths {
         };
         /**
          * List the programs an import can read
+         * @deprecated
+         * @description Scope: partners.manage. Reads the programs in the connected partner platform account (Tolt, with your own API
+         *     key), to pick one for startPartnerImport's source_program. suggested is the program an import takes when none
+         *     is named: the only one, or the only active one; empty when you must choose. 409 connector_needed when Tolt isn't
+         *     connected. Nothing is changed on the platform.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        get: operations["listPartnerImportSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/import-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List the programs an import can read
          * @description Scope: partners.manage. Reads the programs in the connected partner platform account (Tolt, with your own API
          *     key), to pick one for startPartnerImport's source_program. suggested is the program an import takes when none
          *     is named: the only one, or the only active one; empty when you must choose. 409 connector_needed when Tolt isn't
          *     connected. Nothing is changed on the platform.
          */
-        get: operations["listPartnerImportSources"];
+        get: operations["listBrandPartnerImportSources"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30088,9 +32236,36 @@ export interface paths {
         };
         /**
          * Get an import
-         * @description Scope: partners.read. Its status, counts per kind and issues.
+         * @deprecated
+         * @description Scope: partners.read. Its status, counts per kind and issues. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getPartnerImport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/imports/{import}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+                import: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an import
+         * @description Scope: partners.read. Its status, counts per kind and issues.
+         */
+        get: operations["getBrandPartnerImport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30115,6 +32290,38 @@ export interface paths {
         put?: never;
         /**
          * Open the referral widget for a customer signed in to your app
+         * @deprecated
+         * @description Scope: partners.conversions. Call it from your backend when a signed-in customer opens the page that shows the
+         *     widget, and put embed_url in an iframe. The customer becomes a partner in the program if they aren't one (active
+         *     when the program accepts partners on its own, otherwise pending), identified with customer_id, email or
+         *     record_id the same way as conversions. The widget shows their link, promo codes and earnings, and uses a session
+         *     that lasts 12 hours; never cache embed_url or show it to anyone else. The widget posts
+         *     {type: "outflare:partner-widget", height} to its parent page whenever its height changes.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createPartnerWidgetSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/widget-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open the referral widget for a customer signed in to your app
          * @description Scope: partners.conversions. Call it from your backend when a signed-in customer opens the page that shows the
          *     widget, and put embed_url in an iframe. The customer becomes a partner in the program if they aren't one (active
          *     when the program accepts partners on its own, otherwise pending), identified with customer_id, email or
@@ -30122,7 +32329,7 @@ export interface paths {
          *     that lasts 12 hours; never cache embed_url or show it to anyone else. The widget posts
          *     {type: "outflare:partner-widget", height} to its parent page whenever its height changes.
          */
-        post: operations["createPartnerWidgetSession"];
+        post: operations["createBrandPartnerWidgetSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30144,13 +32351,44 @@ export interface paths {
         get?: never;
         /**
          * Open, close or set up a program's partner portal
+         * @deprecated
+         * @description Scope: partners.manage. The portal is where partners apply, sign in with a link emailed through the workspace's own
+         *     email provider (settings.email_from), and see their links, codes, masked referred customers, rewards and payouts. It
+         *     is served at {subdomain}.{the server's partners domain}, on a tracking domain tied to the program
+         *     (POST .../tracking-domains with partner_program), or at /p/{id}/ on this server. settings, when sent, replace the
+         *     stored ones; a kind's defaults fill in pages and sign-up.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        put: operations["setPartnerPortal"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/portal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Open, close or set up a program's partner portal
          * @description Scope: partners.manage. The portal is where partners apply, sign in with a link emailed through the workspace's own
          *     email provider (settings.email_from), and see their links, codes, masked referred customers, rewards and payouts. It
          *     is served at {subdomain}.{the server's partners domain}, on a tracking domain tied to the program
          *     (POST .../tracking-domains with partner_program), or at /p/{id}/ on this server. settings, when sent, replace the
          *     stored ones; a kind's defaults fill in pages and sign-up.
          */
-        put: operations["setPartnerPortal"];
+        put: operations["setBrandPartnerPortal"];
         post?: never;
         delete?: never;
         options?: never;
@@ -30172,15 +32410,46 @@ export interface paths {
         };
         /**
          * List a program's assets for partners
-         * @description Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page.
+         * @deprecated
+         * @description Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerAssets"];
         put?: never;
         /**
          * Add an asset for partners
-         * @description Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote.
+         * @deprecated
+         * @description Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["createPartnerAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a program's assets for partners
+         * @description Scope: partners.read. Banners, copy, email swipes and links shown on the portal's Assets page.
+         */
+        get: operations["listBrandPartnerAssets"];
+        put?: never;
+        /**
+         * Add an asset for partners
+         * @description Scope: partners.manage. image: a banner's https address. text: copy or an email swipe. link: a page to promote.
+         */
+        post: operations["createBrandPartnerAsset"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30205,9 +32474,36 @@ export interface paths {
         post?: never;
         /**
          * Remove an asset
-         * @description Scope: partners.manage.
+         * @deprecated
+         * @description Scope: partners.manage. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         delete: operations["deletePartnerAsset"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/assets/{asset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+                asset: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an asset
+         * @description Scope: partners.manage.
+         */
+        delete: operations["deleteBrandPartnerAsset"];
         options?: never;
         head?: never;
         patch?: never;
@@ -30226,9 +32522,34 @@ export interface paths {
         };
         /**
          * List a partner's postbacks to their tracker
-         * @description Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again.
+         * @deprecated
+         * @description Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerPostbacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/postbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a partner's postbacks to their tracker
+         * @description Scope: partners.read. The last 50 calls to the partner's postback URL, newest first: queued, sent, or failed with the tracker's answer. A tracker that is down is tried 5 times; one that refuses (4xx) isn't tried again.
+         */
+        get: operations["listBrandPartnerPostbacks"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30252,10 +32573,37 @@ export interface paths {
         put?: never;
         /**
          * See the portal as a partner does
+         * @deprecated
+         * @description Scope: partners.manage. A one-time link that opens the program's portal as the partner sees it, read-only, for an
+         *     hour, even while the portal is closed. Recorded in the audit log (partner.impersonated).
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["impersonatePartner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/impersonate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * See the portal as a partner does
          * @description Scope: partners.manage. A one-time link that opens the program's portal as the partner sees it, read-only, for an
          *     hour, even while the portal is closed. Recorded in the audit log (partner.impersonated).
          */
-        post: operations["impersonatePartner"];
+        post: operations["impersonateBrandPartner"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30274,9 +32622,42 @@ export interface paths {
         };
         /**
          * List partners, newest first
-         * @description Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals.
+         * @deprecated
+         * @description Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartners"];
+        put?: never;
+        /**
+         * Add a partner to a program
+         * @deprecated
+         * @description Scope: partners.manage. A partner is a customer record: pass record_id, or an email (the person with it, made
+         *     when nobody has it). code is their ref code; one is made from their name when left out. Each partner gets a
+         *     tracking campaign (channel affiliates, named after the code), a short link (/r/{code} on your tracking domain)
+         *     and a campaign link to the program's landing page.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createPartner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partners, newest first
+         * @description Scope: partners.read. Each partner's membership in one program, with their links, promo codes and totals.
+         */
+        get: operations["listBrandPartners"];
         put?: never;
         /**
          * Add a partner to a program
@@ -30285,7 +32666,7 @@ export interface paths {
          *     tracking campaign (channel affiliates, named after the code), a short link (/r/{code} on your tracking domain)
          *     and a campaign link to the program's landing page.
          */
-        post: operations["createPartner"];
+        post: operations["createBrandPartner"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30305,7 +32686,8 @@ export interface paths {
         };
         /**
          * Get a partner
-         * @description Scope: partners.read.
+         * @deprecated
+         * @description Scope: partners.read. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["getPartner"];
         put?: never;
@@ -30315,9 +32697,38 @@ export interface paths {
         head?: never;
         /**
          * Approve, suspend or reject a partner, or change their group, payout method or note
-         * @description Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id "" is no group.
+         * @deprecated
+         * @description Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id "" is no group. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         patch: operations["updatePartner"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a partner
+         * @description Scope: partners.read.
+         */
+        get: operations["getBrandPartner"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Approve, suspend or reject a partner, or change their group, payout method or note
+         * @description Scope: partners.manage. Send only what changes. A partner who isn't active earns nothing new; their links still land. The code can't change: add a promo code instead. group_id "" is no group.
+         */
+        patch: operations["updateBrandPartner"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partners/{id}/promo-codes": {
@@ -30335,9 +32746,34 @@ export interface paths {
         put?: never;
         /**
          * Tie a promo code to a partner
+         * @deprecated
          * @description Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went).
          */
         post: operations["addPartnerPromoCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/promo-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tie a promo code to a partner
+         * @description Scope: partners.manage. The code as customers type it at checkout (matched in any case). A conversion that reports it (promo_code) credits the partner. Make the code in your billing system yourself, or pass coupon to have Outflare make it there (status shows how that went).
+         */
+        post: operations["addBrandPartnerPromoCode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30361,6 +32797,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a partner's promo code
+         * @deprecated
          * @description Scope: partners.manage.
          */
         delete: operations["removePartnerPromoCode"];
@@ -30368,9 +32805,39 @@ export interface paths {
         head?: never;
         /**
          * Enable or disable a partner promo code
+         * @deprecated
          * @description Updates attribution immediately and queues the matching checkout change for connected billing codes. Local codes must also be updated in your own checkout.
          */
         patch: operations["updatePartnerPromoCode"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/promo-codes/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a partner's promo code
+         * @description Scope: partners.manage.
+         */
+        delete: operations["removeBrandPartnerPromoCode"];
+        options?: never;
+        head?: never;
+        /**
+         * Enable or disable a partner promo code
+         * @description Updates attribution immediately and queues the matching checkout change for connected billing codes. Local codes must also be updated in your own checkout.
+         */
+        patch: operations["updateBrandPartnerPromoCode"];
         trace?: never;
     };
     "/v1/workspaces/{ws}/partners/{id}/fees": {
@@ -30388,9 +32855,34 @@ export interface paths {
         put?: never;
         /**
          * Log a fixed fee for a partner
-         * @description Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works.
+         * @deprecated
+         * @description Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["addPartnerFee"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/fees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Log a fixed fee for a partner
+         * @description Scope: partners.manage. Such as an influencer's fee for a post or a month. Approved at once, counted toward their next payout and logged as a cost (channel affiliates), so cost per sale works.
+         */
+        post: operations["addBrandPartnerFee"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30412,9 +32904,34 @@ export interface paths {
         put?: never;
         /**
          * Correct what a partner is owed
-         * @description Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries.
+         * @deprecated
+         * @description Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["addPartnerAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partners/{id}/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correct what a partner is owed
+         * @description Scope: partners.manage. Positive adds, negative takes away; it nets in their next payout. note (why) is required. The ledger never edits an entry: corrections are new entries.
+         */
+        post: operations["addBrandPartnerAdjustment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30433,13 +32950,42 @@ export interface paths {
         };
         /**
          * List inbound conversion calls, newest first
+         * @deprecated
+         * @description Scope: partners.read. Every conversion your backend or tracker reported in the last 30 days, by the API
+         *     (POST .../partner-conversions) or a postback URL, with what it sent, what Outflare answered and the outcome:
+         *     credited, not_credited (with its reason, such as no_partner), duplicate, rejected (bad input; the reason is
+         *     the error code) or error. Use it to find out why a sale wasn't credited. The email a call sent is never kept:
+         *     request shows "(sent)", and q finds the call by the full address.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        get: operations["listPartnerConversionLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-conversion-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List inbound conversion calls, newest first
          * @description Scope: partners.read. Every conversion your backend or tracker reported in the last 30 days, by the API
          *     (POST .../partner-conversions) or a postback URL, with what it sent, what Outflare answered and the outcome:
          *     credited, not_credited (with its reason, such as no_partner), duplicate, rejected (bad input; the reason is
          *     the error code) or error. Use it to find out why a sale wasn't credited. The email a call sent is never kept:
          *     request shows "(sent)", and q finds the call by the full address.
          */
-        get: operations["listPartnerConversionLog"];
+        get: operations["listBrandPartnerConversionLog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30460,12 +33006,14 @@ export interface paths {
         };
         /**
          * List partner conversions, newest first
-         * @description Scope: partners.read. Leads, sales and refunds credited to partners.
+         * @deprecated
+         * @description Scope: partners.read. Leads, sales and refunds credited to partners. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerConversions"];
         put?: never;
         /**
          * Report a sign-up, sale, refund or custom conversion from your backend
+         * @deprecated
          * @description Scope: partners.conversions, the one scope a server-to-server token needs. Report every sign-up, sale, refund
          *     and custom conversion. Each one becomes a customer event on the customer's timeline, under the names attribution
          *     reads (signed_up; payment.succeeded with payment_id = external_id and amount_minor; payment.refunded; or a custom
@@ -30479,8 +33027,53 @@ export interface paths {
          *     (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired or
          *     country_blocked). 201 means it was
          *     credited, with the rewards it earned.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["createPartnerConversion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner conversions, newest first
+         * @description Scope: partners.read. Leads, sales and refunds credited to partners.
+         */
+        get: operations["listBrandPartnerConversions"];
+        put?: never;
+        /**
+         * Report a sign-up, sale, refund or custom conversion from your backend
+         * @description Scope: partners.conversions, the one scope a server-to-server token needs. A shortcut: a brand's programs also
+         *     read the customer events and transactions your product already sends (a sign-up is a person's first user id or
+         *     a Signed Up event; a reward rule's trigger names a custom event; sales come from transactions), so you need this
+         *     call only if you don't send those. Both ways count once: a sign-up is credited once per customer and program, and
+         *     a sale or refund with external_id and an amount, for a customer of a brand, is saved as that brand's transaction
+         *     with source_id = external_id, so the same payment sent to the transactions API is the same one. Other
+         *     conversions become a customer event on the customer's timeline, under the names attribution
+         *     reads (signed_up; payment.succeeded with payment_id = external_id and amount_minor; payment.refunded; or a custom
+         *     conversion's event_name), whether or not a partner referred them. Outflare also credits the referred ones. The partner is found from, in order: promo_code (when the program's
+         *     codes_win is on), ref (the code from the link, such as a cookie you kept), click_id (ref_click from a short link);
+         *     then a referral already bound to this customer in the program (the first partner keeps them); then the
+         *     customer's own website visits that carried a ref, inside the program's window, first or last as it says. A visit
+         *     only proposes a partner: this call binds it. Identify the customer with customer_id (your own user id),
+         *     email or record_id, the same way each time. external_id (your charge or order id) makes a retry safe and is what
+         *     a refund's refund_of names. Not credited is not an error: the answer is 200 with credited false and a reason
+         *     (no_partner, partner_inactive, program_inactive, self_referral, sale_not_found, currency, lead_expired or
+         *     country_blocked). 201 means it was
+         *     credited, with the rewards it earned.
+         */
+        post: operations["createBrandPartnerConversion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30530,9 +33123,33 @@ export interface paths {
         };
         /**
          * List referred customers, newest first
-         * @description Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales.
+         * @deprecated
+         * @description Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerReferrals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-referrals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List referred customers, newest first
+         * @description Scope: partners.read. Each customer a partner was credited with, once per program, with their net sales.
+         */
+        get: operations["listBrandPartnerReferrals"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30553,9 +33170,33 @@ export interface paths {
         };
         /**
          * List the reward ledger, newest first
-         * @description Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it.
+         * @deprecated
+         * @description Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerRewards"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-rewards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the reward ledger, newest first
+         * @description Scope: partners.read. Cash, fees, actions and adjustments. status pending is still on hold or waiting for a person; approved cash counts toward the next payout; an approved action waits for your system to fulfil it.
+         */
+        get: operations["listBrandPartnerRewards"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30576,11 +33217,38 @@ export interface paths {
         };
         /**
          * List leads partners submitted, newest first
+         * @deprecated
+         * @description Scope: partners.read. The people partners say they referred, submitted on the portal when its
+         *     lead_submissions setting is on: pending ones wait for you (review), approved ones are referrals via manual,
+         *     and rejected ones say why (your reason, or why it couldn't be taken, such as already_referred).
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        get: operations["listPartnerLeads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-leads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List leads partners submitted, newest first
          * @description Scope: partners.read. The people partners say they referred, submitted on the portal when its
          *     lead_submissions setting is on: pending ones wait for you (review), approved ones are referrals via manual,
          *     and rejected ones say why (your reason, or why it couldn't be taken, such as already_referred).
          */
-        get: operations["listPartnerLeads"];
+        get: operations["listBrandPartnerLeads"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30604,11 +33272,39 @@ export interface paths {
         put?: never;
         /**
          * Take a submitted lead
+         * @deprecated
+         * @description Scope: partners.manage. Binds the person to the partner as a referral (via manual), under the program's rules
+         *     and flows like any lead. When the program can't credit it (another partner referred them first, the partner
+         *     isn't active), the lead is rejected with that reason instead.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["approvePartnerLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-leads/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a submitted lead
          * @description Scope: partners.manage. Binds the person to the partner as a referral (via manual), under the program's rules
          *     and flows like any lead. When the program can't credit it (another partner referred them first, the partner
          *     isn't active), the lead is rejected with that reason instead.
          */
-        post: operations["approvePartnerLead"];
+        post: operations["approveBrandPartnerLead"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30630,9 +33326,34 @@ export interface paths {
         put?: never;
         /**
          * Turn down a submitted lead
-         * @description Scope: partners.manage. The partner sees it rejected, with your reason.
+         * @deprecated
+         * @description Scope: partners.manage. The partner sees it rejected, with your reason. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["rejectPartnerLead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-leads/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn down a submitted lead
+         * @description Scope: partners.manage. The partner sees it rejected, with your reason.
+         */
+        post: operations["rejectBrandPartnerLead"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30654,9 +33375,34 @@ export interface paths {
         put?: never;
         /**
          * Approve a held reward now
-         * @description Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system.
+         * @deprecated
+         * @description Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["approvePartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-rewards/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a held reward now
+         * @description Scope: partners.manage. Even before its hold ends. Cash is logged as a cost and counts toward the next payout; an action fires partner_reward.approved for your system.
+         */
+        post: operations["approveBrandPartnerReward"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30677,13 +33423,42 @@ export interface paths {
         put?: never;
         /**
          * Approve or reject many held rewards
+         * @deprecated
+         * @description Scope: partners.manage. Approves or rejects pending rewards: those in ids, or every pending one of a program
+         *     (program) or partner (partner_id), optionally of one kind. Each is recorded as if done alone
+         *     (partner_reward.approved or .rejected, with their webhooks). Up to 1,000 a call: more says there are others,
+         *     so call again. Rewards that aren't pending, that you can't see, or that are in a program shared by every brand
+         *     while you are limited to some are listed in skipped with why.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["bulkPartnerRewards"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-rewards/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or reject many held rewards
          * @description Scope: partners.manage. Approves or rejects pending rewards: those in ids, or every pending one of a program
          *     (program) or partner (partner_id), optionally of one kind. Each is recorded as if done alone
          *     (partner_reward.approved or .rejected, with their webhooks). Up to 1,000 a call: more says there are others,
          *     so call again. Rewards that aren't pending, that you can't see, or that are in a program shared by every brand
          *     while you are limited to some are listed in skipped with why.
          */
-        post: operations["bulkPartnerRewards"];
+        post: operations["bulkBrandPartnerRewards"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30705,9 +33480,34 @@ export interface paths {
         put?: never;
         /**
          * Reject a held reward
-         * @description Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner.
+         * @deprecated
+         * @description Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["rejectPartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-rewards/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a held reward
+         * @description Scope: partners.manage. Only a pending one; take back an approved one with an adjustment. note says why, for the partner.
+         */
+        post: operations["rejectBrandPartnerReward"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30729,9 +33529,34 @@ export interface paths {
         put?: never;
         /**
          * Report that your system carried out an action reward
-         * @description Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done.
+         * @deprecated
+         * @description Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["fulfilPartnerReward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-rewards/{id}/fulfil": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that your system carried out an action reward
+         * @description Scope: partners.conversions. After partner_reward.approved told your system to grant something (credit, a free month), call this so the ledger shows it done.
+         */
+        post: operations["fulfilBrandPartnerReward"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30750,12 +33575,40 @@ export interface paths {
         };
         /**
          * Download payouts as CSV, with payout details
+         * @deprecated
+         * @description Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
+         *     partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
+         *     created_at, paid_at, payout_type, payout_token. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
+         *     upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        get: operations["exportPartnerPayouts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-payouts/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Download payouts as CSV, with payout details
          * @description Scope: partners.manage, because the file holds each partner's payout details. Columns: payout_id, program,
          *     partner_id, partner_code, partner_name, partner_email, payout_method, amount (a decimal), currency, status, reference,
          *     created_at, paid_at, payout_type, payout_token. Due payouts unless status says otherwise; at most 10,000 rows. Pay them from your own account or
          *     upload the file to a payout tool, then mark each one paid. Recorded in the audit log (partner_payouts.exported).
          */
-        get: operations["exportPartnerPayouts"];
+        get: operations["exportBrandPartnerPayouts"];
         put?: never;
         post?: never;
         delete?: never;
@@ -30776,9 +33629,44 @@ export interface paths {
         };
         /**
          * List partner payouts, newest first
-         * @description Scope: partners.read.
+         * @deprecated
+         * @description Scope: partners.read. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         get: operations["listPartnerPayouts"];
+        put?: never;
+        /**
+         * Make the payouts that are due
+         * @deprecated
+         * @description Scope: partners.manage. For each partner (one with partner_id, one program, or all) whose approved, unpaid cash,
+         *     fees and adjustments reach the program's minimum, one payout gathers them and partner_payout.created fires.
+         *     Outflare never holds or sends money: pay from your own account or payout tool, then mark it paid.
+         *     An imported partner with no payout details (Tolt's API doesn't give them) waits: their balance stays until they
+         *     add details on the portal, and waiting_for_details counts them. With a payout term (payout_term_days, Net N),
+         *     only rewards earned in a month that ended at least N days ago are gathered; the rest wait for a later payout.
+         *     Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
+         */
+        post: operations["createPartnerPayouts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List partner payouts, newest first
+         * @description Scope: partners.read.
+         */
+        get: operations["listBrandPartnerPayouts"];
         put?: never;
         /**
          * Make the payouts that are due
@@ -30789,7 +33677,7 @@ export interface paths {
          *     add details on the portal, and waiting_for_details counts them. With a payout term (payout_term_days, Net N),
          *     only rewards earned in a month that ended at least N days ago are gathered; the rest wait for a later payout.
          */
-        post: operations["createPartnerPayouts"];
+        post: operations["createBrandPartnerPayouts"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30811,9 +33699,34 @@ export interface paths {
         put?: never;
         /**
          * Mark a payout paid
-         * @description Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number).
+         * @deprecated
+         * @description Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number). Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["markPartnerPayoutPaid"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-payouts/{id}/paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a payout paid
+         * @description Scope: partners.manage. After you paid it from your own account: a note and the payment's reference (a PayPal or Wise transfer id, an invoice number).
+         */
+        post: operations["markBrandPartnerPayoutPaid"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30835,9 +33748,34 @@ export interface paths {
         put?: never;
         /**
          * Cancel a due payout
-         * @description Scope: partners.manage. Its rewards go back into the partner's balance.
+         * @deprecated
+         * @description Scope: partners.manage. Its rewards go back into the partner's balance. Deprecated: use the same route under /v1/brands/{brand}/. This workspace route stays until the brands contract step.
          */
         post: operations["cancelPartnerPayout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-payouts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a due payout
+         * @description Scope: partners.manage. Its rewards go back into the partner's balance.
+         */
+        post: operations["cancelBrandPartnerPayout"];
         delete?: never;
         options?: never;
         head?: never;
@@ -30898,7 +33836,10 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** getCoverageReports */
+        /**
+         * getCoverageReports
+         * @description The coverage report for a period. momentum compares placements gained and lost in the 28 days to `to` with the 28 before (weighted_net counts a link and traction too; trend is shrinking, flat, slowing, growing or accelerating) with twelve weeks of gained and lost; share_of_voice sets the brand's live placements against each tracked competitor's.
+         */
         get: operations["getCoverageReports"];
         put?: never;
         post?: never;
@@ -31688,6 +34629,354 @@ export interface paths {
         patch: operations["updateCoverageDeliveryReports"];
         trace?: never;
     };
+    "/v1/brands/{brand}/coverage/parties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List parties */
+        get: operations["listCoverageParties"];
+        put?: never;
+        /** Create parties */
+        post: operations["createCoverageParties"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/parties/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get parties */
+        get: operations["getCoverageParties"];
+        put?: never;
+        post?: never;
+        /** Remove a party from a placement */
+        delete: operations["deleteCoverageParties"];
+        options?: never;
+        head?: never;
+        /** Update parties using its current version */
+        patch: operations["updateCoverageParties"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/searches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        /** List the brand's Presence web searches */
+        get: operations["listCoverageSearches"];
+        put?: never;
+        /** Add a Presence web search */
+        post: operations["createCoverageSearches"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/searches/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Get a Presence web search */
+        get: operations["getCoverageSearches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update a Presence web search using its current version */
+        patch: operations["updateCoverageSearches"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/searches/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a Presence web search now
+         * @description Queues the search on the workspace's own search results connection (DataForSEO or Geonode), within its budget. Every result that isn't one of the brand's own pages becomes a find to review. Without a connection the search records connector_needed in last_error.
+         */
+        post: operations["runCoverageSearch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/competitors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the competitors whose presence is scanned
+         * @description The brand's tracked SEO competitors, ranked by shared keywords, with how often each is scanned (the brand's top competitors weekly and the rest monthly by default), when it was last scanned and what each source said, and how many live pages it appears on. settings are the brand's scan settings.
+         */
+        get: operations["listCoverageCompetitors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/competitors/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change how often competitors are scanned
+         * @description How many competitors count as top, and the days between scans for the top ones and for the rest. Set rest_every_days to 7 to scan every competitor weekly.
+         */
+        patch: operations["updateCoverageCompetitorSettings"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/competitors/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set one competitor's scan cadence
+         * @description every_days gives this competitor its own days between scans; null makes it follow the brand's settings again.
+         */
+        patch: operations["updateCoverageCompetitor"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/competitors/{id}/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan where a competitor appears now
+         * @description Queues a scan of search results for the competitor's name and of who links to its site, on the workspace's own search results and SEO connections and within their budgets, plus the pages AI answers cite when they name it. A source without its connection records connector_needed in the competitor's outcome.
+         */
+        post: operations["scanCoverageCompetitor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/competitor_placements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List where competitors appear
+         * @description Pages where the brand's competitors appear, strongest sites first. gap=true keeps the sites where the brand has no publisher yet; gap=false the ones where it does. Pages a backlinks read reports lost are left out unless include_gone=true.
+         */
+        get: operations["listCoverageCompetitorPlacements"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/competition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * See who is dominating, and where the brand leads and trails
+         * @description For the brand and each competitor it tracks: its value, share and rank in every area (search visits, keywords in the top 3, linking sites, AI answers, placements, social followers, reviews), an overall score out of 100 and its rank, now and 28 days ago. A score is the weighted mean, over the areas a brand is measured in, of its value against that area's leader, so 100 means it leads every one. standings say for the brand alone whether it leads, is ahead of, level with or behind the median competitor in each area, and whether its share is gaining or losing. catch_ups say when, if the last 12 weeks' trends keep going, the brand passes the competitor just ahead or the one just behind passes it (only within two years, and only with six weekly reads). series is each one's share of every area week by week over the last year. It reads only stored data (SEO snapshots from one connection, so the numbers share a scale, AI visibility answers, Presence, and the daily reads of followed social profiles and review pages), so it costs nothing.
+         */
+        get: operations["getCompetition"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/competition/{competitor}/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                competitor: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a competitor's social profiles and review pages
+         * @description The social profiles and review pages followed, suggested or dismissed for one of the brand's competitors, with what the last daily read found. Profiles linked from the competitor's home page are suggested by OutflareBot's weekly look; only confirmed ones are read, through the workspace's own page reader (needs_reader is true until one is connected). Their numbers fill the social and reviews areas of the competition overview and stay out of the brand's own social and review pages.
+         */
+        get: operations["listCompetitorProfiles"];
+        put?: never;
+        /**
+         * Follow a competitor's social profile or review page
+         * @description Adds the profile as confirmed (or confirms a suggested or dismissed one) and reads it now. url is a public social profile (X, LinkedIn, YouTube, Instagram, TikTok, Facebook, a subreddit, GitHub, Discord, Bluesky, Threads, Mastodon, DEV, Docker Hub) or a Trustpilot, G2, Capterra or Google review page. The competitor must be tracked.
+         */
+        post: operations["addCompetitorProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Say yes or no to one of a competitor's profiles
+         * @description confirmed follows the profile from now on (the competitor must be tracked); dismissed stops following it and keeps it from being suggested again.
+         */
+        patch: operations["answerCompetitorProfile"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/opportunities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List Presence opportunities, highest leverage first
+         * @description Places worth the team's effort, scored 0 to 100 by leverage: SEO (the site's domain rating and traffic) and AI answers (how often answers to the brand's questions cite the site) together, plus how many competitors are there and how well the page type fits. Reasons: competitor_gap (competitors are on the page, the brand isn't), ai_cited, unlinked_mention (a placement names the brand without a link) and link_removed. action says what to do next: pitch, request_link or reclaim_link. state defaults to open.
+         */
+        get: operations["listCoverageOpportunities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/opportunities/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Presence opportunities now
+         * @description Suggests opportunities from where competitors appear and from the brand's placements, refreshes their scores, and marks won the ones the brand has reached (a publisher on the site, or the link back). It also runs every day with discovery and after each competitor scan. It calls no connection.
+         */
+        post: operations["refreshCoverageOpportunities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/coverage/opportunities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Pick, dismiss or win an opportunity
+         * @description state picked means someone is on it, dismissed keeps it out of the list even when it is suggested again, won means the brand got there. owner_id sets who owns it (null clears it). Picking contacts nobody.
+         */
+        patch: operations["updateCoverageOpportunity"];
+        trace?: never;
+    };
     "/v1/brands/{brand}/coverage/report-snapshots": {
         parameters: {
             query?: never;
@@ -32245,12 +35534,41 @@ export interface paths {
         put?: never;
         /**
          * Automatically sign a customer into the hosted partner portal
+         * @deprecated
          * @description Scope: partners.conversions. Backend-only automatic provisioning and sign-in for an open portal.
          *     Supply your stable customer_id and optionally email/name. Returns a single-use sign-in URL valid for 60 seconds.
          *     Redirect only the authenticated customer to it; never cache it. Existing identity resolution is shared with
          *     conversions and embedded sessions. Program admission and explicit terms acceptance still apply.
          */
         post: operations["createPartnerPortalSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/portal-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Automatically sign a customer into the hosted partner portal
+         * @description Scope: partners.conversions. Backend-only automatic provisioning and sign-in for an open portal.
+         *     Supply your stable customer_id and optionally email/name. Returns a single-use sign-in URL valid for 60 seconds.
+         *     Redirect only the authenticated customer to it; never cache it. Existing identity resolution is shared with
+         *     conversions and embedded sessions. Program admission and explicit terms acceptance still apply.
+         */
+        post: operations["createBrandPartnerPortalSession"];
         delete?: never;
         options?: never;
         head?: never;
@@ -32267,11 +35585,39 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List tasks, custom website proposals and submissions */
+        /**
+         * List tasks, custom website proposals and submissions
+         * @deprecated
+         */
         get: operations["listPartnerTasks"];
         put?: never;
-        /** Create a paid or voluntary partner task */
+        /**
+         * Create a paid or voluntary partner task
+         * @deprecated
+         */
         post: operations["createPartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List tasks, custom website proposals and submissions */
+        get: operations["listBrandPartnerTasks"];
+        put?: never;
+        /** Create a paid or voluntary partner task */
+        post: operations["createBrandPartnerTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -32291,8 +35637,33 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Pause or resume a partner task */
+        /**
+         * Pause or resume a partner task
+         * @deprecated
+         */
         post: operations["updatePartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/tasks/{task}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause or resume a partner task */
+        post: operations["updateBrandPartnerTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -32312,8 +35683,33 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Offer a price, approve or reject submitted work */
+        /**
+         * Offer a price, approve or reject submitted work
+         * @deprecated
+         */
         post: operations["reviewPartnerTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/task-submissions/{submission}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                submission: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Offer a price, approve or reject submitted work */
+        post: operations["reviewBrandPartnerTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -32330,8 +35726,32 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List partner social profiles, websites and communities */
+        /**
+         * List partner social profiles, websites and communities
+         * @deprecated
+         */
         get: operations["listPartnerAudiences"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/audiences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List partner social profiles, websites and communities */
+        get: operations["listBrandPartnerAudiences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -32351,14 +35771,43 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** List one-to-one partnership proposals */
+        /**
+         * List one-to-one partnership proposals
+         * @deprecated
+         */
         get: operations["listPartnerProposals"];
+        put?: never;
+        /**
+         * Draft a proposal for exactly one recipient
+         * @deprecated
+         * @description Assign an existing partner_id or supply an email to provision a customer-backed partner. Invite with updatePartnerProposal after reviewing the draft. No outreach is sent automatically.
+         */
+        post: operations["createPartnerProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** List one-to-one partnership proposals */
+        get: operations["listBrandPartnerProposals"];
         put?: never;
         /**
          * Draft a proposal for exactly one recipient
          * @description Assign an existing partner_id or supply an email to provision a customer-backed partner. Invite with updatePartnerProposal after reviewing the draft. No outreach is sent automatically.
          */
-        post: operations["createPartnerProposal"];
+        post: operations["createBrandPartnerProposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -32381,9 +35830,35 @@ export interface paths {
         put?: never;
         /**
          * Revise, invite, verify a deliverable or approve a milestone
+         * @deprecated
          * @description Manual approval is mandatory. verify anchors a deliverable's required live period; approve creates rewards only after its milestone wait. Accepted agreements cannot be edited. invite returns an unguessable preview URL; the recipient must verify their email to accept.
          */
         post: operations["updatePartnerProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/partner-programs/{id}/proposals/{proposal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                proposal: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revise, invite, verify a deliverable or approve a milestone
+         * @description Manual approval is mandatory. verify anchors a deliverable's required live period; approve creates rewards only after its milestone wait. Accepted agreements cannot be edited. invite returns an unguessable preview URL; the recipient must verify their email to accept.
+         */
+        post: operations["updateBrandPartnerProposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -36806,6 +40281,23 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "coverage_record.deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Coverage record removed (a party taken off a placement). data names the placement, the CRM record and its role. */
+        post: operations["webhook_coverage_record_deleted"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "workspace.updated": {
         parameters: {
             query?: never;
@@ -37371,7 +40863,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "coverage_record.deleted" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -38818,10 +42310,10 @@ export interface components {
             /** @description What needs fixing, worst first. */
             issues: {
                 /** @enum {string} */
-                code: "untracked_clicks" | "campaigns_without_visits" | "ads_without_template" | "sends_failing";
+                code: "untracked_clicks" | "campaigns_without_visits" | "ads_without_template" | "sends_failing" | "events_without_shared_id";
                 /** @enum {string} */
                 severity: "critical" | "warning";
-                /** @description The network or ad connector it is about. */
+                /** @description The network or ad connector it is about; for events_without_shared_id, the event name. */
                 subject: string;
                 message: string;
                 fix: string;
@@ -38918,10 +42410,10 @@ export interface components {
              */
             matched_by: "record" | "browser" | "none";
             /**
-             * @description For matched_by record, how the visit's browser became known as the person: product (the workspace's own sign-in, or a form or identify call that names them) or email_click (a click on a tracked link in an email Outflare sent). Empty otherwise.
+             * @description For matched_by record, how the visit's browser became known as the person: product (the workspace's own sign-in, or a form or identify call that names them), email_click (a click on a tracked link in an email Outflare sent) or link (a visitor link the workspace sent them). Empty otherwise.
              * @enum {string}
              */
-            identified_by: "product" | "email_click" | "";
+            identified_by: "product" | "email_click" | "link" | "";
             weight: number;
         };
         AttributionConversion: {
@@ -39171,7 +42663,7 @@ export interface components {
             /** @description Countries the program doesn't credit: a website visit from one (by the site's proxy or the IP database, never the browser's time zone), or a new customer whose conversion call says one in country (reason country_blocked). Sorted; [] for none. */
             blocked_countries: string[];
             terms_url: string;
-            /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales; '' for the API and postbacks only. */
+            /** @description A billing connector (stripe) whose synced payments and refunds are also partner sales, or transactions: the brand's payments and refunds sent to Outflare (transactions API, Order Completed events), each counted once; '' for the API and postbacks only. */
             sales_source: string;
             /** @description The start of the postback URL's secret; '' when there is none. */
             postback_hint: string;
@@ -39405,7 +42897,7 @@ export interface components {
             /** @description Two-letter country codes the program doesn't credit, such as ["BR", "IN"]. [] for none. */
             blocked_countries?: string[];
             terms_url?: string;
-            /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. "" for none. */
+            /** @description A billing connector's id (stripe): its synced payments and refunds become partner sales too. transactions: a brand's program also takes the brand's payments and refunds sent to Outflare (transactions API, Order Completed events). "" for none. On create, a brand's program takes transactions when left out; a program shared by every brand takes none. */
             sales_source?: string;
             /** @description Create only: the preset's rules when left out. */
             rules?: components["schemas"]["PartnerRuleInput"][];
@@ -39646,10 +43138,10 @@ export interface components {
             currency: string;
             product_id: string;
             /**
-             * @description billing: a payment synced from the program's sales_source. browser: a sign-up the website reported with outflare.signup().
+             * @description billing: a payment synced from the program's sales_source (a billing connector, or the brand's transactions). browser: a sign-up the website reported with outflare.signup(). events: a sign-up or custom conversion taken from the customer events the workspace sends (a Signed Up event, a person's first user id, or an event a reward rule names).
              * @enum {string}
              */
-            source: "api" | "postback" | "billing" | "manual" | "import" | "browser";
+            source: "api" | "postback" | "billing" | "manual" | "import" | "browser" | "events";
             /** @description The payment provider your backend named, such as stripe; '' when it didn't. */
             payment_source: string;
             /**
@@ -41803,10 +45295,118 @@ export interface components {
             /** Format: date-time */
             last_seen_at: string;
             last_path: string;
-            /** @description How they became known: product (the workspace's own sign-in), email_click (a tracked link in an email Outflare sent), company_ip (the company behind their IP address, from the workspace's own provider). */
-            identified_by: ("product" | "email_click" | "company_ip" | "provider")[];
+            /** @description How they became known: product (the workspace's own sign-in), email_click (a tracked link in an email Outflare sent), link (a visitor link the workspace put in a message it sent itself), company_ip (the company behind their IP address, from the workspace's own provider). */
+            identified_by: ("product" | "email_click" | "link" | "company_ip" | "provider")[];
             score: number;
             hot: boolean;
+        };
+        /** @description One browser on the site (the site snippet's anonymous id), known or not. */
+        VisitorBrowser: {
+            anonymous_id: string;
+            /**
+             * Format: uuid
+             * @description The person it turned out to be; null while anonymous.
+             */
+            record_id: string | null;
+            /** @description The person's name. */
+            name: string | null;
+            /**
+             * @description How it became known: product (the workspace's own sign-in or identify call), email_click (a tracked link in an email Outflare sent) or link (a visitor link). Empty while anonymous.
+             * @enum {string}
+             */
+            identified_by: "" | "product" | "email_click" | "link";
+            /**
+             * Format: date-time
+             * @description When it became known.
+             */
+            identified_at: string | null;
+            /** @description The company a lookup named from the browser's address (often wrong; not in the CRM until someone adds it). Empty when none. */
+            company_domain: string;
+            company_name: string;
+            /**
+             * Format: uuid
+             * @description The CRM company the address was matched to.
+             */
+            account_id: string | null;
+            /**
+             * @description The kind of network a lookup found; empty when not looked up.
+             * @enum {string}
+             */
+            network: "" | "business" | "isp" | "mobile" | "hosting";
+            /** @description Two letters, from the latest visit; empty when unknown. */
+            country: string;
+            /** @enum {string} */
+            device: "" | "desktop" | "mobile" | "tablet";
+            browser: string;
+            os: string;
+            pageviews: number;
+            key_pageviews: number;
+            /** @description Visits. */
+            sessions: number;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            last_path: string;
+            /** @description Buying intent, as on the Visitors list. */
+            score: number;
+            hot: boolean;
+        };
+        VisitorVisit: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            pageviews: number;
+            events: number;
+            landing_path: string;
+            referrer_host: string;
+            /** @description The channel Outflare classified the visit into, such as seo or paid_search. */
+            channel: string;
+            source: string;
+            campaign: string;
+            utm_source: string;
+            utm_medium: string;
+            utm_campaign: string;
+            country: string;
+            device: string;
+            browser: string;
+            os: string;
+            /** @description False for a visit made before the browser became known. */
+            known: boolean;
+        };
+        VisitorEvent: {
+            /** Format: uuid */
+            id: string;
+            /** @description page or track. */
+            kind: string;
+            /** @description page.viewed for a page view, else the event's name. */
+            name: string;
+            /** @description The page it happened on. */
+            path: string;
+            /** @description The page's title. */
+            title: string;
+            /** @description The visit it belongs to. */
+            session_id: string | null;
+            properties: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            occurred_at: string;
+        };
+        VisitorLink: {
+            id: string;
+            /** @description The address to send, with its ofvisit token. */
+            url: string;
+            /**
+             * Format: uuid
+             * @description The person it joins a browser to.
+             */
+            record_id: string;
+            /** Format: date-time */
+            expires_at: string;
         };
         VisitorCompanyAdded: {
             /** Format: uuid */
@@ -41965,6 +45565,27 @@ export interface components {
             proxy_secret_at: string | null;
             /** @description The script tag to paste into the site's <head>. Lists the origins' domains in data-domains when there is more than one, so a visit can cross them. */
             snippet: string;
+            /** @description Run no-code A/B tests: the script asks for each visitor's versions on its own whenever a flag that is on has changes from the visual editor, with no data-flags on the tag. Off leaves flags to the page's own code (data-flags or outflare.flag). */
+            tests: boolean;
+            /** @description Optional: a short script for the top of the site's <head>, above everything else. On a returning visitor's next visit it hides just the parts their test versions change, for a second at most, so they never see the original first. */
+            flicker_guard: string;
+            own_domain: components["schemas"]["SiteOwnDomain"];
+        };
+        /** @description Whether the script is served from the site's own domain (a path the site forwards to Outflare), judged from the last 7 days (UTC) of events. Served that way, ad blockers leave events alone and Safari keeps the visitor's cookie for a year instead of seven days. */
+        SiteOwnDomain: {
+            /** @description Events taken in the last 7 days. */
+            events: number;
+            /** @description Of those, events that came through the site's own domain (the browser reported a same-origin request). */
+            through_own_domain: number;
+            /** @description Events from Safari and iPhone or iPad browsers that came straight to Outflare. Those browsers forget such a visitor after seven days, so a return visit looks new. */
+            safari_direct: number;
+            /**
+             * @description working: 95% or more came through the site's own domain; partly: some did; not_set_up: none did.
+             * @enum {string}
+             */
+            status: "no_traffic" | "not_set_up" | "partly" | "working";
+            /** @description The script tag to use once the site forwards /ofx/ to Outflare. */
+            snippet: string;
         };
         Flag: {
             /** Format: uuid */
@@ -42008,7 +45629,7 @@ export interface components {
             key: string;
             /** @description Its share is its weight over the total of all weights. */
             weight: number;
-            /** @description Any JSON the page or server reads with the variant, such as a headline; null for none. At most 4 KB. An object payload's `changes` are the version's visual changes (FlagChange), made in the visual editor and applied by the website script. */
+            /** @description Any JSON the page or server reads with the variant, such as a headline; null for none. At most 16 KB. An object payload's `changes` are the version's visual changes (FlagChange), made in the visual editor and applied by the website script. */
             payload?: unknown;
         };
         FlagRule: {
@@ -42052,12 +45673,56 @@ export interface components {
             src?: string;
             /** @description An image's alt text. */
             alt?: string;
+            /** @description Replaces the elements' text with simple formatting: **bold**, *italic*, [a link](https://…) and new lines. Never HTML. */
+            rich?: string;
+            /** @description CSS properties to set, such as {"color": "#0f766e", "font-size": "20px"}: colours, sizes, spacing, borders and layout only. Values can't load anything (no url()). */
+            style?: {
+                [key: string]: string;
+            };
+            /**
+             * @description Moves the elements before or after target, or to the start or end inside it.
+             * @enum {string}
+             */
+            move?: "before" | "after" | "start" | "end";
+            /** @description For move: the CSS selector of the element to move next to or into. */
+            target?: string;
+            /** @description Adds a new element before or after the selected one, once. */
+            insert?: {
+                /** @enum {string} */
+                where: "before" | "after";
+                /** @enum {string} */
+                kind: "text" | "button" | "link" | "image";
+                text?: string;
+                href?: string;
+                src?: string;
+                alt?: string;
+            };
+            /**
+             * @description Only on phones (up to 767px wide) or only on wider screens; absent: everywhere.
+             * @enum {string}
+             */
+            device?: "mobile" | "desktop";
+        };
+        ABTestVersion: {
+            /** Format: uuid */
+            test_id: string;
+            flag_key: string;
+            version: string;
+            /** @description Whether visitors can see it now: the test runs or its flag is on. */
+            live: boolean;
+            changes: components["schemas"]["FlagChange"][];
+            css: string;
+            redirect: string;
         };
         FlagEdits: {
             flag_key: string;
             flag_name: string;
             variant: string;
             changes: components["schemas"]["FlagChange"][];
+            /** @description The version's own CSS, added to the page for its visitors; "" for none. */
+            css?: string;
+            /** @description Where the version sends its visitors (a split URL test): a path on the site or an address on the brand's domains; "" for none. */
+            redirect?: string;
             /**
              * Format: date-time
              * @description When the edit link stops working.
@@ -42083,6 +45748,12 @@ export interface components {
             reasons?: {
                 [key: string]: "match" | "rules" | "group" | "rollout" | "off" | "no_subject";
             };
+        };
+        SiteFlagDecisions: components["schemas"]["FlagDecisions"] & {
+            /** @description Whether the script should ask on every page by itself: the key runs tests (its tests setting is on) and a flag that is on has changes from the visual editor. */
+            tests: boolean;
+            /** @description CSS selectors of what the visitor's versions change, for the head guard (the key's flicker_guard) to hide on their next visit until their version shows. */
+            hide: string[];
         };
         ABTestGoal: {
             /**
@@ -42159,6 +45830,8 @@ export interface components {
         ABTest: {
             /** Format: uuid */
             id: string;
+            /** @description The page a no-code test was made for (ending in * for every page under it); empty for a test of a flag made elsewhere. Previews and the visual editor open there. */
+            page: string;
             /** Format: uuid */
             flag_id: string;
             /** @example pricing-headline */
@@ -42237,8 +45910,17 @@ export interface components {
             updated_at: string;
         };
         ABTestInput: {
-            /** @description The flag's id or key. Required when adding; can't change. */
+            /** @description The flag's id or key. Required when adding, unless page is sent; can't change. */
             flag?: string;
+            /** @description Only when adding, instead of flag: test a page with no code. Outflare adds a flag (off until the test starts) that shows only on this page, split evenly between the control (today's page) and each new version, ready to edit visually (POST .../flags/{flag}/edit-link). The website script runs it with nothing added to the site. */
+            page?: {
+                /** @description The page, such as https://northpeak.example/pricing. End it with * for every page under it (https://northpeak.example/blog/*). */
+                url: string;
+                /** @description New versions to compare with the control (b, c, …). Default 1, or one per redirect. */
+                versions?: number;
+                /** @description A split URL test: one page per new version, which sends its visitors there (keeping the query string). A path on the site, such as /pricing-b, or an address on the brand's domains. Not with a url ending in *. */
+                redirects?: string[];
+            };
             /** @description Default: the flag's name. */
             name?: string;
             hypothesis?: string;
@@ -42482,6 +46164,8 @@ export interface components {
             origins?: string[];
             /** @description Query parameters to leave out of page addresses, such as plan or fb_*. */
             excluded_params?: string[];
+            /** @description Run no-code A/B tests on this site (on by default). */
+            tests?: boolean;
         };
         /** @description A connection's live updates, its own webhook address. */
         ConnectionHook: {
@@ -42869,6 +46553,30 @@ export interface components {
             /** @description Events that count as conversions: GA4 key events, Plausible goals, Matomo goals, Fathom events. */
             conversions?: number;
         };
+        SiteAnalyticsReport: {
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            totals: components["schemas"]["AnalyticsMetrics"];
+            /** @description One point per day, zero on days without visits. */
+            series: components["schemas"]["AnalyticsPoint"][];
+            /** @description Top 50 pages by page views, each with the website it is on. */
+            pages: components["schemas"]["SiteAnalyticsPage"][];
+            /** @description Top 20 sources by visits: the campaign's source, else the site that sent them, else (direct) or the channel. */
+            sources: components["schemas"]["AnalyticsRow"][];
+            /** @description Visits by the host they landed on, such as example.com and app.example.com. */
+            websites: components["schemas"]["AnalyticsRow"][];
+            /** @description Visits by two-letter country code. */
+            countries: components["schemas"]["AnalyticsRow"][];
+            /** @description Visits by desktop, mobile or tablet. */
+            devices: components["schemas"]["AnalyticsRow"][];
+            notes: string[];
+        };
+        SiteAnalyticsPage: components["schemas"]["AnalyticsRow"] & {
+            /** @description The host the page is on, such as example.com or app.example.com. (none) means not known. */
+            website: string;
+        };
         AnalyticsRow: components["schemas"]["AnalyticsMetrics"] & {
             /** @description A page path, a source, a search query or an event name. (none) means not set. */
             key: string;
@@ -42911,11 +46619,157 @@ export interface components {
         };
         /** @enum {string} */
         AdStatus: "active" | "paused" | "removed" | "other";
-        /** @description A campaign's status and daily budget, as a change found it or asked for it. */
+        /** @description A campaign's status and daily budget, as a change found it or asked for it; for a keyword change, the keyword. */
         AdChangeState: {
             status?: components["schemas"]["AdStatus"];
             /** Format: int64 */
             daily_budget_micros?: number | null;
+            keyword?: string;
+            /** @enum {string} */
+            match_type?: "exact" | "phrase" | "broad";
+            /** @description The platform's id of the ad group; a negative keyword without one is for the whole campaign. */
+            ad_group_id?: string;
+            new_ad_group_name?: string;
+            /** @description A split's new ad group, once made. */
+            new_ad_group_id?: string;
+            bidding?: components["schemas"]["AdBidding"];
+            /** @description The customer list audience's id on the platform. */
+            audience_id?: string;
+            audience_name?: string;
+            /** @description ISO 3166 alpha-2 country code. */
+            country?: string;
+        };
+        /** @description How a campaign bids. Read from the platform, strategy is in its own words (Google maximize_conversions, target_cpa, manual_cpc; Meta set_per_ad_set); set here, it is maximize_conversions or maximize_conversion_value. */
+        AdBidding: {
+            strategy: string;
+            /**
+             * Format: int64
+             * @description The cost per conversion it bids to, in micros of the account's currency.
+             */
+            target_cpa_micros?: number;
+            /** @description The return on spend it bids to: 3 is three times what was spent. */
+            target_roas?: number;
+        };
+        /** @description How a campaign bids and whom it reaches, read live from the platform. */
+        AdTargeting: {
+            bidding: components["schemas"]["AdBidding"];
+            /** @description Customer list audiences it targets. */
+            audiences: {
+                id: string;
+                name: string;
+            }[];
+            /** @description Countries it shows in, ISO 3166 alpha-2. */
+            countries: string[];
+            /** @description What is there but is changed on the platform itself: regions, cities, exclusions, ad sets that differ. */
+            notes: string[];
+        };
+        /** @description What a draft makes. A Google search ad: final_url, 3 to 15 headlines (at most 30 characters), 2 to 4 descriptions (at most 90), optional path1 and path2 (at most 15). A Meta ad: final_url, one headline, at most one description, primary_text, image_url, call_to_action, and page_id (the account's first page when empty). A new ad group or campaign adds name and keywords; a new campaign adds daily_budget_micros, countries and bidding (maximize_conversions when empty). */
+        AdDraftContent: {
+            /** @enum {string} */
+            kind?: "ad" | "ad_group" | "campaign";
+            name?: string;
+            /** Format: uri */
+            final_url?: string;
+            headlines?: string[];
+            descriptions?: string[];
+            path1?: string;
+            path2?: string;
+            primary_text?: string;
+            /** Format: uri */
+            image_url?: string;
+            /** @description Meta: learn_more (when empty), sign_up, shop_now, subscribe, contact_us, download, get_quote, apply_now, get_offer, order_now or book_now. */
+            call_to_action?: string;
+            /** @description The Facebook page a Meta ad runs as. */
+            page_id?: string;
+            keywords?: {
+                text: string;
+                /**
+                 * @description phrase when empty.
+                 * @enum {string}
+                 */
+                match_type?: "exact" | "phrase" | "broad" | "";
+            }[];
+            /**
+             * Format: int64
+             * @description A new campaign's daily budget in micros of the account's currency.
+             */
+            daily_budget_micros?: number;
+            bidding?: components["schemas"]["AdBidding"];
+            /** @description A new campaign's countries, ISO 3166 alpha-2. */
+            countries?: string[];
+        };
+        /** @description A draft as written: where it goes (account_id for a new campaign, campaign_id for a new ad group, ad_group_id for a new ad), why, and what it makes. */
+        AdDraftInput: components["schemas"]["AdDraftContent"] & {
+            /** Format: uuid */
+            account_id?: string;
+            /** Format: uuid */
+            campaign_id?: string;
+            /** Format: uuid */
+            ad_group_id?: string;
+            /** @description Why it should do better than what runs now. */
+            reason?: string;
+        };
+        /** @description New ads written by the brand agent or a person, and what became of them on the platform. */
+        AdDraft: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            account_id: string;
+            account_name: string;
+            connector: string;
+            currency: string;
+            /** @enum {string} */
+            kind: "ad" | "ad_group" | "campaign";
+            /**
+             * Format: uuid
+             * @description The campaign it goes in; null for a new campaign.
+             */
+            campaign_id: string | null;
+            campaign_name: string | null;
+            /**
+             * Format: uuid
+             * @description The ad group a new ad goes in.
+             */
+            ad_group_id: string | null;
+            ad_group_name: string | null;
+            content: components["schemas"]["AdDraftContent"];
+            reason: string;
+            /**
+             * @description draft waits for a person; creating and going_live while the job runs; paused once made on the platform; failed with the platform's reason.
+             * @enum {string}
+             */
+            status: "draft" | "creating" | "paused" | "going_live" | "live" | "failed" | "dismissed";
+            /** @description The platform's ids of the campaign, ad group and ad the new ad is in, and which levels the draft made. */
+            made: {
+                campaign_id?: string;
+                ad_group_id?: string;
+                ad_id?: string;
+                made?: ("campaign" | "ad_group" | "ad")[];
+            };
+            error: string;
+            /** Format: uuid */
+            created_by: string | null;
+            /**
+             * Format: uuid
+             * @description The agent's action, when an agent wrote it (listActions).
+             */
+            action_id: string | null;
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            made_at: string | null;
+            /** Format: uuid */
+            live_by: string | null;
+            /** Format: date-time */
+            live_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         /** @description One change Outflare made, or is making, to a campaign on the workspace's own ad account. */
         AdChange: {
@@ -42929,7 +46783,7 @@ export interface components {
             /** Format: uuid */
             brand_id: string | null;
             /** @enum {string} */
-            kind: "pause" | "resume" | "budget";
+            kind: "pause" | "resume" | "budget" | "keyword_add" | "negative_add" | "keyword_split" | "bidding" | "audience_add" | "audience_remove" | "country_add" | "country_remove";
             before: components["schemas"]["AdChangeState"];
             after: components["schemas"]["AdChangeState"];
             /**
@@ -42962,6 +46816,166 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             applied_at: string | null;
+        };
+        /** @description One change Outflare suggests for a campaign, and once approved, how it did. */
+        AdSuggestion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            campaign_id: string;
+            campaign_name: string;
+            /** Format: uuid */
+            account_id: string;
+            account_name: string;
+            connector: string;
+            currency: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /** @enum {string} */
+            kind: "budget_up" | "budget_down" | "pause" | "resume" | "keyword_add" | "negative_add" | "keyword_split" | "bidding_target";
+            /**
+             * @description open waits for a person; expired no longer held when the campaign was read again; measuring was approved and made; testing was approved as a test inside the network.
+             * @enum {string}
+             */
+            status: "open" | "dismissed" | "expired" | "measuring" | "testing" | "judged";
+            /** @description Why */
+            reason: string;
+            /** @description The numbers behind it: days, spend_micros, conversions, cost_per_conversion_micros, target_cost_per_conversion_micros, daily_budget_micros, days_budget_spent. */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /** @description What the change sets: status, or daily_budget_micros. */
+            proposed: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: uuid
+             * @description The change made on approval (listAdChanges).
+             */
+            change_id: string | null;
+            /**
+             * Format: uuid
+             * @description The test it is tested by, when approved as a test (listAdTests).
+             */
+            test_id: string | null;
+            /** Format: uuid */
+            decided_by: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            /**
+             * Format: date
+             * @description The first day measured
+             */
+            measure_from: string | null;
+            /** Format: date */
+            measure_until: string | null;
+            /** @description How the window was chosen. */
+            window_note: string;
+            /** @enum {string} */
+            verdict: "" | "worked" | "did_not_work" | "not_sure";
+            verdict_note: string;
+            /** @description before and after (spend_micros, conversions, days), and early when the window ended early. */
+            result: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            judged_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description What a test arm does. */
+        AdTestSettings: {
+            /** Format: int64 */
+            daily_budget_micros?: number;
+            /** Format: int64 */
+            target_cpa_micros?: number;
+        };
+        /** @description A test inside an ad network on one campaign, and how it did. */
+        AdTest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            campaign_id: string;
+            campaign_name: string;
+            /** Format: uuid */
+            account_id: string;
+            account_name: string;
+            connector: string;
+            currency: string;
+            /** Format: uuid */
+            brand_id: string | null;
+            /**
+             * Format: uuid
+             * @description The suggestion it tests
+             */
+            suggestion_id: string | null;
+            name: string;
+            /** @enum {string} */
+            kind: "budget" | "bidding";
+            /**
+             * @description starting until the network has made it; judged waits for a person to keep it or roll it back; failed when the network refused it (error says why).
+             * @enum {string}
+             */
+            status: "starting" | "running" | "judged" | "ending" | "kept" | "rolled_back" | "failed";
+            /** @description The trial's share of the traffic or audience. */
+            split_percent: number;
+            control: components["schemas"]["AdTestSettings"];
+            trial: components["schemas"]["AdTestSettings"];
+            /** @description The network's id for it (a Google Ads experiment's resource name, a Meta ad study id). */
+            platform_test_id: string | null;
+            /** @description The network's id of the campaign serving the trial. */
+            trial_campaign_id: string | null;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            /**
+             * Format: date
+             * @description The first day compared
+             */
+            measure_from: string;
+            window_note: string;
+            /** @description control and trial (spend_micros, conversions, clicks, impressions, days), z (how many standard errors the trial's conversions for its money are from the campaign's), through, early, and verdict_so_far and note_so_far while it runs. */
+            result: {
+                [key: string]: unknown;
+            };
+            /** @enum {string} */
+            verdict: "" | "worked" | "did_not_work" | "not_sure";
+            verdict_note: string;
+            /** @enum {string} */
+            decision: "" | "keep" | "roll_back";
+            error: string | null;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: uuid */
+            decided_by: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            /** Format: date-time */
+            checked_at: string | null;
+            /** Format: date-time */
+            judged_at: string | null;
+            /** Format: date-time */
+            ended_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description One of the ad platform's own recommendations. */
+        AdRecommendation: {
+            /** @description The platform's name for it. */
+            id: string;
+            /** @description The platform's word for it, such as KEYWORD or CAMPAIGN_BUDGET. */
+            type: string;
+            /** @description The platform's id of its campaign */
+            campaign_id?: string;
+            /** @description Expected clicks, conversions and cost_micros per week now and potential_* after, when the platform says. */
+            impact?: {
+                [key: string]: number;
+            };
         };
         AdChangeQueued: {
             /** @enum {boolean} */
@@ -43256,6 +47270,30 @@ export interface components {
              * @enum {string}
              */
             trend: "scaling_up" | "steady" | "scaling_down" | "new" | "stopped" | "idle";
+        };
+        AdTrackingRun: {
+            /** @enum {string} */
+            status: "queued" | "running" | "retrying" | "done" | "failed";
+            /** Format: date-time */
+            requested_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description Suffixes the platform took. */
+            changed: number;
+            /** @description Suffixes the platform refused. */
+            failed: number;
+            /** @description The refused ones (up to 50), each with the platform's reason in `error`. */
+            errors: {
+                /** @enum {string} */
+                level: "account" | "campaign" | "ad_group" | "ad";
+                id: string;
+                name: string;
+                before: string;
+                after: string;
+                error?: string;
+            }[];
+            /** @description Why it failed or is being retried; empty otherwise. */
+            error: string;
         };
         AdTrackingPlan: {
             /** @example google_ads */
@@ -44998,7 +49036,7 @@ export interface components {
             next_read_at: string;
             /** @description Why the last read failed, in words; null once a read works. */
             last_error: string | null;
-            /** @description Why the last read failed, in a word: blocked (the site showed a bot check, also in a browser), slow_page (the page took longer than the page reader allows), page_not_found (check the address in the brand's links), not_a_review_page (the site answered but showed no reviews; Outflare looks into these), save_failed (Outflare's side), or the page reader's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
+            /** @description Why the last read failed, in a word: blocked (the site showed a bot check, also in a browser), slow_page (the page took longer than the page reader allows), page_failed (the site failed or turned the page reader away in another way), page_not_found (check the address in the brand's links), not_a_review_page (the site answered but showed no reviews; Outflare looks into these), save_failed (Outflare's side), or the page reader's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
             last_error_code: string | null;
             /** @description How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1 and 2 hours, then every 4 hours (the next day when only a person can fix it: the address). */
             failures: number;
@@ -45188,7 +49226,7 @@ export interface components {
             next_sync_at: string;
             /** @description Why the last read failed, in words; null once a read works. */
             last_error: string | null;
-            /** @description Why the last read failed, in a word: blocked (the site showed a bot check), slow_page (the page took longer than the page reader allows), page_not_found, invalid_address (check the link), no_follower_count (the page showed no count: a login wall, a suspended account, or the site changed its page), save_failed (Outflare's side), or the connection's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
+            /** @description Why the last read failed, in a word: blocked (the site showed a bot check), slow_page (the page took longer than the page reader allows), page_failed (the site failed or turned the page reader away in another way), page_not_found, invalid_address (check the link), no_follower_count (the page showed no count: a login wall, a suspended account, or the site changed its page), save_failed (Outflare's side), or the connection's own (connector_auth, connector_quota, connector_unavailable, connector_invalid). New codes may be added. */
             last_error_code: string | null;
             /** @description How many reads in a row failed. A failed read is tried again the same day: after 15 minutes, then 1 and 2 hours, then every 4 hours (the next regular read when only a person can fix it: the address). */
             failures: number;
@@ -46918,6 +50956,112 @@ export interface components {
             status_changed_at: string;
             /** Format: date-time */
             updated_at: string | null;
+        };
+        CompetitionAreaValue: {
+            value: number | null;
+            /** @description Percent of everyone's total in the area. */
+            share: number | null;
+            /** @description The share 28 days ago. */
+            share_before: number | null;
+            rank: number | null;
+        };
+        CompetitionEntry: {
+            /** @description "brand" for the brand itself, else the competitor's id. */
+            id: string;
+            /** @enum {string} */
+            kind: "brand" | "competitor";
+            name: string;
+            host: string;
+            /** @description 0 to 100; null when measured in no area. */
+            score: number | null;
+            score_before: number | null;
+            rank: number | null;
+            rank_before: number | null;
+            areas: {
+                [key: string]: components["schemas"]["CompetitionAreaValue"];
+            };
+            measured_areas: number;
+        };
+        Competition: {
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: date */
+            as_of: string;
+            /**
+             * Format: date
+             * @description The day the "before" values are from, 28 days earlier.
+             */
+            before: string;
+            areas: {
+                /** @enum {string} */
+                key: "search" | "keywords" | "links" | "ai" | "placements" | "social" | "reviews";
+                label: string;
+                unit: string;
+                weight: number;
+                measured: boolean;
+                /** @description What fills the area, for one nobody has data in yet. */
+                needs: string;
+                leader_id: string | null;
+            }[];
+            entries: components["schemas"]["CompetitionEntry"][];
+            standings: {
+                area: string;
+                /** @enum {string} */
+                standing: "leading" | "ahead" | "level" | "behind" | "far_behind";
+                /** @enum {string} */
+                trend: "gaining" | "steady" | "losing" | "unknown";
+                share: number | null;
+                share_before: number | null;
+            }[];
+            catch_ups: {
+                area: string;
+                competitor_id: string;
+                /** @enum {string} */
+                direction: "you_pass" | "they_pass";
+                weeks: number;
+            }[];
+            series: {
+                [key: string]: {
+                    /** Format: date */
+                    day: string;
+                    shares: {
+                        [key: string]: number;
+                    };
+                }[];
+            };
+            notes: string[];
+            /** @description How many competitors the brand tracks. */
+            tracked: number;
+            /** @description The brand has no website or SEO site, so its search numbers can't be read. */
+            no_website: boolean;
+        };
+        CompetitorProfiles: {
+            /** Format: uuid */
+            competitor_id: string;
+            /** @description True while the workspace has no page reader connected (Geonode): profiles are kept but not read until one is. */
+            needs_reader: boolean;
+            profiles: {
+                /** @description The channel (x, linkedin, youtube and others) or review platform (trustpilot, g2, capterra, google). */
+                kind: string;
+                url: string;
+                /** @enum {string} */
+                state: "suggested" | "confirmed" | "dismissed";
+                /**
+                 * @description home_page: linked from the competitor's home page; manual: added by a person.
+                 * @enum {string}
+                 */
+                source: "home_page" | "manual";
+                /** @description A social profile's headline count (followers, subscribers, members) at the last read. */
+                followers: number | null;
+                followers_change_28d: number | null;
+                /** @description A review page's rating out of 5 at the last read. */
+                score: number | null;
+                review_count: number | null;
+                /** Format: date-time */
+                last_read_at: string | null;
+                /** @description Why the last read failed; it is tried again the same day. */
+                last_error: string | null;
+            }[];
         };
         SEOCompetitor: {
             /** Format: uuid */
@@ -51883,6 +56027,662 @@ export interface components {
              */
             replaces?: string;
         };
+        DeveloperSetup: {
+            /** Format: uuid */
+            brand_id: string;
+            checks: components["schemas"]["DeveloperSetupCheck"][];
+            /** @description Refunds and chargebacks (from the API or Order Refunded events) whose payment Outflare doesn't have, newest first, at most 50. */
+            unmatched_refunds: components["schemas"]["Transaction"][];
+        };
+        DeveloperSetupCheck: {
+            /** @enum {string} */
+            key: "signed_up" | "order_completed" | "payments" | "refunds" | "website_and_server" | "refunds_to_ads";
+            /**
+             * @description ok; warning: it works, but something should be fixed; missing: nothing has arrived yet.
+             * @enum {string}
+             */
+            status: "ok" | "warning" | "missing";
+            title: string;
+            /** @description What the check found; empty when there is nothing to add. */
+            detail: string;
+            /** @description What to send */
+            fix: string;
+            /**
+             * Format: date-time
+             * @description When the last one arrived.
+             */
+            last_at: string | null;
+            /** @description How many in the last 30 days (the website's copies */
+            count: number;
+        };
+        /**
+         * @description One condition. For events and page views, property is a property key or dotted path (plan.tier), or a built-in field:
+         *     url, path, title, referrer, host, utm_source, utm_medium, utm_campaign, utm_term, utm_content, source, or
+         *     param:<name> for one parameter of the page address. For visits and payments it is one of the catalog's fields.
+         *     Text compares ignore case.
+         */
+        InsightFilter: {
+            property: string;
+            /** @enum {string} */
+            op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "contains" | "not_contains" | "exists" | "not_exists";
+            /** @description A string or number; a list for in; nothing for exists and not_exists. */
+            value?: string | number | (string | number)[];
+        };
+        /** @description A time limit, at most 365 days. On a step, from is the earlier step it runs from (counted from 1; the step before when unset). */
+        InsightWindow: {
+            value: number;
+            /** @enum {string} */
+            unit: "minute" | "hour" | "day" | "week";
+            from?: number;
+        };
+        FunnelStep: {
+            /**
+             * @description event: a product or website event by its catalog name. page: a page view. visit: the start of a website visit,
+             *     filtered by how it arrived (network, channel, UTM tags, landing page, device, country). conversion: a saved
+             *     conversion definition by its key. payment: a succeeded payment.
+             * @enum {string}
+             */
+            kind: "event" | "page" | "visit" | "conversion" | "payment";
+            /** @description The event's catalog name */
+            event?: string;
+            /** @description The conversion definition's key */
+            conversion?: string;
+            filters?: components["schemas"]["InsightFilter"][];
+            /** @description Only the person's first ever such event or payment. */
+            first?: boolean;
+            within?: components["schemas"]["InsightWindow"];
+            label?: string;
+        };
+        /**
+         * @description Something described like a step. A person who did it after their step from and before their step to (or, when
+         *     they never reached to, before step 1's deadline) is dropped from every step.
+         */
+        FunnelExclusion: {
+            /** @enum {string} */
+            kind: "event" | "page" | "visit" | "conversion" | "payment";
+            event?: string;
+            conversion?: string;
+            filters?: components["schemas"]["InsightFilter"][];
+            /** @description A step number */
+            from: number;
+            /** @description A later step number. */
+            to: number;
+        };
+        CorrelationItem: {
+            /** @enum {string} */
+            kind: "event" | "page" | "property";
+            /** @description The event's name, the page's path, or a property of the person as "key: value". */
+            name: string;
+            /** @description How many people who reached the step did it. */
+            converted: number;
+            /** @description How many people who dropped off did it. */
+            dropped: number;
+            /** @description 0 to 1, of the people who reached the step. */
+            converted_rate: number;
+            /** @description 0 to 1, of the people who dropped off. */
+            dropped_rate: number;
+            /** @description Over 1 goes with converting */
+            odds_ratio: number;
+        };
+        CorrelationResult: {
+            step: number;
+            label: string;
+            /** @description People at step 1 who reached the step. */
+            converted: number;
+            /** @description People at step 1 who didn't. */
+            dropped: number;
+            /** @description What converters did more */
+            positive: components["schemas"]["CorrelationItem"][];
+            /** @description What people who dropped off did more */
+            negative: components["schemas"]["CorrelationItem"][];
+            /** @description Items too few people did to say anything. */
+            skipped: number;
+        };
+        PathPoint: {
+            /** @enum {string} */
+            kind: "page" | "event";
+            /** @description The page's path (/pricing) or the event's catalog name. */
+            name: string;
+        };
+        PathsSpec: {
+            date_range?: components["schemas"]["InsightDateRange"];
+            /** @description Where every path begins. Not with end. */
+            start?: components["schemas"]["PathPoint"];
+            /** @description Where every path ends. Not with start. */
+            end?: components["schemas"]["PathPoint"];
+            /** @description How many steps a path shows, start or end included; 4 when left out. */
+            steps?: number;
+            /** @description What counts as a step; both when left out. */
+            kinds?: ("page" | "event")[];
+            /** @description How long a whole path may take from its first step. A day when left out. */
+            window?: components["schemas"]["InsightWindow"];
+            /** @description How many pages or events a step shows before the rest fold into other; 8 when left out. */
+            top?: number;
+            /** @description Pages or events left out as if they never happened. */
+            exclude?: components["schemas"]["PathPoint"][];
+        };
+        PathsResult: {
+            /** @description How many people's paths were counted. */
+            people: number;
+            steps: number;
+            nodes: {
+                /** @description Counted from 1. Towards an end */
+                step: number;
+                /** @enum {string} */
+                kind: "page" | "event" | "other";
+                name: string;
+                count: number;
+                /** @description People here who went nowhere in the window; 0 at the last step. */
+                drop_off: number;
+            }[];
+            links: {
+                /** @description The step the link leaves. */
+                step: number;
+                /** @enum {string} */
+                from_kind: "page" | "event" | "other";
+                from: string;
+                /** @enum {string} */
+                to_kind: "page" | "event" | "other";
+                to: string;
+                count: number;
+            }[];
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+        };
+        Annotation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: date */
+            day: string;
+            text: string;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A preset that moves with today, or from and to (both included, UTC). The last 30 days when empty. */
+        InsightDateRange: {
+            /** @enum {string} */
+            preset?: "today" | "yesterday" | "last_7_days" | "last_14_days" | "last_30_days" | "last_90_days" | "last_180_days" | "last_365_days" | "this_month" | "last_month" | "this_year";
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+        };
+        FunnelSpec: {
+            steps: components["schemas"]["FunnelStep"][];
+            /** @description Drops from the whole funnel everyone who did something between two of its steps. */
+            exclusions?: components["schemas"]["FunnelExclusion"][];
+            /**
+             * @description person when left out. company counts each company once, through the people linked to it: a company reaches a step when any of its
+             *     people does. Browsers nobody has identified belong to no company and drop out.
+             * @enum {string}
+             */
+            by?: "person" | "company";
+            /**
+             * @description strict when left out: people do the steps in this order. any: they do them in any order, so step 1 is whichever they did first in the
+             *     dates and step N means N of the steps done within the window; the chart counts how many of the steps people got through, and
+             *     the steps are labelled "1 step", "2 steps" and so on. An any-order funnel takes no exclusions and no per-step time limits, and
+             *     a breakdown needs every step to be of the same kind.
+             * @enum {string}
+             */
+            order?: "strict" | "any";
+            date_range?: components["schemas"]["InsightDateRange"];
+            window?: components["schemas"]["InsightWindow"];
+            /** @description A field of step 1 to split people by (the catalog's breakdowns), param:<name> or property:<key> for an event step, or experiment:<flag key> for the version of an A/B test (the catalog's experiments). */
+            breakdown?: string;
+            /**
+             * @description Adds conversion over time by when people did step 1.
+             * @enum {string}
+             */
+            interval?: "day" | "week" | "month";
+            /** @description Adds the ad networks' clicks, impressions and spend over the dates, from synced campaigns. */
+            ad_clicks?: {
+                /** @description An ad network id: google, meta, x, microsoft, linkedin and so on. All when empty. */
+                network?: string;
+                /** @description Only campaigns whose name contains this. */
+                campaign?: string;
+            };
+        };
+        FunnelStepResult: {
+            label: string;
+            /** @description People who reached the step. */
+            count: number;
+            /** @description 0 to 1, of the people at step 1. */
+            conversion_from_start: number;
+            /** @description 0 to 1, of the people at the step before. */
+            conversion_from_previous: number;
+            /** @description People at the step before who didn't reach this one. */
+            dropped: number;
+            /** @description Median time from the step before. */
+            median_seconds: number | null;
+            average_seconds: number | null;
+        };
+        FunnelResult: {
+            steps: components["schemas"]["FunnelStepResult"][];
+            /** @description Up to 25 values by people at step 1, then $other for the rest. Empty without a breakdown. */
+            breakdown: {
+                /** @description The value, an empty string for none, or $other. */
+                value: string;
+                steps: components["schemas"]["FunnelStepResult"][];
+            }[];
+            over_time: {
+                /** Format: date-time */
+                start: string;
+                counts: number[];
+            }[];
+            ad_clicks: {
+                clicks: number;
+                impressions: number;
+                spend: {
+                    currency: string;
+                    amount_minor: number;
+                }[];
+                campaigns: number;
+            } | null;
+            /**
+             * Format: date-time
+             * @description When step 1's dates start.
+             */
+            from: string;
+            /**
+             * Format: date-time
+             * @description When they end (not included).
+             */
+            to: string;
+        };
+        FunnelPerson: {
+            /** Format: uuid */
+            record_id: string | null;
+            /** @description The browser */
+            anonymous_id: string | null;
+            name: string;
+            email: string;
+            breakdown: string;
+            /** @description When they did each step they reached. */
+            times: string[];
+        };
+        InsightsCatalog: {
+            events: {
+                name: string;
+                count: number;
+                /** Format: date-time */
+                last_seen: string;
+            }[];
+            conversions: {
+                key: string;
+                name: string;
+                event: string;
+            }[];
+            networks: {
+                id: string;
+                label: string;
+                connected: boolean;
+            }[];
+            fields: {
+                event: string[];
+                visit: string[];
+                payment: string[];
+            };
+            breakdowns: {
+                [key: string]: string[];
+            };
+            /** @description A/B tests to split or filter by (running, or started in the last 180 days): field (experiment:<flag key>) is the version each person was first shown, or "" when they weren't in the test. Works for every step kind but ad. */
+            experiments: {
+                /** @example experiment:pricing-headline */
+                field: string;
+                name: string;
+                status: string;
+            }[];
+            /** @description Measures of an event */
+            measures: string[];
+            /** @description Measures of an ad series. */
+            ad_metrics: string[];
+            /** @description Trend intervals. */
+            intervals: string[];
+            ops: string[];
+            date_presets: string[];
+        };
+        TrendSeries: {
+            /** @enum {string} */
+            kind: "event" | "page" | "visit" | "conversion" | "payment" | "ad";
+            /** @description For an event series. */
+            event?: string;
+            /** @description For a conversion series: the conversion definition's key. */
+            conversion?: string;
+            filters?: components["schemas"]["InsightFilter"][];
+            /** @description Only each person's first ever event or payment. */
+            first?: boolean;
+            /**
+             * @description count (default), people, sum or average; for an ad series clicks (default), impressions, spend or conversions.
+             * @enum {string}
+             */
+            measure?: "count" | "people" | "sum" | "average" | "clicks" | "impressions" | "spend" | "conversions";
+            /** @description What sum and average add up: amount for payments, a property for events. */
+            property?: string;
+            /** @description For an ad series: one ad network, or all when empty. */
+            network?: string;
+            /** @description For an ad series: only campaigns whose name contains this. */
+            campaign?: string;
+            label?: string;
+        };
+        TrendSpec: {
+            series: components["schemas"]["TrendSeries"][];
+            date_range?: components["schemas"]["InsightDateRange"];
+            /**
+             * @description Default: day up to two months, week up to about seven, else month.
+             * @enum {string}
+             */
+            interval?: "day" | "week" | "month";
+            /** @description A field of each series' rows to split by; network or campaign for ad series; experiment:<flag key> for the version of an A/B test (the catalog's experiments). */
+            breakdown?: string;
+            /** @description A, B, C for the series, with + - * / and brackets, such as A / B. */
+            formula?: string;
+            /** @description Adds the period just before. */
+            compare?: boolean;
+            /**
+             * @description How the app draws it; the engine ignores it.
+             * @enum {string}
+             */
+            display?: "line" | "bar" | "number" | "table";
+        };
+        TrendSeriesResult: {
+            label: string;
+            /** @description Over the whole range. */
+            total: number | null;
+            points: {
+                /** Format: date-time */
+                start: string;
+                value: number | null;
+            }[];
+            /** @description For money: brand for the brand's currency, an ad account's code, or mixed. */
+            currency?: string;
+        };
+        TrendResult: {
+            series: components["schemas"]["TrendSeriesResult"][];
+            formula: components["schemas"]["TrendSeriesResult"] | null;
+            /** @description Up to 25 values by the first series' total, then $other. Each group's series end with the formula when there is one. */
+            breakdown: {
+                value: string;
+                series: components["schemas"]["TrendSeriesResult"][];
+            }[];
+            previous?: components["schemas"]["TrendResult"];
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+        };
+        /** @description A funnel's, a trend's, a retention question's, a paths question's or a lifecycle question's spec, by the insight's kind. */
+        InsightSpec: components["schemas"]["FunnelSpec"] | components["schemas"]["TrendSpec"] | components["schemas"]["RetentionSpec"] | components["schemas"]["PathsSpec"] | components["schemas"]["LifecycleSpec"];
+        LifecycleSpec: {
+            /** @description What counts as being active. No time limit. */
+            step: components["schemas"]["FunnelStep"];
+            date_range?: components["schemas"]["InsightDateRange"];
+            /**
+             * @description The period. Default: week.
+             * @enum {string}
+             */
+            interval?: "day" | "week" | "month";
+        };
+        LifecycleResult: {
+            label: string;
+            /** @enum {string} */
+            interval: "day" | "week" | "month";
+            /** @description Every period of the dates, in order, even when nobody was active in it. */
+            periods: {
+                /** Format: date-time */
+                start: string;
+                /** @description Did it for the first time ever in this period. */
+                new: number;
+                /** @description Did it in this period and the one before. */
+                returning: number;
+                /** @description Did it in this period */
+                resurrected: number;
+                /** @description Did it the period before but not in this one. A loss: not part of the period's active people. */
+                dormant: number;
+            }[];
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+        };
+        RetentionSpec: {
+            /** @description What puts a person in a cohort, by the period of their first one in the dates. No time limit. */
+            start: components["schemas"]["FunnelStep"];
+            /** @description What counts as coming back; the start again when left out. */
+            return?: components["schemas"]["FunnelStep"];
+            date_range?: components["schemas"]["InsightDateRange"];
+            /**
+             * @description The cohort and return period. Default: week.
+             * @enum {string}
+             */
+            interval?: "day" | "week" | "month";
+            /** @description How many periods after the start to follow. Default: 14 days, 8 weeks or 6 months. */
+            periods?: number;
+        };
+        RetentionResult: {
+            start_label: string;
+            return_label: string;
+            /** @enum {string} */
+            interval: "day" | "week" | "month";
+            periods: number;
+            cohorts: {
+                /** Format: date-time */
+                start: string;
+                /** @description People whose first start fell in this period. */
+                size: number;
+                /** @description How many came back in the start period (0), the next (1) and so on; null for a period that hasn't begun. */
+                counts: (number | null)[];
+            }[];
+            /** @description The share who came back in each period */
+            average: (number | null)[];
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+        };
+        /** @description What every tile takes unless it pins its own. */
+        DashboardSettings: {
+            date_range?: components["schemas"]["InsightDateRange"];
+            compare?: boolean;
+            /** @description Puts the dashboard's trends in the workspace's digest, over the digest's period. */
+            digest?: boolean;
+        };
+        Dashboard: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            description: string;
+            settings: components["schemas"]["DashboardSettings"];
+            /** @description How many tiles it has. */
+            tiles: number;
+            /** @description The dashboard's share link */
+            share: components["schemas"]["DashboardShare"] | null;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DashboardTile: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            insight_id: string | null;
+            insight: components["schemas"]["Insight"] | null;
+            /** @description Markdown */
+            note: string;
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+        };
+        DashboardDetail: components["schemas"]["Dashboard"] & {
+            tile_list: components["schemas"]["DashboardTile"][];
+        };
+        DashboardInput: {
+            name?: string;
+            description?: string;
+            settings?: components["schemas"]["DashboardSettings"];
+            /** @description Moves tiles, on a change only. */
+            layout?: {
+                /** Format: uuid */
+                id: string;
+                x?: number;
+                y?: number;
+                w?: number;
+                h?: number;
+            }[];
+        };
+        DashboardTileInput: {
+            /**
+             * Format: uuid
+             * @description A saved insight of the brand. On a change
+             */
+            insight_id?: string;
+            note?: string;
+            x?: number;
+            y?: number;
+            w?: number;
+            h?: number;
+        };
+        /** @description A dashboard's share link, as the brand sees it (never the token again). */
+        DashboardShare: {
+            has_password: boolean;
+            /** Format: date-time */
+            expires_at: string | null;
+            /** @description How many times the link was opened. */
+            views: number;
+            /** Format: date-time */
+            last_viewed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DashboardShareInput: {
+            /** @description Empty for a link that opens on its own. */
+            password?: string;
+            /** @description 0 for a link that doesn't expire. */
+            expires_in_days?: number;
+        };
+        DashboardShareCreated: {
+            /** @description Shown once. */
+            token: string;
+            /** @description The page to send people to. */
+            url: string;
+            share: components["schemas"]["DashboardShare"];
+        };
+        SharedDashboardOpen: {
+            password?: string;
+            /** @description The key from a previous opening */
+            key?: string;
+        };
+        SharedDashboard: {
+            name: string;
+            description: string;
+            /** @description The brand's name. */
+            brand: string;
+            settings: components["schemas"]["DashboardSettings"];
+            tile_list: {
+                /** Format: uuid */
+                id: string;
+                /**
+                 * @description The insight's kind; null for a note, or a tile whose insight was deleted.
+                 * @enum {string|null}
+                 */
+                kind: "funnel" | "trend" | "retention" | "paths" | "lifecycle" | null;
+                name: string | null;
+                /** @description How a trend is drawn (line, bar, number, table). */
+                display: string | null;
+                note: string;
+                x: number;
+                y: number;
+                w: number;
+                h: number;
+            }[];
+            /** @description For a link with a password: send it with each tile run. Empty otherwise. */
+            key: string;
+        };
+        SharedTileRun: {
+            key?: string;
+            password?: string;
+            date_range?: components["schemas"]["InsightDateRange"];
+        };
+        InsightAlert: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            insight_id: string;
+            insight_name: string;
+            /** @enum {string} */
+            condition: "above" | "below" | "rises_by" | "falls_by";
+            /** @description A value for above and below; a percentage for rises_by and falls_by. */
+            threshold: number;
+            /**
+             * @description firing while the number is over the line; unknown before the first check or when the trend had no number.
+             * @enum {string}
+             */
+            state: "unknown" | "ok" | "firing";
+            last_value: number | null;
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /**
+             * Format: date-time
+             * @description When it last crossed.
+             */
+            fired_at: string | null;
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        InsightAlertInput: {
+            /**
+             * Format: uuid
+             * @description A saved trend of the brand. Required to create; can't change.
+             */
+            insight_id?: string;
+            /** @enum {string} */
+            condition?: "above" | "below" | "rises_by" | "falls_by";
+            threshold?: number;
+        };
+        Insight: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** @enum {string} */
+            kind: "funnel" | "trend" | "retention" | "paths" | "lifecycle";
+            name: string;
+            description: string;
+            spec: components["schemas"]["InsightSpec"];
+            /** Format: uuid */
+            created_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        InsightInput: {
+            /**
+             * @default funnel
+             * @enum {string}
+             */
+            kind: "funnel" | "trend" | "retention" | "paths" | "lifecycle";
+            name: string;
+            description?: string;
+            spec: components["schemas"]["InsightSpec"];
+        };
         Transaction: {
             /** Format: uuid */
             id: string;
@@ -51931,7 +56731,7 @@ export interface components {
             amount_minor: number;
             /** @example EUR */
             currency: string;
-            /** @description Your id for it: the same one again is the same transaction. */
+            /** @description Your id for it: the same one again is the same transaction. For a payment, use the same id as the order_id of its Order Completed event, so the two are counted as one payment. */
             source_id: string;
             /**
              * @description succeeded when left out.
@@ -51943,9 +56743,11 @@ export interface components {
              * @description The person or company who paid.
              */
             record_id?: string;
+            /** @description Your own id for the person who paid, the userId your events send, when you don't have record_id. A payment with a person counts as a payment.succeeded event, for revenue, attribution and conversions sent to ad networks. */
+            user_id?: string;
             /** @description One of the brand's products, by id or key. */
             product?: string;
-            /** @description A refund or chargeback: the source_id of the payment it gives back. */
+            /** @description A refund or chargeback: the payment it gives back, by any id it has: its source_id (an order's order_id), its Order Completed event's messageId, or Outflare's transaction id. It is saved as the payment's source_id. A refund whose payment isn't in yet waits (Developer setup lists it) and counts when the payment arrives. */
             refund_of?: string;
             description?: string;
             /**
@@ -52647,11 +57449,11 @@ export interface components {
              * @description Stable; new kinds may be added.
              * @enum {string}
              */
-            kind: "event" | "attribute_change" | "identity" | "consent" | "message" | "meeting" | "deal" | "visit" | "opt_out" | "journey" | "list";
+            kind: "event" | "attribute_change" | "identity" | "identified" | "consent" | "message" | "meeting" | "deal" | "visit" | "opt_out" | "journey" | "list";
             id: string;
             /** Format: date-time */
             at: string;
-            /** @description The event's name, the field that changed, the identity's namespace, the consent's channel, the email's subject, the meeting's or deal's name, the visit's landing page, the opt-out's reason or the journey's name. */
+            /** @description The event's name, the field that changed, the identity's namespace (anonymous_visitor for identified), the consent's channel, the email's subject, the meeting's or deal's name, the visit's landing page, the opt-out's reason or the journey's name. */
             title: string;
             detail: {
                 [key: string]: unknown;
@@ -54617,12 +59419,12 @@ export interface components {
              * @default blog
              * @enum {string}
              */
-            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /**
              * @default unknown
              * @enum {string}
              */
-            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "organic" | "unknown";
             /**
              * @default identified
              * @enum {string}
@@ -54677,6 +59479,17 @@ export interface components {
             language: string;
             /** @default false */
             baseline: boolean;
+            /**
+             * @description Who delivered the placement. The agency or partner itself is a party (coverage parties, role agency or partner).
+             * @default unknown
+             * @enum {string}
+             */
+            delivered_by: "unknown" | "in_house" | "agency" | "partner";
+            /**
+             * Format: uuid
+             * @description The CRM deal the partnerships team works this placement in. Linking needs outcomes.read.
+             */
+            deal_id?: string | null;
         };
         CoveragePlacementsUpdate: {
             version: number;
@@ -54693,12 +59506,12 @@ export interface components {
              * @default blog
              * @enum {string}
              */
-            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /**
              * @default unknown
              * @enum {string}
              */
-            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "organic" | "unknown";
             /**
              * @default identified
              * @enum {string}
@@ -54753,6 +59566,17 @@ export interface components {
             language: string;
             /** @default false */
             baseline: boolean;
+            /**
+             * @description Who delivered the placement. The agency or partner itself is a party (coverage parties, role agency or partner).
+             * @default unknown
+             * @enum {string}
+             */
+            delivered_by: "unknown" | "in_house" | "agency" | "partner";
+            /**
+             * Format: uuid
+             * @description The CRM deal the partnerships team works this placement in. Linking needs outcomes.read.
+             */
+            deal_id?: string | null;
         };
         CoveragePlacements: {
             /** Format: uuid */
@@ -54777,12 +59601,12 @@ export interface components {
              * @default blog
              * @enum {string}
              */
-            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom";
+            kind: "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /**
              * @default unknown
              * @enum {string}
              */
-            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "unknown";
+            arrangement: "earned" | "paid" | "exchange" | "affiliate" | "organic" | "unknown";
             /**
              * @default identified
              * @enum {string}
@@ -54844,6 +59668,50 @@ export interface components {
             language: string;
             /** @default false */
             baseline: boolean;
+            /**
+             * @description Who delivered the placement. The agency or partner itself is a party (coverage parties, role agency or partner).
+             * @default unknown
+             * @enum {string}
+             */
+            delivered_by: "unknown" | "in_house" | "agency" | "partner";
+            /**
+             * Format: uuid
+             * @description The CRM deal the partnerships team works this placement in. Linking needs outcomes.read.
+             */
+            deal_id?: string | null;
+            /**
+             * @description Whether the page links to the brand (the target page's site, or any of the brand's domains). removed means it had been there and two checks in a row saw the page without it.
+             * @enum {string}
+             */
+            link_status?: "unknown" | "present" | "missing" | "removed";
+            /**
+             * @description Whether the page names the brand (the expected wording, or else the brand's name), as link_status.
+             * @enum {string}
+             */
+            mention_status?: "unknown" | "present" | "missing" | "removed";
+            /**
+             * Format: date-time
+             * @description When two checks agreed the page was gone; null while it is up.
+             */
+            offline_since?: string | null;
+            /** Format: date-time */
+            link_removed_at?: string | null;
+            /** Format: date-time */
+            mention_removed_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When the brand facts on the page were last queued for a check against Knowledge.
+             */
+            accuracy_queued_at?: string | null;
+            /**
+             * @description Whether a live placement has taken off, from AI answers that cite it and visits it sends (the brand's own site tracking), refreshed daily. too_early means it has been live under two weeks.
+             * @enum {string}
+             */
+            traction?: "unknown" | "too_early" | "quiet" | "steady" | "taking_off";
+            /** Format: date-time */
+            traction_at?: string | null;
+            /** @description How many tracked AI answers cited the page in the last 90 days. */
+            ai_citations_90d?: number;
         };
         CoverageDeliverablesInput: {
             /** Format: uuid */
@@ -55223,7 +60091,7 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "mention_missing" | "renewal_due" | "invoice_due" | "relationship_followup";
             /**
              * @default open
              * @enum {string}
@@ -55256,7 +60124,7 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "mention_missing" | "renewal_due" | "invoice_due" | "relationship_followup";
             /**
              * @default open
              * @enum {string}
@@ -55297,7 +60165,7 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "renewal_due" | "invoice_due" | "relationship_followup";
+            reason: "manual" | "publication_overdue" | "first_live" | "page_gone" | "link_missing" | "link_changed" | "outdated_claim" | "mention_missing" | "renewal_due" | "invoice_due" | "relationship_followup";
             /**
              * @default open
              * @enum {string}
@@ -55326,7 +60194,13 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import" | "social" | "ai_citations" | "web_search";
+            /**
+             * @description The placement type discovery guessed from the page's address, empty when it couldn't tell. Confirming the find makes a placement of this type.
+             * @default
+             * @enum {string}
+             */
+            kind: "" | "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /** @default  */
             source_id: string;
             /**
@@ -55345,7 +60219,13 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import" | "social" | "ai_citations" | "web_search";
+            /**
+             * @description The placement type discovery guessed from the page's address, empty when it couldn't tell. Confirming the find makes a placement of this type.
+             * @default
+             * @enum {string}
+             */
+            kind: "" | "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /** @default  */
             source_id: string;
             /**
@@ -55372,7 +60252,13 @@ export interface components {
              * @default manual
              * @enum {string}
              */
-            source: "manual" | "news" | "backlinks" | "link_prospects" | "import";
+            source: "manual" | "news" | "backlinks" | "link_prospects" | "import" | "social" | "ai_citations" | "web_search";
+            /**
+             * @description The placement type discovery guessed from the page's address, empty when it couldn't tell. Confirming the find makes a placement of this type.
+             * @default
+             * @enum {string}
+             */
+            kind: "" | "blog" | "comparison" | "news" | "profile" | "directory" | "review" | "roundup" | "case_study" | "partner" | "integration" | "resource" | "interview" | "podcast" | "video" | "community" | "display_ad" | "newsletter" | "sponsorship" | "custom" | "influencer" | "youtube" | "forum" | "mcp_directory" | "app_listing";
             /** @default  */
             source_id: string;
             /**
@@ -55444,7 +60330,7 @@ export interface components {
              * @default first_live
              * @enum {string}
              */
-            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim" | "mention_missing";
             /** @default true */
             enabled: boolean;
             /** Format: uuid */
@@ -55459,7 +60345,7 @@ export interface components {
              * @default first_live
              * @enum {string}
              */
-            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim" | "mention_missing";
             /** @default true */
             enabled: boolean;
             /** Format: uuid */
@@ -55482,7 +60368,7 @@ export interface components {
              * @default first_live
              * @enum {string}
              */
-            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim";
+            kind: "first_live" | "relationship_followup" | "page_gone" | "link_missing" | "link_changed" | "publication_overdue" | "outdated_claim" | "mention_missing";
             /** @default true */
             enabled: boolean;
             /** Format: uuid */
@@ -55661,6 +60547,258 @@ export interface components {
             } | null;
             /** Format: date-time */
             extracted_at?: string | null;
+        };
+        CoverageSearchesInput: {
+            /** @description What to search for, as you'd type it into the search box, such as the brand's name in quotes. */
+            query: string;
+            /**
+             * @description Two-letter country code, such as US; empty for US.
+             * @default
+             */
+            country: string;
+            /**
+             * @description How many results to read.
+             * @default 50
+             */
+            depth: number;
+            /** @default 1 */
+            every_days: number;
+            /** @default true */
+            enabled: boolean;
+        };
+        CoverageSearchesUpdate: {
+            version: number;
+            /** @description What to search for, as you'd type it into the search box, such as the brand's name in quotes. */
+            query?: string;
+            /**
+             * @description Two-letter country code, such as US; empty for US.
+             * @default
+             */
+            country: string;
+            /**
+             * @description How many results to read.
+             * @default 50
+             */
+            depth: number;
+            /** @default 1 */
+            every_days: number;
+            /** @default true */
+            enabled: boolean;
+        };
+        PlacementOpportunity: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            url: string;
+            host: string;
+            title: string;
+            kind: string;
+            /** @enum {string} */
+            reason: "competitor_gap" | "ai_cited" | "unlinked_mention" | "link_removed";
+            /** @enum {string} */
+            action: "pitch" | "request_link" | "reclaim_link";
+            /** @description The module that suggested it, such as presence or ai_visibility. */
+            source: string;
+            /** @description Ids and fixed labels behind it, such as competitor_ids, likely_paid or placement_id. */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /** @description The numbers behind the score (domain_rating, domain_traffic, ai_citations, competitors) and points, each part's share of the score (seo, ai, competitors, fit, relationship). */
+            factors: {
+                [key: string]: unknown;
+            };
+            score: number;
+            /** @enum {string} */
+            state: "open" | "picked" | "dismissed" | "won";
+            /** Format: uuid */
+            owner_id?: string | null;
+            /** Format: uuid */
+            placement_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The brand's publisher on this site, when it has one.
+             */
+            publisher_id?: string | null;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /** Format: date-time */
+            state_at?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        CoverageCompetitorSettings: {
+            /** @description How many competitors, by shared keywords, count as top. */
+            top_competitors: number;
+            /** @description Days between scans of a top competitor. */
+            top_every_days: number;
+            /** @description Days between scans of the other competitors. */
+            rest_every_days: number;
+        };
+        CoverageCompetitor: {
+            /** Format: uuid */
+            id: string;
+            host: string;
+            name: string;
+            /** @description Its place among the brand's competitors by shared keywords, from 1. */
+            rank: number;
+            top: boolean;
+            /** @description Days between its scans, its own or the brand's. */
+            every_days: number;
+            /** @description Its own cadence; null follows the brand's. */
+            own_every_days: number | null;
+            /** Format: date-time */
+            queued_at: string | null;
+            /** Format: date-time */
+            scanned_at: string | null;
+            /** Format: date-time */
+            next_scan_at?: string | null;
+            /** @description What each source said on the last scan, by source (web_search, backlinks, ai_citations); empty when it worked, else an error code such as connector_needed or budget_reached. */
+            outcome: {
+                [key: string]: string;
+            };
+            /** @description Live pages it appears on. */
+            placements?: number;
+            /** @description Of those, the ones that look paid for. */
+            likely_paid?: number;
+        };
+        CoverageCompetitorPlacement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            /** Format: uuid */
+            competitor_id: string;
+            competitor_host?: string;
+            competitor_name?: string;
+            url: string;
+            host: string;
+            title: string;
+            /** @description A placement type from the address, such as youtube, forum, mcp_directory or comparison; empty when the address says nothing. */
+            kind: string;
+            /**
+             * @description likely_paid only with evidence; nobody outside the deal can be sure.
+             * @enum {string}
+             */
+            arrangement: "likely_paid" | "unknown";
+            /** @description Why it looks paid for, such as link_sponsored, link_affiliate, address_sponsored or title_sponsored. */
+            evidence: string[];
+            sources: ("web_search" | "backlinks" | "ai_citations")[];
+            links_to_them: boolean;
+            nofollow?: boolean | null;
+            anchor?: string;
+            domain_rating?: number | null;
+            url_rating?: number | null;
+            domain_traffic?: number | null;
+            /** @description Whether the brand has a publisher on this site. */
+            brand_present?: boolean;
+            /** Format: date-time */
+            first_seen_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /** Format: date-time */
+            gone_at?: string | null;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+        };
+        CoverageSearches: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            brand_id?: string;
+            version?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            /** @description What to search for, as you'd type it into the search box, such as the brand's name in quotes. */
+            query?: string;
+            /**
+             * @description Two-letter country code, such as US; empty for US.
+             * @default
+             */
+            country: string;
+            /**
+             * @description How many results to read.
+             * @default 50
+             */
+            depth: number;
+            /** @default 1 */
+            every_days: number;
+            /** @default true */
+            enabled: boolean;
+            /** Format: date-time */
+            next_run_at?: string;
+            /** Format: date-time */
+            last_run_at?: string | null;
+            /** @description Why the last run didn't work, as an error code (connector_needed, budget_reached, connector_auth...); empty after a run that worked. */
+            last_error?: string;
+            /** @description How many new finds the last run added. */
+            last_found?: number;
+        };
+        CoveragePartiesInput: {
+            /** Format: uuid */
+            placement_id: string;
+            /**
+             * Format: uuid
+             * @description A CRM company or person.
+             */
+            record_id: string;
+            /**
+             * @default other
+             * @enum {string}
+             */
+            role: "agency" | "partner" | "creator" | "author" | "editor" | "owner" | "account_manager" | "other";
+            /** @default  */
+            notes: string;
+        };
+        CoveragePartiesUpdate: {
+            version: number;
+            /** Format: uuid */
+            placement_id?: string;
+            /**
+             * Format: uuid
+             * @description A CRM company or person.
+             */
+            record_id?: string;
+            /**
+             * @default other
+             * @enum {string}
+             */
+            role: "agency" | "partner" | "creator" | "author" | "editor" | "owner" | "account_manager" | "other";
+            /** @default  */
+            notes: string;
+        };
+        CoverageParties: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            brand_id?: string;
+            version?: number;
+            /** Format: date-time */
+            created_at?: string;
+            /** Format: date-time */
+            updated_at?: string;
+            /** Format: uuid */
+            placement_id?: string;
+            /**
+             * Format: uuid
+             * @description A CRM company or person.
+             */
+            record_id?: string;
+            /**
+             * @default other
+             * @enum {string}
+             */
+            role: "agency" | "partner" | "creator" | "author" | "editor" | "owner" | "account_manager" | "other";
+            /** @default  */
+            notes: string;
         };
         CoverageDeliveryReportsInput: {
             title: string;
@@ -67185,6 +72323,68 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getBrandAttributionSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandAttributionSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listAttributionModels: {
         parameters: {
             query?: {
@@ -67232,6 +72432,77 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionModelInput"];
+            };
+        };
+        responses: {
+            /** @description The model's first version. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionCustomModel"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandAttributionModels: {
+        parameters: {
+            query?: {
+                archived?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The models. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        built_in: {
+                            id: components["schemas"]["AttributionBuiltInModel"];
+                            spec: components["schemas"]["AttributionSpec"];
+                        }[];
+                        data: components["schemas"]["AttributionCustomModel"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -67325,6 +72596,101 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttributionModelInput"];
+            };
+        };
+        responses: {
+            /** @description The model's latest version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionCustomModel"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The versions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AttributionCustomModel"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveBrandAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Archived. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandAttributionModel: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 key: string;
             };
             cookie?: never;
@@ -67868,6 +73234,73 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandConversionDefinitions: {
+        parameters: {
+            query?: {
+                archived?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definitions, by key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConversionDefinition"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionDefinitionInput"];
+            };
+        };
+        responses: {
+            /** @description The definition. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listConversionPresets: {
         parameters: {
             query?: never;
@@ -67875,6 +73308,32 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The presets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ConversionPreset"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandConversionPresets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -67909,6 +73368,44 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                preset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What was added, and the keys already there. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: components["schemas"]["ConversionDefinition"][];
+                        skipped: string[];
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandConversionPreset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 preset: string;
             };
             cookie?: never;
@@ -67998,6 +73495,98 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionDefinitionInput"];
+            };
+        };
+        responses: {
+            /** @description The definition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The definition. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionDefinition"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    archiveBrandConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Archived. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandConversionDefinition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 key: string;
             };
             cookie?: never;
@@ -69184,6 +74773,36 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getSiteAnalytics: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                /** @description Only this website (a host from the websites list, such as app.example.com). */
+                website?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The brand's traffic. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteAnalyticsReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listAnalyticsSyncs: {
         parameters: {
             query?: {
@@ -69848,6 +75467,34 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getAdAccountTrackingRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The latest run, or null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        run: components["schemas"]["AdTrackingRun"] | null;
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     setAdCampaignTarget: {
         parameters: {
             query?: never;
@@ -70287,10 +75934,166 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getAdCampaignTargeting: {
+        parameters: {
+            query?: {
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The targeting. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        supported: boolean;
+                        targeting?: components["schemas"]["AdTargeting"];
+                        bidding_methods: ("maximize_conversions" | "maximize_conversion_value")[];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setAdCampaignBidding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    strategy: "maximize_conversions" | "maximize_conversion_value";
+                    /** Format: int64 */
+                    target_cpa_micros?: number;
+                    target_roas?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The change is queued. For an agent, a MissionHeld answer: a person approves it. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdChangeQueued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    changeAdCampaignAudience: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    audience_id: string;
+                    /** @description Kept with the change so the Changes tab can name it. */
+                    audience_name?: string;
+                    /** @enum {string} */
+                    action: "add" | "remove";
+                };
+            };
+        };
+        responses: {
+            /** @description The change is queued. For an agent, a MissionHeld answer: a person approves it. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdChangeQueued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    changeAdCampaignCountry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description ISO 3166 alpha-2, such as AU. */
+                    country: string;
+                    /** @enum {string} */
+                    action: "add" | "remove";
+                };
+            };
+        };
+        responses: {
+            /** @description The change is queued. For an agent, a MissionHeld answer: a person approves it. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdChangeQueued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listAdChanges: {
         parameters: {
             query?: {
                 campaign_id?: string;
+                /** @description One network, such as google_ads. */
+                connector?: string;
+                /** @description One ad account, from GET .../ads/accounts. */
+                account_id?: string;
                 status?: "queued" | "applied" | "failed";
                 /** @description 1 to 500. Default 50. */
                 limit?: number;
@@ -70332,6 +76135,318 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listAdSuggestions: {
+        parameters: {
+            query?: {
+                /** @description One network, such as google_ads. */
+                connector?: string;
+                account_id?: string;
+                campaign_id?: string;
+                status?: "open" | "dismissed" | "expired" | "measuring" | "testing" | "judged";
+                /** @description 1 to 500. Default 100. */
+                limit?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The suggestions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdSuggestion"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshAdSuggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    approveAdSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Test the change inside the network first (budget suggestions on networks whose tests try a budget, bidding_target on networks whose tests try a target). */
+                    test?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The change is queued and the suggestion is measuring. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSuggestion"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    dismissAdSuggestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dismissed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSuggestion"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdTests: {
+        parameters: {
+            query?: {
+                /** @description One network, such as google_ads. */
+                connector?: string;
+                account_id?: string;
+                campaign_id?: string;
+                status?: "starting" | "running" | "judged" | "ending" | "kept" | "rolled_back" | "failed";
+                /** @description 1 to 500. Default 100. */
+                limit?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description Only records of this brand: its id or handle, none for records shared by every brand, or all (the default). */
+                brand?: components["parameters"]["Brand"];
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tests. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdTest"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createAdTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    campaign_id: string;
+                    /** @enum {string} */
+                    kind: "budget" | "bidding";
+                    /**
+                     * Format: int64
+                     * @description The trial's daily budget (budget).
+                     */
+                    daily_budget_micros?: number;
+                    /**
+                     * Format: int64
+                     * @description The cost per conversion the trial bids to (bidding).
+                     */
+                    target_cpa_micros?: number;
+                    /** @description The trial's share. Default 50. */
+                    split_percent?: number;
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The test is queued to start. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdTest"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    keepAdTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The test is ending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdTest"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rollBackAdTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The test is ending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdTest"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdRecommendations: {
+        parameters: {
+            query: {
+                account_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The recommendations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdRecommendation"][];
+                        supported: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     pauseAllAds: {
         parameters: {
             query?: never;
@@ -70363,6 +76478,247 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdDrafts: {
+        parameters: {
+            query?: {
+                account_id?: string;
+                campaign_id?: string;
+                status?: "draft" | "creating" | "paused" | "going_live" | "live" | "failed" | "dismissed";
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The drafts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AdDraft"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdDraftInput"];
+            };
+        };
+        responses: {
+            /** @description The draft, waiting for a person. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"];
+                };
+            };
+            /** @description For an agent, a MissionHeld answer when the action layer held it for a person. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdDraftContent"] & {
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"];
+                };
+            };
+            /** @description For an agent, a MissionHeld answer when the action layer held it for a person. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft, being made. For an agent, a MissionHeld answer: a person approves it. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    goLiveAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft, being turned on. For an agent, a MissionHeld answer: a person approves it. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    dismissAdDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft, dismissed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdDraft"];
+                };
+            };
+            /** @description For an agent, a MissionHeld answer when the action layer held it for a person. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionHeld"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -71976,6 +78332,71 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    consent_mode: "opt_out" | "opt_in";
+                };
+            };
+        };
+        responses: {
+            /** @description The settings now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandAdSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setBrandAdSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -73937,6 +80358,73 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    pitch_cooldown_days?: number;
+                    weekly_reads?: boolean;
+                    weekly_budget_percent?: number;
+                    recheck_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkBuildingSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkBuildingSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkBuildingSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandLinkBuildingSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -78317,6 +84805,66 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    models?: components["schemas"]["AISampleModelInput"][];
+                    /** @description How many times each model is asked each prompt in a run. Answers vary, so more give steadier numbers. */
+                    samples_per_prompt?: number;
+                    /** @description The most sampling may spend in a calendar month (UTC), in US cents. 0 stops sampling. Default US$10. */
+                    monthly_limit_cents?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIVisibilitySettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandAIVisibilitySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIVisibilitySettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandAIVisibilitySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -92167,7 +98715,7 @@ export interface operations {
     getRecordTimeline: {
         parameters: {
             query?: {
-                /** @description Comma-separated: event, attribute_change, identity, consent, message, meeting, deal, visit, opt_out, journey, list. Default all. */
+                /** @description Comma-separated: event, attribute_change, identity, identified, consent, message, meeting, deal, visit, opt_out, journey, list. Default all. */
                 kinds?: string;
                 /** @description For a company, include its people's items (the default). false shows the company's own. */
                 people?: "true" | "false";
@@ -93254,6 +99802,171 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listVisitorBrowsers: {
+        parameters: {
+            query?: {
+                /** @description Seen in this many days, 1 to 365. Default 30. */
+                days?: number;
+                /** @description false: only anonymous visitors; true: only known ones. Default both. */
+                known?: "true" | "false";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visitors, most recently seen first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VisitorBrowser"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                        days: number;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getVisitorBrowser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The site snippet's id for the browser (outflare.anonymousId()). */
+                anonymous_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The visitor. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        browser: components["schemas"]["VisitorBrowser"];
+                        visits: components["schemas"]["VisitorVisit"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listVisitorBrowserEvents: {
+        parameters: {
+            query?: {
+                /** @description A visit's id: only its events. */
+                session?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                anonymous_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VisitorEvent"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createVisitorLink: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description A full address on your own site.
+                     * @example https://example.com/pricing
+                     */
+                    url: string;
+                    /** @description The person's id in your product (the userId you send with identify). */
+                    user_id?: string;
+                    email?: string;
+                    /** Format: uuid */
+                    record_id?: string;
+                    /** @description Default 30. */
+                    expires_in_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The link. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorLink"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     getVisitorSettings: {
         parameters: {
             query?: never;
@@ -93285,6 +99998,59 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VisitorSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandVisitorSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisitorSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandVisitorSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -93474,7 +100240,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FlagDecisions"];
+                    "application/json": components["schemas"]["SiteFlagDecisions"];
                 };
             };
             default: components["responses"]["Error"];
@@ -93536,6 +100302,10 @@ export interface operations {
                 "application/json": {
                     token: string;
                     changes: components["schemas"]["FlagChange"][];
+                    /** @description The version's own CSS (no url(), @import or fonts); "" removes it, absent keeps it. */
+                    css?: string;
+                    /** @description Send the version's visitors to this page instead: a path such as /pricing-b, or an address on the brand's domains; "" removes it, absent keeps it. */
+                    redirect?: string;
                 };
             };
         };
@@ -94544,7 +101314,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ABTestInput"] & unknown;
+                "application/json": components["schemas"]["ABTestInput"] & (unknown | unknown);
             };
         };
         responses: {
@@ -94604,7 +101374,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ABTestInput"] & unknown;
+                "application/json": components["schemas"]["ABTestInput"] & (unknown | unknown);
             };
         };
         responses: {
@@ -95550,7 +102320,7 @@ export interface operations {
                         ready: boolean;
                         checks: {
                             /** @enum {string} */
-                            id: "flag" | "one_at_a_time" | "overlap" | "exposures" | "delivery" | "goal" | "duration" | "qa" | "guardrails";
+                            id: "flag" | "one_at_a_time" | "overlap" | "exposures" | "delivery" | "changes_found" | "goal" | "duration" | "qa" | "guardrails";
                             /** @enum {string} */
                             status: "ok" | "warn" | "fail";
                             text: string;
@@ -95586,7 +102356,7 @@ export interface operations {
                         ready: boolean;
                         checks: {
                             /** @enum {string} */
-                            id: "flag" | "one_at_a_time" | "overlap" | "exposures" | "delivery" | "goal" | "duration" | "qa" | "guardrails";
+                            id: "flag" | "one_at_a_time" | "overlap" | "exposures" | "delivery" | "changes_found" | "goal" | "duration" | "qa" | "guardrails";
                             /** @enum {string} */
                             status: "ok" | "warn" | "fail";
                             text: string;
@@ -95624,6 +102394,136 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ABTest"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getABTestVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestVersion"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setABTestVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
+                ws: components["parameters"]["Workspace"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    changes?: components["schemas"]["FlagChange"][];
+                    /** @description The version's own CSS (looks only: no url(), @import or fonts). */
+                    css?: string;
+                    /** @description Send the version's visitors to this page: a path such as /pricing-b, or an address on the brand's domains. */
+                    redirect?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The version as saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestVersion"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandABTestVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestVersion"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setBrandABTestVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                test: string;
+                /** @description One of the test flag's versions, such as b. */
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    changes?: components["schemas"]["FlagChange"][];
+                    /** @description The version's own CSS (looks only: no url(), @import or fonts). */
+                    css?: string;
+                    /** @description Send the version's visitors to this page: a path such as /pricing-b, or an address on the brand's domains. */
+                    redirect?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The version as saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ABTestVersion"];
                 };
             };
             202: components["responses"]["MissionHeld"];
@@ -98825,6 +105725,1028 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getInsightsCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightsCatalog"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    runFunnel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FunnelSpec"];
+            };
+        };
+        responses: {
+            /** @description The funnel. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FunnelResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listFunnelPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    funnel: components["schemas"]["FunnelSpec"];
+                    step: number;
+                    /** @default false */
+                    dropped?: boolean;
+                    breakdown?: string;
+                    /** @default 50 */
+                    limit?: number;
+                    /** @default 0 */
+                    offset?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The people. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FunnelPerson"][];
+                        has_more: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    saveFunnelPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    funnel: components["schemas"]["FunnelSpec"];
+                    step: number;
+                    /** @default false */
+                    dropped?: boolean;
+                    breakdown?: string;
+                    /** @description The new list's name. */
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The list was made. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        list_id: string;
+                        added: number;
+                        skipped_anonymous: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runFunnelCorrelation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    funnel: components["schemas"]["FunnelSpec"];
+                    /** @description The step reached; the last when left out. */
+                    step?: number;
+                    /**
+                     * @description How many items each way.
+                     * @default 10
+                     */
+                    limit?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The comparison. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorrelationResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runPaths: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PathsSpec"];
+            };
+        };
+        responses: {
+            /** @description The paths. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PathsResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAnnotations: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The annotations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Annotation"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createAnnotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: date */
+                    day: string;
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The annotation. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Annotation"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteAnnotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                annotation: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runTrend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrendSpec"];
+            };
+        };
+        responses: {
+            /** @description The trend. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrendResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runRetention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetentionSpec"];
+            };
+        };
+        responses: {
+            /** @description The cohorts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetentionResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runLifecycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LifecycleSpec"];
+            };
+        };
+        responses: {
+            /** @description The periods. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LifecycleResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listDashboards: {
+        parameters: {
+            query?: {
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dashboards. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Dashboard"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardInput"];
+            };
+        };
+        responses: {
+            /** @description The dashboard. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardDetail"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dashboard. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardDetail"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardInput"];
+            };
+        };
+        responses: {
+            /** @description The dashboard. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardDetail"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addDashboardTile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardTileInput"];
+            };
+        };
+        responses: {
+            /** @description The dashboard with the tile. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardDetail"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removeDashboardTile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+                tile: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateDashboardTile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+                tile: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardTileInput"];
+            };
+        };
+        responses: {
+            /** @description The dashboard. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardDetail"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    shareDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DashboardShareInput"];
+            };
+        };
+        responses: {
+            /** @description The link. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardShareCreated"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    unshareDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                dashboard: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Taken back. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    openSharedDashboard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The link's token (ofd_...). */
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedDashboardOpen"];
+            };
+        };
+        responses: {
+            /** @description The dashboard. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedDashboard"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runSharedTile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The link's token (ofd_...). */
+                token: string;
+                tile: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedTileRun"];
+            };
+        };
+        responses: {
+            /** @description The tile's result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FunnelResult"] | components["schemas"]["TrendResult"] | components["schemas"]["RetentionResult"] | components["schemas"]["PathsResult"] | components["schemas"]["LifecycleResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listInsightAlerts: {
+        parameters: {
+            query?: {
+                insight_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The alerts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InsightAlert"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createInsightAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightAlertInput"];
+            };
+        };
+        responses: {
+            /** @description The alert. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightAlert"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteInsightAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                alert: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateInsightAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                alert: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightAlertInput"];
+            };
+        };
+        responses: {
+            /** @description The alert. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightAlert"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listInsights: {
+        parameters: {
+            query?: {
+                kind?: "funnel" | "trend" | "retention" | "paths" | "lifecycle";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Saved insights. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Insight"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightInput"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Insight"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                insight: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The insight. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Insight"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                insight: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                insight: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    description?: string;
+                    spec?: components["schemas"]["InsightSpec"];
+                };
+            };
+        };
+        responses: {
+            /** @description Changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Insight"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listBrandTransactions: {
         parameters: {
             query?: {
@@ -98893,7 +106815,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The same source_id was sent before; the transaction saved then. */
+            /** @description The same source_id was sent before, or the same payment came in from an order event or a billing connector; the transaction saved then. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -98974,6 +106896,74 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    linkBrandRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                transaction: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The payment's order_id or source_id, its order's messageId, or Outflare's transaction id. */
+                    payment: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The refund, linked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandDeveloperSetup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The checklist. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeveloperSetup"];
+                };
+            };
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -100059,7 +108049,7 @@ export interface operations {
     getBrandRecordTimeline: {
         parameters: {
             query?: {
-                /** @description Comma-separated: event, attribute_change, identity, consent, message, meeting, deal, visit, opt_out, journey, list. Default all. */
+                /** @description Comma-separated: event, attribute_change, identity, identified, consent, message, meeting, deal, visit, opt_out, journey, list. Default all. */
                 kinds?: string;
                 /** @description For a company, include its people's items (the default). false shows the company's own. */
                 people?: "true" | "false";
@@ -108285,6 +116275,74 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerPrograms: {
+        parameters: {
+            query?: {
+                status?: "active" | "paused" | "archived";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Programs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerProgram"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerProgramInput"];
+            };
+        };
+        responses: {
+            /** @description The program. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getPartnerProgramStats: {
         parameters: {
             query?: never;
@@ -108292,6 +116350,43 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerStats"] & {
+                        partners: {
+                            total: number;
+                            active: number;
+                            pending: number;
+                            suspended: number;
+                            rejected: number;
+                            /** @description Active partners who haven't given payout details. */
+                            missing_payout_details: number;
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandPartnerProgramStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description A program's id or slug. */
                 id: string;
             };
@@ -108390,6 +116485,74 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getBrandPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerProgramInput"];
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     setPartnerRules: {
         parameters: {
             query?: never;
@@ -108433,6 +116596,49 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    setBrandPartnerRules: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    rules: components["schemas"]["PartnerRuleInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     createPartnerGroup: {
         parameters: {
             query?: never;
@@ -108448,6 +116654,52 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description New partners join this group. */
+                    default?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The group. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerGroup"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description The program's id or slug. */
                 id: string;
             };
@@ -108560,6 +116812,87 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    deleteBrandPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    default?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The program, with its groups. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     assignPartnerGroup: {
         parameters: {
             query?: never;
@@ -108575,6 +116908,53 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                /** @description The group's id, or none to take partners out of every group. */
+                group: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    partner_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description How many moved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        moved: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    assignBrandPartnerGroup: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description The program's id or slug. */
                 id: string;
                 /** @description The group's id, or none to take partners out of every group. */
@@ -108636,6 +117016,35 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    switchOverBrandPartnerProgram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     rotatePartnerPostback: {
         parameters: {
             query?: never;
@@ -108651,6 +117060,47 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The URL. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The postback URL */
+                        url: string;
+                        /** @description The start of the secret, shown later as postback_hint. */
+                        hint: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rotateBrandPartnerPostback: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description The program's id or slug. */
                 id: string;
             };
@@ -108756,6 +117206,85 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerImports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The imports. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerImport"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startBrandPartnerImport: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The connection; the first connected partner platform when left out.
+                     */
+                    integration_id?: string;
+                    /** @description The program's id on the platform. */
+                    source_program?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerImport"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPartnerImportSources: {
         parameters: {
             query?: {
@@ -108805,6 +117334,55 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerImportSources: {
+        parameters: {
+            query?: {
+                /** @description The connection; the first connected partner platform when left out. */
+                integration_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The platform's programs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @description The program's id on the platform: pass it as source_program. */
+                            id: string;
+                            name: string;
+                            /** @description Upper case, or empty when the platform doesn't say. */
+                            currency: string;
+                            /** @description active, inactive, or empty when the platform doesn't say. */
+                            status: string;
+                        }[];
+                        /** Format: uuid */
+                        integration_id: string;
+                        /** @description The program an import takes when none is named, or empty. */
+                        suggested: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getPartnerImport: {
         parameters: {
             query?: never;
@@ -108812,6 +117390,34 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description A program's id or slug. */
+                id: string;
+                import: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The import. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerImport"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandPartnerImport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description A program's id or slug. */
                 id: string;
                 import: string;
@@ -108895,6 +117501,68 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    createBrandPartnerWidgetSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Your own id for the customer. */
+                    customer_id?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** Format: uuid */
+                    record_id?: string;
+                    /** @description Set on a new customer record only. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The widget session. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The session; embed_url carries it. */
+                        token: string;
+                        embed_url: string;
+                        expires_in_seconds: number;
+                        /** Format: uuid */
+                        partner_id: string;
+                        /** @enum {string} */
+                        status: "pending" | "active" | "suspended" | "rejected";
+                        code: string;
+                        link: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     setPartnerPortal: {
         parameters: {
             query?: never;
@@ -108910,6 +117578,53 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled?: boolean;
+                    /** @description Lowercase letters, digits and hyphens; "" for none. */
+                    subdomain?: string | null;
+                    settings?: components["schemas"]["PartnerPortalSettings"];
+                };
+            };
+        };
+        responses: {
+            /** @description The program. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProgram"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setBrandPartnerPortal: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description The program's id or slug. */
                 id: string;
             };
@@ -109019,6 +117734,83 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerAsset"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerAsset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "image" | "text" | "link";
+                    title: string;
+                    body?: string;
+                    url?: string;
+                    position?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The asset. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerAsset"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     deletePartnerAsset: {
         parameters: {
             query?: never;
@@ -109034,6 +117826,41 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                /** @description The program's id or slug. */
+                id: string;
+                asset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteBrandPartnerAsset: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 /** @description The program's id or slug. */
                 id: string;
                 asset: string;
@@ -109082,6 +117909,34 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerPostbacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPostbackSend"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     impersonatePartner: {
         parameters: {
             query?: never;
@@ -109097,6 +117952,47 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                        read_only: boolean;
+                        /** @description How long the link works; the session it opens lasts an hour. */
+                        expires_in_seconds: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    impersonateBrandPartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -109212,6 +118108,93 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartners: {
+        parameters: {
+            query?: {
+                /** @description A program's id or slug. */
+                program?: string;
+                status?: "pending" | "active" | "suspended" | "rejected";
+                /** @description The partner's customer record. */
+                record_id?: string;
+                /** @description missing lists partners who haven't given payout details (payout_method), set those who have. */
+                payout_details?: "missing" | "set";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Partners. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Partner"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerInput"];
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getPartner: {
         parameters: {
             query?: never;
@@ -109278,6 +118261,72 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getBrandPartner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The partner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartner: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerInput"];
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     addPartnerPromoCode: {
         parameters: {
             query?: never;
@@ -109293,6 +118342,52 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    code: string;
+                    rules?: components["schemas"]["PartnerPromoRules"];
+                    /** @description A coupon's id in the workspace's billing account (Stripe): Outflare makes the code there too, with the workspace's own key, which needs Write access to Promotion codes. Leave it out when you make the code yourself. */
+                    coupon?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The partner. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandPartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -109391,6 +118486,73 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    removeBrandPartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: components["responses"]["MissionHeld"];
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartnerPromoCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The partner with updated codes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Partner"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     addPartnerFee: {
         parameters: {
             query?: never;
@@ -109406,6 +118568,46 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerLedgerInput"];
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    addBrandPartnerFee: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -109471,6 +118673,46 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    addBrandPartnerAdjustment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerLedgerInput"];
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPartnerConversionLog: {
         parameters: {
             query?: {
@@ -109498,6 +118740,52 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logged calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerConversionLogEntry"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandPartnerConversionLog: {
+        parameters: {
+            query?: {
+                /** @description A program's id or slug. */
+                program?: string;
+                source?: "api" | "postback";
+                outcome?: "credited" | "not_credited" | "duplicate" | "rejected" | "error";
+                /** @description An external_id, customer_id, refund_of, ref, promo code, email address or request id the call sent. */
+                q?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -109580,6 +118868,97 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerConversionInput"];
+            };
+        };
+        responses: {
+            /** @description Not credited, or already recorded (duplicate). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            /** @description Credited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerConversionResult"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandPartnerConversions: {
+        parameters: {
+            query?: {
+                type?: "signup" | "sale" | "refund" | "custom";
+                partner_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerConversion"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerConversion: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -109751,6 +119130,50 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerReferrals: {
+        parameters: {
+            query?: {
+                partner_id?: string;
+                /** @description The referred customer. */
+                record_id?: string;
+                status?: "lead" | "customer" | "refunded" | "rejected";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Referrals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerReferral"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPartnerRewards: {
         parameters: {
             query?: {
@@ -109778,6 +119201,52 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ledger entries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerReward"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandPartnerRewards: {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected" | "paid" | "fulfilled";
+                kind?: "cash" | "fee" | "action" | "adjustment";
+                partner_id?: string;
+                payout_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -109844,6 +119313,49 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerLeads: {
+        parameters: {
+            query?: {
+                /** @description A program's id or slug. */
+                program?: string;
+                status?: "pending" | "approved" | "rejected";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Submitted leads. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerLead"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     approvePartnerLead: {
         parameters: {
             query?: never;
@@ -109859,6 +119371,46 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The lead, approved or rejected. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveBrandPartnerLead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -109928,6 +119480,50 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    rejectBrandPartnerLead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Why; the partner sees it. */
+                    reason?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The lead. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerLead"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     approvePartnerReward: {
         parameters: {
             query?: never;
@@ -109968,6 +119564,46 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    approveBrandPartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     bulkPartnerRewards: {
         parameters: {
             query?: never;
@@ -109983,6 +119619,71 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "approve" | "reject";
+                    ids?: string[];
+                    /** @description A program's id or slug: all its pending rewards. */
+                    program?: string;
+                    /**
+                     * Format: uuid
+                     * @description A partner: all their pending rewards.
+                     */
+                    partner_id?: string;
+                    /** @enum {string} */
+                    kind?: "cash" | "fee" | "action" | "adjustment";
+                    /** @description Reject only: why, for the partner. */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description What changed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        action: "approve" | "reject";
+                        /** @description How many were approved or rejected. */
+                        done: number;
+                        skipped: {
+                            id: string;
+                            /** @description not_found, shared_program, or the reward's status (approved, rejected, paid, fulfilled). */
+                            reason: string;
+                        }[];
+                        /** @description More pending rewards match; call again. */
+                        more: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    bulkBrandPartnerRewards: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -110075,6 +119776,48 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    rejectBrandPartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     fulfilPartnerReward: {
         parameters: {
             query?: never;
@@ -110117,6 +119860,48 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    fulfilBrandPartnerReward: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The ledger entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerReward"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     exportPartnerPayouts: {
         parameters: {
             query?: {
@@ -110130,6 +119915,35 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    exportBrandPartnerPayouts: {
+        parameters: {
+            query?: {
+                status?: "due" | "paid" | "canceled" | "all";
+                /** @description A program's id or slug. */
+                program?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
             };
             cookie?: never;
         };
@@ -110241,6 +120055,97 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerPayouts: {
+        parameters: {
+            query?: {
+                status?: "due" | "paid" | "canceled";
+                partner_id?: string;
+                /** @description A program's id or slug. */
+                program?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Payouts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPayout"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerPayouts: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    partner_id?: string;
+                    /** @description A program's id or slug. */
+                    program?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payouts made now (none when nothing is due). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerPayout"][];
+                        /** @description Imported partners whose balance is due but who haven't given payout details yet. */
+                        waiting_for_details: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     markPartnerPayoutPaid: {
         parameters: {
             query?: never;
@@ -110289,6 +120194,54 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    markBrandPartnerPayoutPaid: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                    reference?: string;
+                    /**
+                     * Format: date-time
+                     * @description When it was paid; now when left out.
+                     */
+                    paid_at?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payout. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPayout"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     cancelPartnerPayout: {
         parameters: {
             query?: never;
@@ -110304,6 +120257,48 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The payout. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerPayout"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    cancelBrandPartnerPayout: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -112589,6 +122584,709 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listCoverageParties: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageParties"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageParties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePartiesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageParties"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageParties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageParties"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteCoverageParties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        deleted: boolean;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageParties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoveragePartiesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageParties"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageSearches: {
+        parameters: {
+            query?: {
+                q?: string;
+                status?: string;
+                stage?: string;
+                kind?: string;
+                arrangement?: string;
+                publisher_id?: string;
+                placement_id?: string;
+                agreement_id?: string;
+                limit?: number;
+                /** @description JSON {mode: all|any, rules: [{field, op: eq|ne|contains|before|after|empty, value}]} with at most 12 rules. Values are strings; dates use YYYY-MM-DD. */
+                filters?: string;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageSearches"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCoverageSearches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageSearchesInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageSearches"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getCoverageSearches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageSearches"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageSearches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoverageSearchesUpdate"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageSearches"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    runCoverageSearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued or held for approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageCompetitors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        settings: components["schemas"]["CoverageCompetitorSettings"];
+                        data: components["schemas"]["CoverageCompetitor"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageCompetitorSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    top_competitors?: number;
+                    top_every_days?: number;
+                    rest_every_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The brand's scan settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageCompetitorSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageCompetitor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    every_days: number | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The competitor */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoverageCompetitor"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    scanCoverageCompetitor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued or held for approval */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageCompetitorPlacements: {
+        parameters: {
+            query?: {
+                competitor_id?: string;
+                kind?: string;
+                arrangement?: "likely_paid" | "unknown";
+                gap?: "true" | "false";
+                include_gone?: "true" | "false";
+                q?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CoverageCompetitorPlacement"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCompetition: {
+        parameters: {
+            query?: {
+                /** @description How much each area counts in the score, as area:weight pairs from 0 to 10, such as search:2,ai:1. Areas left out count 1. */
+                weights?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competition"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listCompetitorProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                competitor: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The competitor's profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompetitorProfiles"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    addCompetitorProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                competitor: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The competitor's profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompetitorProfiles"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    answerCompetitorProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                competitor: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                    /** @enum {string} */
+                    state: "confirmed" | "dismissed";
+                };
+            };
+        };
+        responses: {
+            /** @description The competitor's profiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompetitorProfiles"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCoverageOpportunities: {
+        parameters: {
+            query?: {
+                state?: "open" | "picked" | "dismissed" | "won" | "all";
+                reason?: "competitor_gap" | "ai_cited" | "unlinked_mention" | "link_removed";
+                action?: "pitch" | "request_link" | "reclaim_link";
+                kind?: string;
+                min_score?: number;
+                q?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PlacementOpportunity"][];
+                        total: number;
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    refreshCoverageOpportunities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many were new and how many were won */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        added: number;
+                        won: number;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCoverageOpportunity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    state?: "open" | "picked" | "dismissed" | "won";
+                    /** Format: uuid */
+                    owner_id?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The opportunity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacementOpportunity"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     listCoverageReportSnapshots: {
         parameters: {
             query?: never;
@@ -113567,6 +124265,66 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    createBrandPartnerPortalSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description A program's id or slug. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Your own id for the customer. */
+                    customer_id?: string;
+                    /** Format: email */
+                    email?: string;
+                    /** Format: uuid */
+                    record_id?: string;
+                    /** @description Set on a new customer record only. */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The one-use portal handoff. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sign_in_url: string;
+                        expires_in_seconds: number;
+                        /** Format: uuid */
+                        partner_id: string;
+                        /** @enum {string} */
+                        status: "pending" | "active" | "suspended" | "rejected";
+                        code?: string;
+                        link?: string;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPartnerTasks: {
         parameters: {
             query?: never;
@@ -113624,12 +124382,104 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskInput"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     updatePartnerTask: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 ws: string;
+                id: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskAction"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
                 task: string;
             };
@@ -113688,12 +124538,72 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    reviewBrandPartnerTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+                submission: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartnerTaskAction"];
+            };
+        };
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     listPartnerAudiences: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 ws: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandPartnerAudiences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
             };
             cookie?: never;
@@ -113776,6 +124686,68 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrandPartnerProposals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Proposals and their milestone progress. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PartnerProposal"][];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandPartnerProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    partner_id?: string;
+                    email?: string;
+                    name?: string;
+                    config: components["schemas"]["PartnerProposalConfig"];
+                };
+            };
+        };
+        responses: {
+            /** @description The proposal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProposal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
     updatePartnerProposal: {
         parameters: {
             query?: never;
@@ -113783,6 +124755,45 @@ export interface operations {
             path: {
                 /** @description The workspace ID, or its slug (its name in web app URLs). IDs never change; a slug can, so store IDs. */
                 ws: components["parameters"]["Workspace"];
+                id: string;
+                proposal: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "revise" | "invite" | "verify" | "approve" | "complete";
+                    version: number;
+                    config?: components["schemas"]["PartnerProposalConfig"];
+                    deliverable_id?: string;
+                    milestone_id?: string;
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated proposal. invitation_url is returned only when a link is generated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartnerProposal"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandPartnerProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
                 id: string;
                 proposal: string;
             };
@@ -119902,6 +130913,28 @@ export interface operations {
         };
     };
     webhook_coverage_record_confirmed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_coverage_record_deleted: {
         parameters: {
             query?: never;
             header?: never;

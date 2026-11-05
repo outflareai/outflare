@@ -189,7 +189,7 @@ function FilterValue({
       type={
         f?.kind === "date" || name.endsWith("_at")
           ? "date"
-          : ["money", "number", "hours"].includes(f?.kind ?? "")
+          : ["money", "number", "hours", "count"].includes(f?.kind ?? "")
             ? "number"
             : "text"
       }

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -65,11 +66,39 @@ func TestJobsListAndGet(t *testing.T) {
 		t.Fatalf("queued %v, job %v", queued, job)
 	}
 
-	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET updated_at = now() - interval '15 days' WHERE kind LIKE 'test.%'`); err != nil {
+	// Finished jobs go after 14 days. A key keeps a job, except for the
+	// kinds that run once per event or batch of events.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO jobs (workspace_id, kind, status, idempotency_key) VALUES
+		($1, 'test.keyed', 'succeeded', 'test:1'),
+		($1, 'events.process', 'succeeded', 'batch:1'),
+		($1, 'metric.event', 'dead', 'metric-event:1'),
+		($1, 'events.process', 'queued', 'batch:2')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET updated_at = now() - interval '15 days'
+		WHERE kind LIKE 'test.%' OR idempotency_key IN ('batch:1', 'batch:2', 'metric-event:1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO jobs (workspace_id, kind, status, idempotency_key) VALUES ($1, 'events.process', 'succeeded', 'batch:3')`, ws); err != nil {
 		t.Fatal(err)
 	}
 	n, err := e.srv.PruneJobs(ctx)
-	if err != nil || n != 2 {
+	if err != nil || n != 4 {
 		t.Fatalf("pruned %d, %v", n, err)
+	}
+	var left []string
+	rows, err := e.pool.Query(ctx, `SELECT idempotency_key FROM jobs WHERE idempotency_key IN ('test:1', 'batch:1', 'metric-event:1', 'batch:2', 'batch:3') ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			t.Fatal(err)
+		}
+		left = append(left, k)
+	}
+	if strings.Join(left, ",") != "batch:2,batch:3,test:1" {
+		t.Fatalf("left %v", left)
 	}
 }

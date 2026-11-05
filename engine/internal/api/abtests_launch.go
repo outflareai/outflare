@@ -111,6 +111,12 @@ func (s *Server) abChecklist(ctx context.Context, ws string, t abTestView, f fla
 		out = append(out, c)
 	}
 
+	if c, ok, err := s.abMissedCheck(ctx, ws, f.Key); err != nil {
+		return nil, err
+	} else if ok {
+		out = append(out, c)
+	}
+
 	if len(t.Goals) > 0 {
 		g := t.Goals[0]
 		now := time.Now()
@@ -275,6 +281,38 @@ func (s *Server) abDeliveryCheck(ctx context.Context, ws, key string) (abCheck, 
 		return abCheck{"delivery", "warn", text}, true, nil
 	}
 	return abCheck{"delivery", "ok", fmt.Sprintf("Nine visitors in ten saw their version within %s.", waitText(*p90))}, true, nil
+}
+
+// abMissedCheck reads what the site script reported over the last 7 days
+// about visual changes that found nothing on the page: usually the page
+// was changed since the version was edited. ok is false when none did.
+func (s *Server) abMissedCheck(ctx context.Context, ws, key string) (abCheck, bool, error) {
+	var visitors int64
+	var variant, path, selectors *string
+	if err := s.pool.QueryRow(ctx, `
+		WITH m AS (
+			SELECT anonymous_id, properties->>'variant' AS variant, properties->>'path' AS path, properties->'selectors' AS selectors
+			FROM customer_events
+			WHERE workspace_id = $1 AND name = $2 AND properties->>'flag' = $3 AND occurred_at > now() - interval '7 days'
+		)
+		SELECT (SELECT count(DISTINCT anonymous_id) FROM m), top.variant, top.path,
+			(SELECT string_agg(x, ', ') FROM (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(top.selectors) = 'array' THEN top.selectors ELSE '[]' END) x LIMIT 3) s)
+		FROM (SELECT 1) one LEFT JOIN LATERAL (SELECT variant, path, selectors FROM m GROUP BY 1, 2, 3 ORDER BY count(*) DESC LIMIT 1) top ON true`,
+		ws, abtests.MissedEvent, key).Scan(&visitors, &variant, &path, &selectors); err != nil {
+		return abCheck{}, false, err
+	}
+	if visitors == 0 {
+		return abCheck{}, false, nil
+	}
+	text := fmt.Sprintf("Some changes found nothing on the page for %d visitor(s) in the last 7 days", visitors)
+	if variant != nil && path != nil {
+		text += fmt.Sprintf(", most often in %s on %s", *variant, *path)
+	}
+	if selectors != nil && *selectors != "" {
+		text += " (" + *selectors + ")"
+	}
+	text += ". The page has probably changed since: open Edit visually for that version and pick those parts again."
+	return abCheck{"changes_found", "warn", text}, true, nil
 }
 
 func waitText(ms float64) string {

@@ -1,15 +1,20 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -17,7 +22,7 @@ import (
 // (built in the browser, so its links only show with JavaScript on) and
 // public X profile pages.
 func fakeGeonodePages(t *testing.T) *httptest.Server {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(geonodeJobs(nil, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Header.Get("X-Api-Key") != "gn-key" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -67,6 +72,63 @@ func fakeGeonodePages(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// geonodeJobs adds Geonode's page jobs (processing_mode async, then GET
+// /v1/extract/{id}) to a fake that answers sync reads: a job ends with
+// what the sync read answered, completed for a 200 and failed with its
+// code otherwise. A job for an address in pending runs forever.
+func geonodeJobs(pending map[string]bool, answer http.HandlerFunc) http.Handler {
+	var mu sync.Mutex
+	jobs := map[string]map[string]any{}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/extract/") {
+			job, ok := jobs[strings.TrimPrefix(r.URL.Path, "/v1/extract/")]
+			w.Header().Set("Content-Type", "application/json")
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				io.WriteString(w, `{"code": "NOT_FOUND"}`)
+				return
+			}
+			json.NewEncoder(w).Encode(job)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		var req map[string]any
+		json.Unmarshal(raw, &req)
+		if r.URL.Path != "/v1/extract" || req["processing_mode"] != "async" {
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			answer(w, r)
+			return
+		}
+		url, _ := req["url"].(string)
+		id := fmt.Sprintf("job-%d", len(jobs)+1)
+		job := map[string]any{"status": "processing"}
+		if !pending[url] {
+			req["processing_mode"] = "sync"
+			body, _ := json.Marshal(req)
+			rec := httptest.NewRecorder()
+			sr := r.Clone(r.Context())
+			sr.Body = io.NopCloser(bytes.NewReader(body))
+			answer(rec, sr)
+			json.Unmarshal(rec.Body.Bytes(), &job)
+			if rec.Code == http.StatusOK {
+				job["status"] = "completed"
+			} else {
+				code, _ := job["code"].(string)
+				if e, ok := job["error"].(map[string]any); ok {
+					code, _ = e["code"].(string)
+				}
+				job = map[string]any{"status": "failed", "error": map[string]any{"code": code}, "tokens_charged": 0}
+			}
+		}
+		jobs[id] = job
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]any{"job_id": id, "status": "queued"})
+	})
 }
 
 func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
@@ -252,7 +314,8 @@ func TestBrandLinkDiscoveryBlockedOrSlow(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 	reads := map[string]int{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	defer api.SetLinkJobWait(time.Millisecond, 50*time.Millisecond)()
+	srv := httptest.NewServer(geonodeJobs(map[string]bool{"https://slowest.example/": true}, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v1/usage/concurrency" {
 			io.WriteString(w, `{"work_concurrency_in_use": 0, "work_concurrency_limit": 5}`)
@@ -277,9 +340,23 @@ func TestBrandLinkDiscoveryBlockedOrSlow(t *testing.T) {
 				"metadata":       map[string]any{"http_status": 200, "url": req.URL},
 				"tokens_charged": 1,
 			})
-		case req.URL == "https://slower.example/":
+		case req.URL == "https://slower.example/", req.URL == "https://slowest.example/":
 			w.WriteHeader(http.StatusGatewayTimeout)
 			io.WriteString(w, `{"code": "TIMEOUT"}`)
+		case req.URL == "https://challenge.example/" && req.RenderJS:
+			json.NewEncoder(w).Encode(map[string]any{
+				"data":     map[string]any{"html": `<html><title>Just a moment...</title></html>`},
+				"metadata": map[string]any{"http_status": 403, "url": req.URL}, "tokens_charged": 1,
+			})
+		case req.URL == "https://challenge.example/":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			io.WriteString(w, `{"error": {"code": "CAPTCHA_CHALLENGE"}}`)
+		case req.URL == "https://broke.example/":
+			w.WriteHeader(http.StatusPaymentRequired)
+			io.WriteString(w, `{"code": "PAYMENT_REQUIRED", "message": "out of credits"}`)
+		case req.URL == "https://down.example/":
+			w.WriteHeader(http.StatusInternalServerError)
+			io.WriteString(w, `{"code": "INTERNAL"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -327,6 +404,26 @@ func TestBrandLinkDiscoveryBlockedOrSlow(t *testing.T) {
 		t.Fatalf("slow both times: %v", list)
 	}
 
+	// Still reading the page with JavaScript when the job's wait runs out:
+	// slow_page, never an outage.
+	bid, sug = brand("Slowestpeak", "https://slowest.example")
+	if err := e.srv.DiscoverBrandLinks(ctx, ws, bid); err != nil {
+		t.Fatalf("a page still being read should not be retried: %v", err)
+	}
+	if list := owner.must(200, "GET", sug, nil); list["last_read_error"] != "slow_page" {
+		t.Fatalf("still reading: %v", list)
+	}
+
+	// The read with JavaScript answered with the bot check itself (403):
+	// blocked, not a page with no links.
+	bid, sug = brand("Challengepeak", "https://challenge.example")
+	if err := e.srv.DiscoverBrandLinks(ctx, ws, bid); err != nil {
+		t.Fatal(err)
+	}
+	if list := owner.must(200, "GET", sug, nil); list["last_read_error"] != "blocked" {
+		t.Fatalf("challenge page: %v", list)
+	}
+
 	codes := map[string]int{}
 	for _, ev := range got() {
 		if ev.Name == "brand.links_discovery_failed" {
@@ -335,5 +432,21 @@ func TestBrandLinkDiscoveryBlockedOrSlow(t *testing.T) {
 	}
 	if codes["blocked"] < 1 || codes["slow_page"] < 1 || codes["connector_unavailable"] != 0 {
 		t.Fatalf("failure codes: %v", codes)
+	}
+
+	// The page reader out of credits, or down: the panel says so, and the
+	// job is tried again, its events naming the connector's code instead of
+	// a generic job error.
+	for site, code := range map[string]string{"https://broke.example": "connector_quota", "https://down.example": "connector_unavailable"} {
+		name := map[string]string{"connector_quota": "Brokepeak", "connector_unavailable": "Downpeak"}[code]
+		bid, sug := brand(name, site)
+		err := e.srv.DiscoverBrandLinks(ctx, ws, bid)
+		var coded interface{ ErrorCode() string }
+		if !errors.As(err, &coded) || coded.ErrorCode() != code {
+			t.Fatalf("%s: error %v, want one retried with code %s", site, err, code)
+		}
+		if list := owner.must(200, "GET", sug, nil); list["last_read_error"] != code {
+			t.Fatalf("%s: %v", site, list)
+		}
 	}
 }

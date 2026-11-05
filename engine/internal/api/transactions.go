@@ -175,8 +175,64 @@ func saveTransaction(ctx context.Context, tx pgx.Tx, p *principal, ws, brand str
 	return v, created, err
 }
 
+// addTransaction saves a transaction from the API (or a partner
+// conversion reported to it) and counts it as a payment once. The same
+// payment already in from an order event or a billing connector is that
+// one (merged): it isn't added or counted again.
+func addTransaction(ctx context.Context, tx pgx.Tx, p *principal, ws, brand string, n newTransaction) (v transactionView, created, merged bool, err error) {
+	// A refund may name its payment by any id the sender has for it
+	// (findPayment); it is kept as that payment's source_id, so it comes
+	// off the right payment.
+	if n.RefundOf != "" {
+		paid, found, err := findPayment(ctx, tx, ws, brand, n.RefundOf)
+		if err != nil {
+			return v, false, false, err
+		}
+		if found {
+			n.RefundOf = paid.sourceID
+		}
+	}
+	// The same refund already in from an Order Refunded event is that one.
+	if n.Kind == "refund" || n.Kind == "chargeback" {
+		known, err := sameRefund(ctx, tx, brand, n.Source, n.SourceID, n.RefundOf, n.AmountMinor, n.Currency, n.OccurredAt)
+		if err != nil {
+			return v, false, false, err
+		}
+		if known != "" {
+			v, err = scanTransaction(tx.QueryRow(ctx, `SELECT `+transactionColumns+` FROM transactions t WHERE t.id = $1`, known))
+			return v, false, true, err
+		}
+	}
+	if n.Kind == "payment" {
+		known, found, err := samePayment(ctx, tx, brand, n.Source, n.SourceID, n.RecordID, n.AmountMinor, n.Currency, n.OccurredAt)
+		if err != nil {
+			return v, false, false, err
+		}
+		if found {
+			if n.RecordID != "" && known.recordID == nil {
+				if _, err := tx.Exec(ctx, `UPDATE transactions SET record_id = $2, updated_at = now() WHERE id = $1`, known.id, n.RecordID); err != nil {
+					return v, false, false, err
+				}
+			}
+			if v, err = scanTransaction(tx.QueryRow(ctx, `SELECT `+transactionColumns+` FROM transactions t WHERE t.id = $1`, known.id)); err != nil {
+				return v, false, false, err
+			}
+			if known.source == "api" || known.source == orderSource {
+				_, err = countPayment(ctx, tx, ws, v)
+			}
+			return v, false, true, err
+		}
+	}
+	if v, created, err = saveTransaction(ctx, tx, p, ws, brand, n); err != nil {
+		return v, false, false, err
+	}
+	_, err = countPayment(ctx, tx, ws, v)
+	return v, created, false, err
+}
+
 type transactionInput struct {
 	RecordID    *string    `json:"record_id"`
+	UserID      *string    `json:"user_id"`
 	Kind        string     `json:"kind"`
 	Status      *string    `json:"status"`
 	AmountMinor *int64     `json:"amount_minor"`
@@ -215,7 +271,7 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	case in.Description != nil && len(*in.Description) > 500:
 		problem = "description is at most 500 characters"
 	case in.RefundOf != nil && (len(*in.RefundOf) > 200 || (n.Kind != "refund" && n.Kind != "chargeback")):
-		problem = "refund_of is the source_id of the payment a refund or chargeback gives back"
+		problem = "refund_of names the payment a refund or chargeback gives back: its source_id (an order's order_id), its order event's messageId or Outflare's transaction id"
 	}
 	if problem != "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", problem)
@@ -236,7 +292,7 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	var v transactionView
-	var created bool
+	var created, merged bool
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if in.RecordID != nil && *in.RecordID != "" {
 			var id string
@@ -256,12 +312,24 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		if n.RecordID == "" && in.UserID != nil && strings.TrimSpace(*in.UserID) != "" {
+			rec, _, err := ownerOf(ctx, tx, a, a.Brand, "user_id", strings.TrimSpace(*in.UserID))
+			if err != nil {
+				return err
+			}
+			if rec != nil {
+				n.RecordID = *rec
+			}
+		}
 		var err error
-		v, created, err = saveTransaction(ctx, tx, &a.principal, a.WorkspaceID, a.Brand, n)
+		v, created, merged, err = addTransaction(ctx, tx, &a.principal, a.WorkspaceID, a.Brand, n)
 		return err
 	})
 	outcome := "created"
-	if !created {
+	switch {
+	case merged:
+		outcome = "merged"
+	case !created:
 		outcome = "duplicate"
 	}
 	if err != nil {

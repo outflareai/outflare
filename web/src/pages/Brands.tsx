@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
 import { DataTable } from "@/components/data-table";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
-import { Check, LayoutGrid, List, Plus, Search, X } from "lucide-react";
+import { Check, LayoutGrid, List, Loader2, Plus, Search, X } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { ago, plural } from "../format";
@@ -704,6 +704,8 @@ function linkReadFailed(code: string, website: string): string {
       return `${website} showed Geonode a bot check instead of the page, so Outflare couldn't read it. The site blocks automated reads: add the links yourself, or try again later.`;
     case "slow_page":
       return `${website} took longer to load than Geonode allows, so Outflare couldn't read it. Try again later, or add the links yourself.`;
+    case "page_failed":
+      return `Geonode couldn't read ${website}: the site failed or turned it away. Try again later, or add the links yourself.`;
     case "connector_auth":
       return "Geonode turned the key down. Check the Geonode connection under Connectors, then try again.";
     case "connector_quota":
@@ -737,12 +739,13 @@ function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }:
       setLooking(false);
       return setError(errorMessage(error));
     }
-    // Reading the page takes a few seconds; check until the read is done.
-    // Review pages found by search can show up first, so a new suggestion
-    // alone doesn't mean the website was read.
+    // Reading the page takes a few seconds, and up to about four minutes
+    // for a site behind a bot check; check until the read is done. Review
+    // pages found by search can show up first, so a new suggestion alone
+    // doesn't mean the website was read.
     const readBefore = list?.last_read_at ?? null;
-    for (let i = 0; i < 16; i++) {
-      await new Promise((r) => setTimeout(r, 2500));
+    for (let i = 0; i < 80; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
       const d = await load();
       if (d && d.last_read_at !== readBefore) break;
     }
@@ -780,7 +783,7 @@ function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }:
         </div>
         {!readOnly && list.can_discover && (
           <Button type="button" variant="ghost" onClick={find} disabled={looking}>
-            <Search className="size-3.5" /> {looking ? "Reading the website…" : "Find links"}
+            {looking ? <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden /> : <Search className="size-3.5" />} {looking ? "Reading the website…" : "Find links"}
           </Button>
         )}
       </div>
@@ -790,7 +793,10 @@ function LinkSuggestions({ ws, brand: b, links, readOnly, go, onFill, onAdded }:
           <span className="mt-2 block"><ConnectFor connector="geonode" name="Geonode" back="brands" item={b.id} why={geonodeWhy.brands} go={go} variant="ghost" /></span>
         </p>
       )}
-      {!readOnly && b.website && list.last_read_error && (
+      {!readOnly && looking && (
+        <p className="mt-2 text-xs text-muted-foreground" role="status">Reading {b.website} through Geonode. A site with a bot check can take a few minutes.</p>
+      )}
+      {!readOnly && !looking && b.website && list.last_read_error && (
         <p className="mt-2 text-xs text-muted-foreground" role="status">{linkReadFailed(list.last_read_error, b.website)}</p>
       )}
       {waiting.length > 0 && (

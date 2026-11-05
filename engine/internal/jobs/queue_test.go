@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
@@ -152,6 +153,75 @@ func TestDeadAfterMaxAttemptsAndPermanent(t *testing.T) {
 	pool.QueryRow(ctx, `SELECT attempts FROM jobs WHERE kind = 'permanent'`).Scan(&attempts)
 	if attempts != 1 {
 		t.Fatalf("permanent attempts = %d, want 1", attempts)
+	}
+}
+
+// A job that fails because a connected service is out of credits or down
+// says so on its events (connector_quota, connector_unavailable) with
+// outcome failure, not the generic job_error: nothing in Outflare broke.
+func TestConnectorErrorsKeepTheirCode(t *testing.T) {
+	events := track.Capture(t)
+	pool := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	q := newQueue(pool)
+	q.Handle("quota", func(ctx context.Context, j jobs.Job) error {
+		return fmt.Errorf("read page: %w", connectors.Errf(connectors.ErrQuota, "out of credits"))
+	})
+	q.Handle("broken", func(ctx context.Context, j jobs.Job) error { return errors.New("boom") })
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "quota", MaxAttempts: 2})
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "broken", MaxAttempts: 1})
+	go q.Run(ctx, 2)
+
+	waitFor(t, func() bool { return countStatus(t, pool, "dead") == 2 })
+	got := map[string]string{}
+	for _, e := range events() {
+		if e.Name == "job.failed" || e.Name == "job.dead" {
+			got[e.Name+" "+e.Props["kind"].(string)] = e.ErrorCode + " " + e.Outcome
+		}
+	}
+	want := map[string]string{
+		"job.failed quota": "connector_quota failure",
+		"job.dead quota":   "connector_quota failure",
+		"job.dead broken":  "job_error error",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s: %q, want %q (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// RetryLater makes the next attempt wait longer than the backoff, and the
+// error keeps its code.
+func TestRetryLaterWaits(t *testing.T) {
+	events := track.Capture(t)
+	pool := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var first, second atomic.Int64
+	q := newQueue(pool)
+	q.Handle("outage", func(ctx context.Context, j jobs.Job) error {
+		if j.Attempt == 1 {
+			first.Store(time.Now().UnixMicro())
+			return jobs.RetryLater(fmt.Errorf("read page: %w", connectors.Errf(connectors.ErrUnavailable, "down")), 400*time.Millisecond)
+		}
+		second.Store(time.Now().UnixMicro())
+		return nil
+	})
+	jobs.Enqueue(ctx, pool, jobs.NewJob{Kind: "outage", MaxAttempts: 2})
+	go q.Run(ctx, 1)
+
+	waitFor(t, func() bool { return countStatus(t, pool, "succeeded") == 1 })
+	if gap := time.Duration(second.Load()-first.Load()) * time.Microsecond; gap < 400*time.Millisecond {
+		t.Fatalf("retried after %v, want at least 400ms", gap)
+	}
+	for _, e := range events() {
+		if e.Name == "job.failed" && e.ErrorCode != "connector_unavailable" {
+			t.Fatalf("job.failed code = %q", e.ErrorCode)
+		}
 	}
 }
 

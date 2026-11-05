@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { pickedBrandId } from "@/lib/brand";
 import type { PartnerProgram, Schemas } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import {
@@ -69,14 +70,14 @@ export function PartnerTasks({
   const [offer, setOffer] = useState<Submission | null>(null);
   const [price, setPrice] = useState("");
   const [note, setNote] = useState("");
-  const path = { ws, id: program.id };
+  const path = { brand: pickedBrandId(), id: program.id };
   const load = useCallback(async () => {
     const [a, b] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/partner-programs/{id}/tasks", {
-        params: { path: { ws, id: program.id } },
+      api.GET("/v1/brands/{brand}/partner-programs/{id}/tasks", {
+        params: { path: { brand: pickedBrandId(), id: program.id } },
       }),
-      api.GET("/v1/workspaces/{ws}/partner-programs/{id}/audiences", {
-        params: { path: { ws, id: program.id } },
+      api.GET("/v1/brands/{brand}/partner-programs/{id}/audiences", {
+        params: { path: { brand: pickedBrandId(), id: program.id } },
       }),
     ]);
     if (a.error || b.error) {
@@ -100,7 +101,7 @@ export function PartnerTasks({
     setBusy(true);
     try {
       const r = await api.POST(
-        "/v1/workspaces/{ws}/partner-programs/{id}/task-submissions/{submission}",
+        "/v1/brands/{brand}/partner-programs/{id}/task-submissions/{submission}",
         {
           params: { path: { ...path, submission: s.id } },
           body: {
@@ -130,7 +131,7 @@ export function PartnerTasks({
     setBusy(true);
     try {
       const r = await api.POST(
-        "/v1/workspaces/{ws}/partner-programs/{id}/tasks/{task}",
+        "/v1/brands/{brand}/partner-programs/{id}/tasks/{task}",
         {
           params: { path: { ...path, task: t.id } },
           body: { action: t.status === "active" ? "pause" : "resume" },
@@ -450,7 +451,6 @@ function rewardText(c: Config, currency: string) {
     : money(c.amount_cents ?? 0, currency);
 }
 function TaskComposer({
-  ws,
   program,
   onClose,
   onSaved,
@@ -489,8 +489,8 @@ function TaskComposer({
     setBusy(true);
     try {
       const r = await api.POST(
-        "/v1/workspaces/{ws}/partner-programs/{id}/tasks",
-        { params: { path: { ws, id: program.id } }, body: v },
+        "/v1/brands/{brand}/partner-programs/{id}/tasks",
+        { params: { path: { brand: pickedBrandId(), id: program.id } }, body: v },
       );
       if (r.error) setError(errorMessage(r.error));
       else {

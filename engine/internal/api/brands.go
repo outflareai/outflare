@@ -284,6 +284,37 @@ func (s *Server) defaultBrand(ctx context.Context, a *access) (string, error) {
 	return *first, nil
 }
 
+// settingsBrand is the brand whose settings a route reads or writes: the
+// route's, else ?brand=, else the workspace's first. It is "" when the
+// workspace has no brand. It writes the error and returns false when the
+// caller can't see the brand named.
+func (s *Server) settingsBrand(w http.ResponseWriter, r *http.Request) (string, bool) {
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return "", false
+	}
+	if sel.id != "" && sel.id != "none" {
+		return sel.id, true
+	}
+	b, err := s.rowBrand(r.Context(), accessFrom(r.Context()))
+	if err != nil {
+		s.internal(w, r, err)
+		return "", false
+	}
+	return b, true
+}
+
+// rowBrand is the brand a new row of a brand's data is stored in: the
+// route's, else the workspace's first, as defaultBrand. It is "" when the
+// workspace has no brand: NULLIF to uuid stores that as none.
+func (s *Server) rowBrand(ctx context.Context, a *access) (string, error) {
+	b, err := s.defaultBrand(ctx, a)
+	if b == "none" {
+		b = ""
+	}
+	return b, err
+}
+
 // matches reports whether a record with brand id passes the filter.
 func (b brandSel) matches(id *string) bool {
 	if b.in != nil && id != nil && !slices.Contains(b.in, *id) {
@@ -395,7 +426,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "ab-tests", "support", "help-centre", "agent-mail"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".

@@ -92,6 +92,10 @@ func (s *Server) abTestPreviews(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) abPreviews(ctx context.Context, ws string, t abTestView, f flagView, page string) (abPreviews, error) {
 	out := abPreviews{TestID: t.ID, Pages: []abPreviewPage{}, Versions: []abPreviewVersion{}}
+	// A no-code test previews on the page it was made for.
+	if page == "" && t.Page != "" && !strings.HasSuffix(t.Page, "*") {
+		page = t.Page
+	}
 	var pages []abPreviewPage
 	if page != "" {
 		pages = append(pages, abPreviewPage{URL: page})

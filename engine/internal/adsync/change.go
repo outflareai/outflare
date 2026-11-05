@@ -32,7 +32,35 @@ const (
 	ChangePause  = "pause"
 	ChangeResume = "resume"
 	ChangeBudget = "budget"
+	// Keywords (Google): a keyword added to an ad group, a negative
+	// keyword added to a campaign or ad group, a keyword given its own ad
+	// group.
+	ChangeKeywordAdd   = "keyword_add"
+	ChangeNegativeAdd  = "negative_add"
+	ChangeKeywordSplit = "keyword_split"
+	// Targeting: how the campaign bids, a customer list audience added or
+	// taken out, a country added or taken out.
+	ChangeBidding        = "bidding"
+	ChangeAudienceAdd    = "audience_add"
+	ChangeAudienceRemove = "audience_remove"
+	ChangeCountryAdd     = "country_add"
+	ChangeCountryRemove  = "country_remove"
 )
+
+// TargetingKind reports whether k changes the campaign's bidding or whom
+// it reaches.
+func TargetingKind(k string) bool {
+	switch k {
+	case ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove:
+		return true
+	}
+	return false
+}
+
+// KeywordKind reports whether k changes keywords rather than the campaign.
+func KeywordKind(k string) bool {
+	return k == ChangeKeywordAdd || k == ChangeNegativeAdd || k == ChangeKeywordSplit
+}
 
 type changePayload struct {
 	Change string `json:"change_id"`
@@ -51,6 +79,21 @@ func EnqueueChange(ctx context.Context, q jobs.Querier, ws, changeID string) err
 type ChangeState struct {
 	Status            string `json:"status,omitempty"`
 	DailyBudgetMicros *int64 `json:"daily_budget_micros,omitempty"`
+	// A keyword change: the keyword, its match type (exact, phrase,
+	// broad), and the platform's id of the ad group it is in (a negative
+	// without one is for the whole campaign). A split also names the new
+	// ad group, and once made, its id.
+	Keyword        string `json:"keyword,omitempty"`
+	MatchType      string `json:"match_type,omitempty"`
+	AdGroupID      string `json:"ad_group_id,omitempty"`
+	NewAdGroupName string `json:"new_ad_group_name,omitempty"`
+	NewAdGroupID   string `json:"new_ad_group_id,omitempty"`
+	// A targeting change: the bidding asked for, or the audience (its id
+	// on the platform and name) or country added or taken out.
+	Bidding      *connectors.AdBidding `json:"bidding,omitempty"`
+	AudienceID   string                `json:"audience_id,omitempty"`
+	AudienceName string                `json:"audience_name,omitempty"`
+	Country      string                `json:"country,omitempty"`
 }
 
 func (s *Syncer) changeJob(ctx context.Context, job jobs.Job) error {
@@ -113,6 +156,12 @@ func (s *Syncer) ApplyChange(ctx context.Context, ws, changeID string, last bool
 			return fail("failed", "connector_gone", errors.New("the ad platform connection is gone"))
 		}
 		return fail("error", "internal", err)
+	}
+	if KeywordKind(kind) {
+		return s.applyKeyword(ctx, ws, changeID, kind, connector, o, acct.ad(), entityExternal, want, last, ev, fail)
+	}
+	if TargetingKind(kind) {
+		return s.applyTargeting(ctx, ws, changeID, kind, connector, o, acct, entityExternal, want, last, ev, fail)
 	}
 	m, ok := o.Connector.(connectors.AdsManager)
 	if !ok {
@@ -207,7 +256,90 @@ func budgetWord(b *int64) string {
 }
 
 // ChangeKinds lists the kinds, for the API's checks.
-var ChangeKinds = []string{ChangePause, ChangeResume, ChangeBudget}
+var ChangeKinds = []string{ChangePause, ChangeResume, ChangeBudget, ChangeKeywordAdd, ChangeNegativeAdd, ChangeKeywordSplit,
+	ChangeBidding, ChangeAudienceAdd, ChangeAudienceRemove, ChangeCountryAdd, ChangeCountryRemove}
+
+// applyKeyword makes a keyword change. Keywords aren't read back here: the
+// next sync lists them.
+func (s *Syncer) applyKeyword(ctx context.Context, ws, changeID, kind, connector string, o *connectors.Opened, ad connectors.AdAccount, campaignExternal string,
+	want ChangeState, last bool, ev track.Event, fail func(outcome, code string, err error) error) error {
+	k, ok := o.Connector.(connectors.AdKeywordManager)
+	if !ok {
+		return fail("failed", "connector_invalid", fmt.Errorf("%s cannot change keywords", o.Connector.Definition().Name))
+	}
+	var err error
+	switch kind {
+	case ChangeKeywordAdd:
+		err = k.AddKeyword(ctx, o.Client, o.Creds, ad, want.AdGroupID, want.Keyword, want.MatchType)
+	case ChangeNegativeAdd:
+		err = k.AddNegativeKeyword(ctx, o.Client, o.Creds, ad, campaignExternal, want.AdGroupID, want.Keyword, want.MatchType)
+	case ChangeKeywordSplit:
+		want.NewAdGroupID, err = k.SplitKeyword(ctx, o.Client, o.Creds, ad, campaignExternal, want.AdGroupID, want.NewAdGroupName, want.Keyword)
+	}
+	if err != nil {
+		if connectors.KindOf(err) == connectors.ErrUnavailable && !last {
+			return err
+		}
+		return fail("failed", "connector_"+connectors.KindOf(err), err)
+	}
+	after, _ := json.Marshal(want)
+	if _, err := s.Pool.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, after = $4, verify_note = 'shows after the next sync'
+		WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, s.now(), after); err != nil {
+		return fail("error", "internal", err)
+	}
+	metrics.AdChanged(connector, kind, "applied")
+	track.Emit(ctx, ev)
+	return nil
+}
+
+// applyTargeting makes a bidding, audience or country change. Bidding is
+// kept in the mirror as asked; the next sync shows what the platform
+// says, and the campaign's targeting is read live.
+func (s *Syncer) applyTargeting(ctx context.Context, ws, changeID, kind, connector string, o *connectors.Opened, acct account, campaignExternal string,
+	want ChangeState, last bool, ev track.Event, fail func(outcome, code string, err error) error) error {
+	t, ok := o.Connector.(connectors.AdTargetingManager)
+	if !ok {
+		return fail("failed", "connector_invalid", fmt.Errorf("%s cannot change targeting", o.Connector.Definition().Name))
+	}
+	ad := acct.ad()
+	var err error
+	switch kind {
+	case ChangeBidding:
+		if want.Bidding == nil {
+			err = connectors.Errf(connectors.ErrInvalid, "the change names no bidding")
+		} else {
+			err = t.SetBidding(ctx, o.Client, o.Creds, ad, campaignExternal, *want.Bidding)
+		}
+	case ChangeAudienceAdd, ChangeAudienceRemove:
+		err = t.SetCampaignAudience(ctx, o.Client, o.Creds, ad, campaignExternal, want.AudienceID, kind == ChangeAudienceAdd)
+	case ChangeCountryAdd, ChangeCountryRemove:
+		err = t.SetCampaignCountry(ctx, o.Client, o.Creds, ad, campaignExternal, want.Country, kind == ChangeCountryAdd)
+	}
+	if err != nil {
+		if connectors.KindOf(err) == connectors.ErrUnavailable && !last {
+			return err
+		}
+		return fail("failed", "connector_"+connectors.KindOf(err), err)
+	}
+	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE ad_changes SET status = 'applied', applied_at = $3, verify_note = 'shows on the campaign''s targeting now, and in its numbers after the next sync'
+			WHERE workspace_id = $1 AND id = $2 AND status = 'queued'`, ws, changeID, s.now()); err != nil {
+			return err
+		}
+		if kind != ChangeBidding {
+			return nil
+		}
+		_, err := tx.Exec(ctx, `UPDATE ad_entities SET bidding_strategy = $3, platform_target_cpa_micros = $4, platform_target_roas = $5, updated_at = now()
+			WHERE ad_account_id = $1 AND level = 'campaign' AND external_id = $2`, acct.id, campaignExternal, want.Bidding.Strategy, want.Bidding.TargetCPAMicros, want.Bidding.TargetROAS)
+		return err
+	})
+	if err != nil {
+		return fail("error", "internal", err)
+	}
+	metrics.AdChanged(connector, kind, "applied")
+	track.Emit(ctx, ev)
+	return nil
+}
 
 // ChangeKind reports whether k is a change kind.
 func ChangeKind(k string) bool {

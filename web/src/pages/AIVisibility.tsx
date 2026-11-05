@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Integration, Schemas } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { pickedBrandId, useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, Loading, PageHeader, Stat, Stats, field, toast } from "../ui";
 import type { Tab } from "../App";
@@ -39,7 +39,7 @@ export function AIVisibility({ ws, go }: Props) {
     Promise.all([
       api.GET("/v1/workspaces/{ws}/ai-visibility", { params: { path: { ws }, query: { ...q, days } } }),
       api.GET("/v1/workspaces/{ws}/ai-cohorts", { params: { path: { ws }, query: q } }),
-      api.GET("/v1/workspaces/{ws}/ai-visibility/settings", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/ai-visibility/settings", { params: { path: { brand: pickedBrandId() } } }),
     ]).then(([v, c, s]) => {
       const err = v.error ?? c.error ?? s.error;
       if (err || !v.data || !c.data || !s.data) return setError(errorMessage(err));
@@ -108,7 +108,7 @@ function ModelsCard({ ws, settings, onSaved, go }: { ws: string; settings: Setti
   }, [ws]);
 
   async function save(models: Schemas["AISampleModelInput"][], monthly = settings.monthly_limit_cents) {
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/ai-visibility/settings", { params: { path: { ws } }, body: { models, monthly_limit_cents: monthly } });
+    const { data, error } = await api.PUT("/v1/brands/{brand}/ai-visibility/settings", { params: { path: { brand: pickedBrandId() } }, body: { models, monthly_limit_cents: monthly } });
     if (error || !data) return toast(errorMessage(error), "error");
     if (held(data)) return;
     onSaved(data as Settings);

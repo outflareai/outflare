@@ -20,21 +20,32 @@ import (
 // followers (and sometimes following and posts); posts and their numbers
 // need the channel's own app, as X and LinkedIn have.
 
+// socialOwner is whose a public profile is: a brand's own, or one of the
+// brand's tracked competitors (competitor set).
+type socialOwner struct{ brand, competitor string }
+
 // publicAccounts are the profiles of one channel in the workspace's brand
-// links, with the brand of each. A profile a channel's own connection
-// already reads (an X app, a LinkedIn sign-in) is left to it.
-func (s *Server) publicAccounts(ctx context.Context, ws, integrationID, channel string) ([]connectors.SocialAccount, map[string]string, error) {
+// links and in its tracked competitors' confirmed profiles, with whose
+// each is. A profile a channel's own connection already reads (an X app, a
+// LinkedIn sign-in) is left to it, and the brand's own profile wins over a
+// competitor's claim to the same one.
+func (s *Server) publicAccounts(ctx context.Context, ws, integrationID, channel string) ([]connectors.SocialAccount, map[string]socialOwner, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT b.id::text, l->>'url' FROM brands b, jsonb_array_elements(b.links) l
+		SELECT b.id::text, '', l->>'url', b.created_at FROM brands b, jsonb_array_elements(b.links) l
 		WHERE b.workspace_id = $1 AND b.status = 'active' AND l->>'kind' = $2
-		ORDER BY b.created_at`, ws, channel)
+		UNION ALL
+		SELECT c.brand_id::text, c.id::text, l->>'url', c.created_at FROM seo_competitors c JOIN brands b ON b.id = c.brand_id AND b.workspace_id = c.workspace_id,
+			jsonb_array_elements(c.links) l
+		WHERE c.workspace_id = $1 AND c.status = 'tracked' AND b.status = 'active' AND l->>'kind' = $2 AND l->>'state' = 'confirmed'
+		ORDER BY 2, 4`, ws, channel)
 	if err != nil {
 		return nil, nil, err
 	}
-	type link struct{ brand, url string }
+	type link struct{ brand, competitor, url string }
 	var links []link
 	var l link
-	if _, err := pgx.ForEachRow(rows, []any{&l.brand, &l.url}, func() error { links = append(links, l); return nil }); err != nil {
+	var at time.Time
+	if _, err := pgx.ForEachRow(rows, []any{&l.brand, &l.competitor, &l.url, &at}, func() error { links = append(links, l); return nil }); err != nil {
 		return nil, nil, err
 	}
 	owned := map[string]bool{}
@@ -49,7 +60,7 @@ func (s *Server) publicAccounts(ctx context.Context, ws, integrationID, channel 
 		return nil, nil, err
 	}
 	out := []connectors.SocialAccount{}
-	brands := map[string]string{}
+	brands := map[string]socialOwner{}
 	for _, l := range links {
 		p, ok := sociallinks.PublicProfile(channel, l.url)
 		if !ok || owned[strings.ToLower(p.Handle)] {
@@ -58,7 +69,7 @@ func (s *Server) publicAccounts(ctx context.Context, ws, integrationID, channel 
 		if _, dup := brands[p.ID]; dup {
 			continue
 		}
-		brands[p.ID] = l.brand
+		brands[p.ID] = socialOwner{brand: l.brand, competitor: l.competitor}
 		kind := connectors.SocialProfile
 		if p.Page {
 			kind = connectors.SocialPage

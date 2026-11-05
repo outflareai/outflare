@@ -4,7 +4,21 @@ An A/B test asks a [feature flag](feature-flags.md) a question: which of its ver
 
 A/B tests are separate from SEO experiments, which compare groups of pages rather than visitors.
 
-## Setting one up
+## Test a page, no code
+
+The quickest test needs nothing from a developer once the [website script](website-tracking.md) is on your site:
+
+1. **Analytics → A/B tests → New test → Test a page.** Enter the page (end it with `*` for every page under it, such as `/blog/*`), how many new versions to compare with today's page (one to four), and the goal.
+2. **Edit the versions.** On the draft test, choose **Edit visually** next to each version: your page opens with an editor over it, where you click anything to change it ([what it can change](feature-flags.md#change-a-page-without-code)). Today's page, the control, stays as it is.
+3. **Preview, then start.** Check each version (below) and start the test. Visitors are split from then on.
+
+**Split URL tests.** When the new versions are whole other pages, tick **The versions are other pages** and enter a page for each version, such as `/pricing-b` (`page.redirects`). Visitors who land on the test's page are sent to their version's page, keeping the address's query string, and count in the test as they're sent. Pages must be on the brand's own domains. You can also set or change a version's page later in the editor's **Version settings**.
+
+**Agents build, people decide.** An agent (the MCP server, a playbook or an API token on the action layer) can make a no-code test and build its versions (`PUT .../ab-tests/{test}/versions/{version}`, MCP `set_ab_test_version`, with the same changes, CSS and redirect the editor saves) under its grants, and check them with previews. Anything visitors would see waits for a person, whatever the agent's grants say: starting or shipping a test, turning a flag on, and changing a version (or a flag's versions, rollout or rules) while it is live. The agent's request comes back as held (`202`), and a person approves it under **Actions**.
+
+Behind the scenes Outflare makes a flag for the test (`POST .../ab-tests` with `page` instead of `flag`, MCP `create_ab_test`): off until the test starts, shown only on that page, split evenly between the control and versions `b`, `c` and so on. The test keeps its `page`, so previews and the editor open there. Developers see the flag under Feature flags like any other.
+
+## Setting one up from a flag
 
 1. Make a flag with two or more versions, such as `control` 50 and `faster` 50, and read it on the page (below).
 2. Add a test of it (**Analytics → A/B tests**, `POST /v1/workspaces/{ws}/ab-tests`, or MCP `create_ab_test`):

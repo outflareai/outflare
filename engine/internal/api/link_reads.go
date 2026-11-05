@@ -23,8 +23,10 @@ import (
 
 func (s *Server) routesLinkReads(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/link-building/settings", s.inWorkspace(read, s.getLinkSettings))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-building/settings", s.inWorkspace(manage, s.updateLinkSettings))
+	// Settings are the brand's; the workspace route acts on ?brand= or the
+	// first brand.
+	s.twinRoute(mux, "GET", "link-building/settings", s.inBrand, read, s.getLinkSettings)
+	s.twinRoute(mux, "PATCH", "link-building/settings", s.inWorkspace, manage, s.updateLinkSettings)
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads", s.inBrand(read, s.listLinkReads))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-reads", s.inBrand(manage, s.readLinks))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads/dead-pages", s.inBrand(read, s.deadPagesReport))
@@ -33,7 +35,12 @@ func (s *Server) routesLinkReads(mux *http.ServeMux) {
 }
 
 func (s *Server) getLinkSettings(w http.ResponseWriter, r *http.Request) {
-	v, err := seosync.LoadLinkSettings(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID)
+	a := accessFrom(r.Context())
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	v, err := seosync.LoadLinkSettings(r.Context(), s.pool, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -65,7 +72,11 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	before, err := seosync.LoadLinkSettings(ctx, s.pool, a.WorkspaceID)
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	before, err := seosync.LoadLinkSettings(ctx, s.pool, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -85,11 +96,12 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE link_building_settings SET pitch_cooldown_days = $2, weekly_reads = $3, weekly_budget_percent = $4,
-				recheck_days = $6, updated_by = $5, updated_at = now() WHERE workspace_id = $1`,
-			a.WorkspaceID, after.PitchCooldownDays, after.WeeklyReads, after.WeeklyBudgetPercent, nullIfEmpty(a.ActorID), after.RecheckDays); err != nil {
+				recheck_days = $6, updated_by = $5, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id = COALESCE(NULLIF($7, '')::uuid, outflare_first_brand($1))`,
+			a.WorkspaceID, after.PitchCooldownDays, after.WeeklyReads, after.WeeklyBudgetPercent, nullIfEmpty(a.ActorID), after.RecheckDays, brand); err != nil {
 			return err
 		}
-		data := map[string]any{"pitch_cooldown_days": after.PitchCooldownDays, "weekly_reads": after.WeeklyReads,
+		data := map[string]any{"brand_id": brand, "pitch_cooldown_days": after.PitchCooldownDays, "weekly_reads": after.WeeklyReads,
 			"weekly_budget_percent": after.WeeklyBudgetPercent, "recheck_days": after.RecheckDays}
 		return recordWithProps(ctx, tx, &a.principal, a.WorkspaceID, "link_building.settings_updated", "workspace", a.WorkspaceID, data, data)
 	})
@@ -97,7 +109,7 @@ func (s *Server) updateLinkSettings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	v, err := seosync.LoadLinkSettings(ctx, s.pool, a.WorkspaceID)
+	v, err := seosync.LoadLinkSettings(ctx, s.pool, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -256,10 +268,9 @@ func (s *Server) loadLinkRead(ctx context.Context, a *access, id string) (*linkR
 // linkReader opens the workspace's SEO connection that reads single links:
 // integrationID when set, else the first connected one. Without one it
 // answers 409 connector_needed: the workspace connects its own.
-func (s *Server) linkReader(w http.ResponseWriter, r *http.Request, ws, integrationID string) (*connectors.Opened, connectors.SEOReader, bool) {
-	if !s.needIntegrations(w, r) {
-		return nil, nil, false
-	}
+// linkReaderID is the workspace's connected SEO connection that reads
+// links (integrationID when given), preferring Ahrefs; "" when it has none.
+func (s *Server) linkReaderID(ctx context.Context, ws, integrationID string) (string, error) {
 	var ids []string
 	for _, d := range s.integrations.Registry.All() {
 		if c, ok := s.integrations.Registry.Get(d.ID); ok {
@@ -269,10 +280,21 @@ func (s *Server) linkReader(w http.ResponseWriter, r *http.Request, ws, integrat
 		}
 	}
 	var id string
-	err := s.pool.QueryRow(r.Context(), `SELECT id::text FROM integrations
+	err := s.pool.QueryRow(ctx, `SELECT id::text FROM integrations
 		WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected' AND ($3 = '' OR id::text = $3)
 		ORDER BY connector = 'ahrefs' DESC, created_at LIMIT 1`, ws, ids, integrationID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+func (s *Server) linkReader(w http.ResponseWriter, r *http.Request, ws, integrationID string) (*connectors.Opened, connectors.SEOReader, bool) {
+	if !s.needIntegrations(w, r) {
+		return nil, nil, false
+	}
+	id, err := s.linkReaderID(r.Context(), ws, integrationID)
+	if err == nil && id == "" {
 		if integrationID != "" {
 			writeError(w, r, http.StatusNotFound, "not_found", "integration_id is not a connected SEO connection that reads links")
 			return nil, nil, false

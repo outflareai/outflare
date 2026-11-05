@@ -78,16 +78,25 @@ func (s *Server) dnsApproval(w http.ResponseWriter, r *http.Request, sub dnsSubj
 	if !v.Available {
 		outcome = v.Reason
 	}
-	metrics.DomainConnectLookup(outcome, time.Since(start))
-	if err != nil {
-		track.Fail(ctx, s.log, track.Event{Name: sub.Subject + ".dns_approval_lookup_failed", WorkspaceID: accessFrom(ctx).WorkspaceID,
-			Surface: "api", Props: map[string]any{"subject": sub.Subject}}, "domain_connect_lookup_failed", err)
+	step := domainconnect.StepOf(err)
+	metrics.DomainConnectLookup(outcome, step, time.Since(start))
+	// A failure given again from the cache was reported when it happened,
+	// so a page reloaded while a provider is down doesn't repeat it.
+	if err != nil && !domainconnect.Repeated(err) {
+		if step == domainconnect.StepSign {
+			track.Fail(ctx, s.log, track.Event{Name: "domain_connect.key_failed", WorkspaceID: accessFrom(ctx).WorkspaceID, Surface: "api",
+				Props: map[string]any{"subject": sub.Subject, "step": step}}, "domain_connect_sign", err)
+		} else {
+			track.Fail(ctx, s.log, track.Event{Name: sub.Subject + ".dns_approval_lookup_failed", WorkspaceID: accessFrom(ctx).WorkspaceID,
+				Surface: "api", Props: map[string]any{"subject": sub.Subject, "step": step}}, "domain_connect_lookup_failed", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, v)
 }
 
 // approvalFor finds the provider and builds the link; err is set only for
-// a lookup that failed, not for a provider that doesn't support it.
+// a lookup that failed or a link that couldn't be signed, not for a
+// provider that doesn't support it.
 func (s *Server) approvalFor(ctx context.Context, sub dnsSubject, redirect string) (dnsApprovalView, error) {
 	if len(sub.Want) == 0 {
 		return dnsApprovalView{Reason: nothingToAdd}, nil
@@ -119,7 +128,7 @@ func (s *Server) approvalFor(ctx context.Context, sub dnsSubject, redirect strin
 	}
 	if err != nil {
 		v := dnsApprovalView{Reason: domainconnect.ReasonOf(err), Provider: zone.Settings.Name()}
-		if v.Reason != domainconnect.ReasonLookupFailed {
+		if v.Reason != domainconnect.ReasonLookupFailed && domainconnect.StepOf(err) != domainconnect.StepSign {
 			err = nil
 		}
 		return v, err

@@ -82,6 +82,12 @@ export function page(name: string) {
 // without a request. Names are object.verb in the past tense, like the
 // server's; add new ones to this list (AGENTS.md, "Events").
 export type UiEvent =
+  | "ui.ads_level_opened" // paid ads narrowed to one network or account, or widened (level)
+  | "ui.funnel_people_opened" // the people behind a funnel step or drop-off opened (dropped, breakdown)
+  | "ui.funnel_correlation_opened" // what converters did differently asked for on a funnel
+  | "ui.annotation_started" // the add-a-note form opened on a trend chart
+  | "ui.dashboard_tile_moved" // a dashboard tile moved or resized with the arrows (resized)
+  | "ui.insight_panel_opened" // a built-in panel on Paid ads, Visitors or Home opened in Funnels or Trends (kind, from)
  | "ui.partner_agreement_downloaded"
   | "ui.partner_proposal_composer_opened"
   | "ui.partner_coupon_composer_opened"
@@ -131,6 +137,7 @@ export type UiEvent =
   | "ui.ai_device_owner_opened" // linked device owner opened (user_id)
   | "ui.ai_device_link_approved" // a computer linked to Outflare for desktop from /connect/computer
   | "ui.copied" // a copy button
+  | "ui.shared_dashboard_password_wrong" // a shared dashboard's password was wrong
   | "ui.data_network_previewed" // the owner opened what joining the data network would share (addresses)
   | "ui.data_network_join_cancelled" // the owner closed that preview without joining (addresses)
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback, browser)
@@ -199,6 +206,9 @@ export type UiEvent =
   | "ui.site_key_second_asked" // Add a site when the brand already has a script, and what they chose (choice: edit, second, cancel)
   | "ui.consent_banner_opened" // a site's consent banner settings opened on Website tracking (site_key_id)
   | "ui.site_cookies_opened" // a site's cookies and scripts opened on Website tracking (site_key_id)
+  | "ui.site_own_domain_opened" // the "serve from your own domain" steps opened on Website tracking (site_key_id, status)
+  | "ui.site_own_domain_host_picked" // a host picked in those steps (host: nextjs, vercel, netlify, cloudflare, nginx)
+  | "ui.visitor_profile_opened" // a visitor's profile opened from Visitors, Everyone (known: true or false)
   | "ui.setup_method_used" // a way to do an install step picked (step, method: gtm, dns, developer, ai, manual; how: copied, email, claude, chatgpt)
   | "ui.indexability_filtered" // a site's indexability report filtered by verdict or issue (filter, value: the verdict or issue id, or all)
   | "ui.logs_filtered" // a filter on the Logs page changed (filter: which one)
@@ -211,6 +221,7 @@ export type UiEvent =
   | "ui.agent_client_picked" // Connect your AI: which app's steps were opened (client)
   | "ui.agent_install_opened" // Connect your AI: a one-click install or the app's settings opened (client, where)
   | "ui.agent_connect_prompted" // a Connect your AI prompt clicked outside its page (from: sidebar, home)
+  | "ui.agent_panel_toggled" // the brand agent's panel beside every page opened or closed (open)
   | "ui.home_todo_opened" // a row on Home's Needs you list opened (code: the blocker code or setup row, tone)
   | "ui.email_guide_opened" // Lifecycle: a provider's setup guide opened (connector, from)
   | "ui.email_domain_dns_way_used" // Lifecycle: a way to add a sending domain's records used (way: cloudflare, ai, developer, manual; how: connected, added, approval, approved, approval_cancelled, copied, email, claude, chatgpt)

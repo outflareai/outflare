@@ -32,6 +32,14 @@ func (s *Server) twins(prefix string) []twin {
 	return []twin{{s, "/v1/brands/{brand}/" + prefix, true}, {s, "/v1/workspaces/{ws}/" + prefix, false}}
 }
 
+// twinRoute registers method rest on both bases: the brand's with
+// onBrand, the workspace's with ws.
+func (s *Server) twinRoute(mux *http.ServeMux, method, rest string, ws func(string, http.HandlerFunc) http.HandlerFunc, scope string, h http.HandlerFunc) {
+	for _, t := range s.twins(rest) {
+		mux.HandleFunc(method+" "+t.path, t.on(ws)(scope, h))
+	}
+}
+
 // on is the wrapper for this base: onBrand on the brand's, else ws, the
 // wrapper the workspace route had.
 func (t twin) on(ws func(string, http.HandlerFunc) http.HandlerFunc) func(string, http.HandlerFunc) http.HandlerFunc {

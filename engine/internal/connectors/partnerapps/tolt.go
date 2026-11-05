@@ -31,6 +31,11 @@ const toltAPI = "https://platform.tolt.com/v2"
 // toltPage is how many objects a list call asks for (Tolt's maximum).
 const toltPage = 100
 
+// toltSmaller are the page sizes a list page is asked for again when Tolt
+// fails it (HTTP 5xx, no answer in time): a page of 100 that Tolt can't
+// build in time, or that one bad object breaks, often comes back smaller.
+var toltSmaller = []int{25, 5}
+
 // All returns the partner platform connectors.
 func All() []c.Connector { return []c.Connector{Tolt{}} }
 
@@ -277,6 +282,11 @@ func toltShape(v any) string {
 // which a flow's settings hold rather than anyone's data.
 var settingRE = regexp.MustCompile(`^[A-Za-z0-9_.%-]{1,30}$`)
 
+// wordsRE is an operator or unit spelled as a few words ("is greater
+// than"): shown in an issue so the import can learn it, since it names a
+// comparison, never a customer or a partner.
+var wordsRE = regexp.MustCompile(`^[A-Za-z][A-Za-z _=<>!-]{0,39}$`)
+
 // toltSettings describes a flow's settings for an import issue: field
 // names, numbers and code-like values, and the type of anything else.
 func toltSettings(v any) string {
@@ -298,7 +308,7 @@ func toltSettings(v any) string {
 		case bool:
 			val = strconv.FormatBool(x)
 		case string:
-			if settingRE.MatchString(x) {
+			if settingRE.MatchString(x) || (k == "operator" || k == "unit") && wordsRE.MatchString(x) {
 				val = `"` + x + `"`
 			}
 		case map[string]any:
@@ -421,7 +431,7 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	if !ok {
 		return page, "", c.Errf(c.ErrInvalid, "Tolt has no %s", kind)
 	}
-	q := url.Values{"program_id": {program}, "limit": {strconv.Itoa(toltPage)}}
+	q := url.Values{"program_id": {program}}
 	// Partners are read one status at a time, since Tolt's list filters by
 	// status: the cursor is "<status index>:<Tolt's cursor>". A cursor with
 	// "!" in place of the ":" (or before it, for other kinds) is one asked
@@ -441,7 +451,20 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 		q.Set("starting_after", after)
 	}
 	what := strings.ReplaceAll(kind, "_", " ")
+	limit := toltPage
+	q.Set("limit", strconv.Itoa(limit))
 	status, ctype, body, err := t.fetch(ctx, cl, creds, what, path, q)
+	for _, n := range toltSmaller {
+		if err == nil || c.KindOf(err) != c.ErrUnavailable || ctx.Err() != nil {
+			break
+		}
+		// Asked again from the same place, a smaller page at a time; the
+		// next page asks for the whole size again.
+		slog.Info("tolt list page failed, asking for fewer", "kind", kind, "limit", limit, "next_limit", n)
+		limit = n
+		q.Set("limit", strconv.Itoa(limit))
+		status, ctype, body, err = t.fetch(ctx, cl, creds, what, path, q)
+	}
 	if status == http.StatusNotFound && !probed && (kind == c.PartnerKindGroups || kind == c.PartnerKindFlows) {
 		// Not every Tolt account or plan lists these.
 		return page, "", c.ErrPartnerKindUnavailable
@@ -510,7 +533,7 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	// v2 pages with next_cursor (cur_...) until has_more is false; an
 	// answer without one falls back to the last object's id.
 	next := ""
-	more := len(l.Data) == toltPage
+	more := len(l.Data) == limit
 	if l.HasMore != nil {
 		more = *l.HasMore
 	}
@@ -523,7 +546,7 @@ func (t Tolt) PartnerPage(ctx context.Context, cl *c.Client, creds c.Creds, prog
 	// Tolt said there are no more right after a full page. In case its
 	// list stops at a cap rather than at the end, ask once more, after the
 	// last object's id; a list that really ended answers with nothing.
-	if next == "" && !probed && len(l.Data) == toltPage {
+	if next == "" && !probed && len(l.Data) == limit {
 		next, probed = str(l.Data[len(l.Data)-1], "id"), true
 	}
 	sep := ":"
@@ -760,6 +783,9 @@ var toltFields = map[string]string{
 	// Tolt's "Created date": when the customer was created (became a lead).
 	"created_at": "customer.signed_up_at", "created_date": "customer.signed_up_at", "customer_created_at": "customer.signed_up_at",
 	"customer_created_date": "customer.signed_up_at", "customer_created": "customer.signed_up_at",
+	// v2's name for the same date, as a real account sends it: when the
+	// customer became a lead.
+	"customer_lead_date": "customer.signed_up_at", "lead_date": "customer.signed_up_at", "customer_lead_created_at": "customer.signed_up_at",
 	"customer_first_transaction_date": "customer.first_sale_at", "first_transaction_date": "customer.first_sale_at",
 	"transaction_amount": "transaction.amount_cents", "amount": "transaction.amount_cents",
 	"product_id": "transaction.product_id", "plan_id": "transaction.product_id", "price_id": "transaction.product_id", "plan": "transaction.product_id",
@@ -775,6 +801,34 @@ var toltOps = map[string]string{
 	"less_than_or_equal": "lte", "less_than_or_equal_to": "lte", "lte": "lte", "<=": "lte",
 	"in": "in", "is_one_of": "in", "not_in": "not_in", "is_not_one_of": "not_in",
 	"within": "within", "within_last": "within", "in_the_last": "within", "not_within": "not_within",
+	"within_the_last": "within", "in_last": "within", "last": "within", "not_within_the_last": "not_within",
+	"not_in_the_last": "not_within", "more_than": "gt", "at_least": "gte", "at_most": "lte",
+	"greater_than_or_equals": "gte", "less_than_or_equals": "lte", "equal": "eq", "equal_to": "eq", "equals_to": "eq",
+	"not_equal": "neq", "not_equal_to": "neq", "does_not_equal": "neq",
+}
+
+// toltOp reads a condition's operator however Tolt spells it: any case,
+// with spaces or hyphens for underscores, and with or without a leading
+// "is" ("is greater than", "Greater-than"). A date with a span beside it
+// ("lead date less than 1 year") is a window: less than that long ago is
+// within it, more than that long ago is outside it.
+func toltOp(cm map[string]any, field string) (string, bool) {
+	raw := strings.ToLower(strings.TrimSpace(str(cm, "operator", "op", "comparison")))
+	raw = strings.NewReplacer(" ", "_", "-", "_").Replace(raw)
+	op, ok := toltOps[raw]
+	if !ok {
+		op, ok = toltOps[strings.TrimPrefix(raw, "is_")]
+	}
+	if !ok || partners.Fields[field] != partners.FieldDate {
+		return op, ok
+	}
+	switch op {
+	case "lt", "lte":
+		return "within", true
+	case "gt", "gte":
+		return "not_within", true
+	}
+	return op, ok
 }
 
 func toltFlow(o map[string]any) c.ImportFlow {
@@ -1040,7 +1094,7 @@ func toltConditions(v any, unsupported *[]string) partners.Conditions {
 			cm, _ := x.(map[string]any)
 			name := strings.ToLower(str(cm, "attribute", "field", "property", "type"))
 			field, ok := toltFields[name]
-			op, okOp := toltOps[strings.ToLower(str(cm, "operator", "op", "comparison"))]
+			op, okOp := toltOp(cm, field)
 			if !ok || !okOp {
 				*unsupported = append(*unsupported, "condition")
 				continue

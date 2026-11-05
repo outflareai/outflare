@@ -390,7 +390,8 @@ func (x *exporter) template(ref, where string) (string, error) {
 	err := x.tx.QueryRow(x.ctx, `SELECT t.handle, t.name, t.purpose, COALESCE(v.subject, t.subject), COALESCE(v.html, t.html), COALESCE(v.text_body, t.text_body),
 		v.version IS NOT NULL
 		FROM email_templates t LEFT JOIN email_template_versions v ON v.template_id = t.id AND v.version = t.published_version
-		WHERE t.workspace_id = $1 AND (t.handle = $2 OR t.id::text = $2)`, x.a.WorkspaceID, ref).
+		WHERE t.workspace_id = $1 AND (t.handle = $2 OR t.id::text = $2) AND ($3 = '' OR t.brand_id = $3::uuid)
+		ORDER BY t.id::text = $2 DESC, t.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, t.created_at LIMIT 1`, x.a.WorkspaceID, ref, x.a.Brand).
 		Scan(&t.Handle, &t.Name, &t.Purpose, &t.Subject, &html, &t.Text, &published)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", errInvalid(where + " sends a template that isn't in this workspace")

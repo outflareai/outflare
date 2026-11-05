@@ -221,7 +221,8 @@ func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPl
 		kt := &k.Templates[i]
 		it := kitItem{Kind: "email_template", Key: kt.Handle, Label: kt.Name, Action: kitAdd, template: kt, Detail: "a draft to read and publish"}
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_templates WHERE workspace_id = $1 AND handle = $2)`, ws, kt.Handle).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_templates WHERE workspace_id = $1 AND handle = $2
+			AND brand_id IS NOT DISTINCT FROM outflare_first_brand($1))`, ws, kt.Handle).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if exists {
@@ -370,7 +371,7 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		err := tx.QueryRow(ctx, `
 			INSERT INTO email_templates (workspace_id, brand_id, handle, name, purpose, subject, html, text_body, variables)
 			VALUES ($1, outflare_first_brand($1), $2, $3, $4, $5, '', $6, $7)
-			ON CONFLICT (workspace_id, handle) DO NOTHING RETURNING id`,
+			ON CONFLICT DO NOTHING RETURNING id`,
 			ws, t.Handle, t.Name, t.Purpose, t.Subject, t.Text, vars).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			plan.Items[i].Action, plan.Items[i].Detail = kitReuse, "a template with this handle is already there; it stays as it is"

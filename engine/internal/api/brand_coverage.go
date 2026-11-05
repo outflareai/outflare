@@ -46,11 +46,15 @@ func (s *Server) routesBrandCoverage(mux *http.ServeMux) {
 		mux.HandleFunc("GET "+base, s.onBrand(scope+".read", func(w http.ResponseWriter, r *http.Request) { s.coverageList(w, r, name, resource) }))
 		mux.HandleFunc("POST "+base, s.onBrand(scope+".manage", func(w http.ResponseWriter, r *http.Request) { s.coverageWrite(w, r, name, resource, false) }))
 		mux.HandleFunc("GET "+base+"/{id}", s.onBrand(scope+".read", func(w http.ResponseWriter, r *http.Request) { s.coverageGet(w, r, name, resource) }))
+		if name == "parties" {
+			mux.HandleFunc("DELETE "+base+"/{id}", s.onBrand(scope+".manage", s.coveragePartyDelete))
+		}
 		if name != "payments" {
 			mux.HandleFunc("PATCH "+base+"/{id}", s.onBrand(scope+".manage", func(w http.ResponseWriter, r *http.Request) { s.coverageWrite(w, r, name, resource, true) }))
 		}
 	}
 	s.routesCoverageActions(mux)
+	s.routesPresenceDiscovery(mux)
 }
 
 func coverageVisible(name string, a *access) (string, []any) {
@@ -234,9 +238,9 @@ func coverageValidate(res coverageResource, body map[string]any, update bool) er
 			if _, ok := v.(bool); !ok {
 				return errInvalid(key + " must be true or false")
 			}
-		case "money", "number", "hours":
+		case "money", "number", "hours", "count":
 			n, ok := v.(float64)
-			if !ok || n < 0 || n > 9000000000000000 || ((f.Kind == "money" || f.Kind == "hours") && math.Trunc(n) != n) || (f.Kind == "hours" && (n < 1 || n > 8760)) {
+			if !ok || n < 0 || n > 9000000000000000 || ((f.Kind == "money" || f.Kind == "hours" || f.Kind == "count") && math.Trunc(n) != n) || (f.Kind == "count" && n > 1000000) || (f.Kind == "hours" && (n < 1 || n > 8760)) {
 				return errInvalid(key + " is out of range")
 			}
 		default:
@@ -315,7 +319,7 @@ func coverageReferences(ctx context.Context, tx pgx.Tx, a *access, res coverageR
 				return errDenied("Linking CRM records requires customers.read")
 			}
 			query = "SELECT EXISTS(SELECT 1 FROM records WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND id=$3 AND merged_into IS NULL)"
-			if key == "record_id" {
+			if key == "record_id" && res.Table == "coverage_publishers" {
 				query = strings.TrimSuffix(query, ")") + " AND record_type='account')"
 			}
 		case "coverage_agreements", "coverage_invoices":

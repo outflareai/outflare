@@ -893,7 +893,9 @@ func (s *Server) listEmailTemplates(w http.ResponseWriter, r *http.Request) {
 
 // findEmailTemplate finds a template by id or handle.
 func (s *Server) findEmailTemplate(w http.ResponseWriter, r *http.Request, ws, ref string) (*emailTemplateView, bool) {
-	v, err := scanEmailTemplate(s.pool.QueryRow(r.Context(), emailTemplateSelect+` AND (t.id::text = $2 OR t.handle = $2)`, ws, ref))
+	v, err := scanEmailTemplate(s.pool.QueryRow(r.Context(), emailTemplateSelect+` AND (t.id::text = $2 OR t.handle = $2)
+		AND ($3 = '' OR t.brand_id = $3::uuid)
+		ORDER BY t.id::text = $2 DESC, t.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, t.created_at LIMIT 1`, ws, ref, accessFrom(r.Context()).Brand))
 	// On a brand route only the route's brand's templates are found.
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email template not found")
@@ -1057,7 +1059,7 @@ func (s *Server) createEmailTemplate(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO email_templates (workspace_id, brand_id, handle, name, purpose, from_address, reply_to, subject, html, text_body, variables,
 				track_opens, track_clicks, topic_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, false), COALESCE($13, false), $14)
-			ON CONFLICT (workspace_id, handle) DO NOTHING RETURNING id`,
+			ON CONFLICT DO NOTHING RETURNING id`,
 			a.WorkspaceID, brand, *f.Handle, strings.TrimSpace(*f.Name), purpose, deref(f.From), deref(f.ReplyTo),
 			deref(f.Subject), deref(f.HTML), deref(f.Text), varsJSON, f.TrackOpens, f.TrackClicks, topic).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1156,7 +1158,8 @@ func (s *Server) updateEmailTemplate(w http.ResponseWriter, r *http.Request) {
 				track_opens = COALESCE($15, track_opens), track_clicks = COALESCE($16, track_clicks),
 				topic_id = CASE WHEN $17 THEN $18 ELSE topic_id END, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2
-			  AND NOT EXISTS (SELECT 1 FROM email_templates o WHERE o.workspace_id = $1 AND o.handle = $3 AND o.id <> $2)`,
+			  AND NOT EXISTS (SELECT 1 FROM email_templates o WHERE o.workspace_id = $1 AND o.handle = $3 AND o.id <> $2
+				  AND o.brand_id IS NOT DISTINCT FROM $6)`,
 			a.WorkspaceID, cur.ID, f.Handle, f.Name, true, brand, f.Purpose, f.Status, f.From, f.ReplyTo,
 			*merged.Subject, *merged.HTML, *merged.Text, varsJSON, f.TrackOpens, f.TrackClicks, f.Topic.Set, topic)
 		if err != nil {

@@ -98,7 +98,7 @@ func (s *Server) visitorHook(w http.ResponseWriter, r *http.Request) {
 	}
 	var res peopleResult
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		set, err := visitors.Load(ctx, tx, ws)
+		set, err := visitors.Load(ctx, tx, ws, "")
 		if err != nil {
 			return err
 		}

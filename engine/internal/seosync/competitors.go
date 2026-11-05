@@ -73,6 +73,43 @@ type CompetitorRun struct {
 	Error    *string `json:"error"`
 }
 
+// SuggestSiteCompetitors asks the connection which domains share the most
+// keywords with the site and keeps new ones as suggestions. Tracked and
+// dismissed ones keep their status; only the shared keyword count moves.
+// It returns how many rows it added or updated and what the read cost.
+func (s *Syncer) SuggestSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string) (int, float64, error) {
+	if !connectors.SupportsSEO(r, connectors.SEOCompetitors) {
+		return 0, 0, nil
+	}
+	ws, target, conn := o.WorkspaceID, LinkTarget(site.Host), o.Connector.Definition().ID
+	q, err := connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOCompetitors, Target: target, Country: country, Limit: competitorRows})
+	if err != nil {
+		return 0, 0, err
+	}
+	a, err := Fetch(ctx, s.Pool, o, r, q, Options{Fresh: true})
+	cost := amountOf(Unit(r), a.Cost)
+	if err != nil {
+		return 0, cost, err
+	}
+	n := 0
+	for _, row := range a.Rows {
+		host := CompetitorHost(row.Key)
+		if host == "" || host == target || strings.HasSuffix(host, "."+target) {
+			continue
+		}
+		tag, err := s.Pool.Exec(ctx, `
+			INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, status, source, common_keywords)
+			VALUES ($1, $2, $3, $4, 'suggested', $5, $6)
+			ON CONFLICT (site_id, host) DO UPDATE SET common_keywords = EXCLUDED.common_keywords, updated_at = now()`,
+			ws, site.ID, site.BrandID, host, conn, row.CommonKeywords)
+		if err != nil {
+			return n, cost, err
+		}
+		n += int(tag.RowsAffected())
+	}
+	return n, cost, LinkCompetitorRecords(ctx, s.Pool, ws, site.ID)
+}
+
 // SyncSiteCompetitors suggests a site's competitors and snapshots the
 // tracked ones' numbers.
 func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string, now time.Time) (CompetitorRun, error) {
@@ -86,34 +123,11 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		run.Error = &msg
 		return run, err
 	}
-	if connectors.SupportsSEO(r, connectors.SEOCompetitors) {
-		q, err := connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOCompetitors, Target: target, Country: country, Limit: competitorRows})
-		if err != nil {
-			return fail(err)
-		}
-		a, err := Fetch(ctx, s.Pool, o, r, q, Options{Fresh: true})
-		run.Cost += amountOf(unit, a.Cost)
-		if err != nil {
-			return fail(err)
-		}
-		for _, row := range a.Rows {
-			host := CompetitorHost(row.Key)
-			if host == "" || host == target || strings.HasSuffix(host, "."+target) {
-				continue
-			}
-			tag, err := s.Pool.Exec(ctx, `
-				INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, status, source, common_keywords)
-				VALUES ($1, $2, $3, $4, 'suggested', $5, $6)
-				ON CONFLICT (site_id, host) DO UPDATE SET common_keywords = EXCLUDED.common_keywords, updated_at = now()`,
-				ws, site.ID, site.BrandID, host, conn, row.CommonKeywords)
-			if err != nil {
-				return fail(err)
-			}
-			run.Suggested += int(tag.RowsAffected())
-		}
-		if err := LinkCompetitorRecords(ctx, s.Pool, ws, site.ID); err != nil {
-			return fail(err)
-		}
+	n, cost, err := s.SuggestSiteCompetitors(ctx, o, r, site, country)
+	run.Suggested += n
+	run.Cost += cost
+	if err != nil {
+		return fail(err)
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT id::text, host FROM seo_competitors
 		WHERE workspace_id = $1 AND site_id = $2 AND status = 'tracked' ORDER BY created_at, host LIMIT $3`, ws, site.ID, MaxTrackedNumbers)

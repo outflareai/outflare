@@ -59,6 +59,45 @@ func ParseToken(box *secrets.Box, token string) (int64, bool) {
 	return n, err == nil && n > 0
 }
 
+// linkPurpose signs visitor links, which the workspace puts in messages
+// it sends itself.
+const linkPurpose = "visitor_link"
+
+// linkPrefix starts a visitor link's token, so it never reads as a click's.
+const linkPrefix = "v_"
+
+// LinkTTL is how long a visitor link names its person by default, and
+// LinkMaxTTL the longest a workspace may ask for.
+const (
+	LinkTTL    = 30 * 24 * time.Hour
+	LinkMaxTTL = 365 * 24 * time.Hour
+)
+
+// LinkToken signs a visitor link's id. It travels in the same parameter
+// as a click's token, so the site snippet needs nothing new.
+func LinkToken(box *secrets.Box, id int64) string {
+	s := strconv.FormatInt(id, 36)
+	return linkPrefix + s + "." + box.Sign(linkPurpose, s)
+}
+
+// IsLinkToken reports whether a token is a visitor link's rather than a
+// click's.
+func IsLinkToken(token string) bool { return strings.HasPrefix(token, linkPrefix) }
+
+// ParseLinkToken returns the visitor link a genuine link token names.
+func ParseLinkToken(box *secrets.Box, token string) (int64, bool) {
+	rest, ok := strings.CutPrefix(token, linkPrefix)
+	if !ok {
+		return 0, false
+	}
+	id, sig, ok := strings.Cut(rest, ".")
+	if !ok || id == "" || len(id) > 13 || len(sig) > 40 || !box.Verify(linkPurpose, id, sig) {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(id, 36, 64)
+	return n, err == nil && n > 0
+}
+
 // WithToken adds the token to a link's address, keeping its fragment.
 func WithToken(link, token string) string {
 	u, err := url.Parse(link)
@@ -116,14 +155,19 @@ func Defaults() Settings {
 	return Settings{KeyPages: DefaultKeyPages, HotScore: 60, EmailClicks: true, ExcludeDomains: []string{}, RevealCompanies: false, RevealDailyLimit: 500, NotCompanies: []string{}}
 }
 
-// Load reads a workspace's settings, or the defaults.
-func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
+// inBrand keeps the settings row of brand $2: a brand id, or "" for the
+// workspace's first brand (none when it has no brand).
+const inBrand = `brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1))`
+
+// Load reads a brand's settings ("": the workspace's first brand's), or
+// the defaults.
+func Load(ctx context.Context, q Querier, ws, brand string) (Settings, error) {
 	s := Defaults()
 	var at time.Time
 	err := q.QueryRow(ctx, `SELECT key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
 			reveal_companies, reveal_integration_id::text, reveal_daily_limit, not_companies,
 			reveal_people, people_notice_accepted_at, people_notice_accepted_by::text, updated_at
-		FROM visitor_settings WHERE workspace_id = $1`, ws).Scan(&s.KeyPages, &s.HotScore, &s.EmailClicks, &s.ExcludeDomains, &s.ExcludeCustomers,
+		FROM visitor_settings WHERE workspace_id = $1 AND `+inBrand, ws, brand).Scan(&s.KeyPages, &s.HotScore, &s.EmailClicks, &s.ExcludeDomains, &s.ExcludeCustomers,
 		&s.RevealCompanies, &s.RevealIntegrationID, &s.RevealDailyLimit, &s.NotCompanies,
 		&s.RevealPeople, &s.PeopleNoticeAcceptedAt, &s.PeopleNoticeAcceptedBy, &at)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -136,20 +180,22 @@ func Load(ctx context.Context, q Querier, ws string) (Settings, error) {
 	return s, nil
 }
 
-// Save stores a workspace's settings.
-func Save(ctx context.Context, q Querier, ws string, s Settings) error {
-	_, err := q.Exec(ctx, `INSERT INTO visitor_settings (workspace_id, key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
+// Save stores a brand's settings ("": the workspace's first brand's).
+func Save(ctx context.Context, q Querier, ws, brand string, s Settings) error {
+	tag, err := q.Exec(ctx, `UPDATE visitor_settings SET key_pages = $3, hot_score = $4, email_clicks = $5, exclude_domains = $6, exclude_customers = $7,
+			reveal_companies = $8, reveal_integration_id = $9, reveal_daily_limit = $10, not_companies = $11,
+			reveal_people = $12, people_notice_accepted_at = $13, people_notice_accepted_by = $14, updated_at = now()
+		WHERE workspace_id = $1 AND `+inBrand,
+		ws, brand, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies,
+		s.RevealPeople, s.PeopleNoticeAcceptedAt, s.PeopleNoticeAcceptedBy)
+	if err != nil || tag.RowsAffected() > 0 {
+		return err
+	}
+	_, err = q.Exec(ctx, `INSERT INTO visitor_settings (workspace_id, brand_id, key_pages, hot_score, email_clicks, exclude_domains, exclude_customers,
 			reveal_companies, reveal_integration_id, reveal_daily_limit, not_companies,
 			reveal_people, people_notice_accepted_at, people_notice_accepted_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		ON CONFLICT (workspace_id) DO UPDATE SET key_pages = EXCLUDED.key_pages, hot_score = EXCLUDED.hot_score,
-			email_clicks = EXCLUDED.email_clicks, exclude_domains = EXCLUDED.exclude_domains,
-			exclude_customers = EXCLUDED.exclude_customers, reveal_companies = EXCLUDED.reveal_companies,
-			reveal_integration_id = EXCLUDED.reveal_integration_id, reveal_daily_limit = EXCLUDED.reveal_daily_limit,
-			not_companies = EXCLUDED.not_companies, reveal_people = EXCLUDED.reveal_people,
-			people_notice_accepted_at = EXCLUDED.people_notice_accepted_at, people_notice_accepted_by = EXCLUDED.people_notice_accepted_by,
-			updated_at = now()`,
-		ws, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies,
+		VALUES ($1, COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		ws, brand, s.KeyPages, s.HotScore, s.EmailClicks, s.ExcludeDomains, s.ExcludeCustomers, s.RevealCompanies, s.RevealIntegrationID, s.RevealDailyLimit, s.NotCompanies,
 		s.RevealPeople, s.PeopleNoticeAcceptedAt, s.PeopleNoticeAcceptedBy)
 	return err
 }

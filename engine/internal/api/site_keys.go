@@ -26,6 +26,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/quota"
+	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/utm"
 	"github.com/outflareai/outflare/engine/internal/visitors"
 )
@@ -111,6 +112,43 @@ type siteKeyView struct {
 	// When the key's proxy secret was made; null when it has none.
 	ProxySecretAt *time.Time `json:"proxy_secret_at"`
 	Snippet       string     `json:"snippet"`
+	// Whether the script asks for visitors' versions on its own, so tests
+	// made in the visual editor run with no change to the site's tag.
+	Tests bool `json:"tests"`
+	// An optional two-line guard for the top of the site's <head>, so a
+	// returning visitor never sees the original of what a test changes.
+	FlickerGuard string `json:"flicker_guard"`
+	// How much of the last 7 days' traffic came through the site's own
+	// domain, and how much from Safari straight to Outflare.
+	OwnDomain siteOwnDomain `json:"own_domain"`
+}
+
+// siteOwnDomain is whether a key's script is served from the site's own
+// domain, judged from the last 7 days of events (UTC days, today included).
+type siteOwnDomain struct {
+	// Events taken, events that came through the site's own domain, and
+	// events from Safari and iPhone browsers that came straight to Outflare
+	// (their visitors look new after seven days away).
+	Events       int `json:"events"`
+	Through      int `json:"through_own_domain"`
+	SafariDirect int `json:"safari_direct"`
+	// not_set_up (no event came through it), partly (some did) or working
+	// (nearly all did); no_traffic when the key took no events.
+	Status string `json:"status"`
+	// The tag to use once the site forwards /ofx/ to Outflare.
+	Snippet string `json:"snippet"`
+}
+
+func ownDomainStatus(events, through int) string {
+	switch {
+	case events == 0:
+		return "no_traffic"
+	case through == 0:
+		return "not_set_up"
+	case through*100 >= events*95:
+		return "working"
+	}
+	return "partly"
 }
 
 type siteKeyInput struct {
@@ -119,6 +157,8 @@ type siteKeyInput struct {
 	Origins *[]string `json:"origins"`
 	// Query parameters to leave out of page addresses.
 	ExcludedParams *[]string `json:"excluded_params"`
+	// Run no-code A/B tests on this site (on by default).
+	Tests *bool `json:"tests"`
 }
 
 func newSiteKey() string {
@@ -155,21 +195,53 @@ func (s *Server) siteSnippet(key string, origins []string) string {
 	return tag + `></script>`
 }
 
+// flickerGuard goes at the top of a site's <head>, above everything else.
+// The website script remembers which parts of the page the visitor's test
+// versions change; on their next visit this hides only those parts, for at
+// most a second, until the script has shown the visitor's version. It
+// does nothing for a visitor in no test. Selectors are checked again here,
+// so nothing in them can add rules of its own.
+const flickerGuard = `<script>!function(){try{var h=JSON.parse(localStorage.getItem("of_hide")||"null");if(!h||!h.sel||h.until<Date.now()||/[{}<@;]|\/\*/.test(h.sel))return;var s=document.createElement("style");s.id="of-hide";s.textContent=h.sel+"{opacity:0!important}";document.head.appendChild(s);setTimeout(function(){s.remove()},1000)}catch(e){}}()</script>`
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+// ownDomainSnippet is the tag loading the script from the site's own
+// /ofx/ path, which the site forwards to Outflare.
+func ownDomainSnippet(snippet string) string {
+	i, j := strings.Index(snippet, `src="`), strings.Index(snippet, `/site.js"`)
+	if i < 0 || j < i {
+		return snippet
+	}
+	return snippet[:i+len(`src="`)] + `/ofx` + snippet[j:]
+}
+
 func (s *Server) loadSiteKeys(ctx context.Context, ws string, id *string) ([]siteKeyView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT k.id::text, k.name, k.key, k.brand_id::text, k.origins, k.excluded_params, CASE WHEN k.previous_expires_at > now() THEN k.previous_expires_at END,
 			coalesce((SELECT d.events FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
 			coalesce((SELECT d.bots FROM site_key_days d WHERE d.key_id = k.id AND d.day = current_date), 0),
-			k.created_at, k.last_used_at, k.rotated_at, k.proxy_secret_at
-		FROM site_keys k WHERE k.workspace_id = $1 AND k.revoked_at IS NULL AND ($2::uuid IS NULL OR k.id = $2)
+			k.created_at, k.last_used_at, k.rotated_at, k.proxy_secret_at, k.tests = 'on',
+			coalesce(w.events, 0), coalesce(w.own_domain, 0), coalesce(w.safari_direct, 0)
+		FROM site_keys k
+		LEFT JOIN LATERAL (SELECT sum(d.events)::int AS events, sum(d.own_domain)::int AS own_domain, sum(d.safari_direct)::int AS safari_direct
+			FROM site_key_days d WHERE d.key_id = k.id AND d.day > current_date - 7) w ON true WHERE k.workspace_id = $1 AND k.revoked_at IS NULL AND ($2::uuid IS NULL OR k.id = $2)
 		ORDER BY k.created_at, k.id`, ws, id)
 	if err != nil {
 		return nil, err
 	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (siteKeyView, error) {
 		var v siteKeyView
-		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.ExcludedParams, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt)
+		err := row.Scan(&v.ID, &v.Name, &v.Key, &v.BrandID, &v.Origins, &v.ExcludedParams, &v.PreviousExpiresAt, &v.EventsToday, &v.BotsToday, &v.CreatedAt, &v.LastUsedAt, &v.RotatedAt, &v.ProxySecretAt, &v.Tests,
+			&v.OwnDomain.Events, &v.OwnDomain.Through, &v.OwnDomain.SafariDirect)
 		v.Snippet = s.siteSnippet(v.Key, v.Origins)
+		v.OwnDomain.Status = ownDomainStatus(v.OwnDomain.Events, v.OwnDomain.Through)
+		v.OwnDomain.Snippet = ownDomainSnippet(v.Snippet)
+		v.FlickerGuard = flickerGuard
 		return v, err
 	})
 	if list == nil {
@@ -375,7 +447,10 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	name, brand, origins, excluded := cur.Name, cur.BrandID, cur.Origins, cur.ExcludedParams
+	name, brand, origins, excluded, tests := cur.Name, cur.BrandID, cur.Origins, cur.ExcludedParams, cur.Tests
+	if req.Tests != nil {
+		tests = *req.Tests
+	}
 	if req.Name != nil {
 		if name = strings.TrimSpace(*req.Name); name == "" || len(name) > 100 {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "name must be 1 to 100 characters")
@@ -402,11 +477,11 @@ func (s *Server) updateSiteKey(w http.ResponseWriter, r *http.Request) {
 		brand = &id
 	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6 WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, name, brand, origins, excluded); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE site_keys SET name = $3, brand_id = $4, origins = $5, excluded_params = $6, tests = $7 WHERE id = $1 AND workspace_id = $2`,
+			cur.ID, a.WorkspaceID, name, brand, origins, excluded, onOff(tests)); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins), "excluded_params": len(excluded)})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "site_key.updated", "site_key", cur.ID, map[string]any{"brand_id": brand, "origins": len(origins), "excluded_params": len(excluded), "tests": tests})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -601,10 +676,17 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.allowQuota(w, r, k.workspaceID, quota.TrackedEvents, int64(len(in.Batch))) {
 		return
 	}
-	var today int
-	if err := s.pool.QueryRow(ctx, `INSERT INTO site_key_days (key_id, workspace_id, day, events) VALUES ($1, $2, current_date, $3)
-		ON CONFLICT (key_id, day) DO UPDATE SET events = site_key_days.events + EXCLUDED.events RETURNING events`,
-		k.id, k.workspaceID, len(in.Batch)).Scan(&today); err != nil {
+	var today, own, safari int
+	if throughOwnDomain(r) {
+		own = len(in.Batch)
+	} else if forgetfulBrowser(ua) {
+		safari = len(in.Batch)
+	}
+	if err := s.pool.QueryRow(ctx, `INSERT INTO site_key_days (key_id, workspace_id, day, events, own_domain, safari_direct) VALUES ($1, $2, current_date, $3, $4, $5)
+		ON CONFLICT (key_id, day) DO UPDATE SET events = site_key_days.events + EXCLUDED.events,
+			own_domain = site_key_days.own_domain + EXCLUDED.own_domain, safari_direct = site_key_days.safari_direct + EXCLUDED.safari_direct
+		RETURNING events`,
+		k.id, k.workspaceID, len(in.Batch), own, safari).Scan(&today); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -641,17 +723,35 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 			return err
 		})
 	}
-	if err == nil && in.Consent && accepted > 0 {
-		err = s.queueReveal(ctx, k.workspaceID, anon, siteClientIP(r, k))
-	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
+	}
+	if in.Consent && accepted > 0 {
+		s.revealOrLog(ctx, k.workspaceID, anon, siteClientIP(r, k))
 	}
 	if in.Consent && anon != "" {
 		setSiteCookie(w, r.Header.Get("Origin"), anon)
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"accepted": accepted, "rejected": rejected})
+}
+
+// revealOrLog asks for the company behind the visitor (queueReveal). The
+// batch is already taken by then, so a failure here is logged and recorded
+// as visitor.reveal_failed but never fails the request: answering 500 would
+// make the snippet send the same batch again. The visitor's lookup is
+// marked as tried, so the daily wait holds and the next batch doesn't fail
+// the same way.
+func (s *Server) revealOrLog(ctx context.Context, ws, anon, ip string) {
+	err := s.queueReveal(ctx, ws, anon, ip)
+	if err == nil {
+		return
+	}
+	track.Fail(ctx, s.log, track.Event{Name: "visitor.reveal_failed", WorkspaceID: ws, ActorType: "system", Surface: "api",
+		RequestID: RequestID(ctx)}, "internal", err)
+	if _, err := s.pool.Exec(ctx, `UPDATE site_visitors SET reveal_checked_at = now() WHERE workspace_id = $1 AND anonymous_id = $2`, ws, anon); err != nil {
+		s.log.ErrorContext(ctx, "visitor reveal mark", "err", err, "workspace_id", ws)
+	}
 }
 
 // queueSiteBatch puts a batch in the inbox for the workers to store, and
@@ -701,7 +801,7 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 	if err != nil {
 		return 0, 0, "", err
 	}
-	set, err := visitors.Load(ctx, tx, k.workspaceID)
+	set, err := visitors.Load(ctx, tx, k.workspaceID, deref(k.brandID))
 	if err != nil {
 		return 0, 0, "", err
 	}
@@ -773,7 +873,8 @@ func setSiteDomainCookie(w http.ResponseWriter, origin, name, value string) {
 // one is refused alone. The event joins the visitor's session, and a new
 // session for someone already known updates their last touch. A page view
 // also counts toward its visitor, and one that carries a genuine email
-// click token first joins the browser to the person the email went to.
+// click token first joins the browser to the person the email went to (a
+// visitor link's token, to the person the link was made for).
 func (s *Server) ingestSiteOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog, v siteVisitor, set visitors.Settings, m eventMessage, token string,
 	now time.Time, totals *ingestTotals) error {
 	sp, err := tx.Begin(ctx)
@@ -784,9 +885,16 @@ func (s *Server) ingestSiteOne(ctx context.Context, tx pgx.Tx, a *access, c *cat
 	before := totals.created
 	by := ""
 	if token != "" {
-		var rec string
-		if rec, err = s.knownFromClick(ctx, sp, a, c, set, m.text("anonymousId"), token, now, totals); err == nil && rec != "" {
-			by = "email_click"
+		if visitors.IsLinkToken(token) {
+			var rec string
+			if rec, err = s.knownFromLink(ctx, sp, a, c, v.brandID, m.text("anonymousId"), token, now, totals); err == nil && rec != "" {
+				by = "link"
+			}
+		} else {
+			var rec string
+			if rec, err = s.knownFromClick(ctx, sp, a, c, set, m.text("anonymousId"), token, now, totals); err == nil && rec != "" {
+				by = "email_click"
+			}
 		}
 	}
 	isNew := false
@@ -1021,6 +1129,28 @@ func cleanPage(page map[string]any, excluded []string) {
 func mustJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// throughOwnDomain reports whether a batch came through the site's own
+// domain (a path the site forwards to Outflare) rather than straight from
+// the browser: the browser says the request went to the page's own origin.
+// Proxies pass the header on as it is. A subdomain pointed at Outflare
+// (same-site) doesn't count: Safari still cuts its cookies to seven days,
+// since the address answering isn't the site's.
+func throughOwnDomain(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Site") == "same-origin"
+}
+
+// forgetfulBrowser matches Safari and every browser on an iPhone or iPad
+// (all of them run on Safari's engine), which keep a cookie a script
+// writes, or one set by another site's server, for seven days at most.
+func forgetfulBrowser(ua string) bool {
+	l := strings.ToLower(ua)
+	if strings.Contains(l, "iphone") || strings.Contains(l, "ipad") || strings.Contains(l, "ipod") {
+		return true
+	}
+	return strings.Contains(l, "safari/") && strings.Contains(l, "version/") &&
+		!strings.Contains(l, "chrome/") && !strings.Contains(l, "chromium/") && !strings.Contains(l, "android")
 }
 
 // siteClientIP is the visitor's address. Behind the site's own proxy every

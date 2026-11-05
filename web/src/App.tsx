@@ -60,12 +60,21 @@ import { Flags } from "./pages/Flags";
 import { ABTests } from "./pages/ABTests";
 import { CampaignLinks } from "./pages/CampaignLinks";
 import { Channels } from "./pages/Channels";
+import { Funnels } from "./pages/Funnels";
+import { Trends } from "./pages/Trends";
+import { Dashboards } from "./pages/Dashboards";
+import { Retention } from "./pages/Retention";
+import { Paths } from "./pages/Paths";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { LeadFinder } from "./pages/LeadFinder";
 import { EmailFinder } from "./pages/EmailFinder";
 import { CloudPage, CloudLocked } from "./pages/CloudLocked";
 import { cloudFeature } from "./lib/cloud";
 import { pageIsAvailable, pageExtension } from "./lib/extensions";
+
+// The brand's own agent, when the server adds one (Outflare Cloud). It has a
+// tab on Agents, a card on Home and a panel beside every page.
+const BrandAgentPage = pageExtension("agents");
 import { Missions } from "./pages/Missions";
 import { Agents } from "./pages/Agents";
 import { Playbooks } from "./pages/Playbooks";
@@ -95,6 +104,7 @@ import { SEOOverview } from "./pages/SEOOverview";
 import { AIVisibility } from "./pages/AIVisibility";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
+import { Competition } from "./pages/Competition";
 import { LinkBuilding } from "./pages/LinkBuilding";
 import { LinkAutopilot } from "./pages/LinkAutopilot";
 import { Coverage } from "./pages/Coverage";
@@ -105,6 +115,7 @@ import { Warmup } from "./pages/Warmup";
 import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
 import { ConnectComputer } from "./pages/ConnectComputer";
+import { SharedDashboard } from "./pages/SharedDashboard";
 import { setBrand, useBrand } from "@/lib/brand";
 
 const CRMWorkspace = lazy(() => import("./pages/crm/Workspace").then((m) => ({ default: m.CRMWorkspace })));
@@ -118,6 +129,7 @@ type State =
   | { kind: "connect"; token: string }
   | { kind: "reset"; token: string }
   | { kind: "verify"; token: string }
+  | { kind: "shared"; token: string }
   | { kind: "confirm"; email: string; resendAfter: number }
   | { kind: "authorize"; me: Me }
   | { kind: "connectComputer"; me: Me }
@@ -141,6 +153,8 @@ export function App() {
     // Links from account emails, which also work signed out.
     if (location.pathname === "/reset-password" && location.hash.length > 1) return setState({ kind: "reset", token: location.hash.slice(1) });
     if (location.pathname === "/verify-email" && location.hash.length > 1) return setState({ kind: "verify", token: location.hash.slice(1) });
+    // A dashboard's share link opens for anyone, signed in or not.
+    if (location.pathname.startsWith("/share/")) return setState({ kind: "shared", token: location.pathname.slice("/share/".length) });
     const setup = await api.GET("/v1/setup");
     if (setup.data?.needed) return setState({ kind: "setup" });
     const me = await api.GET("/v1/me");
@@ -187,6 +201,13 @@ export function App() {
       );
     case "verify":
       return <VerifyEmail token={state.token} onDone={boot} />;
+    case "shared":
+      return (
+        <>
+          <SharedDashboard token={state.token} />
+          <ToastHost />
+        </>
+      );
     case "confirm":
       return (
         <>
@@ -467,6 +488,29 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
       // Not remembered; fine.
     }
   }, [apiOpen]);
+  // The agent panel shares the right edge with the API panel: one at a time.
+  const [agentOpen, setAgentOpenState] = useState(() => {
+    try {
+      return localStorage.getItem("agent-panel") === "open";
+    } catch {
+      return false;
+    }
+  });
+  const setAgentOpen = setAgentOpenState;
+  useEffect(() => {
+    if (apiOpen) setAgentOpenState(false);
+  }, [apiOpen]);
+  const agentSeen = useRef(false);
+  useEffect(() => {
+    if (agentOpen) setApiOpen(false);
+    if (agentSeen.current) track("ui.agent_panel_toggled", { open: agentOpen });
+    agentSeen.current = true;
+    try {
+      localStorage.setItem("agent-panel", agentOpen ? "open" : "closed");
+    } catch {
+      // Not remembered; fine.
+    }
+  }, [agentOpen]);
 
   const go = useCallback((t: Tab) => setTab(t), [setTab]);
 
@@ -499,6 +543,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         setPalette((o) => !o);
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j" && BrandAgentPage) {
+        e.preventDefault();
+        setAgentOpen((o) => !o);
+        return;
+      }
       const el = e.target as HTMLElement;
       if (e.metaKey || e.ctrlKey || e.altKey || el.closest("input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog], [role=menu]")) return;
       if (e.key === "g") {
@@ -515,6 +564,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     return () => removeEventListener("keydown", onKey);
   }, [go]);
 
+  const agentReady = !!BrandAgentPage && !!ws && canOpen(ws, "agents");
+  const agentProps = ws ? { workspace: ws, brandId: brandState.brand?.id, onOpenDock: () => setAgentOpen(true), onClose: () => setAgentOpen(false), onOpenPage: () => setTab("agents") } : null;
   const settings = settingsGroups(isAdmin, ws);
   const goTo = (t: Tab, label = tabNames[t], group = "Go to"): Command => ({ id: `go-${t}`, label, group, icon: t as IconName, hint: shortcuts[t] ? `G ${shortcuts[t]!.toUpperCase()}` : undefined, run: () => go(t) });
   const commands: Command[] = [
@@ -524,6 +575,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     ...modules.flatMap((m) => m.tabs.filter((t) => canOpen(ws, t) && pageIsAvailable(t)).map((t) => goTo(t, t === "agent-mail" ? "Agent Mail" : tabNames[t], m.label))),
     ...(["tools", "connectors"] as const).filter((t) => canOpen(ws, t)).map((t) => goTo(t)),
     ...settings.flatMap((g) => g.tabs.map((t) => goTo(t, `${tabNames[t]}`, "Settings"))),
+    ...(agentReady ? [{ id: "agent", label: agentOpen ? "Hide the agent" : "Talk to this brand's agent", group: "Workspace", icon: "sparkles" as IconName, hint: "Ctrl J", run: () => setAgentOpen((o) => !o) }] : []),
     { id: "api", label: apiOpen ? "Hide the API panel" : "Show the API call for this page", group: "Developer", icon: "code", run: () => setApiOpen((o) => !o) },
     ...(ws ? [{ id: "copy-url", label: "Copy link to this page", group: "Workspace", icon: "copy" as IconName, run: () => { navigator.clipboard?.writeText(location.href); toast("Link copied."); } }] : []),
     { id: "copy-ws", label: "Copy workspace ID", group: "Developer", icon: "copy", hint: wsId.slice(0, 8), run: () => { navigator.clipboard?.writeText(wsId); toast("Workspace ID copied."); } },
@@ -567,8 +619,8 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         onSearch={() => setPalette(true)}
         onSignOut={signOut}
       />
-      <SidebarInset id="main" tabIndex={-1} className={cn("min-w-0 outline-none", apiOpen && "xl:pr-[26rem]")}>
-        <TopBar ws={ws} tab={tab} item={item} itemName={link?.name} onTab={go} onApi={() => setApiOpen((o) => !o)} apiOpen={apiOpen} />
+      <SidebarInset id="main" tabIndex={-1} className={cn("min-w-0 outline-none", (apiOpen || (agentOpen && agentReady)) && "xl:pr-[26rem]")}>
+        <TopBar ws={ws} tab={tab} item={item} itemName={link?.name} onTab={go} onApi={() => setApiOpen((o) => !o)} apiOpen={apiOpen} onAgent={agentReady ? () => setAgentOpen((o) => !o) : undefined} agentOpen={agentOpen && agentReady} />
         {/* Every page uses the whole width beside the sidebar: tables and
             charts stretch, and forms and text cap themselves at a reading width. */}
         <div key={pickedBrand ?? "all"} className="w-full px-4 py-6 sm:px-6 lg:px-8">
@@ -585,13 +637,20 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
             <button aria-label="Dismiss" className="-m-2 p-2" onClick={() => setLost("")}><Icon name="x" className="size-3.5" /></button>
           </div>
         )}
-        {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={ws.id} ws={ws.id} onFix={() => setTab("connectors")} />}
+        {/* Its own key: the pages below are keyed by the workspace id too, and
+            siblings that share a key are duplicated when the tab changes. */}
+        {ready && ws && isAdmin && tab !== "connectors" && <UnassignedNotice key={`unassigned:${ws.id}`} ws={ws.id} onFix={() => setTab("connectors")} />}
         {!ready && <Loading />}
-        {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} />}
+        {ready && ws && tab === "overview" && <Overview key={ws.id} ws={ws.id} name={ws.name} isAdmin={isAdmin} go={(t) => { if (t === "get-started") setOpenedFrom("overview"); setTab(t); }} limited={(ws.brand_ids?.length ?? 0) > 0} agent={agentReady && BrandAgentPage && agentProps ? <BrandAgentPage key={`home:${ws.id}:${brandState.brand?.id ?? "all"}`} {...agentProps} variant="home" /> : undefined} />}
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "ab-tests" && <ABTests key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "funnels" && <Funnels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "trends" && <Trends key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "retention" && <Retention key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "paths" && <Paths key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "dashboards" && <Dashboards key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "links" && <CampaignLinks key={ws.id} ws={ws.id} canManage={writer} />}
         {ready && ws && tab === "tracking" && <WebsiteTracking key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -606,12 +665,13 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "ai-visibility" && <AIVisibility key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "competition" && <Competition key={ws.id} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "competitors" && <Competitors key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} item={item} />}
         {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} />}
-        {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
+        {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} open={item} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit-campaigns" && <RedditCampaigns key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "seo" && <SEO key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
@@ -630,7 +690,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "inbox" && <Inbox key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} onRead={() => setUnread((n) => Math.max(0, n - 1))} />}
         {ready && ws && tab === "playbooks" && <Playbooks key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "missions" && <Missions key={ws.id} ws={ws.id} open={item} setOpen={setItem} go={setTab} />}
-        {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
+        {ready && ws && tab === "agents" && <Agents key={ws.id} ws={ws.id} brandAgent={BrandAgentPage ? <BrandAgentPage key={`${ws.id}:${brandState.brand?.id ?? "all"}`} workspace={ws} brandId={brandState.brand?.id} /> : undefined} canApprove={can("actions.approve")} canManage={can("actions.manage")} canTokens={can("tokens.manage")} canRun={can("agents.run")} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "outcomes" && <Outcomes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "sequences" && <Sequences key={ws.id} ws={ws.id} canManage={writer} open={item} setOpen={setItem} go={setTab} />}
         {ready && ws && tab === "infrastructure" && <Infrastructure key={ws.id} ws={ws.id} canManage={writer} canApprove={isAdmin} open={item ?? ""} onOpen={(it) => setItem(it || undefined)} go={setTab} />}
@@ -698,6 +758,11 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         )}
         </div>
       </SidebarInset>
+      {agentOpen && agentReady && BrandAgentPage && agentProps && ws && (
+        <div className="fixed inset-y-0 right-0 z-30 w-full max-w-[26rem] border-l bg-background shadow-2xl xl:shadow-none">
+          <BrandAgentPage key={`dock:${ws.id}:${brandState.brand?.id ?? "all"}`} {...agentProps} variant="dock" />
+        </div>
+      )}
       {apiOpen && wsId && (
         <div className="fixed inset-y-0 right-0 z-30 w-full max-w-[26rem] shadow-2xl xl:shadow-none">
           <ApiPanel ws={wsId} tab={tab} item={item} onClose={() => setApiOpen(false)} />

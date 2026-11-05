@@ -36,13 +36,13 @@ type channelTotals struct {
 func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
 	var s digests.Section
 	model := LastNonDirect
-	err := q.QueryRow(ctx, `SELECT model FROM attribution_settings WHERE workspace_id = $1`, ws).Scan(&model)
+	err := q.QueryRow(ctx, `SELECT model FROM attribution_settings WHERE workspace_id = $1 ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand(workspace_id) DESC LIMIT 1`, ws).Scan(&model)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
 	// A workspace's own default model is stored as its key; its credits
 	// are under its latest version's id.
-	if id, _, err := Resolve(ctx, q, ws, model); err == nil {
+	if id, _, err := Resolve(ctx, q, ws, "", model); err == nil {
 		model = id
 	} else if errors.Is(err, ErrUnknownModel) || errors.Is(err, ErrNotCredited) {
 		model = LastNonDirect

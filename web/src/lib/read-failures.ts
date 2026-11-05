@@ -2,7 +2,8 @@
 // its last_error_code, and when the engine tries again on its own: the
 // same day (engine/internal/retry), so the day-by-day numbers stay whole.
 export const readError: Record<string, string> = {
-  blocked: "The site showed a bot check instead of the page.",
+  blocked: "The site showed a bot check or a login wall instead of the page.",
+  page_failed: "The page reader couldn't read this page: the site failed or turned it away.",
   page_not_found: "The site says this page doesn't exist. Check the address in the brand's links.",
   invalid_address: "This address isn't one Outflare can read. Check it in the brand's links.",
   not_a_review_page: "The page showed no reviews or rating. The site may have changed its page; Outflare's team is told.",

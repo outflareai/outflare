@@ -39,6 +39,8 @@ type fakeReviewSite struct {
 	// failed are the addresses whose job ends on Cloudflare's challenge,
 	// reported without the page (UNPROCESSABLE_CONTENT).
 	failed map[string]bool
+	// failCode, when set, is the code a failed job ends with instead.
+	failCode string
 }
 
 func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +72,11 @@ func (f *fakeReviewSite) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if f.failed[job["url"].(string)] {
-			io.WriteString(w, `{"status": "failed", "error": {"code": "UNPROCESSABLE_CONTENT", "retryable": false}, "tokens_charged": 0}`)
+			code := "UNPROCESSABLE_CONTENT"
+			if f.failCode != "" {
+				code = f.failCode
+			}
+			io.WriteString(w, `{"status": "failed", "error": {"code": "`+code+`", "retryable": false}, "tokens_charged": 0}`)
 			return
 		}
 		json.NewEncoder(w).Encode(job["answer"])
@@ -506,6 +512,11 @@ func TestReviewPageReadRetries(t *testing.T) {
 		switch ev.Name {
 		case "review_page.read_failed":
 			codes[ev.ErrorCode]++
+			// A site's bot check or a missing page is a refusal, not
+			// something broken in Outflare.
+			if ev.Outcome != track.Failure {
+				t.Fatalf("%s read_failed outcome: %s", ev.ErrorCode, ev.Outcome)
+			}
 		case "review_page.read_requested":
 			codes["requested"]++
 		}
@@ -616,5 +627,124 @@ func TestReviewPageJobs(t *testing.T) {
 	}
 	if names["review_page.read_pending"] != 1 || names["review_page.backfilled"] != 2 || names["review_page.read_failed"] != 1 {
 		t.Fatalf("events: %v", names)
+	}
+}
+
+// A page job the reader never finishes is given up after an hour as a slow
+// page, kept on the page and tried again the same day, instead of being
+// sent again every hour with no failure anyone can see.
+func TestReviewPageLostJob(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	t.Cleanup(api.SetReviewJobTimes(time.Millisecond, 20*time.Millisecond))
+	p1 := "https://www.trustpilot.com/review/northpeak.example?sort=recency"
+	site := &fakeReviewSite{slow: map[string]bool{p1: true}, slowPolls: 1 << 30}
+	srv := httptest.NewServer(site)
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["geonode"] = srv.URL
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example", "links": []map[string]any{
+		{"kind": "trustpilot", "url": "https://www.trustpilot.com/review/northpeak.example"},
+	}})
+	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
+	read := func() (job, code *string, failures int, next float64) {
+		t.Helper()
+		if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.pool.QueryRow(ctx, `SELECT pending_job_id, last_error_code, failures, EXTRACT(epoch FROM next_read_at - now()) / 60
+			FROM review_pages WHERE workspace_id = $1`, ws).Scan(&job, &code, &failures, &next); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if job, code, _, _ := read(); job == nil || code != nil {
+		t.Fatalf("pending: job %v code %v", job, code)
+	}
+	// An hour on, the job still hasn't finished: a slow page.
+	e.pool.Exec(ctx, `UPDATE review_pages SET next_read_at = now(), pending_job_at = now() - interval '61 minutes' WHERE workspace_id = $1`, ws)
+	job, code, failures, next := read()
+	if job != nil || code == nil || *code != "slow_page" || failures != 1 || next < 10 || next > 20 {
+		t.Fatalf("lost job: job %v code %v failures %d next %.0f", job, code, failures, next)
+	}
+	// The next try sends the page afresh.
+	e.pool.Exec(ctx, `UPDATE review_pages SET next_read_at = now() WHERE workspace_id = $1`, ws)
+	if job, _, _, _ := read(); job == nil || site.posts[p1] != 2 {
+		t.Fatalf("sent again: job %v posts %d", job, site.posts[p1])
+	}
+	failed := 0
+	for _, ev := range got() {
+		if ev.Name == "review_page.read_failed" {
+			failed++
+			if ev.ErrorCode != "slow_page" || ev.Outcome != track.Failure {
+				t.Fatalf("read_failed: %+v", ev)
+			}
+		}
+	}
+	if failed != 1 {
+		t.Fatalf("read_failed events: %d", failed)
+	}
+}
+
+// A page Geonode couldn't read is that page's own failure, whatever code
+// Geonode gives: a code Outflare doesn't know yet (the site failed, or
+// turned Geonode away) is page_failed and a login wall is blocked. Neither
+// is a Geonode outage that fails the round and is read again every hour,
+// nor a wrong address that waits a day for a person.
+func TestReviewPageUnreadable(t *testing.T) {
+	got := track.Capture(t)
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	t.Cleanup(api.SetReviewJobTimes(time.Millisecond, 50*time.Millisecond))
+	p1 := "https://www.trustpilot.com/review/northpeak.example?sort=recency"
+	site := &fakeReviewSite{failed: map[string]bool{p1: true}}
+	srv := httptest.NewServer(site)
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["geonode"] = srv.URL
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example", "links": []map[string]any{
+		{"kind": "trustpilot", "url": "https://www.trustpilot.com/review/northpeak.example"},
+	}})
+	gn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "geonode", "credentials": map[string]string{"api_key": "gn-key"}})["id"].(string)
+	for i, c := range []struct{ geonode, code string }{
+		{"TARGET_ERROR", "page_failed"},
+		{"AUTH_REQUIRED", "blocked"},
+	} {
+		site.mu.Lock()
+		site.failCode = c.geonode
+		site.mu.Unlock()
+		e.pool.Exec(ctx, `UPDATE review_pages SET next_read_at = now() WHERE workspace_id = $1`, ws)
+		if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
+			t.Fatalf("%s failed the round: %v", c.geonode, err)
+		}
+		var code string
+		var failures int
+		var next float64
+		if err := e.pool.QueryRow(ctx, `SELECT last_error_code, failures, EXTRACT(epoch FROM next_read_at - now()) / 60
+			FROM review_pages WHERE workspace_id = $1`, ws).Scan(&code, &failures, &next); err != nil {
+			t.Fatal(err)
+		}
+		// The usual same-day ladder: 15 minutes, then an hour.
+		if code != c.code || failures != i+1 || next < 10 || next > 70 {
+			t.Fatalf("%s: code %s failures %d next %.0f", c.geonode, code, failures, next)
+		}
+	}
+	var codes []string
+	for _, ev := range got() {
+		if ev.Name == "review_page.read_failed" {
+			if ev.Outcome != track.Failure {
+				t.Fatalf("read_failed: %+v", ev)
+			}
+			codes = append(codes, ev.ErrorCode)
+		}
+		if ev.Name == "job.failed" {
+			t.Fatalf("job failed: %+v", ev)
+		}
+	}
+	if strings.Join(codes, ",") != "page_failed,blocked" {
+		t.Fatalf("read_failed codes: %v", codes)
 	}
 }

@@ -181,12 +181,24 @@ func (s *Server) changeAdCampaign(ctx context.Context, tx pgx.Tx, a *access, c a
 	if err := adsync.EnqueueChange(ctx, tx, a.WorkspaceID, id); err != nil {
 		return adChangeOut{}, err
 	}
-	actionName := map[string]string{adsync.ChangePause: "ad_campaign.paused", adsync.ChangeResume: "ad_campaign.resumed", adsync.ChangeBudget: "ad_campaign.budget_changed"}[kind]
+	actionName := map[string]string{adsync.ChangePause: "ad_campaign.paused", adsync.ChangeResume: "ad_campaign.resumed", adsync.ChangeBudget: "ad_campaign.budget_changed",
+		adsync.ChangeKeywordAdd: "ad_campaign.keyword_added", adsync.ChangeNegativeAdd: "ad_campaign.negative_added", adsync.ChangeKeywordSplit: "ad_campaign.keyword_split",
+		adsync.ChangeBidding: "ad_campaign.bidding_changed", adsync.ChangeAudienceAdd: "ad_campaign.audience_added", adsync.ChangeAudienceRemove: "ad_campaign.audience_removed",
+		adsync.ChangeCountryAdd: "ad_campaign.country_added", adsync.ChangeCountryRemove: "ad_campaign.country_removed"}[kind]
 	data := map[string]any{"change_id": id, "campaign_id": c.id, "external_id": c.externalID, "connector": c.connector, "brand_id": c.brand,
 		"before": before, "after": after}
 	props := map[string]any{"connector": c.connector, "kind": kind}
 	if after.DailyBudgetMicros != nil {
 		props["daily_budget_micros"] = *after.DailyBudgetMicros
+	}
+	if after.MatchType != "" {
+		props["match_type"] = after.MatchType
+	}
+	if after.Bidding != nil {
+		props["strategy"] = after.Bidding.Strategy
+	}
+	if after.Country != "" {
+		props["country"] = after.Country
 	}
 	if batch != nil {
 		data["batch_id"], props["batch"] = *batch, true
@@ -364,6 +376,18 @@ func (s *Server) listAdChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		args = append(args, v)
 		where += ` AND c.ad_entity_id = $` + strconv.Itoa(len(args))
+	}
+	if v := r.URL.Query().Get("connector"); v != "" {
+		args = append(args, v)
+		where += ` AND a.connector = $` + strconv.Itoa(len(args))
+	}
+	if v := r.URL.Query().Get("account_id"); v != "" {
+		if !isUUID(v) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id is an ad account's id, from GET .../ads/accounts")
+			return
+		}
+		args = append(args, v)
+		where += ` AND a.id = $` + strconv.Itoa(len(args))
 	}
 	if v := r.URL.Query().Get("status"); v != "" {
 		if v != "queued" && v != "applied" && v != "failed" {

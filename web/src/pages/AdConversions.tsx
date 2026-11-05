@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AdAccount, AdConnection, AdConversionRule, AdConversionSend, AdConversionTarget, AdSettings, ConversionDefinition } from "@outflare/sdk";
 import { DataTable } from "@/components/data-table";
+import { pickedBrandId } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Input, confirmAction, field, toast } from "../ui";
 import { ago } from "../format";
@@ -33,7 +34,7 @@ export function AdConversions({ ws, canManage, accounts }: { ws: string; canMana
     const [r, s, st] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/conversion-rules", { params: { path } }),
       api.GET("/v1/workspaces/{ws}/ads/conversion-sends", { params: { path, query: { limit: 25 } } }),
-      api.GET("/v1/workspaces/{ws}/ads/settings", { params: { path } }),
+      api.GET("/v1/brands/{brand}/ads/settings", { params: { path: { brand: pickedBrandId() } } }),
     ]);
     if (r.error) toast(errorMessage(r.error), "error");
     setRules(r.data?.data ?? []);
@@ -45,7 +46,7 @@ export function AdConversions({ ws, canManage, accounts }: { ws: string; canMana
   }, [load]);
 
   async function setMode(consent_mode: "opt_out" | "opt_in") {
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/ads/settings", { params: { path: { ws } }, body: { consent_mode } });
+    const { data, error } = await api.PUT("/v1/brands/{brand}/ads/settings", { params: { path: { brand: pickedBrandId() } }, body: { consent_mode } });
     if (error || !data) return toast(errorMessage(error), "error");
     setSettings(data as AdSettings);
   }
@@ -209,7 +210,7 @@ function NewRule({ ws, accounts, cancel, done }: { ws: string; accounts: AdAccou
     loadTargets();
   }, [loadTargets]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/conversion-definitions", { params: { path: { ws } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/conversion-definitions", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => {
       const list = data?.data ?? [];
       setDefinitions(list);
       if (list.length > 0) setConversion(list[0].key ?? "");

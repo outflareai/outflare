@@ -265,18 +265,25 @@ function UseIt() {
   const css = `<script>document.documentElement.classList.add("of-wait"); setTimeout(function () { document.documentElement.classList.remove("of-wait"); }, 1500);</script>
 <style>.of-wait body { opacity: 0 } .of-flag-pricing-headline-faster .old-headline { display: none }</style>`;
   return (
-    <Card title="Use flags on your site" description="Add data-flags to your tracking script tag. The page then knows each visitor's versions; you can use them in a script, or in CSS through the class Outflare puts on the page (of-flag-<flag>-<version>).">
+    <Card title="Use flags on your site" description="No code needed for a test: make a split, open a version and choose Edit visually. Once the tracking script is on your site, the test runs by itself.">
       <div className="space-y-4 text-[13px]">
-        <div className="relative">
-          <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed">{site}</pre>
-          <CopyButton text={site} className="absolute top-2 right-2" />
-        </div>
-        <p className="text-muted-foreground">So visitors don't see the original flash before their version, hide the page until the flags arrive (at most one and a half seconds), with this in your <code>&lt;head&gt;</code>:</p>
-        <div className="relative">
-          <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed">{css}</pre>
-          <CopyButton text={css} className="absolute top-2 right-2" />
-        </div>
-        <p className="text-muted-foreground">To see a version yourself, add <code>?of_flag=pricing-headline:faster</code> to any page's address; it sticks for the rest of your visit. Servers ask with an API token: <code>POST /v1/workspaces/&#123;ws&#125;/flags/evaluate</code> with the visitor's <code>anonymous_id</code>, so they agree with the page.</p>
+        <p className="text-muted-foreground">To see a version yourself, add <code>?of_flag=pricing-headline:faster</code> to any page's address; it sticks for the rest of your visit. To stop the original flashing before a version shows, paste the optional guard from your site's tracking settings at the top of the page's <code>&lt;head&gt;</code>.</p>
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">For developers: read flags in code</summary>
+          <div className="mt-3 space-y-4">
+            <p className="text-muted-foreground">Add <code>data-flags</code> to the script tag, then use each visitor's version in a script, or in CSS through the class Outflare puts on the page (<code>of-flag-&lt;flag&gt;-&lt;version&gt;</code>).</p>
+            <div className="relative">
+              <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed">{site}</pre>
+              <CopyButton text={site} className="absolute top-2 right-2" />
+            </div>
+            <p className="text-muted-foreground">For a CSS-only test, hide the page until the flags arrive (at most one and a half seconds), with this in your <code>&lt;head&gt;</code>:</p>
+            <div className="relative">
+              <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-[12px] leading-relaxed">{css}</pre>
+              <CopyButton text={css} className="absolute top-2 right-2" />
+            </div>
+            <p className="text-muted-foreground">Servers ask with an API token: <code>POST /v1/workspaces/&#123;ws&#125;/flags/evaluate</code> with the visitor's <code>anonymous_id</code>, so they agree with the page.</p>
+          </div>
+        </details>
       </div>
     </Card>
   );
@@ -411,7 +418,7 @@ function FlagSheet({ ws, flag, onClose, onSaved }: { ws: string; flag: Flag | nu
                   <label className="block">
                     <span className="mb-1 block font-medium">Page to edit on</span>
                     <input className={`${field} w-full`} type="url" placeholder="https://northpeak.example/pricing" value={editPage} onChange={(e) => setEditPage(e.target.value)} />
-                    <span className="mt-1 block text-[12px] text-muted-foreground">Edit visually opens this page with the version and an editor over it: click anything to change its text, hide it, or change a link or image. The page needs the website script with data-flags. The link works for 2 hours.</span>
+                    <span className="mt-1 block text-[12px] text-muted-foreground">Edit visually opens this page with the version and an editor over it: click anything to change its text, hide it, or change a link or image. The page needs the website script; nothing else. The link works for 2 hours.</span>
                   </label>
                 )}
                 {flag && flag.status === "on" && <p className="text-[12px] text-muted-foreground">Changing the split while it's on moves some visitors to another version.</p>}

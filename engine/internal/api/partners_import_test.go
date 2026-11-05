@@ -841,3 +841,59 @@ func TestPartnerImportUnpaidPayouts(t *testing.T) {
 		t.Fatalf("payouts after the re-run: %s", got)
 	}
 }
+
+// TestPartnerImportRefusedObject: an object the database refuses (here a
+// partner whose name holds a NUL, which Postgres text can't store) is left
+// out with an issue naming the check, and the rest of the program comes
+// over, instead of the step failing on every retry.
+func TestPartnerImportRefusedObject(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	tolt := &fakeTolt{data: map[string][]map[string]any{}}
+	tolt.set("/programs", map[string]any{"id": "prg_1", "name": "Northpeak partners", "currency": "usd"})
+	tolt.set("/links")
+	tolt.set("/partners",
+		map[string]any{"id": "p1", "first_name": "Ana", "email": "ana@acme.example", "status": "active"},
+		map[string]any{"id": "p2", "first_name": "B\u0000en", "email": "ben@acme.example", "status": "active"},
+		map[string]any{"id": "p3", "first_name": "Cid", "email": "cid@acme.example", "status": "active"})
+	srv := httptest.NewServer(tolt)
+	defer srv.Close()
+	e.integrations.Client.BaseURLs["tolt"] = srv.URL
+	owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate"})
+	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "tolt", "credentials": map[string]string{"api_key": "tlt_test_not_a_real_key"}})
+	imports := base + "/partner-programs/affiliates/imports"
+	imp := owner.must(201, "POST", imports, map[string]any{})
+	e.runCRMImports(t)
+	var v map[string]any
+	for range 500 {
+		v = owner.must(200, "GET", imports+"/"+imp["id"].(string), nil)
+		if v["status"] == "done" || v["status"] == "failed" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if v["status"] != "done" {
+		t.Fatalf("import = %v", v)
+	}
+	sum := v["summary"].(map[string]any)
+	for _, k := range sum["kinds"].([]any) {
+		if m := k.(map[string]any); m["kind"] == "partners" && (m["created"] != 2.0 || m["skipped"] != 1.0) {
+			t.Fatalf("partners = %v", m)
+		}
+	}
+	var found bool
+	for _, i := range sum["issues"].([]any) {
+		is := i.(map[string]any)
+		if is["reason"] == "rejected" {
+			msg, _ := is["message"].(string)
+			if is["external_id"] != "p2" || !strings.Contains(msg, "SQLSTATE 22") || strings.Contains(msg, "Ben") {
+				t.Fatalf("issue = %v", is)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("issues = %v", sum["issues"])
+	}
+}

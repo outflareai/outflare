@@ -33,6 +33,14 @@ func TestLinkReadsReportsAndSettings(t *testing.T) {
 	if set["pitch_cooldown_days"].(float64) != 60 || set["weekly_reads"] != true || set["weekly_budget_percent"].(float64) != 10 {
 		t.Fatalf("defaults: %v", set)
 	}
+	// A brand's own agent token reads the settings and its SEO
+	// connections too, but can't change the workspace's settings.
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Northpeak agent", "scopes": []string{"seo.read", "seo.manage", "analytics.read"}, "brand": "northpeak"})
+	agent := &client{t: t, h: e.h, bearer: tok["token"].(string)}
+	agent.must(200, "GET", base+"/link-building/settings", nil)
+	agent.must(200, "GET", base+"/seo", nil)
+	agent.must(403, "PATCH", base+"/link-building/settings", map[string]any{"weekly_reads": false})
 	owner.must(400, "PATCH", base+"/link-building/settings", map[string]any{"pitch_cooldown_days": 400})
 	owner.must(400, "PATCH", base+"/link-building/settings", map[string]any{"weekly_budget_percent": 0})
 

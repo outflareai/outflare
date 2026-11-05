@@ -363,7 +363,7 @@ var Follows = []Ref{
 	{"crm_activities", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
 	{"review_requests", "record_id"},
-	{"coverage_publishers", "record_id"}, {"coverage_placements", "contact_record_id"},
+	{"coverage_publishers", "record_id"}, {"coverage_placements", "contact_record_id"}, {"coverage_parties", "record_id"},
 	{"partner_audiences", "record_id"}, {"partner_task_submissions", "record_id"},
 	{"customer_events", "record_id"}, {"customer_events", "account_id"}, {"consents", "record_id"}, {"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
@@ -371,7 +371,7 @@ var Follows = []Ref{
 	{"support_conversations", "record_id"}, {"support_messages", "record_id"},
 	{"email_broadcast_recipients", "record_id"}, {"suppressions", "record_id"},
 	{"journey_runs", "record_id"}, {"payment_subscriptions", "record_id"}, {"seo_competitors", "record_id"},
-	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"},
+	{"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"site_visitors", "account_id"}, {"visitor_links", "record_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
 	{"rule_firings", "record_id"}, {"coverage", "record_id"}, {"static_list_members", "record_id"}, {"news_article_authors", "record_id"}, {"pr_experts", "record_id"}, {"story_pitches", "record_id"},
 	{"link_prospect_contacts", "record_id"},
@@ -393,6 +393,8 @@ var followOnce = map[string]string{
 	"email_broadcast_recipients": "broadcast_id",
 	"partner_memberships":        "program_id",
 	"partner_referrals":          "program_id",
+	// A company or person already on a placement keeps its own role there.
+	"coverage_parties": "placement_id",
 }
 
 // Owned are the record columns a merge handles itself (identities, links,

@@ -679,6 +679,14 @@ func (s *Server) deleteTransaction(w http.ResponseWriter, r *http.Request) {
 		} else if err != nil {
 			return err
 		}
+		gone, err := scanTransaction(tx.QueryRow(ctx, `SELECT `+transactionColumns+` FROM transactions t WHERE t.id = $1`, id))
+		if err != nil {
+			return err
+		}
+		// A deleted payment no longer earns a partner commission.
+		if err := partnerSaleDeleted(ctx, tx, a.WorkspaceID, gone); err != nil {
+			return err
+		}
 		d, err := startDeletion(ctx, tx, a, deletedTransaction, rec, id)
 		if err != nil {
 			return err

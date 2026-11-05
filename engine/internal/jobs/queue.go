@@ -167,6 +167,26 @@ func DefaultBackoff(attempt int) time.Duration {
 	return min(d, time.Hour)
 }
 
+// RetryLater wraps err so the job's next attempt waits at least d, for a
+// failure that needs longer than the usual backoff to clear (a provider
+// outage). The error is otherwise unchanged: errors.Is, errors.As and its
+// error code see through it.
+func RetryLater(err error, d time.Duration) error {
+	if err == nil {
+		return nil
+	}
+	return &retryLater{err: err, wait: d}
+}
+
+type retryLater struct {
+	err  error
+	wait time.Duration
+}
+
+func (e *retryLater) Error() string          { return e.err.Error() }
+func (e *retryLater) Unwrap() error          { return e.err }
+func (e *retryLater) RetryIn() time.Duration { return e.wait }
+
 // Retired lists job kinds whose handler was removed. A leftover job of
 // one, enqueued by the old version during a deploy, is closed quietly
 // instead of dying as an error. Its removal migration deletes the rest.
@@ -416,16 +436,27 @@ func (q *Queue) execute(ctx context.Context, job Job) {
 		}
 		return
 	}
+	if !ok {
+		// claim only takes kinds this process handles, so this is a kind
+		// whose handler went away under it. Never kill the job for that:
+		// hand it back, without using up an attempt, for a process that
+		// has the handler (a newer version during a deploy or rollback).
+		fctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		log.Warn("no handler for job kind here, handing it back")
+		if _, err := q.pool.Exec(fctx, `UPDATE jobs SET status = 'queued', attempts = attempts - 1, locked_by = NULL, locked_at = NULL,
+			last_error = 'no handler for this kind on '||$3, run_at = now() + interval '1 minute', updated_at = now()
+			WHERE id = $1 AND `+ownLease, job.ID, job.Attempt, q.workerID); err != nil {
+			log.Error("hand back job without handler", "err", err)
+		}
+		return
+	}
 	var err error
 	done := metrics.JobStarted(job.Kind, job.waited)
 	// What the job records (audit actions) is sent only if it succeeds.
 	hctx, release := track.Hold(ctx)
 	hctx, stopRenew := q.keepLease(hctx, log, job)
-	if !ok {
-		err = fmt.Errorf("%w: no handler for kind %q", ErrPermanent, job.Kind)
-	} else {
-		err = runHandler(hctx, h, job)
-	}
+	err = runHandler(hctx, h, job)
 	lost := stopRenew()
 	if lost && err == nil {
 		err = errLeaseLost
@@ -463,7 +494,7 @@ func (q *Queue) execute(ctx context.Context, job Job) {
 		return
 	}
 
-	ev.Outcome, ev.ErrorCode = track.Error, jobErrorCode(err)
+	ev.ErrorCode, ev.Outcome = jobErrorCode(err)
 	if errors.Is(err, ErrPermanent) || job.Attempt >= job.MaxAttempts {
 		ev.Name = "job.dead"
 		done(metrics.JobDead)
@@ -477,6 +508,10 @@ func (q *Queue) execute(ctx context.Context, job Job) {
 	}
 
 	delay := q.Backoff(job.Attempt)
+	var later interface{ RetryIn() time.Duration }
+	if errors.As(err, &later) {
+		delay = max(delay, later.RetryIn())
+	}
 	ev.Name = "job.failed"
 	done(metrics.JobRetried)
 	track.Emit(ctx, ev)
@@ -541,19 +576,29 @@ func (q *Queue) keepLease(ctx context.Context, log *slog.Logger, job Job) (conte
 }
 
 // jobErrorCode classifies a job's error for its event; the error itself,
-// which can quote customer data, goes only to the log.
-func jobErrorCode(err error) string {
+// which can quote customer data, goes only to the log. An error that names
+// its own code (ErrorCode, as a connector's error does: connector_quota,
+// connector_unavailable) is the connected service's answer, such as an
+// account out of credits or a provider outage, so its outcome is failure
+// rather than error: nothing in Outflare is broken.
+func jobErrorCode(err error) (code, outcome string) {
 	switch {
 	case strings.HasPrefix(err.Error(), "panic: "):
-		return "panic"
+		return "panic", track.Error
 	case errors.Is(err, context.DeadlineExceeded):
-		return "timeout"
+		return "timeout", track.Error
 	case errors.Is(err, ErrPermanent):
-		return "permanent"
+		return "permanent", track.Error
 	case errors.Is(err, errLeaseLost):
-		return "lease_lost"
+		return "lease_lost", track.Error
 	}
-	return "job_error"
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) {
+		if code := coded.ErrorCode(); code != "" {
+			return code, track.Failure
+		}
+	}
+	return "job_error", track.Error
 }
 
 func runHandler(ctx context.Context, h Handler, job Job) (err error) {

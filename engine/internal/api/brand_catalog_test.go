@@ -340,30 +340,39 @@ func TestBrandCatalogEvents(t *testing.T) {
 		t.Fatalf("bravo's name in alpha's catalog: %v", a)
 	}
 
-	// Until the contract step an event name is defined in one brand at a
-	// time: Bravo sending Alpha's name keeps it held, and approving it says
-	// why it can't be.
+	// Each brand has its own catalog: Bravo sending Alpha's name holds it
+	// in Bravo's catalog, Bravo approves it on its own, and Alpha's entry
+	// stays as it was.
 	b2 := send(bravo, map[string]any{"type": "track", "userId": "u_1", "event": "Order Completed"})
 	if ev := settled(bravo, b2); ev["status"] != "held" {
 		t.Fatalf("bravo's order_completed: %v", ev)
 	}
-	if e := owner.must(409, "POST", "/v1/brands/"+bravo+"/catalog/events/order_completed/approve", nil); e["error"].(map[string]any)["code"] != "event_name_in_other_brand" {
-		t.Fatalf("approve another brand's name: %v", e)
+	if b := names(bravo, "quarantined"); !slices.Equal(b, []string{"order_completed"}) {
+		t.Fatalf("bravo quarantined: %v", b)
 	}
-	owner.must(409, "POST", "/v1/brands/"+bravo+"/catalog/events", map[string]any{"name": "order_completed"})
+	if d := owner.must(200, "POST", "/v1/brands/"+bravo+"/catalog/events/order_completed/approve", nil); d["status"] != "approved" {
+		t.Fatalf("bravo approves the same name: %v", d)
+	}
+	if r := owner.must(202, "POST", "/v1/brands/"+bravo+"/events/replay", map[string]any{"status": "held", "name": "order_completed"}); r["replayed"] != 1.0 {
+		t.Fatalf("bravo replay: %v", r)
+	}
+	if ev := settled(bravo, b2); ev["status"] != "accepted" {
+		t.Fatalf("bravo replayed: %v", ev)
+	}
+	owner.must(201, "POST", "/v1/brands/"+alpha+"/catalog/events", map[string]any{"name": "signup_done"})
+	owner.must(201, "POST", "/v1/brands/"+bravo+"/catalog/events", map[string]any{"name": "signup_done"})
+	if a, b := names(alpha, "approved"), names(bravo, "approved"); !slices.Contains(a, "order_completed") || !slices.Contains(b, "order_completed") ||
+		!slices.Contains(a, "signup_done") || !slices.Contains(b, "signup_done") || slices.Contains(a, "trial_started") {
+		t.Fatalf("approved: alpha %v, bravo %v", a, b)
+	}
 
 	approved := named(got(), "event_definition.approved")
-	if len(approved) != 2 || approved[0].Props["brand_id"] != alpha || approved[1].Props["brand_id"] != bravo {
+	if len(approved) != 3 || approved[0].Props["brand_id"] != alpha || approved[1].Props["brand_id"] != bravo || approved[2].Props["brand_id"] != bravo {
 		t.Fatalf("event_definition.approved: %v", approved)
 	}
-	refused := named(got(), "api.called")
-	n := 0
-	for _, ev := range refused {
+	for _, ev := range named(got(), "api.called") {
 		if ev.ErrorCode == "event_name_in_other_brand" {
-			n++
+			t.Fatalf("a name another brand defines was refused: %v", ev)
 		}
-	}
-	if n != 2 {
-		t.Fatalf("refusals recorded: %d", n)
 	}
 }

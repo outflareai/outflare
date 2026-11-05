@@ -10,6 +10,7 @@ import { Snippet } from "./Tokens";
 import { ago, plural } from "../format";
 import { ConsentBannerEditor } from "./ConsentBanner";
 import { SiteCookies } from "./SiteCookies";
+import { Switch } from "@/components/ui/switch";
 
 type SiteKey = components["schemas"]["SiteKey"];
 
@@ -65,6 +66,7 @@ function SiteKeysList({ ws, canManage, version = 0, onChange, hideEmpty = false 
   const [error, setError] = useState("");
   // A proxy secret just made, shown once.
   const [proxy, setProxy] = useState<{ id: string; secret: string } | null>(null);
+  const [ownDomainOf, setOwnDomainOf] = useState<string | null>(null);
 
   const { query: brandQuery, brand, byId } = useBrand(ws);
   const load = useCallback(async () => {
@@ -174,6 +176,7 @@ function SiteKeysList({ ws, canManage, version = 0, onChange, hideEmpty = false 
                     {showBrand && k.brand_id && <Badge>{byId(k.brand_id)?.name ?? "Brand"}</Badge>}
                     {extra.length > 0 && (main.has(k.id) ? <Badge tone="green">In use</Badge> : isExtra(k) && <Badge tone="amber">Not needed</Badge>)}
                   </div>
+                  {!isExtra(k) && <OwnDomainLine k={k} onOpen={() => { const next = ownDomainOf === k.id ? null : k.id; setOwnDomainOf(next); if (next) track("ui.site_own_domain_opened", { site_key_id: k.id, status: k.own_domain.status }); }} />}
                   <div className="text-[12px] text-muted-foreground">
                     Sites: {sitesLine(k)} · {plural(k.events_today, "event")} today{k.bots_today ? ` (${plural(k.bots_today, "bot request")} left out)` : ""} · {k.last_used_at ? `last visit ${ago(k.last_used_at)}` : "no visits yet"}
                   </div>
@@ -207,7 +210,15 @@ function SiteKeysList({ ws, canManage, version = 0, onChange, hideEmpty = false 
               </div>
               {banner === k.id && <ConsentBannerEditor ws={ws} keyID={k.id} name={k.name} canManage={canManage} onDone={() => setBanner(null)} />}
               {cookiesOf === k.id && <SiteCookies ws={ws} keyID={k.id} name={k.name} canManage={canManage} onDone={() => setCookiesOf(null)} />}
-              {!isExtra(k) && <Snippet title="Paste into <head>" code={k.snippet} />}
+              {ownDomainOf === k.id && <OwnDomainSteps k={k} canManage={canManage} onProxySecret={() => makeProxySecret(k)} />}
+              {!isExtra(k) && ownDomainOf !== k.id && <Snippet title="Paste into <head>" code={k.own_domain.status === "working" || k.own_domain.status === "partly" ? k.own_domain.snippet : k.snippet} />}
+              {!isExtra(k) && ownDomainOf !== k.id && k.tests && (
+                <details className="text-[13px]">
+                  <summary className="cursor-pointer text-muted-foreground">Optional: stop A/B tests flashing the original</summary>
+                  <p className="mt-2 text-muted-foreground">Paste this once at the very top of your site's &lt;head&gt;, above everything else. On a visitor's next visit it hides just the parts their test changes, for a second at most, until their version shows. Pages look the same for everyone else.</p>
+                  <Snippet title="Top of <head>" code={k.flicker_guard} />
+                </details>
+              )}
               {proxy?.id === k.id && (
                 <Snippet title="Proxy secret: shown once. Your proxy sends it in X-Outflare-Proxy, with the visitor's address in X-Outflare-Client-IP. Never put it in a page." code={proxy.secret} />
               )}
@@ -224,19 +235,108 @@ function SiteKeysList({ ws, canManage, version = 0, onChange, hideEmpty = false 
   );
 }
 
+// OwnDomainLine says whether the script is served from the site's own
+// domain, from the last 7 days of events, and opens the steps.
+function OwnDomainLine({ k, onOpen }: { k: SiteKey; onOpen: () => void }) {
+  const o = k.own_domain;
+  const share = o.events ? Math.round((o.through_own_domain * 100) / o.events) : 0;
+  const safari = o.events ? Math.round((o.safari_direct * 100) / o.events) : 0;
+  const text =
+    o.status === "working" ? "Served from your own domain" :
+    o.status === "partly" ? `${share}% of events come through your own domain` :
+    o.status === "no_traffic" ? "Not served from your own domain yet" :
+    safari > 0 ? `Not served from your own domain: Safari forgets ${safari}% of your visitors after 7 days` : "Not served from your own domain";
+  return (
+    <button type="button" className="mt-0.5 flex items-center gap-1.5 text-[12px] underline-offset-2 hover:underline" onClick={onOpen}>
+      <Badge tone={o.status === "working" ? "green" : o.status === "partly" || safari > 0 ? "amber" : "grey"}>{o.status === "working" ? "Own domain" : "Set up own domain"}</Badge>
+      <span className="text-muted-foreground">{text}</span>
+    </button>
+  );
+}
+
+const ownDomainHosts = [
+  { id: "nextjs", label: "Next.js" },
+  { id: "vercel", label: "Vercel" },
+  { id: "netlify", label: "Netlify" },
+  { id: "cloudflare", label: "Cloudflare" },
+  { id: "nginx", label: "nginx" },
+] as const;
+
+// OwnDomainSteps: forward /ofx/ on the site to Outflare, then load the
+// script from there. Events then go to the site's own domain, so ad
+// blockers leave them alone and Safari keeps the visitor for a year.
+function OwnDomainSteps({ k, canManage, onProxySecret }: { k: SiteKey; canManage: boolean; onProxySecret: () => void }) {
+  const [host, setHost] = useState<(typeof ownDomainHosts)[number]["id"]>("nextjs");
+  const origin = /src="(https?:\/\/[^/"]+)\//.exec(k.snippet)?.[1] ?? "https://app.outflare.ai";
+  const hostName = origin.replace(/^https?:\/\//, "");
+  const configs: Record<typeof host, { title: string; code: string }> = {
+    nextjs: { title: "next.config.js", code: `module.exports = {\n  async rewrites() {\n    return [{ source: "/ofx/:path*", destination: "${origin}/:path*" }];\n  },\n};` },
+    vercel: { title: "vercel.json", code: `{\n  "rewrites": [{ "source": "/ofx/:path*", "destination": "${origin}/:path*" }]\n}` },
+    netlify: { title: "_redirects (or netlify.toml)", code: `/ofx/*  ${origin}/:splat  200` },
+    cloudflare: {
+      title: "A Worker on the route example.com/ofx/*",
+      code: `export default {\n  async fetch(request, env) {\n    const url = new URL(request.url);\n    const to = new URL("${origin}" + url.pathname.replace(/^\\/ofx/, "") + url.search);\n    const headers = new Headers(request.headers);\n    // With a proxy secret (env.OUTFLARE_PROXY), Outflare sees each visitor's own address and country.\n    if (env.OUTFLARE_PROXY) {\n      headers.set("X-Outflare-Proxy", env.OUTFLARE_PROXY);\n      headers.set("X-Outflare-Client-IP", request.headers.get("CF-Connecting-IP") ?? "");\n      headers.set("X-Outflare-Country", request.headers.get("CF-IPCountry") ?? "");\n    }\n    return fetch(to, { method: request.method, headers, body: request.body });\n  },\n};`,
+    },
+    nginx: {
+      title: "nginx",
+      code: `location /ofx/ {\n  proxy_pass ${origin}/;\n  proxy_set_header Host ${hostName};\n  proxy_ssl_server_name on;\n  # With a proxy secret, Outflare sees each visitor's own address:\n  # proxy_set_header X-Outflare-Proxy "your proxy secret";\n  # proxy_set_header X-Outflare-Client-IP $remote_addr;\n}`,
+    },
+  };
+  const o = k.own_domain;
+  return (
+    <div className="space-y-3 rounded-md border p-3 text-[13px]">
+      <div>
+        <div className="font-medium">Serve the script from your own domain</div>
+        <p className="text-muted-foreground">
+          Safari and every iPhone browser forget a visitor after 7 days when the script talks to Outflare directly, so a returning visitor looks new and never joins their earlier visits. Ad blockers drop those events too. Forward one path on your site to Outflare and both problems go away: the visitor is kept for a year.
+        </p>
+      </div>
+      <ol className="list-decimal space-y-3 pl-5">
+        <li className="space-y-2">
+          <div>Forward <code>/ofx/</code> on your site to Outflare. Pick where your site runs:</div>
+          <div className="flex flex-wrap rounded-md border" role="group" aria-label="Where your site runs">
+            {ownDomainHosts.map((h) => (
+              <button key={h.id} type="button" className={`px-2.5 py-1 ${h.id === host ? "bg-muted font-medium" : "text-muted-foreground"}`} onClick={() => { setHost(h.id); track("ui.site_own_domain_host_picked", { host: h.id }); }}>{h.label}</button>
+            ))}
+          </div>
+          <Snippet title={configs[host].title} code={configs[host].code} />
+        </li>
+        <li className="space-y-2">
+          <div>Replace the tag in your site's &lt;head&gt; with this one:</div>
+          <Snippet title="Paste into <head>" code={o.snippet} />
+        </li>
+        <li>
+          Optional: a <span className="font-medium">proxy secret</span> lets Outflare see each visitor's own address and country (for company lookups, consent rules and limits) instead of your server's.{" "}
+          {canManage && <button type="button" className="underline" onClick={onProxySecret}>{k.proxy_secret_at ? "Make a new one" : "Make one"}</button>}
+        </li>
+      </ol>
+      <p className="text-muted-foreground">
+        {o.status === "working"
+          ? `Working: ${plural(o.through_own_domain, "event")} of ${o.events.toLocaleString()} in the last 7 days came through your own domain.`
+          : o.status === "partly"
+            ? `Partly working: ${plural(o.through_own_domain, "event")} of ${o.events.toLocaleString()} in the last 7 days came through your own domain. Pages still loading the old tag go straight to Outflare.`
+            : o.events
+              ? `Not working yet: none of the last 7 days' ${plural(o.events, "event")} came through your own domain${o.safari_direct ? `, and ${plural(o.safari_direct, "event")} came from Safari or an iPhone` : ""}. This updates as soon as events arrive the new way.`
+              : "Once events arrive through your own domain, this says so."}
+      </p>
+    </div>
+  );
+}
+
 // Change a script's name, allowed sites and left-out query parameters in place. The script stays the
 // same unless the sites now span another domain, when the tag lists them.
 function EditKey({ k, onDone }: { ws: string; k: SiteKey; onDone: (saved: boolean) => void }) {
   const [name, setName] = useState(k.name);
   const [origins, setOrigins] = useState(k.origins.map(originText).join(", "));
   const [excluded, setExcluded] = useState(k.excluded_params.join(", "));
+  const [tests, setTests] = useState(k.tests);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.PATCH("/v1/brands/{brand}/site-keys/{id}", { params: { path: { brand: pickedBrandId(), id: k.id } }, body: { name: name.trim(), origins: parseOrigins(origins), excluded_params: parseOrigins(excluded) } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/site-keys/{id}", { params: { path: { brand: pickedBrandId(), id: k.id } }, body: { name: name.trim(), origins: parseOrigins(origins), excluded_params: parseOrigins(excluded), tests } });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     toast(data.snippet === k.snippet ? "Saved. The script on your site stays the same." : "Saved. The script changed: paste the new one into your site.");
@@ -256,6 +356,13 @@ function EditKey({ k, onDone }: { ws: string; k: SiteKey; onDone: (saved: boolea
           hint="Every other parameter is kept, so reports can filter on it. fb_* leaves out every name starting with fb_. Sign-in tokens, passwords, codes and email addresses are always left out."
         />
       </div>
+      <label className="flex items-start gap-2 text-[13px]">
+        <Switch checked={tests} onCheckedChange={setTests} aria-label="Run A/B tests on this site" className="mt-0.5" />
+        <span>
+          <span className="block font-medium">Run A/B tests on this site</span>
+          <span className="block text-muted-foreground">Tests you make with the visual editor run on their own, with no change to the script. Off: only pages whose code asks for flags get them.</span>
+        </span>
+      </label>
       <ErrorText>{error}</ErrorText>
       <div className="flex gap-2">
         <Button type="submit" disabled={busy || !name.trim()}>{busy ? "Saving…" : "Save"}</Button>

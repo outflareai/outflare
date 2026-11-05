@@ -28,3 +28,7 @@ Connecting an AI model (the Connectors dialog, Get started and connect-request l
 ## Metrics
 
 `outflare_ai_calls_total`, `outflare_ai_tokens_total`, `outflare_ai_cost_cents_total` (by `provider` and `task`) and `outflare_ai_budget_alerts_total` (by `level` and `scope`), on the AI row of the dashboard. Alerts fire when one tool makes over 5 calls a second for 15 minutes, a likely loop spending workspaces' money, and when over 20 limits are reached in an hour ([`docs/monitoring.md`](monitoring.md)).
+
+## The operator's own tooling
+
+An operator may run tooling of its own on AI, such as its own evaluation tooling. That tooling is never a workspace feature and never spends a workspace's key or budget. Extensions open such a model with `outflare.OpenOperatorModel` (only models whose price is known, so every call can be booked against the operator's own budget), check a key with `outflare.CheckOperatorKey`, and store the key with `Host.SealSecret` and `Host.OpenSecret`, which encrypt it with the engine's secret key for one named purpose. The operator records the exception, and the extension caps and books the spend itself.

@@ -117,6 +117,11 @@ type Config struct {
 	// workspace on this server (OUTFLARE_EVENTS_WORKSPACE, its id), so the
 	// operator analyses its own users with Outflare itself.
 	EventsWorkspace string
+	// EventsBrand is the brand in that workspace they are stored under
+	// (OUTFLARE_EVENTS_BRAND, its id or handle; default the first brand):
+	// the one whose website tracking counts the operator's own site, so
+	// each person joins the visits they made before signing in.
+	EventsBrand string
 
 	// Optional analytics storage (docs/adr/0010-analytics-storage.md):
 	// ClickHouse keeps a copy of product events for analytics, and an
@@ -206,6 +211,7 @@ func Load() (Config, error) {
 		PostHogHost: strings.TrimRight(getenv("OUTFLARE_POSTHOG_HOST", "https://us.i.posthog.com"), "/"),
 
 		EventsWorkspace: strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_EVENTS_WORKSPACE"))),
+		EventsBrand:     strings.TrimSpace(os.Getenv("OUTFLARE_EVENTS_BRAND")),
 		ClickHouseURL:   strings.TrimSpace(os.Getenv("OUTFLARE_CLICKHOUSE_URL")),
 		S3: S3{
 			Endpoint:  strings.TrimRight(strings.TrimSpace(os.Getenv("OUTFLARE_S3_ENDPOINT")), "/"),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/outflareai/outflare/engine/internal/conversions"
 	"github.com/outflareai/outflare/engine/internal/db"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -178,5 +179,63 @@ func TestTickCreditsConversions(t *testing.T) {
 	}
 	if !seen {
 		t.Fatal("no attribution.credited event with 3 conversions and 1 refund")
+	}
+}
+
+// TestTickCreditsPerBrand: a brand's conversion definition counts only its
+// own brand's events, and only that brand's visits get the credit.
+func TestTickCreditsPerBrand(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	q := func(sql string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return id
+	}
+	ws := q(`INSERT INTO workspaces (name, slug) VALUES ('Attribution brands', 'ab-' || substr(gen_random_uuid()::text, 1, 8)) RETURNING id::text`)
+	alpha := q(`INSERT INTO brands (workspace_id, name, handle, website) VALUES ($1, 'Acme', 'acme', 'https://acme.example') RETURNING id::text`, ws)
+	bravo := q(`INSERT INTO brands (workspace_id, name, handle, website) VALUES ($1, 'Northpeak', 'northpeak', 'https://northpeak.example') RETURNING id::text`, ws)
+	def, err := conversions.Create(ctx, pool, ws, conversions.Definition{BrandID: bravo, Key: "demo", Name: "Demo booked", Event: "demo.booked",
+		Filters: []conversions.Filter{}, ValueMode: "none", ValueUnit: "major", NetworkEvents: map[string]string{}, Attribution: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.BrandID != bravo {
+		t.Fatalf("definition brand = %q, want %q", def.BrandID, bravo)
+	}
+	now := time.Now()
+	// The same visitor came through an ad to Acme and through search to
+	// Northpeak.
+	q(`INSERT INTO site_sessions (workspace_id, brand_id, anonymous_id, started_at, landing_url, click_ids)
+		VALUES ($1, $2, 'anon-both', $3, 'https://acme.example/', '{"gclid": "test-gclid"}') RETURNING id::text`, ws, alpha, now.Add(-2*time.Hour))
+	q(`INSERT INTO site_sessions (workspace_id, brand_id, anonymous_id, started_at, landing_url, referrer_host)
+		VALUES ($1, $2, 'anon-both', $3, 'https://northpeak.example/', 'www.google.com') RETURNING id::text`, ws, bravo, now.Add(-3*time.Hour))
+	event := func(brand string) string {
+		return q(`INSERT INTO customer_events (workspace_id, brand_id, kind, name, anonymous_id, occurred_at)
+			VALUES ($1, $2, 'track', 'demo.booked', 'anon-both', $3) RETURNING id::text`, ws, brand, now.Add(-time.Hour))
+	}
+	inAlpha, inBravo := event(alpha), event(bravo)
+
+	r := &Runner{Pool: pool, Log: slog.New(slog.DiscardHandler), Settle: time.Minute}
+	if _, _, err := r.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM attribution_conversions WHERE event_id = $1`, inAlpha).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("Northpeak's definition credited Acme's event")
+	}
+	var defID, brand, channel string
+	if err := pool.QueryRow(ctx, `SELECT c.definition_id::text, c.brand_id::text, k.channel FROM attribution_conversions c
+		JOIN attribution_credits k ON k.event_id = c.event_id AND k.model = $2 WHERE c.event_id = $1`, inBravo, LastNonDirect).Scan(&defID, &brand, &channel); err != nil {
+		t.Fatal(err)
+	}
+	if defID != def.ID || brand != bravo || channel != "seo" {
+		t.Fatalf("Northpeak's conversion = %s %s %s, want %s %s seo (Acme's ad visit must not count)", defID, brand, channel, def.ID, bravo)
 	}
 }

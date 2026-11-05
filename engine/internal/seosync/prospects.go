@@ -307,7 +307,8 @@ func CheckPitch(ctx context.Context, tx pgx.Tx, ws, prospectID, recordID, domain
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM link_prospects
 		WHERE workspace_id = $1 AND record_id = $2 AND id <> $3
 		  AND (stage = ANY($4) OR (stage = 'declined' AND ended_at > now() - make_interval(days => COALESCE(
-			(SELECT pitch_cooldown_days FROM link_building_settings WHERE workspace_id = $1), 60)))))`,
+			(SELECT st.pitch_cooldown_days FROM link_building_settings st WHERE st.workspace_id = $1
+			   AND st.brand_id = (SELECT COALESCE(x.brand_id, outflare_first_brand($1)) FROM link_prospects x WHERE x.id = $3)), 60)))))`,
 		ws, recordID, prospectID, InOutreach).Scan(&busy); err != nil {
 		return err
 	}

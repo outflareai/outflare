@@ -154,10 +154,10 @@ func scanProposal(row pgx.Row) (proposalView, error) {
 	return v, err
 }
 func (s *Server) routesPartnerProposals(mux *http.ServeMux) {
-	b := "/v1/workspaces/{ws}/partner-programs/{id}/proposals"
-	mux.HandleFunc("GET "+b, s.inBrand(auth.ScopePartnersRead, s.listPartnerProposals))
-	mux.HandleFunc("POST "+b, s.inBrand(auth.ScopePartnersManage, s.createPartnerProposal))
-	mux.HandleFunc("POST "+b+"/{proposal}", s.inBrand(auth.ScopePartnersManage, s.updatePartnerProposal))
+	b := "partner-programs/{id}/proposals"
+	s.twinRoute(mux, "GET", b, s.inBrand, auth.ScopePartnersRead, s.listPartnerProposals)
+	s.twinRoute(mux, "POST", b, s.inBrand, auth.ScopePartnersManage, s.createPartnerProposal)
+	s.twinRoute(mux, "POST", b+"/{proposal}", s.inBrand, auth.ScopePartnersManage, s.updatePartnerProposal)
 	mux.HandleFunc("GET /p/{program}/api/proposals", s.inPortal(s.portalProposals))
 	mux.HandleFunc("POST /p/{program}/api/proposals/{proposal}", s.inPortal(s.portalProposalAction))
 	mux.HandleFunc("POST /p/{program}/api/proposal-preview", s.proposalPreview)

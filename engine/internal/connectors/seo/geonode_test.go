@@ -204,6 +204,18 @@ func TestGeonodePageJobs(t *testing.T) {
 			case "https://slow.example/":
 				w.WriteHeader(504)
 				io.WriteString(w, `{"code": "TIMEOUT", "message": "Browser extraction did not complete within the allowed time", "retryable": true}`)
+			case "https://login.example/":
+				w.WriteHeader(422)
+				io.WriteString(w, `{"error": {"code": "AUTH_REQUIRED", "message": "Sign in", "retryable": false}, "tokens_charged": 0}`)
+			case "https://failing.example/":
+				w.WriteHeader(422)
+				io.WriteString(w, `{"error": {"code": "TARGET_ERROR", "message": "The site answered 500", "retryable": false}, "tokens_charged": 0}`)
+			case "https://bad.example/":
+				w.WriteHeader(422)
+				io.WriteString(w, `{"error": {"code": "INVALID_URL", "retryable": false}}`)
+			case "https://down.example/":
+				w.WriteHeader(502)
+				io.WriteString(w, `{"error": {"code": "INTERNAL_ERROR", "retryable": true}}`)
 			case "https://cloudflare.example/":
 				w.WriteHeader(422)
 				io.WriteString(w, `{"error": {"code": "UNPROCESSABLE_CONTENT", "message": "Just a moment...", "retryable": false}, "tokens_charged": 0}`)
@@ -272,5 +284,21 @@ func TestGeonodePageJobs(t *testing.T) {
 	}
 	if _, err := g.FetchPage(ctx, cl, creds, "https://cloudflare.example/", true); !errors.As(err, &pe) || !pe.Blocked || c.KindOf(err) == c.ErrInvalid {
 		t.Fatalf("blocked page: %v", err)
+	}
+	// A login wall is the site turning Geonode away, not a wrong address.
+	if _, err := g.FetchPage(ctx, cl, creds, "https://login.example/", true); !errors.As(err, &pe) || !pe.Blocked {
+		t.Fatalf("login wall: %v", err)
+	}
+	// A code Outflare doesn't know yet, on one page, is that page's own
+	// failure, never a Geonode outage.
+	if _, err := g.FetchPage(ctx, cl, creds, "https://failing.example/", true); !errors.As(err, &pe) || !pe.Failed || pe.Code != "TARGET_ERROR" {
+		t.Fatalf("failing site: %v", err)
+	}
+	// A wrong address keeps its kind, and Geonode's own 5xx is an outage.
+	if _, err := g.FetchPage(ctx, cl, creds, "https://bad.example/", true); errors.As(err, &pe) || c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("bad address: %v", err)
+	}
+	if _, err := g.FetchPage(ctx, cl, creds, "https://down.example/", true); errors.As(err, &pe) || c.KindOf(err) != c.ErrUnavailable {
+		t.Fatalf("Geonode down: %v", err)
 	}
 }

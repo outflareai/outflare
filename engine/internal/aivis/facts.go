@@ -164,7 +164,7 @@ func (s *Service) checkFacts(ctx context.Context, ws, runID string, c Cohort, se
 }
 
 func (s *Service) checkOne(ctx context.Context, ws, runID string, c Cohort, set Settings, facts []Fact, u uncheckedSample) (string, error) {
-	spent, err := MonthSpent(ctx, s.Pool, ws, s.now())
+	spent, err := MonthSpent(ctx, s.Pool, ws, deref(c.BrandID), s.now())
 	if err != nil {
 		return "", err
 	}

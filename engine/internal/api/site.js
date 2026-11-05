@@ -48,8 +48,11 @@
 // browser reports the names (never the values) of the page's cookies,
 // storage keys, scripts and embeds for it; data-cookies="off" stops that.
 //
-// Feature flags and A/B tests: with data-flags on the tag (or the first
-// call to outflare.flag), the script asks for the visitor's variants.
+// Feature flags and A/B tests: tests made in Outflare's visual editor run
+// with nothing on the tag; the script asks for the visitor's variants by
+// itself while the site has one (data-flags="off" stops it). For the
+// page's own code, with data-flags on the tag (or the first call to
+// outflare.flag), the script asks for the visitor's variants.
 // outflare.onFlags(fn) runs fn once they are known; outflare.flag("key")
 // then gives the variant or false, and outflare.flagPayload("key") its
 // payload. <html> gets a class per variant (of-flag-pricing-headline-faster)
@@ -76,7 +79,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "10";
+  var VERSION = "12";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -277,6 +280,9 @@
       history.replaceState(history.state, "", editURL.pathname + editURL.search + editURL.hash);
     }
   } catch (e) {}
+  // The editor's phone preview (a window named of_phone) shows the page
+  // without the editor.
+  if (window.name === "of_phone") editToken = "";
   if (editToken && d.createElement) {
     var ed = d.createElement("script");
     ed.src = api + "/v1/site/editor.js";
@@ -369,10 +375,14 @@
   }
   // track returns the event's messageId: pass it to an ad pixel as its
   // event id (Meta's eventID), so a conversion Outflare also sends back
-  // server to server is counted once.
-  function track(event, properties) {
+  // server to server is counted once. options.messageId sets that id
+  // yourself, the same one your server sends for the same event (such as
+  // "signup-" + userId): Outflare then sends the conversion to ad
+  // platforms once, not once per copy.
+  function track(event, properties, options) {
     if (!event) return;
-    var q = new URLSearchParams(location.search), id = uuid(), props = {}, ids = {};
+    var own = options && options.messageId != null ? String(options.messageId).trim() : "";
+    var q = new URLSearchParams(location.search), id = own && own.length <= 200 ? own : uuid(), props = {}, ids = {};
     for (var k in properties || {}) props[k] = properties[k];
     // A conversion carries the ad pixels' cookies, for sending it back.
     if (!props.click_ids && cookieIDs(ids)) props.click_ids = ids;
@@ -383,7 +393,43 @@
   // Flags: asked for once per page (and again on in-app navigation, since
   // rules can depend on the page), and kept for the visit so the next page
   // starts with the last answer.
-  var FLAGS = "of_flags", SEEN = "of_flags_seen", classFlags = script.getAttribute("data-flags") !== null, flagsWanted = classFlags, flagState = null, flagWaiters = [], flagClasses = [], seen = {};
+  var FLAGS = "of_flags", SEEN = "of_flags_seen", flagsAttr = script.getAttribute("data-flags"), classFlags = flagsAttr !== null && flagsAttr !== "off", flagsWanted = classFlags, flagState = null, flagWaiters = [], flagClasses = [], seen = {}, codeAsked = false;
+  // No-code tests: Outflare says whether the site runs tests made in the
+  // visual editor (TESTS, kept a day when it does, half an hour when it
+  // doesn't), so the script asks for the visitor's versions on its own,
+  // with no data-flags on the tag. data-flags="off" stops that. HIDE is
+  // what the visitor's versions change: on their next visit, the guard in
+  // <head> (or this script, if it runs first) hides just those parts until
+  // their version shows, for a second at most.
+  var TESTS = "of_tests", HIDE = "of_hide", hint = null;
+  try { hint = JSON.parse(localStorage.getItem(TESTS) || "null"); } catch (e) {}
+  if (!hint || hint.key !== key || hint.until < Date.now()) hint = null;
+  if (flagsAttr !== "off" && (!hint || hint.on)) flagsWanted = true;
+  function safeSelectors(sel) { return typeof sel === "string" && sel && sel.length < 16000 && !/[{}<@;]|\/\*/.test(sel); }
+  var hideEl = d.getElementById("of-hide");
+  if (!hideEl && flagsWanted) try {
+    var h = JSON.parse(localStorage.getItem(HIDE) || "null");
+    if (h && h.until > Date.now() && safeSelectors(h.sel) && d.head) {
+      hideEl = d.createElement("style");
+      hideEl.id = "of-hide";
+      hideEl.textContent = h.sel + "{opacity:0!important}";
+      d.head.appendChild(hideEl);
+      w.setTimeout && w.setTimeout(unhide, 1000);
+    }
+  } catch (e) {}
+  function unhide() { if (hideEl && hideEl.parentNode) hideEl.parentNode.removeChild(hideEl); hideEl = null; }
+  // Remember Outflare's answer for the next page and visit.
+  function remember(out) {
+    if (typeof out.tests !== "boolean") return;
+    try {
+      localStorage.setItem(TESTS, JSON.stringify({ key: key, on: out.tests, until: Date.now() + (out.tests ? 86400000 : 1800000) }));
+      var sel = (out.hide || []).join(",");
+      if (out.tests && safeSelectors(sel)) localStorage.setItem(HIDE, JSON.stringify({ sel: sel, until: Date.now() + 30 * 86400000 }));
+      else localStorage.removeItem(HIDE);
+    } catch (e) {}
+    // A site with no visual tests: stop asking, unless the page wants flags.
+    if (!out.tests && !classFlags && !codeAsked) flagsWanted = false;
+  }
   // Where the flags in use came from (bootstrap: the server's, kept: the
   // last page's, fetched: asked for) and how long after the script started
   // they were first shown, sent with Experiment Viewed so a test can tell
@@ -420,36 +466,128 @@
     flagClasses = cls;
     if (classFlags) for (k in state.flags) exposed(k);
     applyChanges();
+    // Hidden parts show once their version is in: now, or once the page
+    // has loaded when it is still loading.
+    if (d.readyState !== "loading") unhide();
     root.classList.remove("of-wait");
     var waiting = flagWaiters;
     flagWaiters = [];
     waiting.forEach(function (fn) { try { fn(flagMap()); } catch (e) {} });
   }
   // Visual changes: a version's payload can list edits to make to the page
-  // ({"changes": [{"selector", "text" | "hide" | "href" | "src" and "alt"}]},
-  // from the visual editor). They apply when the flags arrive, again once
-  // the page has loaded and a moment later for content that comes late,
-  // and making them counts as showing the version. Text goes in as text,
-  // never HTML, and links and images only to http(s) or a path.
+  // ({"changes": [{"selector", and one of "text", "rich", "hide", "href",
+  // "src" and "alt", "style", "move" with "target", or "insert"}]}, from the
+  // visual editor), its own CSS ("css") and a page to send its visitors to
+  // ("redirect"). They apply when the flags arrive, again once the page has
+  // loaded, a moment later and whenever the page changes (single-page apps
+  // and content that comes late), and making them counts as showing the
+  // version. Text goes in as text and rich text is built as elements, never
+  // parsed as HTML; links and images only go to http(s) or a path; styles
+  // and CSS never load anything; and a redirect only goes to the site's own
+  // domains.
   function safeURL(u) {
     return typeof u === "string" && u.length <= 2000 && !/\s/.test(u) && (/^\/(?!\/)/.test(u) || /^https?:\/\/[^/]/i.test(u));
   }
+  var STYLE = /^(color|background-color|font-size|font-weight|font-style|font-family|text-align|text-decoration|text-transform|line-height|letter-spacing|padding(-top|-right|-bottom|-left)?|margin(-top|-right|-bottom|-left)?|border(-color|-width|-style|-radius)?|(max-|min-)?width|(max-|min-)?height|display|opacity|gap|order|justify-content|align-items|flex-direction|box-shadow|visibility)$/;
+  function safeStyle(v) { return typeof v === "string" && /^[#(),.%\-+\w\s/"']{1,100}$/.test(v) && !/url|expression|image/i.test(v); }
+  function safeCSS(css) { return typeof css === "string" && css.length <= 8000 && !/<|\\|url\(|@import|@font-face|@charset|@namespace|expression\(|javascript:|behavior|-moz-binding|image-set\(|image\(/i.test(css); }
+  // Rich text: **bold**, *italic*, [a link](/path) and line breaks, built
+  // as elements.
+  function rich(el, src) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    var re = /\*\*([^*]+)\*\*|\*([^*]+)\*|\[([^\]]+)\]\(([^)\s]+)\)|\n/g, last = 0, m;
+    while ((m = re.exec(src))) {
+      if (m.index > last) el.appendChild(d.createTextNode(src.slice(last, m.index)));
+      var n;
+      if (m[1] !== undefined) { n = d.createElement("strong"); n.textContent = m[1]; }
+      else if (m[2] !== undefined) { n = d.createElement("em"); n.textContent = m[2]; }
+      else if (m[3] !== undefined) {
+        if (safeURL(m[4])) { n = d.createElement("a"); n.setAttribute("href", m[4]); n.textContent = m[3]; }
+        else n = d.createTextNode(m[3]);
+      } else n = d.createElement("br");
+      el.appendChild(n);
+      last = re.lastIndex;
+    }
+    if (last < src.length) el.appendChild(d.createTextNode(src.slice(last)));
+  }
+  function phone() { try { return !!(w.matchMedia && w.matchMedia("(max-width: 767px)").matches); } catch (e) { return false; } }
+  // The site's own registrable domains: the page's, and data-domains.
+  function ownSite(u) {
+    try {
+      var to = new URL(u, location.href);
+      if (to.host === location.host) return true;
+      var a = to.hostname.toLowerCase().replace(/^www\./, ""), here = location.hostname.toLowerCase().replace(/^www\./, "");
+      var list = domains.concat([here]);
+      for (var i = 0; i < list.length; i++) if (a === list[i] || a.slice(-list[i].length - 1) === "." + list[i]) return true;
+    } catch (e) {}
+    return false;
+  }
+  var redirected = false, missing = {};
   function applyChanges() {
     if (!flagState || !flagState.payloads) return;
+    var mobile = phone();
     for (var k in flagState.payloads) {
-      var p = flagState.payloads[k], cs = p && p.changes;
-      if (!variant(k) || !cs || !cs.length) continue;
-      var applied = false;
+      var p = flagState.payloads[k], cs = (p && p.changes) || [];
+      if (!variant(k) || !p || typeof p !== "object") continue;
+      var applied = false, miss = missing[k] = { found: 0, lost: [] };
+      // A split URL test: show this version's visitors another page (not
+      // while someone edits the version, so the editor stays put).
+      if (typeof p.redirect === "string" && p.redirect && !redirected && !editToken && safeURL(p.redirect) && ownSite(p.redirect)) {
+        var to = new URL(p.redirect, location.href);
+        if (to.pathname !== location.pathname || to.host !== location.host) {
+          new URLSearchParams(location.search).forEach(function (v, q) { if (!to.searchParams.has(q)) to.searchParams.set(q, v); });
+          redirected = true;
+          exposed(k);
+          location.replace(to.toString());
+          return;
+        }
+      }
+      if (typeof p.css === "string" && p.css && safeCSS(p.css) && d.head) {
+        var sid = "of-css-" + k, st = d.getElementById(sid);
+        if (!st) { st = d.createElement("style"); st.id = sid; d.head.appendChild(st); }
+        if (st.textContent !== p.css) st.textContent = p.css;
+        applied = true;
+      }
       for (var i = 0; i < cs.length && i < 50; i++) {
         var c = cs[i], els = [];
         if (!c || typeof c.selector !== "string") continue;
+        if ((c.device === "mobile" && !mobile) || (c.device === "desktop" && mobile)) continue;
         try { els = d.querySelectorAll(c.selector); } catch (e) { continue; }
+        var target = null;
+        if (c.move) { try { target = d.querySelector(c.target); } catch (e) {} }
+        if (!els.length || (c.move && !target)) { miss.lost.push(els.length ? c.target : c.selector); continue; }
+        miss.found++;
+        if (c.insert) {
+          var mark = k + ":" + i, inn = c.insert;
+          if (d.querySelector("[data-of-insert='" + mark + "']")) { applied = true; continue; }
+          var n = null;
+          if (inn.kind === "image" && safeURL(inn.src)) { n = d.createElement("img"); n.setAttribute("src", inn.src); n.setAttribute("alt", String(inn.alt || "")); }
+          else if ((inn.kind === "button" || inn.kind === "link") && safeURL(inn.href)) { n = d.createElement("a"); n.setAttribute("href", inn.href); n.textContent = String(inn.text || ""); if (inn.kind === "button") n.setAttribute("role", "button"); }
+          else if (inn.kind === "text") { n = d.createElement("p"); n.textContent = String(inn.text || ""); }
+          if (n) {
+            n.setAttribute("data-of-insert", mark);
+            if (inn.kind === "button") n.className = "of-button";
+            var at = els[0];
+            if (at.parentNode) at.parentNode.insertBefore(n, inn.where === "before" ? at : at.nextSibling);
+            applied = true;
+          }
+          continue;
+        }
         for (var j = 0; j < els.length; j++) {
           var el = els[j];
-          if (typeof c.text === "string") el.textContent = c.text;
+          if (typeof c.text === "string") { if (el.textContent !== c.text) el.textContent = c.text; }
+          else if (typeof c.rich === "string") { if (el.getAttribute("data-of-rich") !== c.rich) { rich(el, c.rich); el.setAttribute("data-of-rich", c.rich); } }
           else if (c.hide) el.style.setProperty("display", "none", "important");
           else if (safeURL(c.href)) el.setAttribute("href", c.href);
-          else if (c.src !== undefined || c.alt !== undefined) {
+          else if (c.style && typeof c.style === "object") {
+            for (var sp in c.style) if (STYLE.test(sp) && safeStyle(c.style[sp])) el.style.setProperty(sp, c.style[sp], "important");
+          } else if (target) {
+            if (el === target || el.contains(target)) continue;
+            if (c.move === "before" && el.nextElementSibling !== target) target.parentNode && target.parentNode.insertBefore(el, target);
+            else if (c.move === "after" && target.nextElementSibling !== el) target.parentNode && target.parentNode.insertBefore(el, target.nextSibling);
+            else if (c.move === "start" && target.firstElementChild !== el) target.insertBefore(el, target.firstChild);
+            else if (c.move === "end" && target.lastElementChild !== el) target.appendChild(el);
+          } else if (c.src !== undefined || c.alt !== undefined) {
             if (safeURL(c.src)) el.setAttribute("src", c.src);
             if (typeof c.alt === "string") el.setAttribute("alt", c.alt);
           }
@@ -459,8 +597,36 @@
       if (applied) exposed(k);
     }
   }
-  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", function () { applyChanges(); });
-  w.setTimeout && w.setTimeout(function () { applyChanges(); }, 1500);
+  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", function () { applyChanges(); if (flagState) unhide(); watchPage(); });
+  // Pages that build themselves (single-page apps, content that loads
+  // late): apply again shortly after the page changes. Applying is
+  // idempotent, so it settles; a cap keeps a busy page cheap.
+  var watching = false, again = 0, runs = 0;
+  function watchPage() {
+    if (watching || !w.MutationObserver || !d.body) return;
+    watching = true;
+    new w.MutationObserver(function () {
+      if (again || runs > 500 || !flagState || !flagState.payloads) return;
+      again = w.setTimeout(function () { again = 0; runs++; applyChanges(); }, 60);
+    }).observe(d.body, { childList: true, subtree: true });
+  }
+  if (d.readyState !== "loading") watchPage();
+  w.setTimeout && w.setTimeout(function () { applyChanges(); reportMissing(); }, 1500);
+  // Changes that found nothing on this page once it settled (the page was
+  // redesigned since they were made) are reported once per visit and page,
+  // so the test's checklist can say which to pick again.
+  function reportMissing() {
+    if (editToken) return;
+    var done = {};
+    try { done = JSON.parse(sessionStorage.getItem("of_missed") || "{}") || {}; } catch (e) {}
+    for (var k in missing) {
+      var m = missing[k], v = variant(k), id = k + "|" + location.pathname;
+      if (!m.lost.length || !v || Object.prototype.hasOwnProperty.call(preview, k) || done[id]) continue;
+      done[id] = 1;
+      track("Experiment Change Missed", { flag: k, variant: v, path: location.pathname, missed: m.lost.length, found: m.found, selectors: m.lost.slice(0, 5) });
+    }
+    try { sessionStorage.setItem("of_missed", JSON.stringify(done)); } catch (e) {}
+  }
 
   function variant(k) {
     if (Object.prototype.hasOwnProperty.call(preview, k)) return preview[k];
@@ -494,6 +660,7 @@
       .then(function (out) {
         var state = { anon: anon, flags: (out && out.flags) || (flagState && flagState.flags) || {}, payloads: (out && out.payloads) || (flagState && flagState.payloads) || {} };
         if (out) try { sessionStorage.setItem(FLAGS, JSON.stringify(state)); } catch (e) {}
+        if (out) remember(out);
         applyFlags(state, out ? "fetched" : "");
       }, function () { applyFlags(flagState || { anon: anon, flags: {}, payloads: {} }); });
   }
@@ -892,6 +1059,7 @@
     // The visitor's variant of a flag, or false: false too until the
     // flags arrive, so wait with onFlags when it matters.
     flag: function (k) {
+      codeAsked = true;
       if (!flagsWanted) loadFlags();
       exposed(String(k));
       return variant(String(k));
@@ -905,6 +1073,7 @@
     // they already are), with every flag that is on: its variant or false.
     onFlags: function (fn) {
       if (typeof fn !== "function") return;
+      codeAsked = true;
       if (!flagsWanted) loadFlags();
       if (flagState) { try { fn(flagMap()); } catch (e) {} } else flagWaiters.push(fn);
     }

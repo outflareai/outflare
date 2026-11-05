@@ -344,13 +344,13 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	s.routesPartnerSite(mux)
 	s.routesPartnerLeads(mux)
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/partner-programs/{id}/portal", s.inBrand(manage, s.setPartnerPortal))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(read, s.listPartnerAssets))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/assets", s.inBrand(manage, s.createPartnerAsset))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}", s.inBrand(manage, s.deletePartnerAsset))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partners/{id}/impersonate", s.inBrand(manage, s.impersonatePartner))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions", s.inBrand(auth.ScopePartnersConversions, s.createWidgetSession))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/widget-sessions", s.inBrand(auth.ScopePartnersConversions, s.createWidgetSession))
+	s.twinRoute(mux, "PUT", "partner-programs/{id}/portal", s.inBrand, manage, s.setPartnerPortal)
+	s.twinRoute(mux, "GET", "partner-programs/{id}/assets", s.inBrand, read, s.listPartnerAssets)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/assets", s.inBrand, manage, s.createPartnerAsset)
+	s.twinRoute(mux, "DELETE", "partner-programs/{id}/assets/{asset}", s.inBrand, manage, s.deletePartnerAsset)
+	s.twinRoute(mux, "POST", "partners/{id}/impersonate", s.inBrand, manage, s.impersonatePartner)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/portal-sessions", s.inBrand, auth.ScopePartnersConversions, s.createWidgetSession)
+	s.twinRoute(mux, "POST", "partner-programs/{id}/widget-sessions", s.inBrand, auth.ScopePartnersConversions, s.createWidgetSession)
 
 	// The portal itself. Public: the session cookie names the partner.
 	mux.HandleFunc("GET /p/{program}/{$}", s.portalPage)
@@ -361,7 +361,7 @@ func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("POST /p/{program}/api/session", s.portalSession)
 	mux.HandleFunc("POST /p/{program}/api/sign-out", s.portalSignOut)
 	mux.HandleFunc("POST /p/{program}/api/promo-codes", s.inPortal(s.portalCreatePromoCode))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/partners/{id}/promo-codes/{code}", s.inBrand(manage, s.togglePartnerPromoCode))
+	s.twinRoute(mux, "PATCH", "partners/{id}/promo-codes/{code}", s.inBrand, manage, s.togglePartnerPromoCode)
 	mux.HandleFunc("POST /p/{program}/api/accept-terms", s.inPortal(s.portalAcceptTerms))
 	mux.HandleFunc("GET /p/{program}/api/me", s.inPortal(s.portalMe))
 	mux.HandleFunc("PATCH /p/{program}/api/me", s.inPortal(s.portalUpdateMe))
@@ -903,7 +903,8 @@ func (s *Server) sendSignInLink(ctx context.Context, tx pgx.Tx, p *portalProgram
 	d := emails.Draft{Data: map[string]any{"sign_in_url": base + "#signin=" + token, "partner_name": name}}
 	if t := p.settings.SignInTemplate; t != "" {
 		var id string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)`, p.ws, t).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM email_templates WHERE workspace_id = $1 AND (id::text = $2 OR handle = $2)
+			AND ($3::uuid IS NULL OR brand_id = $3) ORDER BY id::text = $2 DESC, created_at LIMIT 1`, p.ws, t, p.brandID).Scan(&id); err != nil {
 			return errPortalEmail
 		}
 		d.TemplateID = id

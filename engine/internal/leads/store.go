@@ -298,41 +298,46 @@ func Suppress(ctx context.Context, tx pgx.Tx, workspaceID string, by Added, entr
 	if EveryBrand(reason) {
 		brand = ""
 	}
-	// An entry is one brand's, or every brand's (null). Until the brands
-	// contract step one address has one entry per workspace (the unique key
-	// the version before 0371 upserts on), so a second brand's entry for
-	// the same address widens it to every brand: never fewer opt-outs than
-	// asked for.
+	// An entry is one brand's, or every brand's (null): each brand keeps
+	// its own entry for an address, next to the one for every brand.
+	type entryRow struct {
+		kind, value string
+		inserted    bool
+	}
+	var got []entryRow
+	collect := func(rows pgx.Rows) error {
+		defer rows.Close()
+		for rows.Next() {
+			var e entryRow
+			if err := rows.Scan(&e.kind, &e.value, &e.inserted); err != nil {
+				return err
+			}
+			got = append(got, e)
+		}
+		return rows.Err()
+	}
 	rows, err := tx.Query(ctx, `
 		INSERT INTO suppressions (workspace_id, kind, value, reason, source, note, method, added_by, added_by_type, integration_id, confidence, evidence, brand_id)
 		SELECT $1, k, v, $4, $5, $6, $7, $8::uuid, $9, $10::uuid, $11, $12, NULLIF($13, '')::uuid FROM unnest($2::text[], $3::text[]) AS t(k, v)
-		ON CONFLICT (workspace_id, kind, value) DO UPDATE SET brand_id = NULL
-			WHERE suppressions.brand_id IS NOT NULL AND suppressions.brand_id IS DISTINCT FROM EXCLUDED.brand_id
-		RETURNING kind, value, (xmax = 0)`,
+		ON CONFLICT DO NOTHING
+		RETURNING kind, value, true`,
 		workspaceID, kinds, values, reason, source, note, by.Method, nullable(by.ActorID), by.ActorType, nullable(by.IntegrationID), by.Confidence, string(evidence), brand)
 	if err != nil {
 		return 0, err
 	}
+	if err := collect(rows); err != nil {
+		return 0, err
+	}
 	added := 0
 	var unsubs []customers.Unsubscribe
-	for rows.Next() {
-		var kind, value string
-		var inserted bool
-		if err := rows.Scan(&kind, &value, &inserted); err != nil {
-			rows.Close()
-			return 0, err
-		}
-		// A widened entry isn't new, but this brand's person opted out.
-		if inserted {
+	for _, e := range got {
+		// An entry that was there already isn't new.
+		if e.inserted {
 			added++
 		}
-		if kind == "email" {
-			unsubs = append(unsubs, customers.Unsubscribe{Email: value})
+		if e.kind == "email" {
+			unsubs = append(unsubs, customers.Unsubscribe{Email: e.value})
 		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return 0, err
 	}
 	// An unsubscribe is also the person withdrawing consent to all
 	// marketing email, on their record, so every module sees it.

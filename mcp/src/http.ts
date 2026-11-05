@@ -167,6 +167,10 @@ export function serveHttp(opts: HttpOptions) {
   }, 60_000);
   sweep.unref();
 
+  // The engine reuses idle connections for up to 30s; keep them open
+  // longer here, so a request never races this side closing one.
+  http.keepAliveTimeout = 65_000;
+  http.headersTimeout = 70_000;
   const [host, port] = splitHostPort(opts.listen);
   http.listen(port, host, () => console.error(`outflare-mcp: listening on ${host}:${port}`));
   return { http, sessions, close: () => (clearInterval(sweep), http.close()) };

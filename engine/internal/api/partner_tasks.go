@@ -148,12 +148,12 @@ func (v *partnerTaskConfig) check() error {
 }
 
 func (s *Server) routesPartnerTasks(mux *http.ServeMux) {
-	base := "/v1/workspaces/{ws}/partner-programs/{id}"
-	mux.HandleFunc("GET "+base+"/tasks", s.inBrand(auth.ScopePartnersRead, s.listPartnerTasks))
-	mux.HandleFunc("POST "+base+"/tasks", s.inBrand(auth.ScopePartnersManage, s.createPartnerTask))
-	mux.HandleFunc("POST "+base+"/tasks/{task}", s.inBrand(auth.ScopePartnersManage, s.updatePartnerTask))
-	mux.HandleFunc("POST "+base+"/task-submissions/{submission}", s.inBrand(auth.ScopePartnersManage, s.reviewPartnerTask))
-	mux.HandleFunc("GET "+base+"/audiences", s.inBrand(auth.ScopePartnersRead, s.listPartnerAudiences))
+	base := "partner-programs/{id}"
+	s.twinRoute(mux, "GET", base+"/tasks", s.inBrand, auth.ScopePartnersRead, s.listPartnerTasks)
+	s.twinRoute(mux, "POST", base+"/tasks", s.inBrand, auth.ScopePartnersManage, s.createPartnerTask)
+	s.twinRoute(mux, "POST", base+"/tasks/{task}", s.inBrand, auth.ScopePartnersManage, s.updatePartnerTask)
+	s.twinRoute(mux, "POST", base+"/task-submissions/{submission}", s.inBrand, auth.ScopePartnersManage, s.reviewPartnerTask)
+	s.twinRoute(mux, "GET", base+"/audiences", s.inBrand, auth.ScopePartnersRead, s.listPartnerAudiences)
 	mux.HandleFunc("GET /p/{program}/api/tasks", s.inPortal(s.portalTasks))
 	mux.HandleFunc("POST /p/{program}/api/tasks/{task}", s.inPortal(s.portalTaskAction))
 	mux.HandleFunc("GET /p/{program}/api/audiences", s.inPortal(s.portalAudiences))

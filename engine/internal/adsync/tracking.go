@@ -121,7 +121,8 @@ func (s *Syncer) AddTracking(ctx context.Context, ws, accountID, actorID string,
 			code = "not_found"
 		}
 		track.Fail(ctx, s.Log, ev, code, err)
-		return nil
+		// Dead, with the error kept on the job, so the page can say why.
+		return errors.Join(jobs.ErrPermanent, err)
 	}
 	ev.Props["connector"] = t.Connector
 	retry := func(err error) error {
@@ -131,7 +132,7 @@ func (s *Syncer) AddTracking(ctx context.Context, ws, accountID, actorID string,
 		}
 		metrics.AdChanged(t.Connector, ChangeTracking, "failed")
 		track.Fail(ctx, s.Log, ev, "connector_"+k, err)
-		return nil
+		return errors.Join(jobs.ErrPermanent, err)
 	}
 	plan, err := t.Plan(ctx)
 	if err != nil {

@@ -94,20 +94,20 @@ func TestAIVisibility(t *testing.T) {
 
 	// Settings: only the workspace's own AI connections, and only models
 	// that can search when asked to.
-	owner.must(400, "PUT", base+"/ai-visibility/settings", map[string]any{"models": []map[string]any{{"integration_id": "00000000-0000-0000-0000-000000000000", "model": "openai/gpt-5"}}})
+	owner.must(400, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"models": []map[string]any{{"integration_id": "00000000-0000-0000-0000-000000000000", "model": "openai/gpt-5"}}})
 	owner.must(422, "POST", base+"/integrations", map[string]any{"connector": "openrouter", "credentials": map[string]string{"api_key": "sk-ant-wrong-vendor"}})
 	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "openrouter", "credentials": map[string]string{"api_key": "sk-or-good"}})["id"].(string)
 	models := owner.must(200, "GET", base+"/integrations/"+conn+"/models", nil)
 	if len(models["data"].([]any)) != 2 {
 		t.Fatalf("models: %v", models)
 	}
-	set := owner.must(200, "PUT", base+"/ai-visibility/settings", map[string]any{"samples_per_prompt": 1, "monthly_limit_cents": 500,
+	set := owner.must(200, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"samples_per_prompt": 1, "monthly_limit_cents": 500,
 		"models": []map[string]any{{"integration_id": conn, "model": "openai/gpt-5", "web_search": true}}})
 	m0 := set["models"].([]any)[0].(map[string]any)
 	if m0["provider"] != "openrouter" || m0["connected"] != true || set["monthly_limit_cents"] != 500.0 {
 		t.Fatalf("settings: %v", set)
 	}
-	owner.must(400, "PUT", base+"/ai-visibility/settings", map[string]any{"models": []map[string]any{
+	owner.must(400, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"models": []map[string]any{
 		{"integration_id": conn, "model": "openai/gpt-5"}, {"integration_id": conn, "model": "openai/gpt-5"}}})
 
 	run := owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/runs", nil)
@@ -194,12 +194,12 @@ func TestAIVisibility(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT COALESCE(sum(amount_cents), 0) FROM spend_entries WHERE workspace_id = $1 AND provider = 'openrouter' AND channel = 'ai_answers' AND brand_id IS NOT NULL`, ws).Scan(&spend); err != nil || spend != 4 {
 		t.Fatalf("spend: %d %v", spend, err)
 	}
-	if v := owner.must(200, "GET", base+"/ai-visibility/settings", nil); v["spent_this_month_cents"] != 4.0 {
+	if v := owner.must(200, "GET", base+"/ai-visibility/settings?brand=acme", nil); v["spent_this_month_cents"] != 4.0 {
 		t.Fatalf("spent: %v", v)
 	}
 
 	// At the sampling limit, a run stops before calling the model.
-	owner.must(200, "PUT", base+"/ai-visibility/settings", map[string]any{"monthly_limit_cents": 4})
+	owner.must(200, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"monthly_limit_cents": 4})
 	rid = owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/runs", nil)["id"].(string)
 	if err := svc.Step(ctx, ws, rid, 0); err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestAIVisibility(t *testing.T) {
 	}
 
 	// Stopping, pausing and removing.
-	owner.must(200, "PUT", base+"/ai-visibility/settings", map[string]any{"monthly_limit_cents": 500})
+	owner.must(200, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"monthly_limit_cents": 500})
 	rid = owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/runs", nil)["id"].(string)
 	if owner.must(200, "POST", base+"/ai-runs/"+rid+"/stop", nil)["status"] != "stopped" {
 		t.Fatal("stop")

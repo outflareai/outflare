@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { Action, ActionGrant, APIToken } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Input, Loading, PageHeader, toast } from "../ui";
@@ -30,10 +30,13 @@ const modeTone = { run: "green", hold: "amber", refuse: "red" } as const;
 const shortPath = (p: string) => p.replace(/^\/v1\/workspaces\/[^/]+\//, "").replace(/^\/v1\//, "");
 const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000));
 
-type View = "waiting" | "runs" | "all" | "grants";
+type View = "agent" | "waiting" | "runs" | "all" | "grants";
 
-export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, setOpen, go }: { ws: string; canApprove: boolean; canManage: boolean; canTokens: boolean; canRun: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void }) {
-  const [view, setView] = useState<View>(open ? "runs" : "waiting");
+// brandAgent is the brand's own agent, when the server has one (an
+// extension page, such as Outflare Cloud's): it opens first, and the
+// rest of the page is what every agent changed and may do.
+export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, setOpen, go, brandAgent }: { ws: string; canApprove: boolean; canManage: boolean; canTokens: boolean; canRun: boolean; open?: string; setOpen: (id?: string) => void; go: (t: Tab) => void; brandAgent?: ReactNode }) {
+  const [view, setView] = useState<View>(open ? "runs" : brandAgent ? "agent" : "waiting");
   const [waiting, setWaiting] = useState<number | null>(null);
   const [tokens, setTokens] = useState<APIToken[] | null>(null);
 
@@ -59,11 +62,13 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
       )}
       <Tabs value={view} onValueChange={(v) => { setView(v as View); track("ui.agents_view_opened", { view: v }); }}>
         <TabsList>
+          {brandAgent && <TabsTrigger value="agent">Brand agent</TabsTrigger>}
           <TabsTrigger value="waiting">Waiting for you{waiting ? ` (${waiting})` : ""}</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="all">Everything</TabsTrigger>
           <TabsTrigger value="grants">What agents may do</TabsTrigger>
         </TabsList>
+        {brandAgent && <TabsContent value="agent">{brandAgent}</TabsContent>}
         <TabsContent value="waiting"><Waiting ws={ws} canApprove={canApprove} canManage={canManage} onCount={setWaiting} /></TabsContent>
         <TabsContent value="runs"><AgentRuns ws={ws} onOpen={setOpen} /></TabsContent>
         <TabsContent value="all"><Everything ws={ws} tokens={agents} /></TabsContent>

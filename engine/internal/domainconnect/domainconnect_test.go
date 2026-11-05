@@ -171,9 +171,11 @@ func (m misbehaving) LookupTXT(ctx context.Context, name string) ([]string, erro
 }
 
 // A resolver failing a level below the zone doesn't stop discovery: the
-// zone's record still names the provider. With no record anywhere, the
-// failure is the answer rather than "no provider".
+// zone's record still names the provider. When the registered domain says
+// plainly it has no record, that is the answer ("no provider"), whatever a
+// level below said; only its own failure is "lookup failed".
 func TestDiscoverPastFailedLevel(t *testing.T) {
+	retryAfter = 0
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/domainconnect","urlAPI":"https://` + r.Host + `/dc"}`))
 	}))
@@ -181,15 +183,24 @@ func TestDiscoverPastFailedLevel(t *testing.T) {
 	ctx := context.Background()
 	res := misbehaving{
 		txts: txts{"_domainconnect.example.com": {strings.TrimPrefix(srv.URL, "https://") + "/dc"}},
-		fail: map[string]bool{"_domainconnect.click.example.com": true, "_domainconnect.click.example.org": true},
+		fail: map[string]bool{"_domainconnect.click.example.com": true, "_domainconnect.click.example.org": true, "_domainconnect.example.net": true},
 	}
 	c := &Client{HTTP: srv.Client(), Resolver: res}
 	z, err := c.Discover(ctx, "click.example.com")
 	if err != nil || z.Domain != "example.com" || z.Host != "click" || z.Settings.Name() != "Cloudflare" {
 		t.Fatalf("discover: %+v %v", z, err)
 	}
-	if _, err := c.Discover(ctx, "click.example.org"); ReasonOf(err) != ReasonLookupFailed {
-		t.Fatalf("no record anywhere: %v", err)
+	if _, err := c.Discover(ctx, "click.example.org"); ReasonOf(err) != ReasonNoProvider {
+		t.Fatalf("a level below fails, the registered domain has none: %v", err)
+	}
+	_, err = c.Discover(ctx, "click.example.net")
+	if ReasonOf(err) != ReasonLookupFailed || StepOf(err) != StepDiscoverDNS || Repeated(err) {
+		t.Fatalf("the registered domain fails: %v", err)
+	}
+	// Asked again soon after, the failure comes from the cache, marked as
+	// a repeat so it isn't reported twice.
+	if _, err := c.Discover(ctx, "click.example.net"); ReasonOf(err) != ReasonLookupFailed || !Repeated(err) {
+		t.Fatalf("again: %v", err)
 	}
 	if _, err := c.Discover(ctx, "www.example.org"); ReasonOf(err) != ReasonNoProvider {
 		t.Fatalf("plain not found: %v", err)
@@ -319,5 +330,79 @@ func TestDiscoverAndApply(t *testing.T) {
 	c.cache = nil
 	if !c.Ready(ctx) {
 		t.Fatal("not ready once the key is published")
+	}
+}
+
+// flaky fails each name's first lookup with SERVFAIL, then answers.
+type flaky struct {
+	txts
+	seen map[string]int
+}
+
+func (f flaky) LookupTXT(ctx context.Context, name string) ([]string, error) {
+	f.seen[name]++
+	if f.seen[name] == 1 {
+		return nil, &net.DNSError{Err: "server misbehaving", Name: name, IsTemporary: true}
+	}
+	return f.txts.LookupTXT(ctx, name)
+}
+
+// A lookup or provider call that fails once is tried again, and one that
+// keeps failing says which step it was, so the cause shows without logs.
+func TestRetriesAndSteps(t *testing.T) {
+	retryAfter = 0
+	var settingsCalls, templateCalls int
+	templateStatus := http.StatusOK
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/dc/v2/example.com/settings":
+			settingsCalls++
+			if settingsCalls == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.Write([]byte(`{"providerId":"cloudflare.com","providerName":"Cloudflare","urlSyncUX":"https://dash.example.net/domainconnect","urlAPI":"https://` + r.Host + `/dc"}`))
+		case "/dc/v2/example.org/settings":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/dc/v2/domainTemplates/providers/outflare.ai/services/trackingdomain":
+			templateCalls++
+			w.WriteHeader(templateStatus)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	api := strings.TrimPrefix(srv.URL, "https://") + "/dc"
+	res := flaky{txts: txts{"_domainconnect.example.com": {api}, "_domainconnect.example.org": {api}}, seen: map[string]int{}}
+	c := &Client{HTTP: srv.Client(), Resolver: res}
+	ctx := context.Background()
+
+	z, err := c.Discover(ctx, "click.example.com")
+	if err != nil || z.Domain != "example.com" || settingsCalls != 2 {
+		t.Fatalf("SERVFAIL then a 502, each once: %+v %v (settings calls %d)", z, err, settingsCalls)
+	}
+	if _, err := c.Discover(ctx, "example.org"); StepOf(err) != StepSettingsStatus {
+		t.Fatalf("settings keep failing: %v", err)
+	}
+	templateStatus = http.StatusInternalServerError
+	err = c.Supports(ctx, z.Settings, "trackingdomain")
+	if StepOf(err) != StepTemplateStatus || templateCalls != 2 {
+		t.Fatalf("template keeps failing: %v (calls %d)", err, templateCalls)
+	}
+	// The failure is kept a short while, so the provider isn't asked on
+	// every page load.
+	if err := c.Supports(ctx, z.Settings, "trackingdomain"); !Repeated(err) || templateCalls != 2 {
+		t.Fatalf("asked again at once: %v (calls %d)", err, templateCalls)
+	}
+	// Once it's older than failedFor, it's asked again.
+	c.mu.Lock()
+	for k, v := range c.cache {
+		v.at = v.at.Add(-failedFor)
+		c.cache[k] = v
+	}
+	c.mu.Unlock()
+	templateStatus = http.StatusOK
+	if err := c.Supports(ctx, z.Settings, "trackingdomain"); err != nil || templateCalls != 3 {
+		t.Fatalf("after the failure expired: %v (calls %d)", err, templateCalls)
 	}
 }

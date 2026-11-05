@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/adtrack"
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/jobs"
 )
 
 // fakeMetaAds answers the Marketing API for the token "mt": one account
@@ -38,7 +40,20 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000"},
 			map[string]any{"id": "10", "name": "Old test", "effective_status": "PAUSED", "daily_budget": "500"},
 		}}
-	case "/v24.0/9", "/v24.0/10":
+	case "/v24.0/act_55":
+		out = map[string]any{"id": "act_55", "business": map[string]any{"id": "600"}}
+	case "/v24.0/9/copies":
+		metaState.Lock()
+		metaState.posts = append(metaState.posts, "COPY 9")
+		metaState.Unlock()
+		out = map[string]any{"copied_campaign_id": "90"}
+	case "/v24.0/600/ad_studies", "/v24.0/700":
+		b, _ := io.ReadAll(r.Body)
+		metaState.Lock()
+		metaState.posts = append(metaState.posts, "STUDY "+strings.TrimPrefix(r.URL.Path, "/v24.0/")+" "+string(b))
+		metaState.Unlock()
+		out = map[string]any{"id": "700", "success": true}
+	case "/v24.0/9", "/v24.0/10", "/v24.0/90":
 		// Managing: a POST changes the campaign's state, which a GET then
 		// shows (campaign 9 starts active at $30 a day, 10 paused).
 		id := strings.TrimPrefix(r.URL.Path, "/v24.0/")
@@ -48,6 +63,7 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			metaState.campaigns = map[string]map[string]any{
 				"9":  {"id": "9", "name": "Prospecting", "effective_status": "ACTIVE", "objective": "OUTCOME_LEADS", "daily_budget": "3000", "account_id": "55"},
 				"10": {"id": "10", "name": "Old test", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "500", "account_id": "55"},
+				"90": {"id": "90", "name": "Prospecting (test)", "effective_status": "PAUSED", "objective": "OUTCOME_LEADS", "daily_budget": "3000", "account_id": "55"},
 			}
 		}
 		cp := metaState.campaigns[id]
@@ -70,9 +86,42 @@ func (fakeMetaAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		out = cp
+	case "/v24.0/9/adsets":
+		metaState.Lock()
+		if metaState.targeting == nil {
+			metaState.targeting = map[string]any{"geo_locations": map[string]any{"countries": []any{"AU"}, "location_types": []any{"home"}}, "age_min": 25.0}
+		}
+		out = map[string]any{"data": []any{map[string]any{"id": "31", "effective_status": "ACTIVE", "targeting": metaState.targeting}}}
+		metaState.Unlock()
+	case "/v24.0/31":
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		metaState.Lock()
+		var t map[string]any
+		json.Unmarshal([]byte(body["targeting"]), &t)
+		metaState.targeting = t
+		metaState.posts = append(metaState.posts, "TARGETING 31 "+body["targeting"])
+		metaState.Unlock()
+		out = map[string]any{"success": true}
 	case "/v24.0/act_55/adsets":
 		out = map[string]any{"data": []any{map[string]any{"id": "31", "name": "Lookalike", "effective_status": "ACTIVE", "campaign_id": "9"}}}
+	case "/v24.0/act_55/adcreatives", "/v24.0/42":
+		b, _ := io.ReadAll(r.Body)
+		metaState.Lock()
+		metaState.posts = append(metaState.posts, "POST "+strings.TrimPrefix(r.URL.Path, "/v24.0/")+" "+string(b))
+		metaState.Unlock()
+		out = map[string]any{"id": "551", "success": true}
+	case "/v24.0/act_55/promote_pages":
+		out = map[string]any{"data": []any{map[string]any{"id": "880"}}}
 	case "/v24.0/act_55/ads":
+		if r.Method == "POST" {
+			b, _ := io.ReadAll(r.Body)
+			metaState.Lock()
+			metaState.posts = append(metaState.posts, "POST act_55/ads "+string(b))
+			metaState.Unlock()
+			out = map[string]any{"id": "42"}
+			break
+		}
 		out = map[string]any{"data": []any{map[string]any{"id": "41", "name": "Demo video", "effective_status": "ACTIVE", "adset_id": "31",
 			"creative": map[string]any{"object_story_spec": map[string]any{"link_data": map[string]any{"link": "https://acme.example/demo", "name": "Book a demo"}}}}}}
 	case "/v24.0/act_55/adspixels":
@@ -143,6 +192,8 @@ var metaState struct {
 	campaigns map[string]map[string]any
 	posts     []string
 	refuse    bool
+	// targeting is ad set 31's, as changes leave it.
+	targeting map[string]any
 }
 
 // metaAudience collects what fakeMetaAds took into audience 801:
@@ -165,7 +216,9 @@ var googleSuffix = struct {
 	sync.Mutex
 	account, campaign string
 	mutates           []string
-	refuse            bool
+	// uploads are the conversions and adjustments sent, path and body.
+	uploads []string
+	refuse  bool
 }{campaign: "gad_campaignid={campaignid}"}
 
 // fakeGoogleAds refuses a developer token other than "dev-ok". Google
@@ -179,6 +232,67 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/v23/customers/123/adGroupCriteria:mutate", "/v23/customers/123/campaignCriteria:mutate", "/v23/customers/123/adGroups:mutate", "/v23/customers/123/adGroupAds:mutate",
+		"/v23/customers/123/experiments:mutate", "/v23/customers/123/experimentArms:mutate",
+		"/v23/customers/123/experiments/9:scheduleExperiment", "/v23/customers/123/experiments/9:endExperiment", "/v23/customers/123/experiments/9:promoteExperiment":
+		b, _ := io.ReadAll(r.Body)
+		googleSuffix.Lock()
+		googleSuffix.mutates = append(googleSuffix.mutates, r.URL.Path+" "+string(b))
+		googleSuffix.Unlock()
+		name := "customers/123/x/1"
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/adGroups:mutate"):
+			name = "customers/123/adGroups/72"
+		case strings.HasSuffix(r.URL.Path, "/experiments:mutate"):
+			name = "customers/123/experiments/9"
+		case strings.HasSuffix(r.URL.Path, "/experimentArms:mutate"):
+			json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"resourceName": "customers/123/experimentArms/9~1"},
+				map[string]any{"resourceName": "customers/123/experimentArms/9~2", "experimentArm": map[string]any{"inDesignCampaigns": []string{"customers/123/campaigns/7001"}}}}})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"results": []any{map[string]any{"resourceName": name}}})
+	case "/v23/customers/123/googleAds:mutate":
+		// New ads: one batch of operations, answered in order with the
+		// resource names made (or updated).
+		b, _ := io.ReadAll(r.Body)
+		googleSuffix.Lock()
+		googleSuffix.mutates = append(googleSuffix.mutates, r.URL.Path+" "+string(b))
+		googleSuffix.Unlock()
+		var body struct {
+			Ops []map[string]map[string]any `json:"mutateOperations"`
+		}
+		json.Unmarshal(b, &body)
+		made := map[string]string{"campaignBudgets/-1": "campaignBudgets/501", "campaigns/-2": "campaigns/7002", "adGroups/-3": "adGroups/73"}
+		var res []any
+		for _, op := range body.Ops {
+			for k, v := range op {
+				result := strings.TrimSuffix(k, "Operation") + "Result"
+				if u, ok := v["update"].(map[string]any); ok {
+					res = append(res, map[string]any{result: map[string]any{"resourceName": u["resourceName"]}})
+					continue
+				}
+				c := v["create"].(map[string]any)
+				name, _ := c["resourceName"].(string)
+				name = strings.TrimPrefix(name, "customers/123/")
+				if m, ok := made[name]; ok {
+					name = m
+				}
+				switch k {
+				case "campaignCriterionOperation":
+					name = "campaignCriteria/7002~2036"
+				case "adGroupCriterionOperation":
+					name = "adGroupCriteria/73~1"
+				case "adGroupAdOperation":
+					g := strings.TrimPrefix(c["adGroup"].(string), "customers/123/adGroups/")
+					if g == "-3" {
+						g = "73"
+					}
+					name = "adGroupAds/" + g + "~91"
+				}
+				res = append(res, map[string]any{result: map[string]any{"resourceName": "customers/123/" + name}})
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"mutateOperationResponses": res})
 	case "/v23/customers:listAccessibleCustomers":
 		json.NewEncoder(w).Encode(map[string]any{"resourceNames": []string{"customers/123"}})
 	case "/v23/customers/123:mutate", "/v23/customers/123/campaigns:mutate":
@@ -234,11 +348,41 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		group := map[string]any{"id": "71", "name": "Exact brand", "status": "ENABLED"}
 		var out []any
 		switch {
+		case strings.Contains(q, "FROM experiment_arm"):
+			out = []any{map[string]any{"experimentArm": map[string]any{"control": true, "campaigns": []string{"customers/123/campaigns/7"}}},
+				map[string]any{"experimentArm": map[string]any{"control": false, "campaigns": []string{"customers/123/campaigns/7001"}}}}
+		case strings.Contains(q, "campaign.id IN ("):
+			// The experiment's arms: the trial converts more for the same money.
+			out = []any{map[string]any{"campaign": map[string]any{"id": "7"}, "segments": map[string]any{"date": day},
+				"metrics": map[string]any{"costMicros": "500000000", "impressions": "9000", "clicks": "400", "conversions": 50.0}},
+				map[string]any{"campaign": map[string]any{"id": "7001"}, "segments": map[string]any{"date": day},
+					"metrics": map[string]any{"costMicros": "500000000", "impressions": "9100", "clicks": "410", "conversions": 80.0}}}
+		case strings.Contains(q, "FROM campaign_criterion"):
+			out = []any{map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~501", "type": "USER_LIST",
+				"userList": map[string]any{"userList": "customers/123/userLists/501"}}},
+				map[string]any{"campaignCriterion": map[string]any{"resourceName": "customers/123/campaignCriteria/7~2036", "type": "LOCATION",
+					"location": map[string]any{"geoTargetConstant": "geoTargetConstants/2036"}}}}
+		case strings.Contains(q, "FROM geo_target_constant") && strings.Contains(q, "country_code = 'NZ'"):
+			out = []any{map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2554", "countryCode": "NZ", "targetType": "Country"}}}
+		case strings.Contains(q, "FROM geo_target_constant"):
+			out = []any{map[string]any{"geoTargetConstant": map[string]any{"resourceName": "geoTargetConstants/2036", "countryCode": "AU", "targetType": "Country"}}}
+		case strings.Contains(q, "FROM user_list"):
+			out = []any{map[string]any{"userList": map[string]any{"id": "501", "name": "Trial users"}}}
+		case strings.Contains(q, "FROM recommendation"):
+			out = []any{map[string]any{"recommendation": map[string]any{"resourceName": "customers/123/recommendations/1", "type": "KEYWORD", "campaign": "customers/123/campaigns/7",
+				"impact": map[string]any{"baseMetrics": map[string]any{"clicks": 10.0}, "potentialMetrics": map[string]any{"clicks": 14.0}}}}}
+		case strings.Contains(q, "responsive_search_ad.path1"):
+			hl := []any{map[string]any{"text": "Acme CRM"}, map[string]any{"text": "Simple sales"}, map[string]any{"text": "Try it free"}}
+			ds := []any{map[string]any{"text": "A CRM for small teams."}, map[string]any{"text": "Set up in minutes."}}
+			out = []any{map[string]any{"adGroupAd": map[string]any{"ad": map[string]any{"finalUrls": []string{"https://acme.example/"},
+				"responsiveSearchAd": map[string]any{"headlines": hl, "descriptions": ds, "path1": "crm"}}}}}
 		case strings.Contains(q, "conversion_action_name"):
 			id := map[string]any{"campaign": map[string]any{"id": "7"}, "adGroup": map[string]any{"id": "71"}, "adGroupAd": map[string]any{"ad": map[string]any{"id": "81"}}}
 			id["segments"] = map[string]any{"date": day, "conversionActionName": "Demo booked"}
 			id["metrics"] = map[string]any{"conversions": 2.0, "conversionsValue": 80.0}
 			out = []any{id}
+		case strings.Contains(q, "FROM conversion_action"):
+			out = []any{map[string]any{"conversionAction": map[string]any{"id": "42", "name": "Purchase"}}}
 		case strings.Contains(q, "FROM keyword_view"):
 			out = []any{row(map[string]any{"adGroup": map[string]any{"id": "71"}, "adGroupCriterion": map[string]any{"criterionId": "91", "status": "ENABLED",
 				"keyword": map[string]any{"text": "acme crm", "matchType": "EXACT"}}})}
@@ -270,6 +414,12 @@ func (fakeGoogleAds) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = []any{map[string]any{"campaign": c}}
 		}
 		json.NewEncoder(w).Encode(map[string]any{"results": out})
+	case "/v23/customers/123:uploadClickConversions", "/v23/customers/123:uploadConversionAdjustments":
+		b, _ := io.ReadAll(r.Body)
+		googleSuffix.Lock()
+		googleSuffix.uploads = append(googleSuffix.uploads, r.URL.Path+" "+string(b))
+		googleSuffix.Unlock()
+		w.Write([]byte(`{}`))
 	default:
 		http.NotFound(w, r)
 	}
@@ -705,7 +855,13 @@ func TestAddAdTracking(t *testing.T) {
 		t.Fatalf("a plan changed something: %v", googleSuffix.mutates)
 	}
 	googleSuffix.Unlock()
+	if r := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking/run", nil); r["run"] != nil {
+		t.Fatalf("run before any: %v", r)
+	}
 	owner.must(202, "POST", base+"/ads/accounts/"+acc+"/tracking", nil)
+	if r := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking/run", nil)["run"].(map[string]any); r["status"] != "queued" {
+		t.Fatalf("queued run: %v", r)
+	}
 	var queued int
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE workspace_id = $1 AND kind = 'ads.tracking'`, ws).Scan(&queued); err != nil || queued != 1 {
 		t.Fatalf("queued: %d %v", queued, err)
@@ -718,6 +874,13 @@ func TestAddAdTracking(t *testing.T) {
 	googleSuffix.Unlock()
 	if got != tpl+" | "+c["after"].(string) || mut != 2 {
 		t.Fatalf("suffixes: %s (%d mutates)", got, mut)
+	}
+	// The job as the queue ran it: finished, with what it changed.
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET status = 'succeeded' WHERE workspace_id = $1 AND kind = 'ads.tracking'`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if r := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking/run", nil)["run"].(map[string]any); r["status"] != "done" || r["changed"] != 2.0 || r["failed"] != 0.0 {
+		t.Fatalf("done run: %v", r)
 	}
 	if p := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking", nil)["changes"].([]any); len(p) != 0 {
 		t.Fatalf("still to change: %v", p)
@@ -738,6 +901,7 @@ func TestAddAdTracking(t *testing.T) {
 	googleSuffix.Lock()
 	googleSuffix.account, googleSuffix.campaign, googleSuffix.refuse = "", "ref=ppc", true
 	googleSuffix.Unlock()
+	owner.must(202, "POST", base+"/ads/accounts/"+acc+"/tracking", nil)
 	if err := e.ads.AddTracking(ctx, ws, acc, "", false); err != nil {
 		t.Fatal(err)
 	}
@@ -751,6 +915,18 @@ func TestAddAdTracking(t *testing.T) {
 	googleSuffix.Unlock()
 	if acctSuffix != tpl {
 		t.Fatalf("account after a refused campaign: %q", acctSuffix)
+	}
+	// The second request, refused in part, shows the refusal.
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET status = 'succeeded' WHERE workspace_id = $1 AND kind = 'ads.tracking'`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if r := owner.must(200, "GET", base+"/ads/accounts/"+acc+"/tracking/run", nil)["run"].(map[string]any); r["status"] != "done" || r["failed"] != 1.0 ||
+		!strings.Contains(r["errors"].([]any)[0].(map[string]any)["error"].(string), "FIELD_NOT_MUTABLE") {
+		t.Fatalf("refused run: %v", r)
+	}
+	// A run that can't reach the account fails, with why.
+	if err := e.ads.AddTracking(ctx, ws, "00000000-0000-4000-8000-000000000002", "", false); err == nil || !errors.Is(err, jobs.ErrPermanent) {
+		t.Fatalf("missing account: %v", err)
 	}
 
 	// Other platforms say the template goes in by hand.

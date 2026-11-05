@@ -8,6 +8,7 @@ package api
 // workspace, flag, version and person, and expires.
 
 import (
+	"context"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
@@ -129,15 +130,17 @@ func (s *Server) editorJS(w http.ResponseWriter, r *http.Request) {
 	w.Write(editorScript)
 }
 
-// siteFlagEdits reads (GET ?token=) or saves (POST {token, changes}) the
-// visual changes of the version an edit link names. Like the other site
+// siteFlagEdits reads (GET ?token=) or saves (POST {token, changes, css,
+// redirect}) the visual changes of the version an edit link names. Like the other site
 // routes it is public: the signed token is the authority.
 func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 	siteCORS(w)
 	w.Header().Set("Cache-Control", "no-store")
 	var in struct {
-		Token   string          `json:"token"`
-		Changes json.RawMessage `json:"changes"`
+		Token    string          `json:"token"`
+		Changes  json.RawMessage `json:"changes"`
+		CSS      *string         `json:"css"`
+		Redirect *string         `json:"redirect"`
 	}
 	if r.Method == http.MethodGet {
 		in.Token = r.URL.Query().Get("token")
@@ -172,50 +175,83 @@ func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := list[0]
-	answer := func(changes []flags.Change) {
+	answer := func(v flags.Variant) {
+		changes, _ := flags.Changes(v.Payload)
 		if changes == nil {
 			changes = []flags.Change{}
 		}
+		var extra struct {
+			CSS      string `json:"css"`
+			Redirect string `json:"redirect"`
+		}
+		if len(v.Payload) > 0 && v.Payload[0] == '{' {
+			_ = json.Unmarshal(v.Payload, &extra)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"flag_key": f.Key, "flag_name": f.Name, "variant": c.Variant, "changes": changes,
-			"expires_at": time.Unix(c.Expires, 0).UTC()})
+			"css": extra.CSS, "redirect": extra.Redirect, "expires_at": time.Unix(c.Expires, 0).UTC()})
 	}
 	if r.Method == http.MethodGet {
-		cs, _ := flags.Changes(f.Variants[i].Payload)
-		answer(cs)
+		answer(f.Variants[i])
 		return
 	}
 
-	// Save: the changes replace the version's "changes", and the rest of
-	// its payload stays.
-	var cs []flags.Change
-	if len(in.Changes) == 0 || json.Unmarshal(in.Changes, &cs) != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "changes is a list of {selector, and text, hide, href, src or alt}")
-		return
-	}
-	payload := map[string]json.RawMessage{}
-	if p := f.Variants[i].Payload; len(p) > 0 && p[0] == '{' {
-		_ = json.Unmarshal(p, &payload)
-	}
-	payload["changes"], _ = json.Marshal(cs)
-	f.Variants[i].Payload, _ = json.Marshal(payload)
-	if msg := flags.CheckVariants(f.Variants); msg != "" {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
-		return
-	}
+	// Save: the changes replace the version's "changes" (and css and
+	// redirect, when sent), and the rest of its payload stays.
 	p := principal{ActorID: c.Actor, ActorType: "human", UserID: c.User}
-	variants, _ := json.Marshal(f.Variants)
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE flags SET variants = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`, f.ID, c.Workspace, variants); err != nil {
-			return err
+	if err := s.saveVisualEdit(ctx, &p, c.Workspace, &f, i, in.Changes, in.CSS, in.Redirect); err != nil {
+		var bad errInvalid
+		if errors.As(err, &bad) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", string(bad))
+			return
 		}
-		data := flagAuditData(f)
-		data["was"], data["visual_changes"] = f.Status, len(cs)
-		return record(ctx, tx, &p, c.Workspace, "flag.updated", "flag", f.ID, data)
-	})
-	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	s.flagCache.forget(c.Workspace)
-	answer(cs)
+	answer(f.Variants[i])
+}
+
+// saveVisualEdit replaces version i's visual changes (and its css and
+// redirect, when given; "" removes them), keeps the rest of its payload,
+// checks it all, saves it and records flag.updated by p.
+func (s *Server) saveVisualEdit(ctx context.Context, p *principal, ws string, f *flagView, i int, changes json.RawMessage, css, redirect *string) error {
+	var cs []flags.Change
+	if len(changes) == 0 || json.Unmarshal(changes, &cs) != nil {
+		return errInvalid("changes is a list of {selector, and text, rich, hide, href, src and alt, style, move or insert}")
+	}
+	payload := map[string]json.RawMessage{}
+	if pl := f.Variants[i].Payload; len(pl) > 0 && pl[0] == '{' {
+		_ = json.Unmarshal(pl, &payload)
+	}
+	payload["changes"], _ = json.Marshal(cs)
+	for k, v := range map[string]*string{"css": css, "redirect": redirect} {
+		switch {
+		case v == nil:
+		case *v == "":
+			delete(payload, k)
+		default:
+			payload[k], _ = json.Marshal(*v)
+		}
+	}
+	f.Variants[i].Payload, _ = json.Marshal(payload)
+	if msg := flags.CheckVariants(f.Variants); msg != "" {
+		return errInvalid(msg)
+	}
+	if err := s.checkRedirects(ctx, ws, f.BrandID, f.Variants[i:i+1]); err != nil {
+		return err
+	}
+	variants, _ := json.Marshal(f.Variants)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE flags SET variants = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`, f.ID, ws, variants); err != nil {
+			return err
+		}
+		data := flagAuditData(*f)
+		data["was"], data["visual_changes"], data["variant"] = f.Status, len(cs), f.Variants[i].Key
+		return record(ctx, tx, p, ws, "flag.updated", "flag", f.ID, data)
+	})
+	if err != nil {
+		return err
+	}
+	s.flagCache.forget(ws)
+	return nil
 }

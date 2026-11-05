@@ -18,6 +18,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/customers"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/quota"
 )
 
@@ -204,7 +205,10 @@ type eventResult struct {
 	// Records merged into this person because they proved they own an email
 	// those records held.
 	Merged []string `json:"merged,omitempty"`
-	Error  *struct {
+	// newUser is set when the event gave a person their first user id:
+	// the product's sign-up, which partner programs credit.
+	newUser bool
+	Error   *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -402,10 +406,8 @@ func (s *Server) ingestCustomerEvents(w http.ResponseWriter, r *http.Request) {
 // saveEventNames keeps one catalog row per name in the brand (a resolved
 // id, catalog.Brand), however many events had it. A name the brand never
 // defined arrives quarantined, so it drives nothing until someone approves
-// it. Until the contract step of plans/brands/README.md an event name is
-// defined in one brand of a workspace at a time (event_definitions keeps
-// its per-workspace unique constraint for the version before this one), so
-// a name another brand defines is left uncounted here.
+// it. Each brand has its own catalog (event_definitions_brand_name_idx), so
+// another brand defining the same name changes nothing here.
 func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[string]*seenName) error {
 	for name, n := range names {
 		status := "quarantined"
@@ -414,11 +416,9 @@ func saveEventNames(ctx context.Context, tx pgx.Tx, ws, brand string, names map[
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count)
 			SELECT $1, NULLIF($7, '')::uuid, $2, $3, $4, $5, $6
-			WHERE NOT EXISTS (SELECT 1 FROM event_definitions WHERE workspace_id = $1 AND name = $2 AND brand_id IS DISTINCT FROM NULLIF($7, '')::uuid)
-			ON CONFLICT (workspace_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + EXCLUDED.seen_count,
+			ON CONFLICT (brand_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + EXCLUDED.seen_count,
 				last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
-				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)
-			WHERE event_definitions.brand_id IS NOT DISTINCT FROM EXCLUDED.brand_id`,
+				first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
 			ws, name, status, n.first, n.last, n.count, brand); err != nil {
 			return err
 		}
@@ -585,6 +585,49 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 	// a browser event, so one never counts.
 	usage := source != siteSource && (kind == "track" || kind == "page" || kind == "screen")
 
+	// A completed order from the server is a payment, counted once with the
+	// same payment sent as a transaction (docs/transactions.md). Anyone can
+	// send a browser event, so one is never money.
+	if kind == "track" && orderEvents[name] && rec != nil && source != siteSource {
+		var pb string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE($2::uuid, (SELECT r.brand_id FROM records r WHERE r.id = $3), outflare_first_brand($1))::text`,
+			a.WorkspaceID, brand, rec).Scan(&pb); err != nil {
+			return err
+		}
+		if pb != "" {
+			start := time.Now()
+			link, err := orderPayment(ctx, tx, a.WorkspaceID, pb, *rec, props, messageID, at)
+			if err != nil {
+				metrics.TransactionSaved(orderSource, "error", time.Since(start))
+				return err
+			}
+			if link != "" {
+				props[paymentLink] = link
+				metrics.TransactionSaved(orderSource, "counted", time.Since(start))
+			}
+		}
+	}
+	// A refunded order from the server is a refund of that payment.
+	if kind == "track" && refundEvents[name] && rec != nil && source != siteSource {
+		var pb string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE($2::uuid, (SELECT r.brand_id FROM records r WHERE r.id = $3), outflare_first_brand($1))::text`,
+			a.WorkspaceID, brand, rec).Scan(&pb); err != nil {
+			return err
+		}
+		if pb != "" {
+			start := time.Now()
+			id, err := orderRefund(ctx, tx, a.WorkspaceID, pb, *rec, props, messageID, at)
+			if err != nil {
+				metrics.TransactionSaved(orderSource, "error", time.Since(start))
+				return err
+			}
+			if id != "" {
+				props[refundLink] = id
+				metrics.TransactionSaved(orderSource, "refund", time.Since(start))
+			}
+		}
+	}
+
 	var id, eventBrand string
 	err = tx.QueryRow(ctx, `INSERT INTO customer_events (workspace_id, record_id, account_id, brand_id, kind, name, raw_name, user_id, anonymous_id,
 			properties, traits, context, source, message_id, occurred_at, request_id, product_id, usage)
@@ -611,6 +654,11 @@ func (s *Server) ingestOne(ctx context.Context, tx pgx.Tx, a *access, c *catalog
 			}
 		}
 		if err := customers.MetricEventAdded(ctx, tx, a.WorkspaceID, eventBrand, id, name, usage); err != nil {
+			return err
+		}
+		// A sign-up or a program's own conversion event credits the
+		// partner who referred them (docs/partners.md, "From your events").
+		if err := partnerFromEvent(ctx, tx, a.WorkspaceID, eventBrand, *rec, kind, name, res.newUser, props, traits, id, at); err != nil {
 			return err
 		}
 	}
@@ -762,9 +810,11 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 		return nil, nil
 	}
 	if userID != "" {
-		if _, err := attach(ctx, tx, a, *rec, "user_id", userID, true, totals); err != nil {
+		added, err := attach(ctx, tx, a, *rec, "user_id", userID, true, totals)
+		if err != nil {
 			return nil, err
 		}
+		res.newUser = added
 	}
 	if anonID != "" {
 		if other, _, err := ownerOf(ctx, tx, a, c.Brand, "anonymous_id", anonID); err != nil {
@@ -846,7 +896,7 @@ func (s *Server) claimProvenEmail(ctx context.Context, tx pgx.Tx, a *access, c *
 }
 
 // releaseClickBrowser takes a browser back from the person it joined
-// through an email click when a sign-in on it says it is someone else: a
+// through an email click or a visitor link when a sign-in on it says it is someone else: a
 // userId without the person's email, or an email they don't have. A
 // forwarded email then never puts two people in one record. The browser's events and visits leave the
 // person, so the new owner's backfill picks them up. It reports whether it
@@ -857,7 +907,7 @@ func releaseClickBrowser(ctx context.Context, tx pgx.Tx, a *access, c *catalog, 
 	}
 	var fromClick, hasEmail bool
 	if err := tx.QueryRow(ctx, `SELECT
-			EXISTS (SELECT 1 FROM record_identities WHERE record_id = $1 AND namespace = 'anonymous_id' AND value = $2 AND valid_to IS NULL AND source = 'email_click'),
+			EXISTS (SELECT 1 FROM record_identities WHERE record_id = $1 AND namespace = 'anonymous_id' AND value = $2 AND valid_to IS NULL AND source IN ('email_click', 'link')),
 			EXISTS (SELECT 1 FROM record_identities WHERE record_id = $1 AND namespace = 'email' AND value = $3 AND valid_to IS NULL)`,
 		rec, anonID, email).Scan(&fromClick, &hasEmail); err != nil {
 		return false, err
@@ -1246,7 +1296,7 @@ type timelineItem struct {
 	RecordID string `json:"record_id"`
 }
 
-var timelineKinds = []string{"event", "attribute_change", "identity", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list"}
+var timelineKinds = []string{"event", "attribute_change", "identity", "identified", "consent", "message", "meeting", "deal", "visit", "opt_out", "journey", "list"}
 
 // timelinePeople caps how many of a company's people its timeline reads.
 const timelinePeople = 5000
@@ -1270,6 +1320,28 @@ var timelineBranches = map[string]string{
 		SELECT 'identity', i.id::text || ':closed', i.valid_to, i.namespace,
 			jsonb_build_object('change', i.closed_reason, 'value', i.value, 'verified', i.verified), i.source, i.record_id
 		FROM record_identities i WHERE i.record_id = ANY($2) AND i.valid_to IS NOT NULL`,
+	// The moment an anonymous browser became this person: how (product,
+	// email_click or link), when the browser was first seen, and the visits
+	// and events from before that the person took over. A browser taken
+	// back (a sign-in on it as someone else) shows as released.
+	"identified": `SELECT 'identified', i.id::text || ':identified', i.valid_from, 'anonymous_visitor',
+			jsonb_build_object('change', 'identified', 'anonymous_id', i.value,
+				'by', CASE WHEN i.source IN ('email_click', 'link') THEN i.source ELSE 'product' END,
+				'first_seen_at', (SELECT min(v.started_at) FROM site_sessions v WHERE v.workspace_id = $1 AND v.anonymous_id = i.value),
+				'visits_before', (SELECT count(*) FROM site_sessions v WHERE v.workspace_id = $1 AND v.anonymous_id = i.value
+					AND v.record_id = i.record_id AND v.started_at < i.valid_from),
+				'events_before', (SELECT count(*) FROM customer_events e WHERE e.record_id = i.record_id AND e.anonymous_id = i.value
+					AND e.kind NOT IN ('identify', 'alias', 'group') AND e.occurred_at < i.valid_from),
+				'device', d.device, 'browser', d.browser, 'os', d.os, 'country', d.country), 'website', i.record_id
+		FROM record_identities i
+		LEFT JOIN LATERAL (SELECT v.device, v.browser, v.os, v.country FROM site_sessions v
+			WHERE v.workspace_id = $1 AND v.anonymous_id = i.value ORDER BY v.last_seen_at DESC LIMIT 1) d ON true
+		WHERE i.record_id = ANY($2) AND i.namespace = 'anonymous_id'
+		UNION ALL
+		SELECT 'identified', i.id::text || ':released', i.valid_to, 'anonymous_visitor',
+			jsonb_build_object('change', 'released', 'anonymous_id', i.value,
+				'by', CASE WHEN i.source IN ('email_click', 'link') THEN i.source ELSE 'product' END, 'reason', i.closed_reason), 'website', i.record_id
+		FROM record_identities i WHERE i.record_id = ANY($2) AND i.namespace = 'anonymous_id' AND i.valid_to IS NOT NULL`,
 	"consent": `SELECT 'consent', k.id::text, k.occurred_at, k.channel,
 			jsonb_build_object('status', k.status, 'topic', k.topic, 'purpose', k.purpose, 'evidence', k.evidence), k.source, k.record_id
 		FROM consents k WHERE k.record_id = ANY($2)`,

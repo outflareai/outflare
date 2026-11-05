@@ -470,7 +470,7 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 	tokens := 0.0
 	var refused error
 	for _, js := range []bool{false, true} {
-		p, err := f.FetchPage(ctx, o.Client, o.Creds, pageURL, js)
+		p, err := readHomepage(ctx, o, f, pageURL, js)
 		tokens += p.Cost.Units
 		if err != nil {
 			err = pageFailed(err)
@@ -491,6 +491,11 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 		found = sociallinks.Find(p.HTML, pageURL)
 		if len(found) > 0 {
 			break
+		}
+		// A page job ends with the page the reader saw, which for a
+		// bot check is the challenge itself.
+		if len(found) == 0 && (p.Status == http.StatusForbidden || p.Status == http.StatusTooManyRequests || p.Status == http.StatusServiceUnavailable) {
+			refused = readFailed(readBlocked, "the site answered the page reader with %d, a bot check", p.Status)
 		}
 	}
 	if refused != nil {
@@ -522,4 +527,43 @@ func (s *Server) DiscoverBrandLinks(ctx context.Context, ws, brandID string) err
 	ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 	track.Emit(ctx, ev)
 	return nil
+}
+
+// How the read with JavaScript waits for a page reader that reads pages as
+// jobs (connectors.PageJobs): a page behind a bot check takes 45 to 100
+// seconds, longer than one request may wait, so it is sent once and its
+// result asked for every linkJobPoll, for up to linkJobWait.
+var (
+	linkJobPoll = 5 * time.Second
+	linkJobWait = 150 * time.Second
+)
+
+// readHomepage reads a brand's homepage once, with or without JavaScript.
+// The read with JavaScript runs as a job when the reader can; one still
+// running after linkJobWait is a slow page (the site's), never an outage of
+// the reader.
+func readHomepage(ctx context.Context, o *connectors.Opened, f connectors.PageFetcher, url string, js bool) (connectors.FetchedPage, error) {
+	j, ok := f.(connectors.PageJobs)
+	if !js || !ok {
+		return f.FetchPage(ctx, o.Client, o.Creds, url, js)
+	}
+	id, err := j.StartPage(ctx, o.Client, o.Creds, url)
+	if err != nil {
+		return connectors.FetchedPage{}, err
+	}
+	deadline := time.Now().Add(linkJobWait)
+	for {
+		p, done, err := j.PageResult(ctx, o.Client, o.Creds, id)
+		if done || err != nil {
+			return p, err
+		}
+		if time.Now().After(deadline) {
+			return p, readFailed(readSlow, "the page reader was still reading the page after %s", linkJobWait)
+		}
+		select {
+		case <-ctx.Done():
+			return p, ctx.Err()
+		case <-time.After(linkJobPoll):
+		}
+	}
 }

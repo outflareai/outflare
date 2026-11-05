@@ -33,8 +33,10 @@ func (s *Server) routesAdConversions(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/conversion-rules/{id}", s.inWorkspace(manage, s.updateAdConversionRule))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ads/conversion-rules/{id}", s.inWorkspace(manage, s.deleteAdConversionRule))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/conversion-sends", s.inWorkspace(read, s.listAdConversionSends))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/settings", s.inWorkspace(read, s.getAdSettings))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/ads/settings", s.inWorkspace(manage, s.setAdSettings))
+	for _, t := range s.twins("ads/settings") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.getAdSettings))
+		mux.HandleFunc("PUT "+t.path, t.on(s.inWorkspace)(manage, s.setAdSettings))
+	}
 }
 
 var (
@@ -230,8 +232,15 @@ func (s *Server) listAdConversionRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "account_id must be an ad account's id")
 		return
 	}
-	rows, err := s.pool.Query(r.Context(), adRuleSelect+` WHERE r.workspace_id = $1 AND ($2 = '' OR r.ad_account_id::text = $2)
-		ORDER BY a.connector, r.event_name, r.created_at, r.id`, a.WorkspaceID, acct)
+	brand, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	// A rule is its ad account's brand's, filtered like the accounts.
+	args := []any{a.WorkspaceID, acct}
+	where := brand.sql(`a.brand_id`, &args)
+	rows, err := s.pool.Query(r.Context(), adRuleSelect+` WHERE r.workspace_id = $1 AND ($2 = '' OR r.ad_account_id::text = $2)`+where+`
+		ORDER BY a.connector, r.event_name, r.created_at, r.id`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -355,11 +364,21 @@ func (s *Server) adRuleTarget(w http.ResponseWriter, r *http.Request, ws, accoun
 }
 
 // adRuleDefinition reads the conversion definition a rule names, answering
-// the error itself.
-func (s *Server) adRuleDefinition(w http.ResponseWriter, r *http.Request, ws, key string) (conversions.Definition, bool) {
-	d, err := conversions.Get(r.Context(), s.pool, ws, key)
+// the error itself. It is one of the ad account's brand's definitions (an
+// account with no brand: the workspace's first brand's); account is the
+// ad account's id, or "" with rule, the rule's id.
+func (s *Server) adRuleDefinition(w http.ResponseWriter, r *http.Request, ws, account, rule, key string) (conversions.Definition, bool) {
+	var brand string
+	err := s.pool.QueryRow(r.Context(), `SELECT coalesce((SELECT a.brand_id::text FROM ad_accounts a
+		WHERE a.workspace_id = $1 AND a.id::text = COALESCE(NULLIF($2, ''), (SELECT r.ad_account_id::text FROM ad_conversion_rules r WHERE r.workspace_id = $1 AND r.id::text = $3))), '')`,
+		ws, account, rule).Scan(&brand)
+	if err != nil {
+		s.internal(w, r, err)
+		return conversions.Definition{}, false
+	}
+	d, err := conversions.Get(r.Context(), s.pool, ws, brand, key)
 	if errors.Is(err, conversions.ErrNotFound) || (err == nil && d.ArchivedAt != nil) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "conversion is the key of one of the workspace's conversion definitions that isn't archived (GET .../conversion-definitions)")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "conversion is the key of one of the ad account's brand's conversion definitions that isn't archived (GET .../conversion-definitions)")
 		return d, false
 	}
 	if err != nil {
@@ -390,7 +409,7 @@ func (s *Server) createAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		eventName = *in.EventName
 	}
 	if hasConversion {
-		d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, *in.Conversion)
+		d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, *in.AccountID, "", *in.Conversion)
 		if !ok {
 			return
 		}
@@ -475,7 +494,7 @@ func (s *Server) updateAdConversionRule(w http.ResponseWriter, r *http.Request) 
 		if *in.Conversion == "" {
 			clear = true
 		} else {
-			d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, *in.Conversion)
+			d, ok := s.adRuleDefinition(w, r, a.WorkspaceID, "", id, *in.Conversion)
 			if !ok {
 				return
 			}
@@ -596,13 +615,19 @@ func (s *Server) listAdConversionSends(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	brand, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID, ruleID, status, recordID, before, limit}
+	where := brand.sql(`a.brand_id`, &args)
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT q.id, q.rule_id, a.connector, x.event_name, q.record_id, q.event_id, q.occurred_at, q.status, q.reason, q.match_keys,
 			q.value_micros, q.currency, q.attempts, q.sent_at, q.created_at
 		FROM ad_conversion_sends q JOIN ad_conversion_rules x ON x.id = q.rule_id JOIN ad_accounts a ON a.id = x.ad_account_id
 		WHERE q.workspace_id = $1 AND ($2 = '' OR q.rule_id::text = $2) AND ($3 = '' OR q.status = $3)
-		  AND ($4 = '' OR q.record_id::text = $4) AND ($5::timestamptz IS NULL OR q.created_at < $5)
-		ORDER BY q.created_at DESC, q.id DESC LIMIT $6`, a.WorkspaceID, ruleID, status, recordID, before, limit)
+		  AND ($4 = '' OR q.record_id::text = $4) AND ($5::timestamptz IS NULL OR q.created_at < $5)`+where+`
+		ORDER BY q.created_at DESC, q.id DESC LIMIT $6`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -637,9 +662,10 @@ type adSettings struct {
 
 func (s *Server) adSettings(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, ws string) (adSettings, error) {
+}, ws, brand string) (adSettings, error) {
 	out := adSettings{ConsentMode: adconv.OptOut}
-	err := q.QueryRow(ctx, `SELECT consent_mode, updated_at FROM ad_settings WHERE workspace_id = $1`, ws).Scan(&out.ConsentMode, &out.UpdatedAt)
+	err := q.QueryRow(ctx, `SELECT consent_mode, updated_at FROM ad_settings WHERE workspace_id = $1
+		AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$2"), ws, brand).Scan(&out.ConsentMode, &out.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = nil
 	}
@@ -647,7 +673,8 @@ func (s *Server) adSettings(ctx context.Context, q interface {
 }
 
 func (s *Server) getAdSettings(w http.ResponseWriter, r *http.Request) {
-	out, err := s.adSettings(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID)
+	a := accessFrom(r.Context())
+	out, err := s.adSettings(r.Context(), s.pool, a.WorkspaceID, a.Brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -669,12 +696,18 @@ func (s *Server) setAdSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var out adSettings
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(r.Context(), `INSERT INTO ad_settings (workspace_id, consent_mode) VALUES ($1, $2)
-			ON CONFLICT (workspace_id) DO UPDATE SET consent_mode = EXCLUDED.consent_mode, updated_at = now()`, a.WorkspaceID, *in.ConsentMode); err != nil {
+		tag, err := tx.Exec(r.Context(), `UPDATE ad_settings SET consent_mode = $2, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$3"), a.WorkspaceID, *in.ConsentMode, a.Brand)
+		if err != nil {
 			return err
 		}
-		var err error
-		if out, err = s.adSettings(r.Context(), tx, a.WorkspaceID); err != nil {
+		if tag.RowsAffected() == 0 {
+			if _, err := tx.Exec(r.Context(), `INSERT INTO ad_settings (workspace_id, brand_id, consent_mode) VALUES ($1, `+settingsBrand("$3")+`, $2)`,
+				a.WorkspaceID, *in.ConsentMode, a.Brand); err != nil {
+				return err
+			}
+		}
+		if out, err = s.adSettings(r.Context(), tx, a.WorkspaceID, a.Brand); err != nil {
 			return err
 		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "ad_settings.updated", "workspace", a.WorkspaceID, map[string]any{"consent_mode": out.ConsentMode})

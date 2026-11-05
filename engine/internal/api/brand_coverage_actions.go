@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/coverage"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
 func (s *Server) routesCoverageActions(m *http.ServeMux) {
@@ -277,70 +280,129 @@ func (s *Server) coverageReconcile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, 403, "forbidden", "seo.read required to import discovery results")
 		return
 	}
-	var added int64
+	var found map[string]int
 	var processed int
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(r.Context(), `WITH sources AS (
- SELECT n.url,n.title,'news' AS source,c.id::text AS source_id FROM coverage c JOIN news_articles n ON n.id=c.article_id AND n.workspace_id=c.workspace_id WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status<>'dismissed'
- UNION ALL SELECT page_url,left(page_url,500),'link_prospects',id::text FROM link_prospects WHERE workspace_id=$1 AND brand_id=$2 AND stage<>'excluded'
- UNION ALL SELECT source_url,left(source_url,500),'backlinks',id::text FROM backlinks WHERE workspace_id=$1 AND brand_id=$2
- ) SELECT url,title,source,source_id FROM sources s WHERE NOT EXISTS (
- SELECT 1 FROM coverage_discovery_receipts r WHERE r.workspace_id=$1 AND r.brand_id=$2 AND r.source=s.source AND r.source_id=s.source_id
- ) ORDER BY source,source_id LIMIT 2000`, a.WorkspaceID, a.Brand)
-		if err != nil {
-			return err
-		}
-		type hit struct{ URL, Title, Source, ID string }
-		hits := []hit{}
-		for rows.Next() {
-			var h hit
-			if err = rows.Scan(&h.URL, &h.Title, &h.Source, &h.ID); err != nil {
-				rows.Close()
-				return err
-			}
-			hits = append(hits, h)
-		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
-			return err
-		}
-		processed = len(hits)
-		for _, h := range hits {
-			u, e := coverageURL(h.URL)
-			if e != nil {
-				if _, err := tx.Exec(r.Context(), "INSERT INTO coverage_discovery_receipts(workspace_id,brand_id,source,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", a.WorkspaceID, a.Brand, h.Source, h.ID); err != nil {
-					return err
-				}
-				continue
-			}
-			var candidate string
-			var created bool
-			e = tx.QueryRow(r.Context(), `INSERT INTO coverage_candidates(workspace_id,brand_id,url,title,source,source_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,brand_id,url) DO UPDATE SET updated_at=now() RETURNING id::text,(xmax=0)`, a.WorkspaceID, a.Brand, u, h.Title, h.Source, h.ID).Scan(&candidate, &created)
-			if e != nil {
-				return e
-			}
-			if _, err := tx.Exec(r.Context(), "INSERT INTO coverage_discovery_receipts(workspace_id,brand_id,source,source_id,candidate_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", a.WorkspaceID, a.Brand, h.Source, h.ID, candidate); err != nil {
-				return err
-			}
-			if created {
-				added++
-			}
-			var known bool
-			if e = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM coverage_history WHERE workspace_id=$1 AND brand_id=$2 AND resource='candidates' AND resource_id=$3 AND action='discovered' AND detail->>'source'=$4 AND detail->>'source_id'=$5)", a.WorkspaceID, a.Brand, candidate, h.Source, h.ID).Scan(&known); e != nil {
-				return e
-			}
-			if !known {
-				if e = coverageHistory(r.Context(), tx, a, "candidates", candidate, "discovered", map[string]any{"source": h.Source, "source_id": h.ID}); e != nil {
-					return e
-				}
-			}
-		}
-		return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "coverage_discovery.reconciled", "brand", a.Brand, nil, map[string]any{"count": added})
+		var err error
+		found, processed, err = coverageDiscover(r.Context(), tx, a)
+		return err
 	})
 	if s.coverageError(w, r, err) {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"added": added, "processed": processed, "has_more": processed == 2000})
+	added := 0
+	for source, n := range found {
+		metrics.CoverageFound(source, n)
+		added += n
+	}
+	writeJSON(w, 200, map[string]any{"added": added, "processed": processed, "has_more": processed == coverageDiscoverBatch})
+}
+
+const coverageDiscoverBatch = 2000
+
+// coverageDiscover brings the brand's new finds from the modules that
+// already watch the web into its review list: news coverage, backlinks,
+// link prospects, posts its social watches found, and the pages AI answers
+// cite when they name the brand. Each find gets the type its address
+// suggests. It handles one batch, and there is more when it returns a full
+// batch. It returns how many pages were new to the list, by source.
+func coverageDiscover(ctx context.Context, tx pgx.Tx, a *access) (map[string]int, int, error) {
+	rows, err := tx.Query(ctx, `WITH sources AS (
+ SELECT n.url,n.title,'news' AS source,c.id::text AS source_id FROM coverage c JOIN news_articles n ON n.id=c.article_id AND n.workspace_id=c.workspace_id WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status<>'dismissed'
+ UNION ALL SELECT page_url,left(page_url,500),'link_prospects',id::text FROM link_prospects WHERE workspace_id=$1 AND brand_id=$2 AND stage<>'excluded'
+ UNION ALL SELECT source_url,left(source_url,500),'backlinks',id::text FROM backlinks WHERE workspace_id=$1 AND brand_id=$2
+ UNION ALL SELECT url,left(coalesce(nullif(title,''),url),500),'social',id::text FROM social_items WHERE workspace_id=$1 AND brand_id=$2 AND status<>'ignored'
+ UNION ALL SELECT DISTINCT ON (ci.url) ci.url,left(coalesce(nullif(ci.title,''),ci.url),500),'ai_citations',md5(ci.url) FROM ai_citations ci JOIN ai_cohorts co ON co.id=ci.cohort_id AND co.workspace_id=ci.workspace_id
+  WHERE ci.workspace_id=$1 AND co.brand_id=$2 AND ci.owner='other' AND EXISTS (SELECT 1 FROM ai_mentions m WHERE m.sample_id=ci.sample_id AND m.entity='brand')
+ ) SELECT url,title,source,source_id FROM sources s WHERE NOT EXISTS (
+ SELECT 1 FROM coverage_discovery_receipts r WHERE r.workspace_id=$1 AND r.brand_id=$2 AND r.source=s.source AND r.source_id=s.source_id
+ ) ORDER BY source,source_id LIMIT 2000`, a.WorkspaceID, a.Brand)
+	if err != nil {
+		return nil, 0, err
+	}
+	hits := []coverageFind{}
+	for rows.Next() {
+		var h coverageFind
+		if err = rows.Scan(&h.URL, &h.Title, &h.Source, &h.ID); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		hits = append(hits, h)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	found, added := map[string]int{}, 0
+	for _, h := range hits {
+		created, err := coverageAddFind(ctx, tx, a, h)
+		if err != nil {
+			return nil, 0, err
+		}
+		if created {
+			found[h.Source]++
+			added++
+		}
+	}
+	if err := recordWithProps(ctx, tx, coverageActor(a), a.WorkspaceID, "coverage_discovery.reconciled", "brand", a.Brand, nil, map[string]any{"count": added}); err != nil {
+		return nil, 0, err
+	}
+	return found, len(hits), nil
+}
+
+// coverageFind is one page a source found: its URL and title, the source
+// module and that module's id for it.
+type coverageFind struct{ URL, Title, Source, ID string }
+
+// coverageAddFind adds a find to the review list once, with the type its
+// address suggests, and remembers the source's record so it is never
+// brought in again. It reports whether the page was new to the list.
+func coverageAddFind(ctx context.Context, tx pgx.Tx, a *access, h coverageFind) (bool, error) {
+	u, e := coverageURL(h.URL)
+	if e != nil {
+		_, err := tx.Exec(ctx, "INSERT INTO coverage_discovery_receipts(workspace_id,brand_id,source,source_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", a.WorkspaceID, a.Brand, h.Source, h.ID)
+		return false, err
+	}
+	kind := coverage.Classify(u)
+	if kind == "" && h.Source == "news" {
+		kind = "news"
+	}
+	title := strings.TrimSpace(h.Title)
+	if title == "" {
+		title = u
+	}
+	if len(title) > 500 {
+		title = title[:500]
+	}
+	var candidate string
+	var created bool
+	if err := tx.QueryRow(ctx, `INSERT INTO coverage_candidates(workspace_id,brand_id,url,title,source,source_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7)
+ ON CONFLICT(workspace_id,brand_id,url) DO UPDATE SET updated_at=now(),kind=CASE WHEN coverage_candidates.kind='' THEN EXCLUDED.kind ELSE coverage_candidates.kind END RETURNING id::text,(xmax=0)`,
+		a.WorkspaceID, a.Brand, u, title, h.Source, h.ID, kind).Scan(&candidate, &created); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO coverage_discovery_receipts(workspace_id,brand_id,source,source_id,candidate_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", a.WorkspaceID, a.Brand, h.Source, h.ID, candidate); err != nil {
+		return false, err
+	}
+	var known bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM coverage_history WHERE workspace_id=$1 AND brand_id=$2 AND resource='candidates' AND resource_id=$3 AND action='discovered' AND detail->>'source'=$4 AND detail->>'source_id'=$5)", a.WorkspaceID, a.Brand, candidate, h.Source, h.ID).Scan(&known); err != nil {
+		return false, err
+	}
+	if !known {
+		if err := coverageHistory(ctx, tx, a, "candidates", candidate, "discovered", map[string]any{"source": h.Source, "source_id": h.ID, "kind": kind}); err != nil {
+			return false, err
+		}
+	}
+	return created, nil
+}
+
+// coverageActor is who an access acts as in the audit log: nobody for the
+// system (a scheduled job), else the person or token.
+func coverageActor(a *access) *principal {
+	if a.ActorType == "" {
+		return nil
+	}
+	return &a.principal
 }
 func (s *Server) coverageConfirm(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -356,14 +418,14 @@ func (s *Server) coverageConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	var data json.RawMessage
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-		var url, title, status string
-		if err := tx.QueryRow(r.Context(), "SELECT url,title,status FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 FOR UPDATE", a.WorkspaceID, a.Brand, r.PathValue("id")).Scan(&url, &title, &status); err != nil {
+		var url, title, status, kind string
+		if err := tx.QueryRow(r.Context(), "SELECT url,title,status,coalesce(nullif(kind,''),'blog') FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 FOR UPDATE", a.WorkspaceID, a.Brand, r.PathValue("id")).Scan(&url, &title, &status, &kind); err != nil {
 			return err
 		}
 		if err := coverageReferences(r.Context(), tx, a, coverageResources["placements"], map[string]any{"publisher_id": req.Publisher}); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(r.Context(), `INSERT INTO coverage_placements AS p(workspace_id,brand_id,publisher_id,title,url) VALUES($1,$2,$3,$4,$5) ON CONFLICT(workspace_id,brand_id,url,inventory) WHERE url<>'' DO UPDATE SET updated_at=p.updated_at RETURNING to_jsonb(p)-'workspace_id'`, a.WorkspaceID, a.Brand, req.Publisher, title, url).Scan(&data); err != nil {
+		if err := tx.QueryRow(r.Context(), `INSERT INTO coverage_placements AS p(workspace_id,brand_id,publisher_id,title,url,kind) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(workspace_id,brand_id,url,inventory) WHERE url<>'' DO UPDATE SET updated_at=p.updated_at RETURNING to_jsonb(p)-'workspace_id'`, a.WorkspaceID, a.Brand, req.Publisher, title, url, kind).Scan(&data); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(r.Context(), "UPDATE coverage_candidates SET status='confirmed',version=version+1,updated_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3", a.WorkspaceID, a.Brand, r.PathValue("id")); err != nil {

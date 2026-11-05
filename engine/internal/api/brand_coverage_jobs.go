@@ -32,6 +32,12 @@ func (s *Server) QueueDueCoverage(ctx context.Context) (int, error) {
 	if err := s.queueCoverageAccuracy(ctx); err != nil {
 		return 0, err
 	}
+	if err := s.queueCoverageDiscovery(ctx); err != nil {
+		return 0, err
+	}
+	if err := s.queueCompetitorScans(ctx); err != nil {
+		return 0, err
+	}
 	n := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE coverage_placements SET next_check_at=now()+make_interval(hours=>least(8760,check_every_hours*(1+least(failure_count,6))))
@@ -89,9 +95,10 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 	}
 	var page, target, kind, mention, expectedRel, configuredReader string
 	var expect, test, monitor bool
-	var stage string
+	var stage, brandName, website string
+	var domains []string
 	var version int
-	err := s.pool.QueryRow(ctx, `SELECT p.url,p.target_url,p.kind,p.expected_link,p.expected_mention,p.version,w.test,p.expected_rel,p.reader,p.monitor,p.stage FROM coverage_placements p JOIN workspaces w ON w.id=p.workspace_id WHERE p.workspace_id=$1 AND p.brand_id=$2 AND p.id=$3`, ws, req.Brand, req.ID).Scan(&page, &target, &kind, &expect, &mention, &version, &test, &expectedRel, &configuredReader, &monitor, &stage)
+	err := s.pool.QueryRow(ctx, `SELECT p.url,p.target_url,p.kind,p.expected_link,p.expected_mention,p.version,w.test,p.expected_rel,p.reader,p.monitor,p.stage,b.name,b.website,b.domains FROM coverage_placements p JOIN workspaces w ON w.id=p.workspace_id JOIN brands b ON b.id=p.brand_id AND b.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND p.brand_id=$2 AND p.id=$3`, ws, req.Brand, req.ID).Scan(&page, &target, &kind, &expect, &mention, &version, &test, &expectedRel, &configuredReader, &monitor, &stage, &brandName, &website, &domains)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -159,15 +166,23 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 			health = "up"
 		}
 		links := []crawl.Link{}
-		targetURL, _ := url.Parse(target)
+		// Links to the target page's site; with no target, links to any of
+		// the brand's own domains, so "did they link to us?" is always asked.
+		hosts := coverageBrandHosts(target, website, domains)
 		for _, link := range rd.Links {
 			u, _ := url.Parse(link.URL)
-			if targetURL != nil && u != nil && targetURL.Hostname() != "" && strings.EqualFold(strings.TrimPrefix(u.Hostname(), "www."), strings.TrimPrefix(targetURL.Hostname(), "www.")) {
+			if u != nil && coverageHostIn(u.Hostname(), hosts) {
 				links = append(links, link)
 			}
 		}
 		evidence["links"] = links
 		evidence["link_present"] = len(links) > 0
+		// The expected wording, or else the brand's name, so "is the brand
+		// mentioned?" is always asked too.
+		if mention == "" {
+			mention = strings.TrimSpace(brandName)
+			evidence["mention_expected"] = "brand_name"
+		}
 		if mention != "" && health == "up" {
 			evidence["mention_present"] = strings.Contains(strings.ToLower(rd.Text), strings.ToLower(mention))
 			evidence["text_sample_only"] = true
@@ -221,7 +236,10 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 		if health == "gone" && (previousHealth != "gone" || rotating) {
 			observed = "unchecked"
 		}
-		verifiedPresence := health == "up" && !rotating && (evidence["link_present"] == true || evidence["mention_present"] == true)
+		// Verification keeps its meaning: what the placement expects (its
+		// target page, its wording). Finding the brand's name or a link to
+		// another of its pages is kept as link and mention status instead.
+		verifiedPresence := health == "up" && !rotating && ((target != "" && evidence["link_present"] == true) || (evidence["mention_expected"] == nil && evidence["mention_present"] == true))
 		evidence["presence_verified"] = verifiedPresence
 		evidence["effective_health"] = observed
 		evidence["rel_matches"] = coverageRelMatches(evidence, expectedRel)
@@ -231,8 +249,12 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 		if _, err = tx.Exec(ctx, `UPDATE coverage_placements SET health=$4,last_check_at=now(),first_verified_at=CASE WHEN $5 THEN coalesce(first_verified_at,now()) ELSE first_verified_at END,last_verified_at=CASE WHEN $5 THEN now() ELSE last_verified_at END,failure_count=CASE WHEN $4 IN ('up','gone') THEN 0 ELSE failure_count+1 END WHERE workspace_id=$1 AND brand_id=$2 AND id=$3`, ws, req.Brand, req.ID, observed, verifiedPresence); err != nil {
 			return err
 		}
-		findings := map[string]bool{"page_gone": observed == "gone", "link_changed": !rotating && expect && expectedRel != "any" && health == "up" && previousHealth == "up" && evidence["link_present"] == true && previous["link_present"] == true && !coverageRelMatches(evidence, expectedRel) && !coverageRelMatches(previous, expectedRel), "link_missing": !rotating && expect && target != "" && health == "up" && previousHealth == "up" && evidence["link_present"] == false && previous["link_present"] == false}
-		labels := map[string]string{"link_changed": "Expected backlink attributes changed", "page_gone": "Page is no longer available", "link_missing": "Expected backlink was not found"}
+		linkStatus, mentionStatus, err := coverageWatch(ctx, tx, ws, req.Brand, req.ID, observed, health, rotating, evidence, previous, previousHealth)
+		if err != nil {
+			return err
+		}
+		findings := map[string]bool{"mention_missing": mentionStatus == "removed", "page_gone": observed == "gone", "link_changed": !rotating && expect && expectedRel != "any" && health == "up" && previousHealth == "up" && evidence["link_present"] == true && previous["link_present"] == true && !coverageRelMatches(evidence, expectedRel) && !coverageRelMatches(previous, expectedRel), "link_missing": linkStatus == "removed" || (!rotating && expect && target != "" && health == "up" && previousHealth == "up" && evidence["link_present"] == false && previous["link_present"] == false)}
+		labels := map[string]string{"link_changed": "Expected backlink attributes changed", "page_gone": "Page is no longer available", "link_missing": "Expected backlink was not found", "mention_missing": "The brand mention was removed"}
 		for reason, active := range findings {
 			if active {
 				if enabled, e := coverageRuleEnabled(ctx, tx, ws, req.Brand, reason); e != nil {
@@ -241,12 +263,12 @@ func (s *Server) coverageCheckJob(ctx context.Context, j jobs.Job) error {
 					continue
 				}
 				var recovery string
-				if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT id::text FROM coverage_observations WHERE workspace_id=$1 AND brand_id=$2 AND placement_id=$3 AND source='page_read' AND health='up' AND ($4='page_gone' OR ($4='link_missing' AND evidence->>'link_present'='true') OR ($4='link_changed' AND evidence->>'link_present'='true' AND evidence->>'rel_matches'='true')) ORDER BY created_at DESC LIMIT 1),'none')`, ws, req.Brand, req.ID, reason).Scan(&recovery); err != nil {
+				if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT id::text FROM coverage_observations WHERE workspace_id=$1 AND brand_id=$2 AND placement_id=$3 AND source='page_read' AND health='up' AND ($4='page_gone' OR ($4='link_missing' AND evidence->>'link_present'='true') OR ($4='mention_missing' AND evidence->>'mention_present'='true') OR ($4='link_changed' AND evidence->>'link_present'='true' AND evidence->>'rel_matches'='true')) ORDER BY created_at DESC LIMIT 1),'none')`, ws, req.Brand, req.ID, reason).Scan(&recovery); err != nil {
 					return err
 				}
 				detail := "Two checks agree. Open the placement observation history for evidence. Last recovery observation: " + recovery
 				err = coverageRaiseTask(ctx, tx, a, req.ID, labels[reason], reason, detail)
-			} else if health == "up" && (reason == "page_gone" || (reason == "link_missing" && evidence["link_present"] == true) || (reason == "link_changed" && evidence["link_present"] == true && coverageRelMatches(evidence, expectedRel))) {
+			} else if health == "up" && (reason == "page_gone" || (reason == "link_missing" && evidence["link_present"] == true) || (reason == "mention_missing" && evidence["mention_present"] == true) || (reason == "link_changed" && evidence["link_present"] == true && coverageRelMatches(evidence, expectedRel))) {
 				err = coverageResolveTask(ctx, tx, a, req.ID, reason, "Recovered on a successful page check")
 			}
 			if err != nil {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SEOOverviewBrand, SEOTrend } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
@@ -43,21 +43,42 @@ export function SEOOverview({ ws, go }: Props) {
     setData(null);
   }, [ws, brandKey, weeks]);
 
-  // A first SEO read takes a minute or two; check back until it lands.
+  // A first SEO read takes a minute or two; check back until it lands. The
+  // checks keep going while a read runs, whether or not the last one got an
+  // answer.
   useEffect(() => {
     if (!reading) return;
-    const t = setTimeout(() => setPoll((n) => n + 1), 20000);
-    return () => clearTimeout(t);
-  }, [reading, poll]);
+    const t = setInterval(() => setPoll((n) => n + 1), 20000);
+    return () => clearInterval(t);
+  }, [reading]);
+  const shown = useRef(data);
+  shown.current = data;
 
+  // A failed check-back keeps the page as it was, and the next check tries
+  // again. A failed first load shows the error. Answers to a call the page no
+  // longer needs (another brand or range picked since) are dropped.
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo/overview", { params: { path: { ws }, query: { weeks, ...(brandKey ? { brand: brandKey } : {}) } } }).then(({ data, error }) => {
-      if (error || !data) return setError(errorMessage(error));
-      setError("");
-      setData(data.data);
-      setRange({ from: data.from, to: data.to });
-      setNotes(data.notes);
-    });
+    let live = true;
+    api
+      .GET("/v1/workspaces/{ws}/seo/overview", { params: { path: { ws }, query: { weeks, ...(brandKey ? { brand: brandKey } : {}) } } })
+      .then(({ data, error }) => {
+        if (!live) return;
+        if (error || !data) {
+          if (shown.current) return;
+          return setError(errorMessage(error));
+        }
+        setError("");
+        setData(data.data);
+        setRange({ from: data.from, to: data.to });
+        setNotes(data.notes);
+      })
+      .catch((err: unknown) => {
+        if (!live || shown.current || (err instanceof Error && err.name === "AbortError")) return;
+        setError(errorMessage(undefined));
+      });
+    return () => {
+      live = false;
+    };
   }, [ws, brandKey, weeks, poll]);
 
   const header = (

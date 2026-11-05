@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { pickedBrandId } from "@/lib/brand";
 import type { Partner, Schemas } from "@outflare/sdk";
 import { Plus, Ticket, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -290,7 +291,6 @@ export function CouponTemplates({
   );
 }
 export function PartnerCouponDialog({
-  ws,
   partner,
   currency,
   onClose,
@@ -311,9 +311,9 @@ export function PartnerCouponDialog({
     e.preventDefault();
     setBusy(true);
     const { error } = await api.POST(
-      "/v1/workspaces/{ws}/partners/{id}/promo-codes",
+      "/v1/brands/{brand}/partners/{id}/promo-codes",
       {
-        params: { path: { ws, id: partner.id } },
+        params: { path: { brand: pickedBrandId(), id: partner.id } },
         body: { code, coupon, rules },
       },
     );
@@ -368,9 +368,9 @@ export function PartnerCouponDialog({
                 onClick={async () => {
                   setBusy(true);
                   const { error } = await api.PATCH(
-                    "/v1/workspaces/{ws}/partners/{id}/promo-codes/{code}",
+                    "/v1/brands/{brand}/partners/{id}/promo-codes/{code}",
                     {
-                      params: { path: { ws, id: partner.id, code: c.code } },
+                      params: { path: { brand: pickedBrandId(), id: partner.id, code: c.code } },
                       body: { enabled: !!c.rules?.disabled },
                     },
                   );

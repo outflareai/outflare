@@ -49,8 +49,10 @@ curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/ai-cohorts/$COHORT/prompts" \
 
 ## Models
 
-Under AI visibility settings (`PUT /v1/workspaces/{ws}/ai-visibility/settings`)
-pick up to 8 models to ask. Each names one of your AI connections and a
+Under AI visibility settings (`PUT /v1/brands/{brand}/ai-visibility/settings`)
+pick up to 8 models to ask. Each brand has its own settings, monthly limit
+and spending; the workspace route is deprecated and acts on `?brand=` or
+the first brand. Each names one of your AI connections and a
 model, and whether to let it search the web first (Claude and OpenRouter
 models, and OpenAI's search models). Answers with web search cite real pages,
 which is what AI search products show people. Asking the same model and

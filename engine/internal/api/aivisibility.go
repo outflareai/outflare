@@ -30,8 +30,10 @@ import (
 func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-visibility", s.inBrand(read, s.getAIVisibility))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-visibility/settings", s.inWorkspace(read, s.getAIVisibilitySettings))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/ai-visibility/settings", s.inWorkspace(manage, s.putAIVisibilitySettings))
+	// Settings are the brand's; the workspace route acts on ?brand= or the
+	// first brand.
+	s.twinRoute(mux, "GET", "ai-visibility/settings", s.inWorkspace, read, s.getAIVisibilitySettings)
+	s.twinRoute(mux, "PUT", "ai-visibility/settings", s.inWorkspace, manage, s.putAIVisibilitySettings)
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts", s.inBrand(read, s.listAICohorts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts", s.inBrand(manage, s.createAICohort))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(read, s.getAICohort))
@@ -151,8 +153,8 @@ type aiVisModelView struct {
 	Connected bool `json:"connected"`
 }
 
-func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws string) (map[string]any, error) {
-	set, err := aivis.LoadSettings(ctx, s.pool, ws)
+func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws, brand string) (map[string]any, error) {
+	set, err := aivis.LoadSettings(ctx, s.pool, ws, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +162,7 @@ func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	spent, err := aivis.MonthSpent(ctx, s.pool, ws, time.Now())
+	spent, err := aivis.MonthSpent(ctx, s.pool, ws, brand, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +181,15 @@ func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws string) (map[s
 	}, nil
 }
 
+// AI visibility settings are the brand's: on a workspace route, ?brand= or
+// the first brand's.
 func (s *Server) getAIVisibilitySettings(w http.ResponseWriter, r *http.Request) {
-	v, err := s.aiVisibilitySettingsView(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	a := accessFrom(r.Context())
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.aiVisibilitySettingsView(r.Context(), a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -257,18 +266,30 @@ func (s *Server) putAIVisibilitySettings(w http.ResponseWriter, r *http.Request)
 		}
 		modelsJSON, _ = json.Marshal(list)
 	}
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// One row per brand: insert it if it is new, then update it.
 		_, err := tx.Exec(ctx, `
-			INSERT INTO ai_visibility_settings (workspace_id, models, samples_per_prompt, monthly_limit_cents, updated_by)
-			VALUES ($1, COALESCE($2::jsonb, '[]'), COALESCE($3::int, 1), COALESCE($4::bigint, $6::bigint), $5)
-			ON CONFLICT (workspace_id) DO UPDATE SET models = COALESCE($2::jsonb, ai_visibility_settings.models),
-				samples_per_prompt = COALESCE($3::int, ai_visibility_settings.samples_per_prompt),
-				monthly_limit_cents = COALESCE($4::bigint, ai_visibility_settings.monthly_limit_cents), updated_by = $5, updated_at = now()`,
-			a.WorkspaceID, nullJSON(modelsJSON), req.SamplesPerPrompt, req.MonthlyLimit, a.ActorID, int64(aivis.DefaultLimitCents))
+			INSERT INTO ai_visibility_settings (workspace_id, brand_id, models, samples_per_prompt, monthly_limit_cents, updated_by)
+			VALUES ($1, NULLIF($4, '')::uuid, '[]', 1, $2::bigint, $3)
+			ON CONFLICT DO NOTHING`,
+			a.WorkspaceID, int64(aivis.DefaultLimitCents), a.ActorID, brand)
 		if err != nil {
 			return err
 		}
-		data := map[string]any{}
+		_, err = tx.Exec(ctx, `
+			UPDATE ai_visibility_settings SET models = COALESCE($2::jsonb, models),
+				samples_per_prompt = COALESCE($3::int, samples_per_prompt),
+				monthly_limit_cents = COALESCE($4::bigint, monthly_limit_cents), updated_by = $5, updated_at = now()
+			WHERE workspace_id = $1 AND brand_id = COALESCE(NULLIF($6, '')::uuid, outflare_first_brand($1))`,
+			a.WorkspaceID, nullJSON(modelsJSON), req.SamplesPerPrompt, req.MonthlyLimit, a.ActorID, brand)
+		if err != nil {
+			return err
+		}
+		data := map[string]any{"brand_id": brand}
 		if req.Models != nil {
 			providers := []string{}
 			for _, t := range *req.Models {
@@ -547,6 +568,9 @@ func (s *Server) createAICohort(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if _, err := trackCompetitors(ctx, tx, a, brand, comps, "ai_visibility"); err != nil {
+			return err
+		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "ai_cohort.created", "ai_cohort", id, map[string]any{
 			"brand_id": brand, "schedule": schedule, "competitors": len(comps),
 		})
@@ -613,6 +637,11 @@ func (s *Server) updateAICohort(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			return err
+		}
+		if req.Competitors != nil {
+			if _, err := trackCompetitors(ctx, tx, a, brand, *req.Competitors, "ai_visibility"); err != nil {
+				return err
+			}
 		}
 		// The cohort's fixes and samples follow its brand.
 		if _, err := tx.Exec(ctx, `UPDATE fixes SET brand_id = $3::uuid WHERE workspace_id = $1 AND source = $4

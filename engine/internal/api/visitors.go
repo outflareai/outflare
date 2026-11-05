@@ -38,14 +38,13 @@ const (
 
 func (s *Server) routesVisitors(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
-	// Who is on a brand's site is the brand's (brand_website.go). The
-	// settings stay the workspace's, held by its first brand, until the
-	// contract step keys them by brand.
+	// Who is on a brand's site, and its visitor settings, are the brand's
+	// (brand_website.go).
 	for _, t := range s.twins("visitors") {
 		mux.HandleFunc("GET "+t.path, t.on(s.inBrand)(read, s.listVisitors))
+		mux.HandleFunc("GET "+t.path+"/settings", t.on(s.inWorkspace)(read, s.getVisitorSettings))
+		mux.HandleFunc("PUT "+t.path+"/settings", t.on(s.inWorkspace)(manage, s.updateVisitorSettings))
 	}
-	mux.HandleFunc("GET /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(read, s.getVisitorSettings))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/visitors/settings", s.inWorkspace(manage, s.updateVisitorSettings))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/visitors/companies", s.inWorkspace(manage, s.addVisitorCompany))
 	mux.HandleFunc("POST /v1/visitor-hooks/{id}/{token}", s.visitorHook)
 }
@@ -66,7 +65,7 @@ func (s *Server) withVisitToken(ctx context.Context, c tracking.Clicked) string 
 	host := strings.ToLower(u.Hostname())
 	var own bool
 	err = s.pool.QueryRow(ctx, `
-		SELECT COALESCE((SELECT email_clicks FROM visitor_settings WHERE workspace_id = $1), true)
+		SELECT COALESCE((SELECT email_clicks FROM visitor_settings WHERE workspace_id = $1 ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand(workspace_id) DESC LIMIT 1), true)
 		   AND EXISTS (SELECT 1 FROM site_keys WHERE workspace_id = $1 AND revoked_at IS NULL)
 		   AND (EXISTS (SELECT 1 FROM brands b, unnest(b.domains || ARRAY[b.website]) d
 				WHERE b.workspace_id = $1 AND d <> '' AND ($2 = lower(regexp_replace(d, '^(https?://)?(www\.)?([^/:]+).*$', '\3'))
@@ -128,30 +127,68 @@ func (s *Server) knownFromClick(ctx context.Context, tx pgx.Tx, a *access, c *ca
 	if tag.RowsAffected() == 0 {
 		return "", nil
 	}
-	// A browser someone else already signed in on stays theirs.
-	if owner, _, err := ownerOf(ctx, tx, a, recordBrandOf(ctx, tx, *rec), "anonymous_id", anonID); err != nil {
+	return joinBrowser(ctx, tx, a, c, *rec, anonID, "email_click", totals)
+}
+
+// knownFromLink joins a browser to the person a visitor link was made for
+// (POST .../visitors/links) when its page view carries the link's token:
+// the link is this workspace's and this site's brand's, not expired, and
+// no other browser opened it first. Anything else is ignored, and the page
+// view is still counted, anonymous.
+func (s *Server) knownFromLink(ctx context.Context, tx pgx.Tx, a *access, c *catalog, brand *string, anonID, token string, now time.Time,
+	totals *ingestTotals) (string, error) {
+	if s.box == nil || anonID == "" {
+		return "", nil
+	}
+	id, ok := visitors.ParseLinkToken(s.box, token)
+	if !ok {
+		return "", nil
+	}
+	// Claim the link for this browser in one statement, so two browsers
+	// racing with one link can't both have it.
+	var rec string
+	err := tx.QueryRow(ctx, `UPDATE visitor_links l SET anonymous_id = $3, claimed_at = COALESCE(l.claimed_at, $4)
+		FROM records r
+		WHERE l.id = $1 AND l.workspace_id = $2 AND l.expires_at > $4 AND (l.anonymous_id IS NULL OR l.anonymous_id = $3)
+		  AND l.brand_id IS NOT DISTINCT FROM COALESCE($5::uuid, outflare_first_brand($2))
+		  AND r.id = l.record_id AND r.archived_at IS NULL
+		RETURNING COALESCE(r.merged_into, r.id)::text`, id, a.WorkspaceID, anonID, now, brand).Scan(&rec)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return joinBrowser(ctx, tx, a, c, rec, anonID, "link", totals)
+}
+
+// joinBrowser joins a browser to a person from a click or a visitor link,
+// unless someone already signed in on it: it is marked as known that way
+// (by), since a forwarded email or link can put a colleague on it, and a
+// later sign-in that says otherwise takes the browser back
+// (releaseClickBrowser). It returns the person, or "" when the browser
+// stays as it was.
+func joinBrowser(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, anonID, by string, totals *ingestTotals) (string, error) {
+	if owner, _, err := ownerOf(ctx, tx, a, recordBrandOf(ctx, tx, rec), "anonymous_id", anonID); err != nil {
 		return "", err
 	} else if owner != nil {
 		return "", nil
 	}
-	// The browser joins the person, marked as known from an email click: a
-	// forwarded email can put a colleague on it, so a later sign-in that
-	// says otherwise takes the browser back (releaseClickBrowser).
-	added, err := attach(ctx, tx, a, *rec, "anonymous_id", anonID, true, totals)
+	added, err := attach(ctx, tx, a, rec, "anonymous_id", anonID, true, totals)
 	if err != nil || !added {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE record_identities SET source = 'email_click' WHERE record_id = $1 AND namespace = 'anonymous_id' AND value = $2 AND valid_to IS NULL`,
-		*rec, anonID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE record_identities SET source = $3 WHERE record_id = $1 AND namespace = 'anonymous_id' AND value = $2 AND valid_to IS NULL`,
+		rec, anonID, by); err != nil {
 		return "", err
 	}
-	if err := backfill(ctx, tx, a, c, *rec, anonID); err != nil {
+	if err := backfill(ctx, tx, a, c, rec, anonID); err != nil {
 		return "", err
 	}
-	if err := visitors.Identify(ctx, tx, a.WorkspaceID, anonID, *rec, "email_click"); err != nil {
+	if err := visitors.Identify(ctx, tx, a.WorkspaceID, anonID, rec, by); err != nil {
 		return "", err
 	}
-	return *rec, nil
+	return rec, nil
 }
 
 // countVisit adds a stored browser page view to its visitor's counts and,
@@ -354,7 +391,7 @@ func (s *Server) listVisitors(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	set, err := visitors.Load(ctx, s.pool, a.WorkspaceID)
+	set, err := visitors.Load(ctx, s.pool, a.WorkspaceID, oneBrand(sel))
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -531,7 +568,7 @@ func (s *Server) visitorCompanies(ctx context.Context, args []any, brand string)
 
 func (s *Server) getVisitorSettings(w http.ResponseWriter, r *http.Request) {
 	ws := accessFrom(r.Context()).WorkspaceID
-	set, err := visitors.Load(r.Context(), s.pool, ws)
+	set, err := visitors.Load(r.Context(), s.pool, ws, accessFrom(r.Context()).Brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -596,7 +633,7 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 	var set visitors.Settings
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if set, err = visitors.Load(ctx, tx, a.WorkspaceID); err != nil {
+		if set, err = visitors.Load(ctx, tx, a.WorkspaceID, a.Brand); err != nil {
 			return err
 		}
 		changed := []string{}
@@ -715,7 +752,7 @@ func (s *Server) updateVisitorSettings(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if err := visitors.Save(ctx, tx, a.WorkspaceID, set); err != nil {
+		if err := visitors.Save(ctx, tx, a.WorkspaceID, a.Brand, set); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "visitor_settings.updated", "workspace", a.WorkspaceID,

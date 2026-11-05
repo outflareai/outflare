@@ -1,4 +1,5 @@
 import { PartnerProposals } from "./PartnerProposals";
+import { pickedBrandId } from "@/lib/brand";
 import { PartnerCouponDialog } from "./PartnerCoupons";
 import { PartnerPortalBrand } from "./PartnerPortalBrand";
 // Partners: customer referral, affiliate and influencer programs on one
@@ -54,7 +55,7 @@ export function Partners({ ws, canManage }: Props) {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-programs", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-programs", { params: { path: { brand: pickedBrandId() } } });
     if (error) setError(errorMessage(error));
     const list = (data?.data ?? []).filter((p) => p.status !== "archived");
     setPrograms(list);
@@ -124,10 +125,34 @@ export function Partners({ ws, canManage }: Props) {
 export function ruleText(r: PartnerProgram["rules"][number], currency: string): string {
   if (r.kind === "group") return r.name || "Moves the partner to a group";
   const what = r.kind === "percent" ? `${(r.percent_bp ?? 0) / 100}%` : r.kind === "fixed" ? money(r.amount_cents ?? 0, currency) : r.action;
-  const when = r.trigger === "signup" ? "per sign-up" : r.trigger !== "sale" ? `per ${r.trigger}` : r.recurrence === "first" ? "on the first sale" : r.recurrence === "months" ? `on sales for ${r.months} months` : "on every sale";
+  const when = r.trigger === "signup" ? "per sign-up" : r.trigger !== "sale" ? `per ${r.trigger}` : r.recurrence === "first" ? "on the first sale" : r.recurrence === "months" ? `on sales for ${r.months} months` : salesText(r.conditions);
   const who = r.side === "referred" ? " for the friend" : "";
   const tier = r.min_sales > 0 ? ` after ${r.min_sales} sales` : "";
   return `${what} ${when}${who}${tier}`;
+}
+
+// salesText says which sales a rule pays on, so "on every sale" never shows
+// for a rule its conditions narrow: "on the first sale, within 1 year of
+// sign-up", or "on sales that match" when the conditions say more.
+function salesText(c: PartnerProgram["rules"][number]["conditions"] | undefined): string {
+  const groups = (c?.groups ?? []).filter((g) => g.conditions.length > 0);
+  if (groups.length === 0) return "on every sale";
+  if (groups.length > 1 || groups[0].match === "any") return "on sales that match";
+  let which = "", since = "", other = false;
+  for (const x of groups[0].conditions) {
+    const v = x.value as unknown;
+    if (x.field === "customer.transactions" && typeof v === "number") {
+      if (x.op === "eq" && v === 0) which = "on the first sale";
+      else if ((x.op === "gt" && v === 0) || (x.op === "gte" && v === 1)) which = "on sales after the first";
+      else other = true;
+    } else if (x.field === "customer.signed_up_at" && x.op === "within" && v && typeof v === "object") {
+      const w = v as { amount?: number; unit?: string };
+      const unit = w.amount === 1 ? (w.unit ?? "days").replace(/s$/, "") : w.unit;
+      since = `within ${w.amount} ${unit} of sign-up`;
+    } else other = true;
+  }
+  if (other || (!which && !since)) return "on sales that match";
+  return [which || "on sales", since].filter(Boolean).join(", ");
 }
 
 function rulesSummary(p: PartnerProgram): string {
@@ -207,8 +232,8 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   const [missingOnly, setMissingOnly] = useState(false);
   useEffect(() => setRules(program.rules), [program.rules]);
   const get = useCallback(async (cursor?: string): Promise<Page<Partner>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partners", {
-      params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
+    const { data, error } = await api.GET("/v1/brands/{brand}/partners", {
+      params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
     });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, missingOnly]);
@@ -217,8 +242,8 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   const load = useCallback(async () => {
     const [, stats, prog] = await Promise.all([
       reload(),
-      api.GET("/v1/workspaces/{ws}/partner-programs/{id}/stats", { params: { path: { ws, id: program.id } } }),
-      api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } }),
+      api.GET("/v1/brands/{brand}/partner-programs/{id}/stats", { params: { path: { brand: pickedBrandId(), id: program.id } } }),
+      api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } }),
     ]);
     setTotals(stats.data ?? null);
     if (prog.data) {
@@ -231,8 +256,8 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   // move puts the picked partners in a group, or in none.
   async function move(group: string) {
     const ids = [...picked];
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}/partners", {
-      params: { path: { ws, id: program.id, group } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/groups/{group}/partners", {
+      params: { path: { brand: pickedBrandId(), id: program.id, group } },
       body: { partner_ids: ids },
     });
     if (error || !data) return toast(errorMessage(error), "error");
@@ -250,7 +275,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   }, [load]);
 
   async function setStatus(p: Partner, status: Partner["status"]) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws, id: p.id } }, body: { status } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { status } });
     if (error) return toast(errorMessage(error), "error");
     toast(status === "active" ? `${p.name || p.code} is active.` : `${p.name || p.code} is ${status}. Their links still land, uncounted.`);
     load();
@@ -280,7 +305,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   }
 
   async function postback(p: Partner) {
-    const { data } = await api.GET("/v1/workspaces/{ws}/partners/{id}/postbacks", { params: { path: { ws, id: p.id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/partners/{id}/postbacks", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     const sends = data?.data ?? [];
     const last = sends.slice(0, 5).map((s) => `${ago(s.created_at)}: ${s.status}${s.http_status ? ` (${s.http_status})` : ""}${s.error ? `, ${s.error}` : ""}`);
     const r = await ask({
@@ -295,7 +320,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
     });
     if (r?.choice !== "ok") return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws, id: p.id } }, body: { postback_url: r.value.trim() } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { postback_url: r.value.trim() } });
     if (error) return toast(errorMessage(error), "error");
     toast(r.value.trim() ? "Postback URL saved." : "Postbacks turned off.");
     load();
@@ -304,7 +329,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   // rate gives a partner their own share of each sale, which replaces the
   // program's cash rate for them (their group's and tiers too).
   async function rate(p: Partner) {
-    const cur = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } });
+    const cur = await api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } });
     if (cur.error || !cur.data) return toast(errorMessage(cur.error), "error");
     const mine = ownRate(cur.data.rules, p.id);
     const r = await ask({
@@ -318,14 +343,14 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
     if (pct !== null && !(pct > 0 && pct <= 100)) return toast("Enter a percent from 0.01 to 100.", "error");
     const next = cur.data.rules.filter((x) => x !== mine).map(toRuleInput);
     if (pct !== null) next.push({ trigger: "sale", side: "partner", kind: "percent", percent_bp: Math.round(pct * 100), recurrence: "every", partner_id: p.id });
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: program.id } }, body: { rules: next } });
+    const { data, error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/rules", { params: { path: { brand: pickedBrandId(), id: program.id } }, body: { rules: next } });
     if (error || !data) return toast(errorMessage(error), "error");
     setRules(data.rules);
     toast(pct === null ? `${p.name || p.code} is back on the program's rate.` : `${p.name || p.code} earns ${pct}% of each sale from now on. Rewards already earned keep their amounts.`);
   }
 
   async function viewAs(p: Partner) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partners/{id}/impersonate", { params: { path: { ws, id: p.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/partners/{id}/impersonate", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     window.open(data.url, "_blank", "noopener");
   }
@@ -439,7 +464,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   );
 }
 
-function AddPartner({ ws, program, onClose, onSaved }: { ws: string; program: PartnerProgram; onClose: () => void; onSaved: () => void }) {
+function AddPartner({ program, onClose, onSaved }: { ws: string; program: PartnerProgram; onClose: () => void; onSaved: () => void }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -449,8 +474,8 @@ function AddPartner({ ws, program, onClose, onSaved }: { ws: string; program: Pa
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partners", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/partners", {
+      params: { path: { brand: pickedBrandId() } },
       body: { program: program.id, email: email.trim(), name: name.trim() || undefined, code: code.trim() || undefined },
     });
     setBusy(false);
@@ -495,7 +520,7 @@ function AddPartner({ ws, program, onClose, onSaved }: { ws: string; program: Pa
 
 function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
   const get = useCallback(async (cursor?: string): Promise<Page<PartnerConversion>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversions", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-conversions", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
   const { list, next, error, reload, more } = usePages(get);
@@ -544,8 +569,8 @@ function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram })
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<PartnerConversionLogEntry | null>(null);
   const get = useCallback(async (cursor?: string): Promise<Page<PartnerConversionLogEntry>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-conversion-log", {
-      params: { path: { ws }, query: { limit: pageSize, ...(all ? {} : { program: program.id }), ...(outcome ? { outcome } : {}), ...(search ? { q: search } : {}), ...(cursor ? { cursor } : {}) } },
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-conversion-log", {
+      params: { path: { brand: pickedBrandId() }, query: { limit: pageSize, ...(all ? {} : { program: program.id }), ...(outcome ? { outcome } : {}), ...(search ? { q: search } : {}), ...(cursor ? { cursor } : {}) } },
     });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, outcome, all, search]);
@@ -616,7 +641,7 @@ function ConversionLog({ ws, program }: { ws: string; program: PartnerProgram })
 function Leads({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const [status, setStatus] = useState<PartnerLead["status"] | "">("pending");
   const get = useCallback(async (cursor?: string): Promise<Page<PartnerLead>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-leads", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-leads", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, status]);
   const { list, next, error, reload, more } = usePages(get);
@@ -631,8 +656,8 @@ function Leads({ ws, program, canManage }: { ws: string; program: PartnerProgram
       reason = r.value.trim();
     }
     const { data, error } = what === "approve"
-      ? await api.POST("/v1/workspaces/{ws}/partner-leads/{id}/approve", { params: { path: { ws, id: l.id } }, body: {} })
-      : await api.POST("/v1/workspaces/{ws}/partner-leads/{id}/reject", { params: { path: { ws, id: l.id } }, body: { reason } });
+      ? await api.POST("/v1/brands/{brand}/partner-leads/{id}/approve", { params: { path: { brand: pickedBrandId(), id: l.id } }, body: {} })
+      : await api.POST("/v1/brands/{brand}/partner-leads/{id}/reject", { params: { path: { brand: pickedBrandId(), id: l.id } }, body: { reason } });
     if (error) return toast(errorMessage(error), "error");
     toast(data?.status === "approved" ? "Added as a referral." : data?.reason && what === "approve" ? `Couldn't add it: ${data.reason}.` : "Rejected.", data?.status === "approved" ? "ok" : "error");
     reload();
@@ -673,7 +698,7 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const get = useCallback(async (cursor?: string): Promise<Page<PartnerReward>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-rewards", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-rewards", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id, status]);
   const { list, next, error: listError, reload, more } = usePages(get);
@@ -692,8 +717,8 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
       note = r.value.trim();
     }
     const { error } = what === "approve"
-      ? await api.POST("/v1/workspaces/{ws}/partner-rewards/{id}/approve", { params: { path: { ws, id: w.id } }, body: {} })
-      : await api.POST("/v1/workspaces/{ws}/partner-rewards/{id}/reject", { params: { path: { ws, id: w.id } }, body: { note } });
+      ? await api.POST("/v1/brands/{brand}/partner-rewards/{id}/approve", { params: { path: { brand: pickedBrandId(), id: w.id } }, body: {} })
+      : await api.POST("/v1/brands/{brand}/partner-rewards/{id}/reject", { params: { path: { brand: pickedBrandId(), id: w.id } }, body: { note } });
     if (error) return toast(errorMessage(error), "error");
     toast(what === "approve" ? "Approved." : "Rejected.");
     load();
@@ -713,8 +738,8 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
     setBusy(true);
     let done = 0, skipped = 0;
     for (;;) {
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-rewards/bulk", {
-        params: { path: { ws } },
+      const { data, error } = await api.POST("/v1/brands/{brand}/partner-rewards/bulk", {
+        params: { path: { brand: pickedBrandId() } },
         body: { action: what, ...(ids.length > 0 ? { ids } : { program: program.id }), ...(what === "reject" && r.value.trim() ? { note: r.value.trim() } : {}) },
       });
       if (error || !data) {
@@ -793,7 +818,7 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
 // SwitchOver warns, while the platform a program was imported from still
 // pays it, that its imported commissions are paid there, and records the
 // day that stops.
-function SwitchOver({ ws, program, canManage, onDone }: { ws: string; program: PartnerProgram; canManage: boolean; onDone: () => void }) {
+function SwitchOver({ program, canManage, onDone }: { ws: string; program: PartnerProgram; canManage: boolean; onDone: () => void }) {
   const [at, setAt] = useState(program.switched_over_at);
   if (!program.imported_from || at) return null;
   const from = program.imported_from === "tolt" ? "Tolt" : program.imported_from;
@@ -804,7 +829,7 @@ function SwitchOver({ ws, program, canManage, onDone }: { ws: string; program: P
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Switch over", value: "ok" }],
     });
     if (r?.choice !== "ok") return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/switch-over", { params: { path: { ws, id: program.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/switch-over", { params: { path: { brand: pickedBrandId(), id: program.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     setAt(data.switched_over_at);
     toast(`Switched over from ${from}. Imported commissions are paid here from now on.`);
@@ -820,7 +845,7 @@ function SwitchOver({ ws, program, canManage, onDone }: { ws: string; program: P
 
 function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
   const get = useCallback(async (cursor?: string): Promise<Page<PartnerPayout>> => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-payouts", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
   }, [ws, program.id]);
   const { list, next, error: listError, reload: load, more } = usePages(get);
@@ -828,7 +853,7 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
     load();
   }, [load]);
   async function makeDue() {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-payouts", { params: { path: { ws } }, body: { program: program.id } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/partner-payouts", { params: { path: { brand: pickedBrandId() } }, body: { program: program.id } });
     if (error) return toast(errorMessage(error), "error");
     const n = data?.data.length ?? 0;
     const waiting = data?.waiting_for_details ? ` ${plural(data.waiting_for_details, "partner")} still need to add payout details on the portal; theirs wait.` : "";
@@ -838,8 +863,8 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
   // download saves the due payouts, with each partner's payout details, as
   // CSV for paying them from your own account or a payout tool.
   async function download() {
-    const { data, error, response } = await api.GET("/v1/workspaces/{ws}/partner-payouts/export", {
-      params: { path: { ws }, query: { program: program.id, status: "due" } }, parseAs: "text",
+    const { data, error, response } = await api.GET("/v1/brands/{brand}/partner-payouts/export", {
+      params: { path: { brand: pickedBrandId() }, query: { program: program.id, status: "due" } }, parseAs: "text",
     });
     if (error || typeof data !== "string") return toast(errorMessage(error), "error");
     const url = URL.createObjectURL(new Blob([data], { type: response.headers.get("Content-Type") ?? "text/csv" }));
@@ -852,13 +877,13 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
   async function paid(o: PartnerPayout) {
     const r = await ask({ title: `Mark ${money(o.amount_cents, o.currency)} paid`, body: "Only once you've paid it. The reference is the payment's id, such as a PayPal or Wise transfer id.", input: { label: "Reference", maxLength: 200, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Mark paid", value: "ok" }] });
     if (r?.choice !== "ok") return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/partner-payouts/{id}/paid", { params: { path: { ws, id: o.id } }, body: { reference: r.value.trim() } });
+    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/paid", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: { reference: r.value.trim() } });
     if (error) return toast(errorMessage(error), "error");
     toast("Marked paid.");
     load();
   }
   async function cancel(o: PartnerPayout) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/partner-payouts/{id}/cancel", { params: { path: { ws, id: o.id } }, body: {} });
+    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/cancel", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: {} });
     if (error) return toast(errorMessage(error), "error");
     toast("Canceled; its rewards are back in the balance.");
     load();
@@ -930,11 +955,9 @@ function ErasePayoutNotes({ ws, canManage }: { ws: string; canManage: boolean })
   );
 }
 
-function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void; onSaved: (p: PartnerProgram) => void }) {
-  const { active: brands } = useBrand(ws);
+function NewProgram({ onClose, onSaved }: { ws: string; onClose: () => void; onSaved: (p: PartnerProgram) => void }) {
   const [kind, setKind] = useState<Kind>("affiliate");
   const [name, setName] = useState("");
-  const [brand, setBrand] = useState("");
   const [landing, setLanding] = useState("");
   const [autoAccept, setAutoAccept] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -942,9 +965,9 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
   async function save(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs", {
-      params: { path: { ws } },
-      body: { name: name.trim(), kind, brand: brand || undefined, landing_url: landing.trim() || undefined, auto_accept: autoAccept },
+    const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs", {
+      params: { path: { brand: pickedBrandId() } },
+      body: { name: name.trim(), kind, landing_url: landing.trim() || undefined, auto_accept: autoAccept },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -969,15 +992,6 @@ function NewProgram({ ws, onClose, onSaved }: { ws: string; onClose: () => void;
           </div>
 </details>
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Northpeak partners" maxLength={120} required />
-          {brands.length > 0 && (
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Brand</span>
-              <select className={`${field} w-full`} value={brand} onChange={(e) => setBrand(e.target.value)}>
-                <option value="">No brand</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </label>
-          )}
           <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={autoAccept} onChange={e => setAutoAccept(e.target.checked)} /> Let new partners participate immediately</label>
           <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000} hint="Where partner links land." />
           <ErrorText>{error}</ErrorText>
@@ -1021,8 +1035,8 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", {
-      params: { path: { ws, id: p.id } },
+    const { error } = await api.PATCH("/v1/brands/{brand}/partner-programs/{id}", {
+      params: { path: { brand: pickedBrandId(), id: p.id } },
       body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
         payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
         lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays),
@@ -1035,13 +1049,13 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
     onClose();
   }
   async function setStatus(status: PartnerProgram["status"]) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: p.id } }, body: { status } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { status } });
     if (error) return toast(errorMessage(error), "error");
     toast(status === "active" ? "Program active." : status === "paused" ? "Paused: nothing new is credited; links still land." : "Archived.");
     onClose();
   }
   async function makePostback() {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/postback", { params: { path: { ws, id: p.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/postback", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     setPostback(data.url);
   }
@@ -1118,6 +1132,11 @@ function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; p
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" checked={salesSource === "stripe"} onChange={(e) => setSalesSource(e.target.checked ? "stripe" : "")} /> Also take sales and refunds from connected Stripe
             </label>
+            {p.brand_id && (
+              <label className="flex items-center gap-2 text-[13px]">
+                <input type="checkbox" checked={salesSource === "transactions"} onChange={(e) => setSalesSource(e.target.checked ? "transactions" : "")} /> Also take this brand's payments and refunds sent to Outflare (transactions API and Order Completed events), each counted once
+              </label>
+            )}
           </fieldset>
           <p className="text-[12px] text-muted-foreground">Rewards are flows: set them on the Flows tab.</p>
           <ErrorText>{error}</ErrorText>
@@ -1196,7 +1215,7 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ReactNode>("");
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/imports", { params: { path: { ws, id: p.id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/imports", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     setRuns(data?.data ?? []);
     return data?.data ?? [];
   }, [ws, p.id]);
@@ -1204,7 +1223,7 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
     (async () => {
       const past = await load();
       if (!canManage) return;
-      const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/import-sources", { params: { path: { ws, id: p.id } } });
+      const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/import-sources", { params: { path: { brand: pickedBrandId(), id: p.id } } });
       if (!data) return;
       setSources(data.data);
       // The program the last run read, else the one an import would take.
@@ -1222,8 +1241,8 @@ function ImportSection({ ws, program: p, canManage }: { ws: string; program: Par
   async function start() {
     setBusy(true);
     setError("");
-    const { error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/imports", {
-      params: { path: { ws, id: p.id } }, body: source.trim() ? { source_program: source.trim() } : {},
+    const { error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/imports", {
+      params: { path: { brand: pickedBrandId(), id: p.id } }, body: source.trim() ? { source_program: source.trim() } : {},
     });
     setBusy(false);
     if (error) {
@@ -1338,7 +1357,7 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const loadAssets = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}/assets", { params: { path: { ws, id: p.id } } });
+    const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/assets", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     setAssets(data?.data ?? []);
   }, [ws, p.id]);
   useEffect(() => {
@@ -1349,8 +1368,8 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/portal", {
-      params: { path: { ws, id: p.id } },
+    const { data, error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/portal", {
+      params: { path: { brand: pickedBrandId(), id: p.id } },
       body: { enabled, subdomain: sub.trim(), settings: { ...brandPortal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
         site_key_id: siteKey, lead_submissions: leadMode, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
     });
@@ -1367,14 +1386,14 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
     const v = b.value.trim();
     const isURL = /^https:\/\/\S+$/.test(v);
     const kind = isURL ? (/\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(v) ? "image" : "link") : "text";
-    const { error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/assets", {
-      params: { path: { ws, id: p.id } }, body: { kind, title: r.value.trim(), ...(isURL ? { url: v } : { body: v }) },
+    const { error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/assets", {
+      params: { path: { brand: pickedBrandId(), id: p.id } }, body: { kind, title: r.value.trim(), ...(isURL ? { url: v } : { body: v }) },
     });
     if (error) return toast(errorMessage(error), "error");
     loadAssets();
   }
   async function removeAsset(a: PartnerAsset) {
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/partner-programs/{id}/assets/{asset}", { params: { path: { ws, id: p.id, asset: a.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/partner-programs/{id}/assets/{asset}", { params: { path: { brand: pickedBrandId(), id: p.id, asset: a.id } } });
     if (error) return toast(errorMessage(error), "error");
     loadAssets();
   }
@@ -1452,7 +1471,7 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
   const [p, setP] = useState<PartnerProgram | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } });
     if (error || !data) return setError(errorMessage(error));
     setP(data);
   }, [ws, program.id]);
@@ -1470,12 +1489,12 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
   async function create() {
     const r = await ask({ title: "New group", body: "Such as Gold or Agencies. Give it its own rate after.", input: { label: "Name", maxLength: 80 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Add", value: "ok" }] });
     if (r?.choice !== "ok" || !r.value.trim()) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/partner-programs/{id}/groups", { params: { path: { ws, id: p!.id } }, body: { name: r.value.trim(), default: p!.groups.length === 0 } });
+    const { error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/groups", { params: { path: { brand: pickedBrandId(), id: p!.id } }, body: { name: r.value.trim(), default: p!.groups.length === 0 } });
     if (error) return toast(errorMessage(error), "error");
     done(p!.groups.length === 0 ? `Added ${r.value.trim()}. New partners join it.` : `Added ${r.value.trim()}.`);
   }
   async function patch(g: PartnerGroup, body: { name?: string; default?: boolean }, msg: string) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws, id: p!.id, group: g.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/partner-programs/{id}/groups/{group}", { params: { path: { brand: pickedBrandId(), id: p!.id, group: g.id } }, body });
     if (error) return toast(errorMessage(error), "error");
     done(msg);
   }
@@ -1498,14 +1517,14 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
     if (pct !== null && !(pct > 0 && pct <= 100)) return toast("Enter a percent from 0.01 to 100.", "error");
     const next = p!.rules.filter((x) => x !== mine).map(toRuleInput);
     if (pct !== null) next.push({ trigger: "sale", side: "partner", kind: "percent", percent_bp: Math.round(pct * 100), recurrence: "every", group_id: g.id });
-    const { error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p!.id } }, body: { rules: next } });
+    const { error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/rules", { params: { path: { brand: pickedBrandId(), id: p!.id } }, body: { rules: next } });
     if (error) return toast(errorMessage(error), "error");
     done(pct === null ? `${g.name} is back on the program's rate.` : `${g.name} earns ${pct}% of each sale from now on.`);
   }
   async function remove(g: PartnerGroup) {
     const r = await ask({ title: `Remove ${g.name}?`, body: `Its own rules go with it, and its ${plural(g.partners, "partner")} move to no group. Rewards already earned keep their amounts.`, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Remove", value: "ok", variant: "danger-solid" }] });
     if (r?.choice !== "ok") return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/partner-programs/{id}/groups/{group}", { params: { path: { ws, id: p!.id, group: g.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/partner-programs/{id}/groups/{group}", { params: { path: { brand: pickedBrandId(), id: p!.id, group: g.id } } });
     if (error) return toast(errorMessage(error), "error");
     done(`Removed ${g.name}.`);
   }
@@ -1554,12 +1573,12 @@ export function RecordPartners({ ws, record, go }: { ws: string; record: string;
     let live = true;
     (async () => {
       const [mine, refs] = await Promise.all([
-        api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { record_id: record } } }),
-        api.GET("/v1/workspaces/{ws}/partner-referrals", { params: { path: { ws }, query: { record_id: record } } }),
+        api.GET("/v1/brands/{brand}/partners", { params: { path: { brand: pickedBrandId() }, query: { record_id: record } } }),
+        api.GET("/v1/brands/{brand}/partner-referrals", { params: { path: { brand: pickedBrandId() }, query: { record_id: record } } }),
       ]);
       const list = refs.data?.data ?? [];
       const partners = await Promise.all(list.map((ref) =>
-        api.GET("/v1/workspaces/{ws}/partners/{id}", { params: { path: { ws, id: ref.partner_id } } }).then(({ data }) => ({ ref, partner: data ?? null })),
+        api.GET("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: ref.partner_id } } }).then(({ data }) => ({ ref, partner: data ?? null })),
       ));
       if (!live) return;
       setOwn(mine.data?.data ?? []);

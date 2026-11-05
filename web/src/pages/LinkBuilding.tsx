@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LinkBuildingSettings, LinkPitch, LinkProspect, LinkRead, LinkResultRow, LinkSequence, SEOSite } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { pickedBrandId, useBrand } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -966,7 +966,7 @@ function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/link-building/settings", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-building/settings", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setSet(data);
       setDraft({ cooldown: String(data.pitch_cooldown_days), weekly: data.weekly_reads, percent: String(data.weekly_budget_percent), recheck: String(data.recheck_days) });
@@ -975,8 +975,8 @@ function Settings({ ws, canManage, brand, go }: { ws: string; canManage: boolean
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/link-building/settings", {
-      params: { path: { ws } },
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/link-building/settings", {
+      params: { path: { brand: pickedBrandId() } },
       body: { pitch_cooldown_days: Number(draft.cooldown), weekly_reads: draft.weekly, weekly_budget_percent: Number(draft.percent), recheck_days: Number(draft.recheck) },
     });
     setBusy(false);

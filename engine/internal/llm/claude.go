@@ -93,6 +93,18 @@ func (m *claudeModel) Chat(ctx context.Context, req Request) (Response, error) {
 			messages = append(messages, anthropic.NewBetaUserMessage(blocks...))
 		}
 	}
+	// Cache the conversation so far as well. An agent resends it on every
+	// step of a turn, with each tool result added at the end; without a
+	// breakpoint there, every step paid full price for the whole context
+	// and all the results before it. With one, each step reads them from
+	// the cache at a tenth of the price and pays only for what is new.
+	if n := len(messages); n > 0 && messages[n-1].Role == anthropic.BetaMessageParamRoleUser {
+		if blocks := messages[n-1].Content; len(blocks) > 0 {
+			if cc := blocks[len(blocks)-1].GetCacheControl(); cc != nil {
+				*cc = anthropic.NewBetaCacheControlEphemeralParam()
+			}
+		}
+	}
 	var tools []anthropic.BetaToolUnionParam
 	for _, t := range req.Tools {
 		props, _ := t.Schema["properties"]

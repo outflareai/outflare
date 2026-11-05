@@ -159,8 +159,9 @@ func (s *Server) socialSyncJob(ctx context.Context, job jobs.Job) error {
 }
 
 // SyncSocialAccounts finds the accounts a connection reaches and reads the
-// ones that are due. A refusal is kept on the accounts and in the events;
-// only an outage is retried.
+// ones that are due. A failure is kept on the accounts and in the events;
+// an outage is tried again by the accounts' own back-off, and the job
+// itself fails only for what Outflare must fix (a read it couldn't save).
 func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID string) error {
 	if s.integrations == nil {
 		return nil
@@ -173,22 +174,29 @@ func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID strin
 		return k == connectors.ErrUnavailable || k == connectors.ErrQuota
 	}
 	// failAll keeps a failure of the whole connection on its accounts; the
-	// ones that were due are tried again the same day (retry.After).
+	// ones that were due are tried again the same day (retry.After), when
+	// the hourly QueueDueSocialSyncs queues the connection again. So an
+	// outage isn't handed back to the job queue as well, which would read
+	// and record the same outage up to three times more: only a connection
+	// with no accounts yet, which nothing else brings back within the
+	// hour, is retried by the queue.
 	failAll := func(err error) error {
 		ev.Name = "social_account.sync_failed"
 		code := readCode(err)
-		track.Fail(ctx, s.log, ev, code, err)
-		// Accounts already marked by their own read aren't due any more,
-		// so they aren't counted twice.
-		if _, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, last_error_code = $4, updated_at = now(),
+		tag, uerr := s.pool.Exec(ctx, `UPDATE social_accounts SET last_error = $3, last_error_code = $4, updated_at = now(),
 			last_failed_at = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN now() ELSE last_failed_at END,
 			failures = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN failures + 1 ELSE failures END,
 			next_sync_at = CASE WHEN status = 'active' AND next_sync_at <= now() + interval '1 minute' THEN now() + `+retry.SQL("failures + 1")+` ELSE next_sync_at END
 			WHERE workspace_id = $1 AND integration_id = $2`,
-			ws, integrationID, truncate(err.Error(), 500), code); uerr != nil {
+			ws, integrationID, truncate(err.Error(), 500), code)
+		requeue := uerr == nil && retryable(err) && tag.RowsAffected() == 0
+		ev.Props["will_retry"] = retryable(err)
+		ev.Outcome = readEventOutcome(code)
+		track.Fail(ctx, s.log, ev, code, err)
+		if uerr != nil {
 			return uerr
 		}
-		if retryable(err) {
+		if requeue {
 			return err
 		}
 		return nil
@@ -200,6 +208,7 @@ func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID strin
 	if err != nil {
 		return failAll(err)
 	}
+	ev.Props["connector"] = o.Connector.Definition().ID
 	if m, ok := o.Connector.(connectors.SocialMetrics); ok {
 		return s.syncSocialChannel(ctx, ws, o, o.Connector.Definition().ID, m, nil, ev, start, failAll, retryable)
 	}
@@ -226,7 +235,7 @@ func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID strin
 			continue
 		}
 		ev := track.Event{Name: ev.Name, WorkspaceID: ws, ActorType: "system", Surface: "job",
-			Props: map[string]any{"integration_id": integrationID, "source": "public_page"}}
+			Props: map[string]any{"integration_id": integrationID, "connector": ev.Props["connector"], "source": "public_page"}}
 		if err := s.syncSocialChannel(ctx, ws, o, channel, publicProfiles{channel: channel, fetch: f, accounts: accounts}, brands, ev, start, failAll, retryable); err != nil {
 			if !retryable(err) {
 				return err
@@ -239,7 +248,7 @@ func (s *Server) SyncSocialAccounts(ctx context.Context, ws, integrationID strin
 
 // syncSocialChannel saves the accounts a connection reaches on one channel
 // and reads the ones that are due.
-func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors.Opened, channel string, m connectors.SocialMetrics, brands map[string]string,
+func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors.Opened, channel string, m connectors.SocialMetrics, brands map[string]socialOwner,
 	ev track.Event, start time.Time, failAll func(error) error, retryable func(error) bool) error {
 	ev.Props["channel"] = channel
 	found, err := m.SocialAccounts(ctx, o.Client, o.Creds)
@@ -290,6 +299,8 @@ func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors
 	ev.Props["duration_ms"] = time.Since(start).Milliseconds()
 	if lastErr != nil {
 		ev.Name = "social_account.sync_failed"
+		ev.Props["will_retry"] = retryable(lastErr)
+		ev.Outcome = readEventOutcome(readCode(lastErr))
 		track.Fail(ctx, s.log, ev, readCode(lastErr), lastErr)
 		// A read Outflare couldn't save is its own to fix: the job fails
 		// too, and shows in job.failed.
@@ -303,7 +314,7 @@ func (s *Server) syncSocialChannel(ctx context.Context, ws string, o *connectors
 // their names, and marks the ones it no longer reaches disconnected.
 // brands gives an account's brand by its external id, where its source
 // knows it (a brand's own link); the others get the workspace's only brand.
-func (s *Server) saveSocialAccounts(ctx context.Context, ws, integrationID, channel string, found []connectors.SocialAccount, brands map[string]string) error {
+func (s *Server) saveSocialAccounts(ctx context.Context, ws, integrationID, channel string, found []connectors.SocialAccount, brands map[string]socialOwner) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		// A workspace with one brand gets its accounts on that brand.
 		var brand *string
@@ -314,29 +325,40 @@ func (s *Server) saveSocialAccounts(ctx context.Context, ws, integrationID, chan
 		for _, a := range found {
 			ext = append(ext, a.ExternalID)
 			brand := brand
+			// A competitor's profile carries its competitor; the brand's
+			// own carry none.
+			var competitor *string
 			if b, ok := brands[a.ExternalID]; ok {
-				brand = &b
+				brand = &b.brand
+				if b.competitor != "" {
+					competitor = &b.competitor
+				}
 			}
 			var id string
 			var inserted bool
 			err := tx.QueryRow(ctx, `
-				INSERT INTO social_accounts (workspace_id, brand_id, channel, kind, integration_id, external_id, handle, name, url, avatar_url)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				INSERT INTO social_accounts (workspace_id, brand_id, channel, kind, integration_id, external_id, handle, name, url, avatar_url, competitor_id)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 				ON CONFLICT (workspace_id, channel, external_id) DO UPDATE SET
-					integration_id = EXCLUDED.integration_id, kind = EXCLUDED.kind, handle = EXCLUDED.handle,
+					integration_id = EXCLUDED.integration_id, kind = EXCLUDED.kind, handle = EXCLUDED.handle, competitor_id = EXCLUDED.competitor_id,
+					brand_id = CASE WHEN EXCLUDED.competitor_id IS NOT NULL OR social_accounts.competitor_id IS NOT NULL THEN EXCLUDED.brand_id ELSE social_accounts.brand_id END,
 					name = COALESCE(NULLIF(EXCLUDED.name, ''), social_accounts.name), url = EXCLUDED.url,
 					avatar_url = COALESCE(NULLIF(EXCLUDED.avatar_url, ''), social_accounts.avatar_url),
 					status = CASE WHEN social_accounts.status = 'disconnected' THEN 'active' ELSE social_accounts.status END,
 					updated_at = now()
 				RETURNING id::text, xmax = 0`,
-				ws, brand, channel, a.Kind, integrationID, a.ExternalID, truncate(a.Handle, 200), truncate(a.Name, 300), truncate(a.URL, 500), truncate(a.AvatarURL, 1000)).
+				ws, brand, channel, a.Kind, integrationID, a.ExternalID, truncate(a.Handle, 200), truncate(a.Name, 300), truncate(a.URL, 500), truncate(a.AvatarURL, 1000), competitor).
 				Scan(&id, &inserted)
 			if err != nil {
 				return err
 			}
 			if inserted {
+				data := map[string]any{"channel": channel, "kind": a.Kind, "integration_id": integrationID}
+				if competitor != nil {
+					data["competitor_id"] = *competitor
+				}
 				if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "social_account.added", TargetType: "social_account",
-					TargetID: id, Data: map[string]any{"channel": channel, "kind": a.Kind, "integration_id": integrationID}}); err != nil {
+					TargetID: id, Data: data}); err != nil {
 					return err
 				}
 			}

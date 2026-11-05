@@ -60,20 +60,29 @@ func (r *Runner) Tick(ctx context.Context) (visits, conversions int, err error) 
 	if visits, err = r.classifyBatch(ctx); err != nil {
 		return visits, 0, err
 	}
-	if _, err := r.Pool.Exec(ctx, `INSERT INTO attribution_settings (workspace_id, lookback_days) SELECT id, $1 FROM workspaces ON CONFLICT DO NOTHING`,
-		DefaultLookbackDays); err != nil {
+	// Each brand has its settings, made with the defaults; a workspace
+	// with no brand has one row with none.
+	if _, err := r.Pool.Exec(ctx, `INSERT INTO attribution_settings (workspace_id, brand_id, lookback_days)
+		SELECT workspace_id, id, $1::int FROM brands
+		UNION ALL SELECT id, NULL, $1::int FROM workspaces w WHERE NOT EXISTS (SELECT 1 FROM brands b WHERE b.workspace_id = w.id)
+		ON CONFLICT DO NOTHING`, DefaultLookbackDays); err != nil {
 		return visits, 0, err
 	}
-	rows, err := r.Pool.Query(ctx, `SELECT workspace_id::text FROM attribution_settings`)
+	rows, err := r.Pool.Query(ctx, `SELECT workspace_id::text, coalesce(brand_id::text, '') FROM attribution_settings`)
 	if err != nil {
 		return visits, 0, err
 	}
-	wss, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	type wsBrand struct{ ws, brand string }
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (wsBrand, error) {
+		var x wsBrand
+		return x, row.Scan(&x.ws, &x.brand)
+	})
 	if err != nil {
 		return visits, 0, err
 	}
-	for _, ws := range wss {
-		n, err := r.creditWorkspace(ctx, ws)
+	for _, x := range list {
+		ws := x.ws
+		n, err := r.creditBrand(ctx, ws, x.brand)
 		conversions += n
 		if err != nil && ctx.Err() == nil {
 			track.Fail(ctx, r.Log, track.Event{Name: "attribution.run_failed", WorkspaceID: ws, ActorType: "system", Surface: "system"}, "internal", err)
@@ -191,6 +200,26 @@ type conversion struct {
 	props               []byte
 }
 
+// brand is the brand the conversion is credited in: its event's, else the
+// workspace's first; "" when the workspace has none.
+func (c conversion) brand() string {
+	if c.brandID == nil {
+		return ""
+	}
+	return *c.brandID
+}
+
+// brandDefs keeps the definitions of one brand.
+func brandDefs(defs []conversions.Definition, brand string) []conversions.Definition {
+	var out []conversions.Definition
+	for _, d := range defs {
+		if d.BrandID == brand {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // value is a conversion's money in minor units, and its currency: a
 // payment's amount_minor, or Segment-style revenue or value in major units.
 func (c conversion) value() (*int64, string) {
@@ -229,10 +258,10 @@ func (c conversion) value() (*int64, string) {
 	return &minor, cur
 }
 
-// creditWorkspace credits one workspace's conversions that have none yet:
-// those of the last few days on every tick, and all of them once after its
-// settings change.
-func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
+// creditBrand credits one brand's conversions that have none yet (brand
+// "": a workspace with no brand): those of the last few days on every
+// tick, and all of them once after its settings change.
+func (r *Runner) creditBrand(ctx context.Context, ws, brand string) (int, error) {
 	settle := r.Settle
 	if settle == 0 {
 		settle = 5 * time.Minute
@@ -241,14 +270,14 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 	var events []string
 	var backfilled *time.Time
 	var changed time.Time
-	if err := r.Pool.QueryRow(ctx, `SELECT lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings WHERE workspace_id = $1`, ws).
+	if err := r.Pool.QueryRow(ctx, `SELECT lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid`, ws, brand).
 		Scan(&lookback, &events, &backfilled, &changed); err != nil {
 		return 0, err
 	}
 	// The events that count: the settings' conversion_events, each as it
-	// is, and the workspace's conversion definitions that credit channels,
-	// each when its filters match.
-	defs, defNames, err := conversions.ForAttribution(ctx, r.Pool, ws)
+	// is, and the brand's conversion definitions that credit channels, each
+	// when its filters match.
+	defs, defNames, err := conversions.ForAttribution(ctx, r.Pool, ws, brand)
 	if err != nil {
 		return 0, err
 	}
@@ -265,7 +294,8 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 	if backfilled == nil {
 		since = time.Time{} // everything, after the settings change
 		// What was credited before the change is credited again.
-		if _, err := r.Pool.Exec(ctx, `DELETE FROM attribution_conversions WHERE workspace_id = $1 AND credited_at < $2`, ws, changed); err != nil {
+		if _, err := r.Pool.Exec(ctx, `DELETE FROM attribution_conversions WHERE workspace_id = $1 AND credited_at < $2
+			AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid`, ws, changed, brand); err != nil {
 			return 0, err
 		}
 	}
@@ -275,7 +305,7 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 	total, refunds := 0, 0
 	at := cursor{at: since, id: "00000000-0000-0000-0000-000000000000"}
 	for {
-		n, rf, fetched, next, err := r.creditBatch(ctx, ws, names, at, settle, lookback, events, defs)
+		n, rf, fetched, next, err := r.creditBatch(ctx, ws, brand, names, at, settle, lookback, events, defs)
 		total, refunds = total+n, refunds+rf
 		if err != nil {
 			return total, err
@@ -286,7 +316,8 @@ func (r *Runner) creditWorkspace(ctx context.Context, ws string) (int, error) {
 		at = next
 	}
 	if backfilled == nil {
-		if _, err := r.Pool.Exec(ctx, `UPDATE attribution_settings SET backfilled_at = now() WHERE workspace_id = $1`, ws); err != nil {
+		if _, err := r.Pool.Exec(ctx, `UPDATE attribution_settings SET backfilled_at = now() WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid`,
+			ws, brand); err != nil {
 			return total, err
 		}
 	}
@@ -307,16 +338,19 @@ type cursor struct {
 // transaction, from the events after at. An event counts when it is one of
 // plain (the settings' conversion_events) or a definition matches it. A
 // refund whose payment isn't credited yet waits.
-func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, at cursor, settle time.Duration, lookback int,
+func (r *Runner) creditBatch(ctx context.Context, ws, brand string, names []string, at cursor, settle time.Duration, lookback int,
 	plain []string, defs []conversions.Definition) (n, refunds, fetched int, next cursor, err error) {
 	next = at
 	err = pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT e.id::text, e.record_id::text, e.anonymous_id, e.brand_id::text, e.name, e.occurred_at, e.properties
+			SELECT e.id::text, e.record_id::text, e.anonymous_id, COALESCE(e.brand_id, outflare_first_brand(e.workspace_id))::text, e.name, e.occurred_at, e.properties
 			FROM customer_events e
 			WHERE e.workspace_id = $1 AND e.name = ANY($2) AND e.kind = 'track' AND (e.occurred_at, e.id) > ($3, $6::uuid) AND e.occurred_at <= $4
 			  AND NOT EXISTS (SELECT 1 FROM attribution_conversions c WHERE c.event_id = e.id)
-			ORDER BY e.occurred_at, e.id LIMIT $5`, ws, names, at.at, time.Now().Add(-settle), conversionBatch, at.id)
+			  -- An order counted as a payment is credited as that payment.
+			  AND NOT (e.name <> 'payment.succeeded' AND e.properties ? 'outflare_payment' AND 'payment.succeeded' = ANY($2))
+			  AND COALESCE(e.brand_id, outflare_first_brand(e.workspace_id)) IS NOT DISTINCT FROM NULLIF($7, '')::uuid
+			ORDER BY e.occurred_at, e.id LIMIT $5`, ws, names, at.at, time.Now().Add(-settle), conversionBatch, at.id, brand)
 		if err != nil {
 			return err
 		}
@@ -338,16 +372,20 @@ func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, at 
 			next = cursor{at: list[fetched-1].at, id: list[fetched-1].id}
 		}
 		var own []string
-		var models []CreditModel
 		if len(list) > 0 {
 			if own, err = ownHosts(ctx, tx, ws); err != nil {
 				return err
 			}
-			if models, err = creditModels(ctx, tx, ws, lookback); err != nil {
-				return err
-			}
 		}
+		// Each brand credits with its own models and definitions.
+		models := map[string][]CreditModel{}
 		for _, c := range list {
+			brand := c.brand()
+			if _, ok := models[brand]; !ok {
+				if models[brand], err = creditModels(ctx, tx, ws, brand, lookback); err != nil {
+					return err
+				}
+			}
 			if c.name == "payment.refunded" {
 				done, err := creditRefund(ctx, tx, ws, c)
 				if err != nil {
@@ -361,7 +399,8 @@ func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, at 
 				// Its payment is waiting to be credited: try again later.
 				var waiting bool
 				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM customer_events WHERE workspace_id = $1 AND name = 'payment.succeeded'
-					AND properties->>'payment_id' = $2::jsonb->>'payment_id')`, ws, c.props).Scan(&waiting); err != nil {
+					AND properties->>'payment_id' = $2::jsonb->>'payment_id'
+					AND COALESCE(brand_id, outflare_first_brand(workspace_id)) IS NOT DISTINCT FROM $3::uuid)`, ws, c.props, c.brandID).Scan(&waiting); err != nil {
 					return err
 				}
 				if waiting {
@@ -372,11 +411,11 @@ func (r *Runner) creditBatch(ctx context.Context, ws string, names []string, at 
 			if c.name != "payment.refunded" {
 				var props map[string]any
 				_ = json.Unmarshal(c.props, &props)
-				if def = conversions.For(defs, c.name, props); def == nil && !slices.Contains(plain, c.name) {
+				if def = conversions.For(brandDefs(defs, brand), c.name, props); def == nil && !slices.Contains(plain, c.name) {
 					continue // a definition's event that its filters leave out
 				}
 			}
-			if err := credit(ctx, tx, ws, c, own, models, def); err != nil {
+			if err := credit(ctx, tx, ws, c, own, models[brand], def); err != nil {
 				return err
 			}
 			n++
@@ -393,7 +432,7 @@ func creditRefund(ctx context.Context, tx pgx.Tx, ws string, c conversion) (bool
 	var orig string
 	err := tx.QueryRow(ctx, `SELECT a.event_id::text FROM attribution_conversions a JOIN customer_events o ON o.id = a.event_id
 		WHERE a.workspace_id = $1 AND o.name = 'payment.succeeded' AND o.properties->>'payment_id' = $2::jsonb->>'payment_id'
-		  AND $2::jsonb->>'payment_id' IS NOT NULL LIMIT 1`, ws, c.props).Scan(&orig)
+		  AND $2::jsonb->>'payment_id' IS NOT NULL AND a.brand_id IS NOT DISTINCT FROM $3::uuid LIMIT 1`, ws, c.props, c.brandID).Scan(&orig)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -428,7 +467,10 @@ func credit(ctx context.Context, tx pgx.Tx, ws string, c conversion, own []strin
 		FROM site_sessions s `+visitJoin+`
 		WHERE s.workspace_id = $1 AND (s.record_id = $2 OR ($3::text IS NOT NULL AND s.anonymous_id = $3))
 		  AND s.started_at <= $4 AND s.started_at > $4 - make_interval(days => $5)
-		ORDER BY s.started_at DESC LIMIT $6`, ws, c.recordID, c.anonymous, c.at, lookback, MaxTouches)
+		  -- Only the conversion's brand's visits (a visit with no brand, from
+		  -- before brands, counts for any).
+		  AND (s.brand_id IS NULL OR s.brand_id IS NOT DISTINCT FROM $7::uuid)
+		ORDER BY s.started_at DESC LIMIT $6`, ws, c.recordID, c.anonymous, c.at, lookback, MaxTouches, c.brandID)
 	if err != nil {
 		return err
 	}

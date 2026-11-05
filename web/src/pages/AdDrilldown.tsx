@@ -11,6 +11,7 @@ import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
 import { Badge, Card, ErrorText, Stat, Stats } from "../ui";
 import { deliveryColumns, metricColumns, money, n, platformName } from "./Ads";
+import { CampaignTargeting } from "./AdTargeting";
 
 const metrics = [
   { id: "spend", label: "Spend", value: (r: AdSummaryRow) => r.totals.spend_micros, format: (v: number, c: string) => money(v, c) },
@@ -245,6 +246,8 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
       </Card>
 
       <ConversionActions ws={ws} from={from} to={to} entity={groupId ?? campaign.id} card />
+
+      {!groupId && (campaign.connector === "google_ads" || campaign.connector === "meta_ads") && <CampaignTargeting ws={ws} campaign={campaign} />}
 
       {below && !groupId && (
         <Card title={groupWord} description={`Open one for its ads${google ? ", keywords and searches" : ""}.`}>

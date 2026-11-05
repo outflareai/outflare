@@ -92,7 +92,11 @@ func audienceCall(ctx context.Context, c *call) callResult {
 		return callResult{outcome: "skipped", detail: "no email or phone number to match on"}
 	}
 	if change == connectors.AudienceAdd {
-		mode, err := adconv.ConsentMode(ctx, s.Pool, c.ws)
+		var brand string
+		if err := s.Pool.QueryRow(ctx, `SELECT coalesce(brand_id::text, '') FROM records WHERE workspace_id = $1 AND id = $2`, c.ws, c.r.recordID).Scan(&brand); err != nil {
+			return retry("internal", "the person's brand could not be read")
+		}
+		mode, err := adconv.ConsentMode(ctx, s.Pool, c.ws, brand)
 		if err != nil {
 			return retry("internal", "the consent setting could not be read")
 		}

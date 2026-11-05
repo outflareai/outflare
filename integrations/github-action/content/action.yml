@@ -1,0 +1,64 @@
+name: Outflare content
+description: Opens a pull request in your repository for each page approved in Outflare, and reports it live once merged. Outflare never gets access to the repository.
+author: Outflare
+branding:
+  icon: file-text
+  color: orange
+
+inputs:
+  outflare-token:
+    description: An Outflare API token with the content.read and content.manage scopes. Keep it in a repository secret.
+    required: true
+  brand:
+    description: The brand's id (Settings, Brands, or GET /v1/workspaces/{workspace}/brands).
+    required: true
+  path:
+    description: Where each page's file goes, from the repository root. Placeholders are {slug}, {id}, {language}, {collection} and {target}.
+    default: content/{target}/{slug}.md
+  site-url:
+    description: Your site's address, such as https://acme.example. Needed to report pages live.
+    default: ""
+  url:
+    description: A page's address on the site, from site-url. The same placeholders as path, plus {path} (the page's placement path, when it has one).
+    default: /{slug}/
+  report-live:
+    description: Report a page live once its file is on the default branch at its approved revision. Set false to report from your own deploy instead.
+    default: "true"
+  base:
+    description: The branch pull requests go into. Defaults to the repository's default branch.
+    default: ""
+  labels:
+    description: Labels to put on each pull request, separated by commas. They must exist already.
+    default: ""
+  outflare-url:
+    description: Your Outflare server. Change it only when you host Outflare yourself.
+    default: https://app.outflare.ai
+  github-token:
+    description: The token for git and pull requests. The default token's pull requests don't start your other workflows; pass a GitHub App or fine-grained token for that.
+    default: ${{ github.token }}
+
+outputs:
+  opened:
+    description: How many pull requests were opened or updated.
+    value: ${{ steps.run.outputs.opened }}
+  reported:
+    description: How many pages were reported live.
+    value: ${{ steps.run.outputs.reported }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: OUTFLARE_OUTPUT_FILE="$GITHUB_OUTPUT" node "$GITHUB_ACTION_PATH/index.mjs"
+      env:
+        OUTFLARE_TOKEN: ${{ inputs.outflare-token }}
+        OUTFLARE_URL: ${{ inputs.outflare-url }}
+        OUTFLARE_BRAND: ${{ inputs.brand }}
+        OUTFLARE_PATH: ${{ inputs.path }}
+        OUTFLARE_SITE_URL: ${{ inputs.site-url }}
+        OUTFLARE_PAGE_URL: ${{ inputs.url }}
+        OUTFLARE_REPORT_LIVE: ${{ inputs.report-live }}
+        OUTFLARE_BASE: ${{ inputs.base }}
+        OUTFLARE_LABELS: ${{ inputs.labels }}
+        GH_TOKEN: ${{ inputs.github-token }}

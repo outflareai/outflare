@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { AttributionChannels, components, StoryResult, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api } from "../api";
@@ -13,8 +13,9 @@ import { openGetStartedAt } from "./GetStarted";
 import { blockerTone, dotClass, type Tone } from "@/lib/status";
 import { tabNames } from "../shell";
 import { money, num, totals } from "./Channels";
+import { HomeTiles } from "@/components/insight-panels";
 
-type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels" | "stories") => void;
+type Go = (tab: "ai" | "get-started" | "members" | "inbox" | "sequences" | "mailboxes" | "domains" | "leads" | "company" | "servers" | "connectors" | "missions" | "allocation" | "infrastructure" | "analytics" | "fixes" | "lifecycle" | "social" | "setup" | "brands" | "channels" | "stories" | "funnels" | "trends" | "retention" | "paths" | "dashboards") => void;
 
 // The page that resolves each area of blocker GET /status reports.
 const areaTab: Record<WorkspaceStatus["blockers"][number]["area"], Parameters<Go>[0]> = {
@@ -31,7 +32,8 @@ const toneRank: Record<Tone, number> = { red: 0, amber: 1, blue: 2, green: 3, gr
 
 // limited: the person is kept to some brands, so the workspace's blockers
 // (which need every brand) are left out.
-export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: string; name: string; isAdmin: boolean; go: Go; limited?: boolean }) {
+// agent: the brand's own agent, as a card at the top, when the server has one.
+export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws: string; name: string; isAdmin: boolean; go: Go; limited?: boolean; agent?: ReactNode }) {
   const [s, setS] = useState<WorkspaceStats | null>(null);
   const [status, setStatus] = useState<WorkspaceStatus | null>(null);
   const apps = useAgentApps(limited ? "" : ws);
@@ -141,6 +143,8 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
     <div className="space-y-6">
       <PageHeader title="Home" description={`What needs you in ${name}, and how outreach is going. Updates every 30 seconds.`} />
 
+      {agent}
+
       {!checklist && !limited && apps !== null && apps.length === 0 && (
         <section aria-labelledby="home-ai" className="flex flex-col gap-4 rounded-lg border border-brand-strong/40 bg-brand-strong/5 p-5 sm:flex-row sm:items-center dark:border-brand/40 dark:bg-brand/5">
           <div className="flex shrink-0 -space-x-2" aria-hidden>
@@ -196,6 +200,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false }: { ws: strin
         )}
       </section>
 
+      {brand && <HomeTiles brand={brand.id} go={go} />}
       <ChannelTiles ws={ws} brand={handle} go={go} />
       <PRTiles ws={ws} brand={handle} go={go} />
 

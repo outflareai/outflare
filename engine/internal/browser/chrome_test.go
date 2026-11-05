@@ -2,8 +2,10 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -44,13 +46,15 @@ func TestChromeDriverOnALocalSite(t *testing.T) {
 	host := NormalizeHost(site.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	start := time.Now()
 	d, err := Chrome{}.Open(ctx, Boundary{Hosts: []string{host}, AllowPrivate: true})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("after %s: %v", time.Since(start).Round(time.Millisecond), err)
 	}
 	defer d.Close()
+	opened := time.Since(start)
 	if err := d.Navigate(ctx, site.URL+"/"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("browser started in %s, then after %s: %v", opened.Round(time.Millisecond), (time.Since(start) - opened).Round(time.Millisecond), err)
 	}
 	p, err := d.Page(ctx)
 	if err != nil {
@@ -145,5 +149,24 @@ func TestChromeDriverKeepsCookies(t *testing.T) {
 	p, err := second.Page(ctx)
 	if err != nil || !strings.Contains(p.Text, "Signed in as ops.") {
 		t.Fatalf("restored: %+v %v", p, err)
+	}
+}
+
+// A browser that never comes up fails the task within its deadline, and
+// doesn't hold the worker.
+func TestChromeStartIsBounded(t *testing.T) {
+	stuck := t.TempDir() + "/chrome"
+	if err := os.WriteFile(stuck, []byte("#!/bin/sh\nexec sleep 120\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err := Chrome{Path: stuck}.Open(ctx, Boundary{Hosts: []string{"example.com"}})
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "starting the browser") {
+		t.Fatalf("open: %v", err)
+	}
+	if took := time.Since(start); took > 10*time.Second {
+		t.Fatalf("open took %s past a one second deadline", took)
 	}
 }

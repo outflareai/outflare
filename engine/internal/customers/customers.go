@@ -298,13 +298,11 @@ func RecordEvent(ctx context.Context, q Querier, workspaceID string, ev Event) (
 	}
 	// The catalog entry goes in before journeys hear of the event: outside a
 	// transaction the job could otherwise run before the name is approved.
-	// It is the person's brand's; until the contract step a name another
-	// brand defines stays with that brand (event_definitions keeps its
-	// per-workspace unique constraint for the version before this one).
+	// It is the person's brand's: each brand has its own catalog
+	// (event_definitions_brand_name_idx).
 	if _, err := q.Exec(ctx, `INSERT INTO event_definitions (workspace_id, brand_id, name, status, first_seen_at, last_seen_at, seen_count)
 		SELECT $1, e.brand_id, $2, 'approved', $3, $3, 1 FROM customer_events e WHERE e.id = $4
-		  AND NOT EXISTS (SELECT 1 FROM event_definitions d WHERE d.workspace_id = $1 AND d.name = $2 AND d.brand_id IS DISTINCT FROM e.brand_id)
-		ON CONFLICT (workspace_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + 1,
+		ON CONFLICT (brand_id, name) DO UPDATE SET seen_count = event_definitions.seen_count + 1,
 			last_seen_at = GREATEST(event_definitions.last_seen_at, EXCLUDED.last_seen_at),
 			first_seen_at = LEAST(COALESCE(event_definitions.first_seen_at, EXCLUDED.first_seen_at), EXCLUDED.first_seen_at)`,
 		workspaceID, ev.Name, ev.OccurredAt, id); err != nil {

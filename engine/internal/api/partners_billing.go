@@ -18,7 +18,10 @@ import (
 //
 //   - A program whose sales_source is a payment connector (stripe) also
 //     takes that account's synced payments and refunds as partner sales,
-//     beside what the workspace's backend reports. The payment sync queues
+//     beside what the workspace's backend reports. A brand's program whose
+//     sales_source is "transactions" takes the brand's payments and
+//     refunds as they are counted (docs/transactions.md): transactions
+//     sent to the API and Order Completed events, once each. The payment sync queues
 //     a job per payment; the job credits it like a reported conversion, so
 //     a referral already bound, or the customer's own visits, decide the
 //     partner.
@@ -30,8 +33,14 @@ const (
 	jobPartnerPromoCode         = "partners.promo_code"
 )
 
+// salesFromTransactions is the sales_source of a program that takes its
+// brand's counted payments, from the API or order events, as sales.
+const salesFromTransactions = "transactions"
+
 type partnerBillingConversion struct {
-	Provider    string    `json:"provider"`
+	Provider string `json:"provider"`
+	// Brand limits a counted payment to its brand's programs.
+	Brand       string    `json:"brand,omitempty"`
 	Type        string    `json:"type"` // sale or refund
 	RecordID    string    `json:"record_id"`
 	ExternalID  string    `json:"external_id"` // the payment's or refund's id
@@ -57,7 +66,89 @@ func enqueueBillingConversion(ctx context.Context, tx pgx.Tx, ws string, c partn
 }
 
 func billingConversionKey(c partnerBillingConversion) string {
+	if c.Brand != "" {
+		return "partner-billing:" + c.Provider + ":" + c.Brand + ":" + c.Type + ":" + c.ExternalID
+	}
 	return "partner-billing:" + c.Provider + ":" + c.Type + ":" + c.ExternalID
+}
+
+// partnerSalesFromPayment queues a counted payment or refund as a partner
+// sale for the brand's programs that take their sales from transactions.
+// The payment.succeeded event is already recorded, so the conversion adds
+// none (source billing): it counts once.
+func partnerSalesFromPayment(ctx context.Context, tx pgx.Tx, ws string, t transactionView) error {
+	if t.BrandID == "" || t.RecordID == nil || t.SourceID == "" {
+		return nil
+	}
+	var on bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_programs WHERE workspace_id = $1 AND brand_id = $2 AND sales_source = $3 AND status = 'active')`,
+		ws, t.BrandID, salesFromTransactions).Scan(&on); err != nil || !on {
+		return err
+	}
+	c := partnerBillingConversion{Provider: salesFromTransactions, Brand: t.BrandID, Type: "sale", RecordID: *t.RecordID, ExternalID: t.SourceID,
+		AmountMinor: t.AmountMinor, Currency: t.Currency, At: t.OccurredAt}
+	if t.Kind == "refund" || t.Kind == "chargeback" {
+		c.Type = "refund"
+		if t.RefundOf != nil {
+			c.RefundOf = *t.RefundOf
+		}
+	}
+	return enqueueBillingConversion(ctx, tx, ws, c)
+}
+
+// referredPaymentLead is how long before a referral was made a payment of
+// the customer's can be and still be credited to it: the payment can reach
+// Outflare before the sign-up that links the referral.
+const referredPaymentLead = time.Hour
+
+// requeueReferredPayments queues the customer's payments again once a
+// referral binds them, when the program takes its sales from transactions:
+// a payment counted just before (it arrived before the sign-up) found no
+// partner then. Each payment is still credited once (its external id).
+func requeueReferredPayments(ctx context.Context, tx pgx.Tx, ws, program, rec, referral string, at time.Time) error {
+	rows, err := tx.Query(ctx, `SELECT t.brand_id::text, t.source_id, t.amount_minor, t.currency, t.occurred_at FROM transactions t
+		JOIN partner_programs p ON p.id = $2 AND p.brand_id = t.brand_id AND p.sales_source = $5 AND p.status = 'active'
+		WHERE t.workspace_id = $1 AND t.record_id = $3 AND t.kind = 'payment' AND t.status = 'succeeded' AND t.source IN ('api', 'events')
+			AND t.occurred_at >= $4::timestamptz - $6::interval
+		ORDER BY t.occurred_at LIMIT 100`, ws, program, rec, at, salesFromTransactions, referredPaymentLead.String())
+	if err != nil {
+		return err
+	}
+	type payment struct {
+		brand, id, currency string
+		amount              int64
+		at                  time.Time
+	}
+	paid, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (payment, error) {
+		var p payment
+		err := r.Scan(&p.brand, &p.id, &p.amount, &p.currency, &p.at)
+		return p, err
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range paid {
+		c := partnerBillingConversion{Provider: salesFromTransactions, Brand: p.brand, Type: "sale", RecordID: rec, ExternalID: p.id,
+			AmountMinor: p.amount, Currency: p.currency, At: p.at}
+		if _, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobPartnerBillingConversion, WorkspaceID: &ws, Payload: c, MaxAttempts: 5,
+			IdempotencyKey: billingConversionKey(c) + ":referral:" + referral}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// partnerSaleDeleted takes back a partner sale whose transaction was
+// deleted: it is queued as a refund of the whole payment, as a refund sent
+// to the API would be.
+func partnerSaleDeleted(ctx context.Context, tx pgx.Tx, ws string, t transactionView) error {
+	if t.Kind != "payment" || t.Status != "succeeded" || (t.Source != "api" && t.Source != orderSource) {
+		return nil
+	}
+	refund := t
+	refund.Kind, refund.ID = "refund", ""
+	refund.RefundOf, refund.SourceID, refund.OccurredAt = &t.SourceID, "deleted:"+t.SourceID, time.Now().UTC()
+	return partnerSalesFromPayment(ctx, tx, ws, refund)
 }
 
 // partnerBillingConversionJob credits one synced payment or refund in
@@ -68,7 +159,8 @@ func (s *Server) partnerBillingConversionJob(ctx context.Context, job jobs.Job) 
 		return fmt.Errorf("%w: bad payload", jobs.ErrPermanent)
 	}
 	ws := *job.WorkspaceID
-	rows, err := s.pool.Query(ctx, `SELECT id::text FROM partner_programs WHERE workspace_id = $1 AND sales_source = $2 AND status = 'active'`, ws, c.Provider)
+	rows, err := s.pool.Query(ctx, `SELECT id::text FROM partner_programs WHERE workspace_id = $1 AND sales_source = $2 AND status = 'active'
+		AND ($3 = '' OR brand_id = NULLIF($3, '')::uuid)`, ws, c.Provider, c.Brand)
 	if err != nil {
 		return err
 	}
@@ -81,7 +173,7 @@ func (s *Server) partnerBillingConversionJob(ctx context.Context, job jobs.Job) 
 		// a refund before its sale would find nothing to take back.
 		var waiting bool
 		err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM jobs WHERE kind = $1 AND idempotency_key = $2 AND status IN ('queued', 'running'))`,
-			jobPartnerBillingConversion, billingConversionKey(partnerBillingConversion{Provider: c.Provider, Type: "sale", ExternalID: c.RefundOf})).Scan(&waiting)
+			jobPartnerBillingConversion, billingConversionKey(partnerBillingConversion{Provider: c.Provider, Brand: c.Brand, Type: "sale", ExternalID: c.RefundOf})).Scan(&waiting)
 		if err != nil {
 			return err
 		}

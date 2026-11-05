@@ -215,11 +215,59 @@ export function registerABTestTools(
     {
       title: "Add an A/B test",
       description:
-        "Test a feature flag with two or more versions (create_flag) against goals. It starts as a draft; start_ab_test starts measuring. Visitors join when a page shows them the flag's version (the website script sends Experiment Viewed).",
-      inputSchema: { brand: brandRef, flag: z.string().min(1).describe("The flag's id or key."), ...fields, goals: fields.goals.unwrap() },
+        "Test a feature flag with two or more versions (create_flag) against goals, or send page instead of flag to test a page with no code: " +
+        "Outflare makes a flag shown only there, split between the control and page.versions new versions (b, c, …), whose changes are made " +
+        "in the visual editor (a person opens it from the test's page) or set with set_ab_test_version. It starts as a draft; start_ab_test starts " +
+        "measuring. Visitors join when a page shows them the flag's version (the website script sends Experiment Viewed).",
+      inputSchema: {
+        brand: brandRef,
+        flag: z.string().min(1).optional().describe("The flag's id or key. Leave out when sending page."),
+        page: z.object({
+          url: z.string().url().max(2000).describe("The page, such as https://northpeak.example/pricing; end with * for every page under it."),
+          versions: z.number().int().min(1).max(4).optional().describe("New versions besides the control. Default 1."),
+          redirects: z.array(z.string().max(2000)).min(1).max(4).optional().describe("A split URL test: one page per new version that its visitors are sent to, such as /pricing-b (only the brand's own domains)."),
+        }).optional(),
+        ...fields,
+        goals: fields.goals.unwrap(),
+      },
       annotations: write,
     },
     ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-tests", { params: { path: { brand: b } }, body: body as never }))),
+  );
+
+  server.registerTool(
+    "get_ab_test_version",
+    {
+      title: "Read a test version's changes",
+      description: "A version's visual changes, CSS and redirect, and whether visitors can see it now (live).",
+      inputSchema: { brand: brandRef, test: testRef, version: z.string().min(1).describe("One of the test's versions, such as b.") },
+      annotations: { readOnlyHint: true },
+    },
+    ({ brand, test, version }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ab-tests/{test}/versions/{version}", { params: { path: { brand: b, test, version } } }))),
+  );
+
+  server.registerTool(
+    "set_ab_test_version",
+    {
+      title: "Set a test version's changes",
+      description:
+        "Build a version of a no-code test, as the visual editor saves it. changes replace the version's visual changes: each has a CSS selector " +
+        "and one action: text, rich (**bold**, *italic*, [link](/page)), hide, href, src and alt, style ({\"color\": \"#0f766e\"}; looks only), " +
+        "move (before, after, start or end of target) or insert ({where, kind: text|button|link|image, text, href, src, alt}), optionally device " +
+        "mobile or desktop. css adds the version's own CSS (no url() or @import); redirect sends its visitors to another page on the brand's domains " +
+        "(a split URL test). No scripts or HTML. The control can't change. While the test is a draft this runs on your grants; once visitors can see " +
+        "the version it waits for a person. Check each version with get_ab_test_previews before asking a person to start the test.",
+      inputSchema: {
+        brand: brandRef,
+        test: testRef,
+        version: z.string().min(1).describe("One of the test's versions besides the control, such as b."),
+        changes: z.array(z.record(z.string(), z.unknown())).max(50).describe("The version's visual changes."),
+        css: z.string().max(8000).optional().describe("The version's own CSS; \"\" removes it."),
+        redirect: z.string().max(2000).optional().describe("A page to send the version's visitors to, such as /pricing-b; \"\" removes it."),
+      },
+      annotations: write,
+    },
+    ({ brand, test, version, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/ab-tests/{test}/versions/{version}", { params: { path: { brand: b, test, version } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -237,7 +285,7 @@ export function registerABTestTools(
     "start_ab_test",
     {
       title: "Start an A/B test",
-      description: "Start measuring from now. Turns the flag on if it is off. A flag runs one test at a time.",
+      description: "Start measuring from now. Turns the flag on if it is off. A flag runs one test at a time. From an agent this always waits for a person to approve it.",
       inputSchema: { brand: brandRef, test: testRef },
       annotations: write,
     },
@@ -326,7 +374,7 @@ export function registerABTestTools(
     {
       title: "Ship a version of an A/B test",
       description:
-        "Show the chosen version to everyone: its flag gives it all the traffic at full rollout, and a running test ends with it as the decision. Confirm with the person first: visitors see the change at once.",
+        "Show the chosen version to everyone: its flag gives it all the traffic at full rollout, and a running test ends with it as the decision. Confirm with the person first: visitors see the change at once. From an agent this always waits for a person to approve it.",
       inputSchema: { brand: brandRef, test: testRef, variant: z.string().min(1).describe("The version to ship, usually the winner from get_ab_test_results.") },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },

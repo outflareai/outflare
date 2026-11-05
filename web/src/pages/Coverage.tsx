@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { CoverageExtraction, CoverageOutcomes } from "./brand-coverage/enrichment";
+import { PlacementParties } from "./brand-coverage/parties";
+import { PresenceMomentum } from "./brand-coverage/momentum";
+import { WebSearches } from "./brand-coverage/web-searches";
+import { CompetitorPresence } from "./brand-coverage/competitors";
+import { Opportunities } from "./brand-coverage/opportunities";
 import {
   FilterBuilder,
   emptyFilters,
@@ -67,6 +72,8 @@ type Section =
   | "publishers"
   | "commercial"
   | "candidates"
+  | "competitors"
+  | "opportunities"
   | "reports"
   | "rules"
   | "settings"
@@ -78,6 +85,8 @@ const sections: [Section, string][] = [
   ["publishers", "Publishers"],
   ["commercial", "Commercial"],
   ["candidates", "Discovery"],
+  ["opportunities", "Opportunities"],
+  ["competitors", "Competitors"],
   ["reports", "Reports"],
 ];
 const titles: Partial<Record<Resource, string>> = {
@@ -110,11 +119,11 @@ const hints: Partial<Record<Resource, string>> = {
     "Record settlements and explicit reversals. These records do not send money.",
 };
 const color = (s: unknown) =>
-  ["up", "live", "active", "resolved", "accepted", "confirmed"].includes(
+  ["up", "live", "active", "resolved", "accepted", "confirmed", "present"].includes(
     String(s),
   )
     ? "green"
-    : ["gone", "urgent", "disputed"].includes(String(s))
+    : ["gone", "urgent", "disputed", "removed"].includes(String(s))
       ? "red"
       : ["unknown", "unchecked", "archived", "dismissed"].includes(String(s))
         ? "grey"
@@ -152,14 +161,14 @@ export function Coverage(props: Props) {
   if (!loaded) return <Loading />;
   if (!brand)
     return (
-      <Empty title="Choose a brand for Coverage">
+      <Empty title="Choose a brand for Presence">
         Select a brand in the sidebar to manage its publisher relationships,
         placements and commercial activity.
       </Empty>
     );
   if (!props.can("coverage.read"))
     return (
-      <Empty title="Coverage access needed">
+      <Empty title="Presence access needed">
         Ask a workspace admin for Coverage read access.
       </Empty>
     );
@@ -200,7 +209,9 @@ function CoverageBrand({
       ? commercial
       : section === "overview" ||
           section === "reports" ||
-          section === "settings"
+          section === "settings" ||
+          section === "competitors" ||
+          section === "opportunities"
         ? "placements"
         : section;
   const def = defs.find((d) => d.name === resource);
@@ -283,10 +294,10 @@ function CoverageBrand({
         title={
           <span className="flex items-center gap-2">
             <Globe2 className="size-5" />
-            Coverage
+            Presence
           </span>
         }
-        description="Build your presence. Keep every placement accurate and every publisher relationship connected."
+        description="Everywhere your brand appears: placements, mentions, links, videos, posts, reviews and listings. Keep each one accurate and every relationship connected."
         action={
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => navigate("rules")}>
@@ -318,6 +329,10 @@ function CoverageBrand({
       <ErrorText>{error}</ErrorText>
       {section === "settings" ? (
         <CoverageSettings go={go} can={can} />
+      ) : section === "opportunities" ? (
+        <Opportunities brand={brand} manage={can("coverage.manage")} myId={myId} />
+      ) : section === "competitors" ? (
+        <CompetitorPresence ws={ws} brand={brand} manage={can("coverage.manage")} />
       ) : section === "overview" || section === "reports" ? (
         <CoverageOverview
           brand={brand}
@@ -398,6 +413,9 @@ function CoverageBrand({
               )}
             </div>
           </div>
+          {section === "candidates" && (
+            <WebSearches ws={ws} brand={brand} manage={manage} />
+          )}
           {section === "candidates" && can("seo.read") && (
             <CoverageSearches
               ws={ws}
@@ -409,8 +427,9 @@ function CoverageBrand({
             <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/20 p-4 text-sm">
               <Search className="size-4" />
               <span className="flex-1">
-                Bring in results from your existing news searches, backlinks and
-                link prospects.
+                New finds come in by themselves every day from news searches,
+                backlinks, link prospects, social watches, AI answers that name
+                the brand, and web searches. Refresh to bring them in now.
               </span>
               <Button variant="ghost" onClick={() => go("news")}>
                 Searches
@@ -695,7 +714,9 @@ function CoverageList({
           "arrangement",
           "stage",
           "health",
-          "expected_on",
+          "link_status",
+          "mention_status",
+          "traction",
           "published_on",
         ]
       : def.name === "publishers"
@@ -1286,7 +1307,7 @@ function CoverageForm({
             String(v),
             String(values.currency ?? values.__currency ?? "USD"),
           );
-        else if (["money", "number", "hours"].includes(f.kind))
+        else if (["money", "number", "hours", "count"].includes(f.kind))
           body[f.name] = Number(v);
         else body[f.name] = v;
       }
@@ -1378,7 +1399,7 @@ function CoverageForm({
                     type={
                       f.kind === "date"
                         ? "date"
-                        : ["money", "number", "hours"].includes(f.kind)
+                        : ["money", "number", "hours", "count"].includes(f.kind)
                           ? "number"
                           : f.kind === "url"
                             ? "url"
@@ -1684,6 +1705,27 @@ function CoverageDetail({
           {row.arrangement != null && (
             <Badge tone="grey">{label(String(row.arrangement))}</Badge>
           )}
+          {resource === "placements" && row.link_status != null && row.link_status !== "unknown" && (
+            <Badge tone={color(row.link_status)}>
+              {row.link_status === "removed" ? "Link removed" : row.link_status === "present" ? "Links to us" : "No link"}
+            </Badge>
+          )}
+          {resource === "placements" && row.mention_status != null && row.mention_status !== "unknown" && (
+            <Badge tone={color(row.mention_status)}>
+              {row.mention_status === "removed" ? "Mention removed" : row.mention_status === "present" ? "Mentions us" : "No mention"}
+            </Badge>
+          )}
+          {resource === "placements" && (row.traction === "taking_off" || row.traction === "quiet") && (
+            <Badge
+              tone={row.traction === "taking_off" ? "green" : "grey"}
+              title={`Cited by ${Number(row.ai_citations_90d ?? 0)} AI answers in 90 days`}
+            >
+              {row.traction === "taking_off" ? "Taking off" : "Quiet"}
+            </Badge>
+          )}
+          {resource === "placements" && row.offline_since ? (
+            <Badge tone="red">Offline since {new Date(String(row.offline_since)).toLocaleDateString()}</Badge>
+          ) : null}
           {can(def?.finance ? "coverage.finance.manage" : "coverage.manage") &&
             resource !== "payments" && (
               <Button variant="ghost" onClick={edit}>
@@ -1884,6 +1926,15 @@ function CoverageDetail({
               }
               allowed={can("customers.read")}
             />
+            {resource === "placements" && (
+              <PlacementParties
+                ws={ws}
+                brand={brand}
+                placement={row}
+                manage={can("coverage.manage")}
+                readCRM={can("customers.read")}
+              />
+            )}
             <div className="rounded-lg border p-4">
               <h3 className="font-medium">Keep the relationship in context</h3>
               <p className="mt-2 text-sm text-muted-foreground">
@@ -2358,6 +2409,10 @@ function CoverageOverview({
           </button>
         ))}
       </div>
+      <PresenceMomentum
+        momentum={data.momentum as Parameters<typeof PresenceMomentum>[0]["momentum"]}
+        voice={data.share_of_voice as Parameters<typeof PresenceMomentum>[0]["voice"]}
+      />
       <div className="grid gap-5 lg:grid-cols-3">
         <section className="rounded-xl border p-5 lg:col-span-2">
           <h2 className="font-semibold">Coverage over time</h2>
@@ -3037,6 +3092,8 @@ function formGroups(def: Definition): [string, Field[]][] {
       "Relationship and campaign",
       [
         "contact_record_id",
+        "delivered_by",
+        "deal_id",
         "owner_id",
         "campaign",
         "market",
@@ -3282,7 +3339,7 @@ function CoverageSearches({
   return (
     <details className="rounded-xl border p-4">
       <summary className="cursor-pointer font-medium">
-        Saved discovery searches · {rows.length}
+        News searches · {rows.length}
       </summary>
       <div className="mt-4 space-y-4">
         <p className="text-sm text-muted-foreground">

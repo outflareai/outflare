@@ -38,7 +38,7 @@ func TestAIFacts(t *testing.T) {
 	conn := owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "openrouter", "credentials": map[string]string{"api_key": "sk-or-good"}})["id"].(string)
 	// The checker is the workspace's model for the ai_visibility task.
 	owner.must(200, "PUT", base+"/ai-settings", map[string]any{"integration_id": conn, "model": "openai/gpt-5"})
-	owner.must(200, "PUT", base+"/ai-visibility/settings", map[string]any{"models": []map[string]any{{"integration_id": conn, "model": "openai/gpt-5"}}})
+	owner.must(200, "PUT", base+"/ai-visibility/settings?brand=acme", map[string]any{"models": []map[string]any{{"integration_id": conn, "model": "openai/gpt-5"}}})
 	cid := owner.must(201, "POST", base+"/ai-cohorts", map[string]any{"name": "Proxy buyers", "brand_id": "acme",
 		"competitors": []map[string]any{{"name": "Northpeak"}}})["id"].(string)
 	owner.must(201, "POST", base+"/ai-cohorts/"+cid+"/prompts", map[string]any{"prompts": []map[string]any{

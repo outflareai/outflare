@@ -50,11 +50,27 @@ const (
 	ReasonConflict      = "conflict"       // a record would land beside one already there
 )
 
+// Steps of a lookup that can fail, for the API's events and metrics:
+// which call didn't answer, so a broken resolver, a provider that is down
+// and one that answers oddly can be told apart without the logs.
+const (
+	StepDiscoverDNS    = "discover_dns"    // the _domainconnect TXT lookup
+	StepSettingsHTTP   = "settings_http"   // the provider's settings call didn't answer
+	StepSettingsStatus = "settings_status" // it answered with an error status
+	StepTemplateHTTP   = "template_http"   // the template check didn't answer
+	StepTemplateStatus = "template_status" // it answered with an error status
+	StepConflictDNS    = "conflict_dns"    // looking up the records already in DNS
+	StepSign           = "sign"            // signing the apply link with this server's key
+)
+
 // Unavailable says why Domain Connect can't be used, with one of the
-// Reason codes.
+// Reason codes, and for a failed lookup the Step that failed. Cached is
+// set when the answer is a recent failure given again, not a new lookup.
 type Unavailable struct {
 	Reason string
+	Step   string
 	Err    error
+	Cached bool
 }
 
 func (u *Unavailable) Error() string {
@@ -67,6 +83,26 @@ func (u *Unavailable) Error() string {
 func (u *Unavailable) Unwrap() error { return u.Err }
 
 func unavailable(reason string, err error) error { return &Unavailable{Reason: reason, Err: err} }
+
+func failedAt(step string, err error) error {
+	return &Unavailable{Reason: ReasonLookupFailed, Step: step, Err: err}
+}
+
+// StepOf gives the step a failed lookup stopped at, or "".
+func StepOf(err error) string {
+	var u *Unavailable
+	if errors.As(err, &u) {
+		return u.Step
+	}
+	return ""
+}
+
+// Repeated reports whether err is a recent failure given again from the
+// cache, already reported when it happened.
+func Repeated(err error) bool {
+	var u *Unavailable
+	return errors.As(err, &u) && u.Cached
+}
 
 // ReasonOf gives an error's Reason code, or lookup_failed.
 func ReasonOf(err error) string {
@@ -115,30 +151,82 @@ type Client struct {
 
 type cached struct {
 	at  time.Time
+	ttl time.Duration
 	val any
 	err error
 }
 
-const cacheFor = 10 * time.Minute
+// cacheFor is how long an answer is kept; failedFor is how long a failed
+// lookup is, so a provider that is down isn't asked again on every page
+// load, but one that comes back is tried again soon.
+const (
+	cacheFor  = 10 * time.Minute
+	failedFor = time.Minute
+)
+
+// retryAfter is the pause before a failed DNS lookup or provider call is
+// tried a second time.
+var retryAfter = 300 * time.Millisecond
 
 func (c *Client) remember(key string, fn func() (any, error)) (any, error) {
 	c.mu.Lock()
 	if c.cache == nil {
 		c.cache = map[string]cached{}
 	}
-	if v, ok := c.cache[key]; ok && time.Since(v.at) < cacheFor {
+	if v, ok := c.cache[key]; ok && time.Since(v.at) < v.ttl {
 		c.mu.Unlock()
+		var u *Unavailable
+		if errors.As(v.err, &u) && u.Reason == ReasonLookupFailed {
+			again := *u
+			again.Cached = true
+			return v.val, &again
+		}
 		return v.val, v.err
 	}
 	c.mu.Unlock()
 	val, err := fn()
+	ttl := cacheFor
 	var u *Unavailable
-	if err == nil || errors.As(err, &u) && u.Reason != ReasonLookupFailed {
-		c.mu.Lock()
-		c.cache[key] = cached{at: time.Now(), val: val, err: err}
-		c.mu.Unlock()
+	switch {
+	case err == nil:
+	case errors.As(err, &u) && u.Reason == ReasonLookupFailed:
+		ttl = failedFor
+	case errors.As(err, &u):
+	default:
+		return val, err // not one of ours (the key check): ask again next time
 	}
+	c.mu.Lock()
+	c.cache[key] = cached{at: time.Now(), ttl: ttl, val: val, err: err}
+	c.mu.Unlock()
 	return val, err
+}
+
+// pause waits before a second try, or until ctx is done.
+func pause(ctx context.Context) error {
+	t := time.NewTimer(retryAfter)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// lookupTXT looks a name up, once more after a pause when the resolver
+// fails with anything but "no such name" (a timeout or SERVFAIL is often
+// gone a moment later).
+func (c *Client) lookupTXT(ctx context.Context, name string) ([]string, error) {
+	txts, err := c.Resolver.LookupTXT(ctx, name)
+	if err != nil && !notFound(err) && pause(ctx) == nil {
+		txts, err = c.Resolver.LookupTXT(ctx, name)
+	}
+	return txts, err
+}
+
+func notFound(err error) bool {
+	var dnsErr *net.DNSError
+	return errors.As(err, &dnsErr) && dnsErr.IsNotFound
 }
 
 // Ready reports whether this server's public key is the one published at
@@ -182,18 +270,17 @@ func (c *Client) discover(ctx context.Context, name string) (Zone, error) {
 	if err != nil {
 		return Zone{}, unavailable(ReasonNoProvider, err)
 	}
-	// failed is the first lookup that errored. Some hosting resolvers
-	// answer "server misbehaving" instead of "no such name" for a level
-	// below the zone that has no record, so the walk goes on: a record
-	// higher up still names the provider. Only when none does is the
-	// error the answer, so an outage isn't taken for no provider.
-	var failed error
+	// Some hosting resolvers answer "server misbehaving" instead of "no
+	// such name" for a level below the zone that has no record, every
+	// time, so the walk goes on past a level that fails: a record higher
+	// up still names the provider. The registered domain is where the
+	// zone almost always is, so its answer decides: when it says plainly
+	// that there is no record, the provider doesn't support Domain
+	// Connect, whatever a level below said. Only when the registered
+	// domain's own lookup fails is the answer "lookup failed", so an
+	// outage isn't taken for no provider.
 	for cand := name; ; {
-		txts, err := c.Resolver.LookupTXT(ctx, "_domainconnect."+cand)
-		var dnsErr *net.DNSError
-		if err != nil && !(errors.As(err, &dnsErr) && dnsErr.IsNotFound) && failed == nil {
-			failed = err
-		}
+		txts, err := c.lookupTXT(ctx, "_domainconnect."+cand)
 		if len(txts) > 0 {
 			s, err := c.settings(ctx, strings.TrimSpace(txts[0]), cand)
 			if err != nil {
@@ -202,8 +289,8 @@ func (c *Client) discover(ctx context.Context, name string) (Zone, error) {
 			return Zone{Domain: cand, Host: strings.TrimSuffix(strings.TrimSuffix(name, cand), "."), Settings: s}, nil
 		}
 		if cand == top {
-			if failed != nil {
-				return Zone{}, unavailable(ReasonLookupFailed, failed)
+			if err != nil && !notFound(err) {
+				return Zone{}, failedAt(StepDiscoverDNS, err)
 			}
 			return Zone{}, unavailable(ReasonNoProvider, nil)
 		}
@@ -213,15 +300,15 @@ func (c *Client) discover(ctx context.Context, name string) (Zone, error) {
 
 func (c *Client) settings(ctx context.Context, api, domain string) (Settings, error) {
 	var s Settings
-	status, err := c.get(ctx, "https://"+strings.TrimSuffix(api, "/")+"/v2/"+url.PathEscape(domain)+"/settings", &s)
+	status, err := c.getTwice(ctx, "https://"+strings.TrimSuffix(api, "/")+"/v2/"+url.PathEscape(domain)+"/settings", &s)
 	switch {
 	case err != nil:
-		return s, unavailable(ReasonLookupFailed, err)
+		return s, failedAt(StepSettingsHTTP, err)
 	case status == http.StatusNotFound:
 		// A _domainconnect record left behind by a previous DNS host.
 		return s, unavailable(ReasonNoProvider, nil)
 	case status/100 != 2:
-		return s, unavailable(ReasonLookupFailed, fmt.Errorf("settings: status %d", status))
+		return s, failedAt(StepSettingsStatus, fmt.Errorf("settings: status %d", status))
 	case s.URLSyncUX == "" || !strings.HasPrefix(s.URLSyncUX, "https://") || !strings.HasPrefix(s.URLAPI, "https://"):
 		return s, unavailable(ReasonNoProvider, nil)
 	}
@@ -231,18 +318,28 @@ func (c *Client) settings(ctx context.Context, api, domain string) (Settings, er
 // Supports reports whether the provider has taken a template of Outflare's.
 func (c *Client) Supports(ctx context.Context, s Settings, service string) error {
 	_, err := c.remember("tpl "+s.URLAPI+" "+service, func() (any, error) {
-		status, err := c.get(ctx, strings.TrimSuffix(s.URLAPI, "/")+"/v2/domainTemplates/providers/"+ProviderID+"/services/"+service, nil)
+		status, err := c.getTwice(ctx, strings.TrimSuffix(s.URLAPI, "/")+"/v2/domainTemplates/providers/"+ProviderID+"/services/"+service, nil)
 		switch {
 		case err != nil:
-			return nil, unavailable(ReasonLookupFailed, err)
+			return nil, failedAt(StepTemplateHTTP, err)
 		case status == http.StatusNotFound:
 			return nil, unavailable(ReasonNotOnboarded, nil)
 		case status/100 != 2:
-			return nil, unavailable(ReasonLookupFailed, fmt.Errorf("template: status %d", status))
+			return nil, failedAt(StepTemplateStatus, fmt.Errorf("template: status %d", status))
 		}
 		return nil, nil
 	})
 	return err
+}
+
+// getTwice is get, tried once more after a pause when the provider
+// didn't answer or answered with a server error.
+func (c *Client) getTwice(ctx context.Context, u string, into any) (int, error) {
+	status, err := c.get(ctx, u, into)
+	if (err != nil || status/100 == 5) && ctx.Err() == nil && pause(ctx) == nil {
+		status, err = c.get(ctx, u, into)
+	}
+	return status, err
 }
 
 func (c *Client) get(ctx context.Context, u string, into any) (int, error) {
@@ -286,20 +383,19 @@ func (c *Client) Conflicts(ctx context.Context, want []Rec) error {
 			found = len(mxs) > 0
 		case r.Type == "TXT" && strings.Contains(name, "._domainkey."):
 			var txts []string
-			txts, err = c.Resolver.LookupTXT(ctx, name)
+			txts, err = c.lookupTXT(ctx, name)
 			found = len(txts) > 0
 		case r.Type == "TXT" && strings.HasPrefix(name, "_dmarc."):
 			var txts []string
-			txts, err = c.Resolver.LookupTXT(ctx, name)
+			txts, err = c.lookupTXT(ctx, name)
 			found = slices.ContainsFunc(txts, func(t string) bool {
 				return strings.HasPrefix(strings.ToLower(strings.TrimSpace(t)), "v=dmarc1")
 			})
 		default:
 			continue
 		}
-		var dnsErr *net.DNSError
-		if err != nil && !(errors.As(err, &dnsErr) && dnsErr.IsNotFound) {
-			return unavailable(ReasonLookupFailed, err)
+		if err != nil && !notFound(err) {
+			return failedAt(StepConflictDNS, err)
 		}
 		if found {
 			return unavailable(ReasonConflict, nil)
@@ -336,7 +432,8 @@ func (c *Client) ApplyURL(z Zone, p Plan, redirect, state string) (string, error
 	query := q.Encode()
 	sig, err := c.Key.Sign(query)
 	if err != nil {
-		return "", err
+		// This server's key is broken, not the provider: report it as such.
+		return "", &Unavailable{Reason: ReasonNotConfigured, Step: StepSign, Err: err}
 	}
 	return strings.TrimSuffix(z.Settings.URLSyncUX, "/") + "/v2/domainTemplates/providers/" + ProviderID + "/services/" + p.Template.ServiceID +
 		"/apply?" + query + "&sig=" + url.QueryEscape(sig) + "&key=" + url.QueryEscape(c.Key.ID), nil

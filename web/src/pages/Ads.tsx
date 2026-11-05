@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AdAccount, AdCampaign, AdConnection, AdSummaryRow, AdTotals, AttributionAdRow } from "@outflare/sdk";
+import type { AdAccount, AdCampaign, AdChange, AdConnection, AdSummaryRow, AdTotals, AttributionAdRow } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { api, errorMessage } from "../api";
+import { track } from "@/lib/analytics";
 import { ask, Badge, Button, Card, confirmAction, ErrorText, Input, Loading, PageHeader, Stat, Stats, toast } from "../ui";
 import { ago } from "../format";
 import type { Tab } from "../App";
 import { AdConversions } from "./AdConversions";
 import { AdTrackingFix, AdTrackingHealthCard, AdTrackingTemplates } from "./AdTracking";
 import { AdResults } from "./AdResults";
+import { AdSuggestions } from "./AdSuggestions";
+import { AdDrafts } from "./AdDrafts";
+import { AdTests } from "./AdTests";
 import { AdTrend, CampaignDetail, ConversionActions, outflareColumns } from "./AdDrilldown";
+import { AdsPanels } from "@/components/insight-panels";
 
 // Paid ads: spend, clicks and what each platform says it brought in, read
 // every six hours from the workspace's own ad accounts. Conversions and ROAS
@@ -95,7 +100,24 @@ const roas = (v: number | null | undefined) => (v === null || v === undefined ? 
 const manageable = new Set(["google_ads", "meta_ads", "microsoft_ads", "linkedin_ads", "tiktok_ads"]);
 
 // The page's tabs, as the item in its URL (the overview has none).
-const adsTabs = ["overview", "campaigns", "tracking", "conversions", "accounts"] as const;
+const adsTabs = ["overview", "suggestions", "tests", "campaigns", "changes", "tracking", "conversions", "accounts"] as const;
+
+// The level the page shows: every network, one network, or one account
+// of it. The same page narrows; the breadcrumb widens it again. It is
+// kept for the tab's session, so opening a campaign and coming back
+// keeps it.
+export type AdScope = { network?: string; account?: string };
+const scopeKey = (ws: string) => `outflare.ads.scope.${ws}`;
+function readScope(ws: string): AdScope {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(scopeKey(ws)) ?? "{}");
+    return { network: typeof v.network === "string" ? v.network : undefined, account: typeof v.account === "string" ? v.account : undefined };
+  } catch {
+    return {};
+  }
+}
+// The query a level adds to every ads request.
+export const scopeQuery = (s: AdScope) => ({ ...(s.network ? { connector: s.network } : {}), ...(s.account ? { account_id: s.account } : {}) });
 type AdsTab = (typeof adsTabs)[number];
 
 export function Ads({ ws, canManage, go, item }: Props) {
@@ -106,6 +128,17 @@ export function Ads({ ws, canManage, go, item }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
+  const [scope, setScopeState] = useState<AdScope>(() => readScope(ws));
+  const setScope = (next: AdScope) => {
+    setScopeState(next);
+    try {
+      sessionStorage.setItem(scopeKey(ws), JSON.stringify(next));
+    } catch {
+      // Private windows: the level just isn't kept.
+    }
+    track("ui.ads_level_opened", { level: next.account ? "account" : next.network ? "network" : "all", ...(next.network ? { connector: next.network } : {}) });
+  };
+  const [byAccount, setByAccount] = useState<AdSummaryRow[]>([]);
   const [conns, setConns] = useState<AdConnection[] | null>(null);
   const [accounts, setAccounts] = useState<AdAccount[]>([]);
   // Every account, whatever its brand, so the accounts list can give one a
@@ -123,16 +156,18 @@ export function Ads({ ws, canManage, go, item }: Props) {
   const load = useCallback(async () => {
     const path = { ws };
     const query = brandKey ? { brand: brandKey } : {};
+    const narrow = { ...query, ...scopeQuery(scope) };
     const to = new Date();
     const range = { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
-    const [c, a, all, cp, s, d, at] = await Promise.all([
+    const [c, a, all, cp, s, d, at, ba] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path } }),
       api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query } }),
       brandKey ? api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query: { brand: "all" } } }) : null,
-      api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...query, ...range, limit: 200 } } }),
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "connector" } } }),
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...query, ...range, group: "day" } } }),
+      api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...narrow, ...range, limit: 200 } } }),
+      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "connector" } } }),
+      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "day" } } }),
       api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...query, ...range } } }),
+      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "account" } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
     setError(a.error || cp.error || s.error ? errorMessage(a.error ?? cp.error ?? s.error) : "");
@@ -143,8 +178,9 @@ export function Ads({ ws, canManage, go, item }: Props) {
     setByPlatform(s.data?.data ?? []);
     setTotals(s.data?.totals ?? []);
     setByDay(d.data?.data ?? []);
+    setByAccount(ba.data?.data ?? []);
     setCredited(Object.fromEntries((at.data?.data ?? []).map((r) => [r.id, r])));
-  }, [ws, brandKey, days]);
+  }, [ws, brandKey, days, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
   }, [load]);
@@ -289,12 +325,16 @@ export function Ads({ ws, canManage, go, item }: Props) {
       <Tabs value={tab} onValueChange={(v) => go("ads", v === "overview" ? undefined : v)}>
         <TabsList className="h-8">
           <TabsTrigger value="overview" className="px-3 text-[12px]">Overview</TabsTrigger>
+          <TabsTrigger value="suggestions" className="px-3 text-[12px]">Suggestions</TabsTrigger>
+          <TabsTrigger value="tests" className="px-3 text-[12px]">Tests</TabsTrigger>
           <TabsTrigger value="campaigns" className="px-3 text-[12px]">Campaigns</TabsTrigger>
+          <TabsTrigger value="changes" className="px-3 text-[12px]">Changes</TabsTrigger>
           <TabsTrigger value="tracking" className="px-3 text-[12px]">Tracking</TabsTrigger>
           <TabsTrigger value="conversions" className="px-3 text-[12px]">Send conversions</TabsTrigger>
           <TabsTrigger value="accounts" className="px-3 text-[12px]">Accounts</TabsTrigger>
         </TabsList>
       </Tabs>
+      <Levels scope={scope} setScope={setScope} accounts={allAccounts} />
       {error && <ErrorText>{error}</ErrorText>}
 
       {conns.filter((c) => c.setup_needed.length > 0).map((c) => <Setup key={c.id} ws={ws} conn={c} canManage={canManage} done={load} />)}
@@ -311,6 +351,8 @@ export function Ads({ ws, canManage, go, item }: Props) {
         </Stats>
       ))}
 
+      {brand.brand && <AdsPanels brand={brand.brand.id} days={days} go={go} />}
+
       <Card title="By day" description="Every platform's spend, clicks, impressions and conversions per day, as each reports them.">
         <AdTrend rows={byDay} from={range.from} to={range.to} />
       </Card>
@@ -319,6 +361,7 @@ export function Ads({ ws, canManage, go, item }: Props) {
         <DataTable
           data={byPlatform}
           rowId={(r) => `${r.key}-${r.currency}`}
+          onRowClick={scope.network ? undefined : (r) => setScope({ network: r.key })}
           columnsMenu={false}
           hidden={deliveryColumns}
           empty="Nothing spent in this range yet."
@@ -329,6 +372,30 @@ export function Ads({ ws, canManage, go, item }: Props) {
           ]}
         />
       </Card>
+
+      {!scope.account && byAccount.length > 0 && (
+        <Card title="By account" description={`The last ${days} days, each ad account on its own. Open one to see only its campaigns, changes and suggestions.`}>
+          <DataTable
+            data={byAccount}
+            rowId={(r) => `${r.key}-${r.currency}`}
+            columnsMenu={false}
+            hidden={deliveryColumns}
+            empty="Nothing spent in this range yet."
+            initialSort={[{ id: "spend", desc: true }]}
+            onRowClick={(r) => {
+              const acc = allAccounts.find((x) => x.id === r.key);
+              setScope({ network: acc?.connector ?? scope.network, account: r.key });
+            }}
+            columns={[
+              { id: "account", header: "Account", accessorFn: (r) => allAccounts.find((x) => x.id === r.key)?.name ?? r.key, cell: ({ row: { original: r } }) => {
+                const acc = allAccounts.find((x) => x.id === r.key);
+                return acc ? <AccountName a={acc} /> : <span className="font-mono">{r.key}</span>;
+              } },
+              ...metricColumns<AdSummaryRow>((r) => r.totals, (r) => r.currency),
+            ]}
+          />
+        </Card>
+      )}
 
       <ConversionActions ws={ws} from={range.from} to={range.to} brand={brandKey || undefined} card />
 
@@ -423,6 +490,12 @@ export function Ads({ ws, canManage, go, item }: Props) {
 
         </>
       )}
+
+      {tab === "suggestions" && <AdSuggestions ws={ws} brand={brandKey} scope={scope} canManage={canManage} />}
+      {tab === "suggestions" && (brand.brand ? <AdDrafts key={brand.brand.id} brand={brand.brand.id} canManage={canManage} />
+        : <Card title="New ads"><p className="text-[13px] text-muted-foreground">Pick a brand to see the new ads its agent wrote.</p></Card>)}
+      {tab === "tests" && <AdTests ws={ws} brand={brandKey} scope={scope} campaigns={campaigns} canManage={canManage} />}
+      {tab === "changes" && <AdChanges ws={ws} brand={brandKey} scope={scope} />}
 
       {tab === "tracking" && (
         <>
@@ -577,6 +650,97 @@ function Setup({ ws, conn, canManage, done }: { ws: string; conn: AdConnection; 
       ) : (
         <p className="text-[13px] text-muted-foreground">Ask an admin to finish setting it up.</p>
       )}
+    </Card>
+  );
+}
+
+// The level the page shows, as a breadcrumb: every network › one network ›
+// one account. Each step back widens it again.
+function Levels({ scope, setScope, accounts }: { scope: AdScope; setScope: (s: AdScope) => void; accounts: AdAccount[] }) {
+  const networks = [...new Set(accounts.map((a) => a.connector))];
+  const inNetwork = accounts.filter((a) => a.connector === scope.network);
+  const account = accounts.find((a) => a.id === scope.account);
+  const crumb = "rounded px-1.5 py-0.5 hover:bg-muted";
+  return (
+    <nav aria-label="Level" className="flex flex-wrap items-center gap-1 text-[13px]">
+      <button type="button" className={`${crumb} ${scope.network ? "text-muted-foreground" : "font-medium"}`} onClick={() => setScope({})}>All networks</button>
+      <span className="text-muted-foreground">›</span>
+      <select aria-label="Network" className="rounded border bg-transparent px-1.5 py-0.5" value={scope.network ?? ""} onChange={(e) => setScope(e.target.value ? { network: e.target.value } : {})}>
+        <option value="">Every network</option>
+        {networks.map((c) => <option key={c} value={c}>{platformName(c)}</option>)}
+      </select>
+      {scope.network && (
+        <>
+          <span className="text-muted-foreground">›</span>
+          <select aria-label="Account" className="rounded border bg-transparent px-1.5 py-0.5" value={scope.account ?? ""} onChange={(e) => setScope({ network: scope.network, account: e.target.value || undefined })}>
+            <option value="">Every account</option>
+            {inNetwork.map((a) => <option key={a.id} value={a.id}>{a.name || accountId(a.connector, a.external_id)}</option>)}
+          </select>
+        </>
+      )}
+      {account && <span className="text-muted-foreground">· {account.currency}</span>}
+    </nav>
+  );
+}
+
+const changeWord = {
+  pause: "Paused", resume: "Resumed", budget: "Daily budget", keyword_add: "Keyword added", negative_add: "Negative keyword added", keyword_split: "Keyword given its own ad group",
+  bidding: "Bidding", audience_add: "Audience added", audience_remove: "Audience taken out", country_add: "Country added", country_remove: "Country taken out",
+} as const;
+
+// changeDetail is what a change names: a keyword, an audience, a country or a bidding target.
+function changeDetail(r: AdChange) {
+  const a = r.after;
+  if (a.keyword) return <span className="font-mono">[{a.keyword}]</span>;
+  if (a.country) return <span>{a.country}</span>;
+  if (a.audience_id) return <span>{a.audience_name || a.audience_id}</span>;
+  if (a.bidding) {
+    const b = a.bidding;
+    const target = b.target_cpa_micros != null ? ` to ${(b.target_cpa_micros / 1e6).toFixed(2)} a conversion` : b.target_roas != null ? ` to ${b.target_roas}× return` : "";
+    return <span>{b.strategy === "maximize_conversion_value" ? "Maximise value" : "Maximise conversions"}{target}</span>;
+  }
+  return null;
+}
+
+// Every change Outflare made, or is making, at the level the page shows.
+function AdChanges({ ws, brand, scope }: { ws: string; brand: string; scope: AdScope }) {
+  const [rows, setRows] = useState<AdChange[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let live = true;
+    api.GET("/v1/workspaces/{ws}/ads/changes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 200 } } }).then(({ data, error }) => {
+      if (!live) return;
+      if (error) setError(errorMessage(error));
+      setRows(data?.data ?? []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ws, brand, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (error) return <ErrorText>{error}</ErrorText>;
+  if (!rows) return <Loading />;
+  return (
+    <Card title="Changes" description="Every pause, resume, budget, keyword, bidding, audience and country change asked for here, newest first, and whether the platform shows it.">
+      <DataTable
+        data={rows}
+        rowId={(r) => r.id}
+        columnsMenu={false}
+        empty="No changes yet."
+        columns={[
+          { id: "when", header: "When", accessorFn: (r) => r.created_at, cell: ({ row: { original: r } }) => <span className="text-muted-foreground">{ago(r.created_at)}</span> },
+          { id: "campaign", header: "Campaign", accessorFn: (r) => r.campaign_name, cell: ({ row: { original: r } }) => (
+            <div><div className="font-medium">{r.campaign_name}</div><div className="text-[12px] text-muted-foreground">{platformName(r.connector)} · {r.account_name}</div></div>
+          ) },
+          { id: "change", header: "Change", accessorFn: (r) => r.kind, cell: ({ row: { original: r } }) => (
+            <span>{changeWord[r.kind]} {changeDetail(r)}{r.kind === "budget" && <> {r.before.daily_budget_micros != null ? `${(r.before.daily_budget_micros / 1e6).toFixed(2)} → ` : ""}{r.after.daily_budget_micros != null ? (r.after.daily_budget_micros / 1e6).toFixed(2) : ""}</>}</span>
+          ) },
+          { id: "status", header: "Status", accessorFn: (r) => r.status, cell: ({ row: { original: r } }) => (
+            <Badge tone={r.status === "failed" ? "red" : r.status === "applied" ? (r.verified_at ? "green" : "blue") : "grey"} title={r.error || r.verify_note || undefined}>
+              {r.status === "failed" ? "Failed" : r.status === "queued" ? "Queued" : r.verified_at ? "Applied and checked" : "Applied"}
+            </Badge>
+          ) },
+        ]}
+      />
     </Card>
   );
 }

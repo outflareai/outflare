@@ -79,15 +79,20 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 	}
 	// Verified but without a certificate, links keep the server's address.
 	// The first look finds it pending and queues the next one. Wait for that
-	// job to be committed, not just for the provider to be asked: the job
-	// asks first and queues the next look after, in its own transaction.
-	waitUntil(t, func() bool {
-		var n int
-		if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind = 'tracking.domain_https' AND status = 'queued' AND workspace_id = $1 AND (payload ->> 'n')::int = 1`, ws).Scan(&n); err != nil {
-			t.Fatal(err)
+	// look to be queued and the first one to be done, not just for the
+	// provider to be asked: the job asks first, queues the next look after,
+	// in its own transaction, and only then is marked done.
+	nextLook := func(n int) func() bool {
+		return func() bool {
+			var queued, running int
+			if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'queued' AND (payload ->> 'n')::int = $2),
+				count(*) FILTER (WHERE status = 'running') FROM jobs WHERE kind = 'tracking.domain_https' AND workspace_id = $1`, ws, n).Scan(&queued, &running); err != nil {
+				t.Fatal(err)
+			}
+			return queued == 1 && running == 0
 		}
-		return n == 1
-	})
+	}
+	waitUntil(t, nextLook(1))
 	if a, _ := certs.got(); len(a) != 1 || a[0] != "links.acme.example" {
 		t.Fatalf("asked the provider for: %v", a)
 	}
@@ -113,7 +118,12 @@ func TestTrackingDomainHTTPS(t *testing.T) {
 	}
 	owner.must(200, "POST", base+"/tracking-domains/"+id+"/check", nil)
 	waitUntil(t, func() bool { a, _ := certs.got(); return len(a) == 2 })
-	waitUntil(t, func() bool { return httpsJobs() == 1 })
+	// The restarted look queues its next one the same way: wait until it
+	// has, not until the running look is the only one left.
+	waitUntil(t, nextLook(1))
+	if n := httpsJobs(); n != 1 {
+		t.Fatalf("looks after starting them again: %d", n)
+	}
 
 	// Issued: the next look marks it active and links move to the domain.
 	certs.set(api.CertState{Status: "active"})

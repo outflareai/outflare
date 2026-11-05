@@ -33,16 +33,18 @@ type LinkSettings struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// LoadLinkSettings reads a workspace's settings, making the row with the
-// defaults on first use.
-func LoadLinkSettings(ctx context.Context, q jobs.Querier, ws string) (LinkSettings, error) {
+// LoadLinkSettings reads a brand's settings (the first brand's when brand
+// is empty), making the row with the defaults on first use.
+func LoadLinkSettings(ctx context.Context, q jobs.Querier, ws, brand string) (LinkSettings, error) {
 	var v LinkSettings
 	err := q.QueryRow(ctx, `
-		WITH ins AS (INSERT INTO link_building_settings (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING
+		WITH b AS (SELECT COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1)) AS id),
+		ins AS (INSERT INTO link_building_settings (workspace_id, brand_id) SELECT $1, id FROM b ON CONFLICT DO NOTHING
 			RETURNING pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at)
 		SELECT * FROM ins
-		UNION ALL SELECT pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at FROM link_building_settings WHERE workspace_id = $1
-		LIMIT 1`, ws).Scan(&v.PitchCooldownDays, &v.WeeklyReads, &v.WeeklyBudgetPercent, &v.RecheckDays, &v.UpdatedAt)
+		UNION ALL SELECT pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at FROM link_building_settings, b
+		WHERE workspace_id = $1 AND brand_id = b.id
+		LIMIT 1`, ws, brand).Scan(&v.PitchCooldownDays, &v.WeeklyReads, &v.WeeklyBudgetPercent, &v.RecheckDays, &v.UpdatedAt)
 	return v, err
 }
 
@@ -214,11 +216,11 @@ type DeadPageRun struct {
 // ReadDeadPages reads who links to the pages that went from a site's
 // tracked competitors' sitemaps in the last 8 days and were never read, at
 // most WeeklyReadPages a site, while the month's weekly reads stay within
-// the workspace's share of the connection's budget. It does nothing when
-// the workspace turned weekly reads off.
+// the site's brand's share of the connection's budget. It does nothing
+// when the brand turned weekly reads off.
 func ReadDeadPages(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r connectors.SEOReader, site LinkSite) (DeadPageRun, error) {
 	run := DeadPageRun{SiteID: site.ID}
-	set, err := LoadLinkSettings(ctx, pool, o.WorkspaceID)
+	set, err := LoadLinkSettings(ctx, pool, o.WorkspaceID, deref(site.BrandID))
 	if err != nil || !set.WeeklyReads {
 		return run, err
 	}
@@ -244,7 +246,8 @@ func ReadDeadPages(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened
 	}
 	var spent float64
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(sum(cost), 0) FROM link_reads
-		WHERE integration_id = $1 AND reason = 'dead_page' AND created_at >= date_trunc('month', now())`, o.ID).Scan(&spent); err != nil {
+		WHERE integration_id = $1 AND reason = 'dead_page' AND created_at >= date_trunc('month', now())
+		  AND brand_id IS NOT DISTINCT FROM COALESCE($2::uuid, outflare_first_brand(workspace_id))`, o.ID, site.BrandID).Scan(&spent); err != nil {
 		return run, err
 	}
 	share := b.Limit * float64(set.WeeklyBudgetPercent) / 100
@@ -316,4 +319,11 @@ func (s *Syncer) retryDeadPages(ctx context.Context, ws, integrationID string) e
 	}
 	s.readDeadPages(ctx, o, r, sites)
 	return nil
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

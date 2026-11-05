@@ -21,11 +21,24 @@ import (
 
 func (s *Server) routesAttributionModels(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/models", s.inWorkspace(read, s.listAttributionModels))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/attribution/models", s.inWorkspace(manage, s.createAttributionModel))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/models/{key}", s.inWorkspace(read, s.getAttributionModel))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/attribution/models/{key}", s.inWorkspace(manage, s.updateAttributionModel))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/attribution/models/{key}", s.inWorkspace(manage, s.archiveAttributionModel))
+	for _, t := range s.twins("attribution/models") {
+		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listAttributionModels))
+		mux.HandleFunc("POST "+t.path, t.on(s.inWorkspace)(manage, s.createAttributionModel))
+		mux.HandleFunc("GET "+t.path+"/{key}", t.on(s.inWorkspace)(read, s.getAttributionModel))
+		mux.HandleFunc("PATCH "+t.path+"/{key}", t.on(s.inWorkspace)(manage, s.updateAttributionModel))
+		mux.HandleFunc("DELETE "+t.path+"/{key}", t.on(s.inWorkspace)(manage, s.archiveAttributionModel))
+	}
+}
+
+// brandModelVersions lists a model's versions, newest first, if the
+// caller's brand holds it: one in another brand has none, as if it didn't
+// exist.
+func (s *Server) brandModelVersions(ctx context.Context, a *access, key string) ([]attribution.Model, error) {
+	versions, err := attribution.Versions(ctx, s.pool, a.WorkspaceID, a.Brand, key)
+	if err == nil && len(versions) > 0 && !a.sees(nullIfEmpty(versions[0].BrandID)) {
+		return nil, nil
+	}
+	return versions, err
 }
 
 type builtInModelView struct {
@@ -35,7 +48,11 @@ type builtInModelView struct {
 
 func (s *Server) listAttributionModels(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	list, err := attribution.LatestModels(r.Context(), s.pool, a.WorkspaceID, r.URL.Query().Get("archived") == "true")
+	sel, ok := s.dataBrand(w, r)
+	if !ok {
+		return
+	}
+	list, err := attribution.LatestModels(r.Context(), s.pool, a.WorkspaceID, groupBrand(sel), r.URL.Query().Get("archived") == "true")
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -49,7 +66,7 @@ func (s *Server) listAttributionModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getAttributionModel(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	versions, err := attribution.Versions(r.Context(), s.pool, a.WorkspaceID, r.PathValue("key"))
+	versions, err := s.brandModelVersions(r.Context(), a, r.PathValue("key"))
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -86,17 +103,18 @@ func checkModelInput(w http.ResponseWriter, r *http.Request, in attributionModel
 
 // saveAttributionModel stores a model's next version and credits every
 // conversion again, so its credits cover the past too.
-func (s *Server) saveAttributionModel(ctx context.Context, a *access, key, name string, spec attribution.Spec, action string) (attribution.Model, error) {
-	if _, err := s.loadAttributionSettings(ctx, a.WorkspaceID); err != nil {
+// The model is brand's ("": the workspace's first).
+func (s *Server) saveAttributionModel(ctx context.Context, a *access, brand, key, name string, spec attribution.Spec, action string) (attribution.Model, error) {
+	if _, err := s.loadAttributionSettings(ctx, a.WorkspaceID, brand); err != nil {
 		return attribution.Model{}, err
 	}
 	var m attribution.Model
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		if m, err = attribution.SaveVersion(ctx, tx, a.WorkspaceID, key, name, spec, nullIfEmpty(a.ActorID)); err != nil {
+		if m, err = attribution.SaveVersion(ctx, tx, a.WorkspaceID, brand, key, name, spec, nullIfEmpty(a.ActorID)); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE attribution_settings SET backfilled_at = NULL, updated_at = now() WHERE workspace_id = $1`, a.WorkspaceID); err != nil {
+		if err := recreditBrand(ctx, tx, a.WorkspaceID, brand); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "attribution_model", m.ID,
@@ -124,8 +142,14 @@ func (s *Server) createAttributionModel(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "name and spec are required")
 		return
 	}
+	brand, err := s.rowBrand(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	var exists bool
-	if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM attribution_models WHERE workspace_id = $1 AND key = $2)`, a.WorkspaceID, in.Key).Scan(&exists); err != nil {
+	if err := s.pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM attribution_models WHERE workspace_id = $1 AND key = $2
+		AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($3, '')::uuid, outflare_first_brand($1)))`, a.WorkspaceID, in.Key, brand).Scan(&exists); err != nil {
 		s.internal(w, r, err)
 		return
 	}
@@ -133,7 +157,7 @@ func (s *Server) createAttributionModel(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, http.StatusConflict, "conflict", "a model with that key exists: change it with PATCH .../attribution/models/"+in.Key)
 		return
 	}
-	m, err := s.saveAttributionModel(r.Context(), a, in.Key, strings.TrimSpace(*in.Name), *in.Spec, "attribution.model_created")
+	m, err := s.saveAttributionModel(r.Context(), a, brand, in.Key, strings.TrimSpace(*in.Name), *in.Spec, "attribution.model_created")
 	if isUniqueViolation(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "a model with that key was just made")
 		return
@@ -152,7 +176,7 @@ func (s *Server) updateAttributionModel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	key := r.PathValue("key")
-	versions, err := attribution.Versions(r.Context(), s.pool, a.WorkspaceID, key)
+	versions, err := s.brandModelVersions(r.Context(), a, key)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -174,7 +198,7 @@ func (s *Server) updateAttributionModel(w http.ResponseWriter, r *http.Request) 
 		// A new name alone keeps the version: every version takes it.
 		if name != cur.Name {
 			err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
-				if _, err := tx.Exec(r.Context(), `UPDATE attribution_models SET name = $3 WHERE workspace_id = $1 AND key = $2`, a.WorkspaceID, key, name); err != nil {
+				if _, err := tx.Exec(r.Context(), `UPDATE attribution_models SET name = $3 WHERE workspace_id = $1 AND key = $2 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid`, a.WorkspaceID, key, name, cur.BrandID); err != nil {
 					return err
 				}
 				return record(r.Context(), tx, &a.principal, a.WorkspaceID, "attribution.model_renamed", "attribution_model", cur.ID, map[string]any{"version": cur.Version})
@@ -188,7 +212,7 @@ func (s *Server) updateAttributionModel(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusOK, cur)
 		return
 	}
-	m, err := s.saveAttributionModel(r.Context(), a, key, name, *in.Spec, "attribution.model_updated")
+	m, err := s.saveAttributionModel(r.Context(), a, cur.BrandID, key, name, *in.Spec, "attribution.model_updated")
 	if isUniqueViolation(err) {
 		writeError(w, r, http.StatusConflict, "conflict", "the model was just changed: read it again")
 		return
@@ -198,7 +222,7 @@ func (s *Server) updateAttributionModel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if name != cur.Name {
-		if _, err := s.pool.Exec(r.Context(), `UPDATE attribution_models SET name = $3 WHERE workspace_id = $1 AND key = $2`, a.WorkspaceID, key, name); err != nil {
+		if _, err := s.pool.Exec(r.Context(), `UPDATE attribution_models SET name = $3 WHERE workspace_id = $1 AND key = $2 AND brand_id IS NOT DISTINCT FROM NULLIF($4, '')::uuid`, a.WorkspaceID, key, name, cur.BrandID); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -213,19 +237,29 @@ func specEqual(a, b attribution.Spec) bool {
 func (s *Server) archiveAttributionModel(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	key := r.PathValue("key")
-	settings, err := s.loadAttributionSettings(r.Context(), a.WorkspaceID)
+	versions, err := s.brandModelVersions(r.Context(), a, key)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if len(versions) == 0 {
+		writeError(w, r, http.StatusNotFound, "not_found", "no model with that key that isn't archived")
+		return
+	}
+	settings, err := s.loadAttributionSettings(r.Context(), a.WorkspaceID, versions[0].BrandID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	if settings.Model == key {
-		writeError(w, r, http.StatusConflict, "conflict", "it is the workspace's default model: pick another in PATCH .../attribution/settings first")
+		writeError(w, r, http.StatusConflict, "conflict", "it is the brand's default model: pick another in PATCH .../attribution/settings first")
 		return
 	}
 	var id string
 	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(r.Context(), `UPDATE attribution_models SET archived_at = now() WHERE workspace_id = $1 AND key = $2 AND archived_at IS NULL
-			RETURNING id::text`, a.WorkspaceID, key).Scan(&id)
+			AND brand_id IS NOT DISTINCT FROM NULLIF($3, '')::uuid
+			RETURNING id::text`, a.WorkspaceID, key, versions[0].BrandID).Scan(&id)
 		if err != nil {
 			return err
 		}

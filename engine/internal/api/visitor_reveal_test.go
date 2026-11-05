@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 func TestVisitorCompanyReveal(t *testing.T) {
@@ -204,6 +207,40 @@ func TestVisitorCompanyReveal(t *testing.T) {
 	if called("192.0.2.13") != 0 {
 		t.Fatalf("over the limit: %v", called("192.0.2.13"))
 	}
+	// A lookup that can't be queued doesn't fail the request: the batch
+	// is taken, the failure is an event, and the visitor isn't tried again
+	// until the next day, so its next batch goes through clean.
+	if _, err := e.pool.Exec(t.Context(), `
+		CREATE FUNCTION test_reveal_fail() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.kind = 'visitor_reveal' AND NEW.payload->>'anonymous_id' = 'b-fail' THEN RAISE EXCEPTION 'test: reveal fails'; END IF;
+			RETURN NEW;
+		END $$;
+		CREATE TRIGGER test_reveal_fail BEFORE INSERT ON jobs FOR EACH ROW EXECUTE FUNCTION test_reveal_fail();`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS test_reveal_fail ON jobs; DROP FUNCTION IF EXISTS test_reveal_fail()`)
+	})
+	got := track.Capture(t)
+	failures := func() int {
+		n := 0
+		for _, ev := range got() {
+			if ev.Name == "visitor.reveal_failed" && ev.ErrorCode == "internal" {
+				n++
+			}
+		}
+		return n
+	}
+	visit("b-fail", "192.0.2.16", true) // fails the test unless it answers 200
+	if failures() != 1 || count(`SELECT count(*) FROM site_visitors WHERE anonymous_id = 'b-fail' AND reveal_checked_at IS NOT NULL`) != 1 {
+		t.Fatalf("reveal failure: events %d", failures())
+	}
+	visit("b-fail", "192.0.2.16", true)
+	if failures() != 1 {
+		t.Fatalf("tried again the same day: %d", failures())
+	}
+
 	// Turned off, nothing is queued.
 	owner.must(200, "PUT", base+"/visitors/settings", map[string]any{"reveal_companies": false})
 	visit("b-6", "192.0.2.14", true)

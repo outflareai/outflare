@@ -77,10 +77,10 @@ func TestFlagGroupHoldout(t *testing.T) {
 		}
 	}
 	if _, err := e.pool.Exec(t.Context(), `
-		INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, properties, context, occurred_at)
-		SELECT $1::uuid, 'page', 'page.viewed', id, '{}'::jsonb, '{"page": {"path": "/"}}'::jsonb, now() - interval '3 days' FROM unnest($2::text[]) id
+		INSERT INTO customer_events (workspace_id, brand_id, kind, name, anonymous_id, properties, context, occurred_at)
+		SELECT $1::uuid, outflare_first_brand($1::uuid), 'page', 'page.viewed', id, '{}'::jsonb, '{"page": {"path": "/"}}'::jsonb, now() - interval '3 days' FROM unnest($2::text[]) id
 		UNION ALL
-		SELECT $1::uuid, 'track', 'signup_started', id, '{}'::jsonb, '{}'::jsonb, now() - interval '2 days'
+		SELECT $1::uuid, outflare_first_brand($1::uuid), 'track', 'signup_started', id, '{}'::jsonb, '{}'::jsonb, now() - interval '2 days'
 		FROM unnest($2::text[]) WITH ORDINALITY AS v(id, n)
 		WHERE (id = ANY($3) AND n % 10 = 0) OR (NOT id = ANY($3) AND n % 10 < 3)`, ws, visitors, inHoldout); err != nil {
 		t.Fatal(err)

@@ -186,11 +186,14 @@ func TestBrandOutreach(t *testing.T) {
 	}
 	// A brand token can't apply one to every brand.
 	bravoApp.must(403, "POST", b+"/suppressions", map[string]any{"values": []string{"z@acme.example"}, "all_brands": true})
-	// A second brand's opt-out of the same address widens it to every
-	// brand until the contract step lets an address have one per brand.
+	// A second brand's opt-out of an address another brand has is its own
+	// entry: both brands stop, and a third brand still emails it.
 	owner.must(200, "POST", b+"/suppressions", map[string]any{"values": []string{"optout@acme.example"}, "reason": "unsubscribed"})
-	if check(alpha, "optout@acme.example") || check(bravo, "optout@acme.example") || check(first, "optout@acme.example") {
-		t.Fatal("two brands' opt-outs of one address should stop every brand")
+	if check(alpha, "optout@acme.example") || check(bravo, "optout@acme.example") {
+		t.Fatal("two brands' opt-outs of one address should stop both brands")
+	}
+	if !check(first, "optout@acme.example") {
+		t.Fatal("two brands' opt-outs of one address stopped a third brand")
 	}
 	// A brand removes only its own entries.
 	var gone string

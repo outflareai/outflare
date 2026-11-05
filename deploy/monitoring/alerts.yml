@@ -123,6 +123,21 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "More than half of browser task runs in six hours failed. Each task's log (GET /v1/brands/{brand}/browser-tasks/{id}) says where it stopped: a site that changed, a sign-in refused, no AI connected, or no Chrome on the worker. Check the Browser workers row."
+      - alert: OutflareAdSuggestionsFailing
+        expr: sum(increase(outflare_ads_suggest_run_seconds_count{outcome="error"}[6h])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three runs of the paid ads suggestions job failed in six hours (ad_suggestions.failed in the log, with the request id): suggestions and verdicts on approved changes are not being updated. Check the Paid media (suggestions) row."
+      - alert: OutflareAdTestsFailing
+        expr: sum(increase(outflare_ads_test_steps_total{outcome="error"}[6h])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three steps of tests inside ad networks (start, check, end) failed in six hours (ad_test.failed in the log, with the request id): tests are not being started, read or ended. Check the Paid media (suggestions) row and the network's API status."
+      - alert: OutflareAdDraftsFailing
+        expr: sum(increase(outflare_ads_draft_steps_total{outcome="error"}[6h])) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "More than three steps of approved new ads (making them paused, turning them on) failed in six hours (ad_draft.failed in the log, with the request id): new ads are not reaching the ad platform. Check the Paid media (suggestions) row and the network's API status."
       - alert: OutflareAdChangesUnverified
         expr: sum(increase(outflare_ads_changes_total{outcome="unverified"}[6h])) > 5
         labels: { severity: info }
@@ -918,6 +933,15 @@ groups:
         annotations:
           summary: "Over a quarter of conversions sent to {{ $labels.connector }} fail; the send log (Paid ads, or GET .../ads/conversion-sends?status=failed) has the platform's reason, and ad_conversions.sent failures carry the error code."
 
+      - alert: OutflareAdConversionAdjustmentsFailing
+        # Refunds not reaching the ad platform: conversion adjustments it
+        # refused on every try, so bidding still counts refunded revenue.
+        expr: sum by (connector) (increase(outflare_ad_conversion_adjustments_total{outcome="failed"}[6h])) > 5
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Refunds sent to {{ $labels.connector }} as conversion adjustments keep failing; the engine log for ad_conversions.adjusted has the platform's reason (often the conversion action doesn't allow adjustments, or the conversion was sent without an order id)."
+
       - alert: OutflareAdConversionsBehind
         # Conversions queued but not sent: the sender loop or its jobs are
         # not running, or a platform is unreachable.
@@ -984,13 +1008,16 @@ groups:
           summary: "Partner imports could not read the same kind from Tolt several times in 6 hours; check partner_import.kind_skipped events and the engine log ('tolt answer') for the status, content type and keys Tolt sent."
 
       - alert: OutflareReviewPagesNotRead
-        # Pages are read once a day; two days without a read means the
-        # hourly scheduler or the reviews.read jobs are stuck.
+        # Pages are read once a day and a failed read is tried again the
+        # same day; two days with no read ending, read or failed, on a page
+        # with a connected page reader means the hourly scheduler or the
+        # reviews.read jobs are stuck. Pages that keep failing are
+        # OutflareReviewPageReadsFailing and outflare_reviews_stuck_pages.
         expr: max by (platform) (outflare_reviews_oldest_read_seconds) > 48 * 3600
         for: 1h
         labels: { severity: warning }
         annotations:
-          summary: "A review page ({{ $labels.platform }}) hasn't been read for over two days; check the reviews.read jobs and the engine log for reviews.scheduler_failed."
+          summary: "No read of a review page ({{ $labels.platform }}) has ended, read or failed, for over two days; check the reviews.read jobs and the engine log for reviews.scheduler_failed."
 
       - alert: OutflareReviewPageReadsFailing
         # pending (a page still being read, picked up next round) is no failure.
@@ -1021,11 +1048,12 @@ groups:
         # A page that failed 3 reads in a row, retries included, with an
         # error Outflare has to fix: the site changed its page (the parser in
         # engine/internal/reviews/parse.go), the page is slower than the page
-        # reader allows, or the read couldn't be saved. A site that blocks
+        # reader allows, the page reader failed with a code Outflare doesn't
+        # sort yet (page_failed), or the read couldn't be saved. A site that blocks
         # the page reader (blocked) is the reader's to get past, not
         # Outflare's, and errors a workspace fixes itself (its key, quota, a
         # wrong address) show on its Reviews page instead; neither alerts.
-        expr: sum by (platform, code) (outflare_reviews_stuck_pages{code=~"not_a_review_page|slow_page|save_failed|unknown"}) > 0
+        expr: sum by (platform, code) (outflare_reviews_stuck_pages{code=~"not_a_review_page|slow_page|page_failed|save_failed|unknown"}) > 0
         for: 30m
         labels: { severity: warning }
         annotations:
@@ -1049,7 +1077,7 @@ groups:
         # Outflare's, and errors a workspace fixes itself (its key, credits,
         # a wrong address) show on its Social page instead; neither alerts.
         # Each missed day is a gap in follower growth.
-        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"slow_page|no_follower_count|save_failed|unknown"}) > 0
+        expr: sum by (channel, code) (outflare_social_stuck_accounts{code=~"slow_page|page_failed|no_follower_count|save_failed|unknown"}) > 0
         for: 30m
         labels: { severity: warning }
         annotations:
@@ -1298,13 +1326,13 @@ groups:
           summary: "Review invitation batches are failing repeatedly. Inspect reviews.dispatch jobs and email configuration."
 
       - alert: OutflareCoverageChecksOverdue
-        expr: max(outflare_jobs_oldest_due_seconds{kind=~"coverage[.](check|review|extract)"}) > 900
+        expr: max(outflare_jobs_oldest_due_seconds{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan)"}) > 900
         for: 15m
         labels: { severity: warning }
         annotations:
           summary: "Coverage checks are over fifteen minutes late; inspect coverage.check workers and scheduler errors."
       - alert: OutflareCoverageChecksFailing
-        expr: sum(increase(outflare_jobs_processed_total{kind=~"coverage[.](check|review|extract)",outcome="dead"}[30m])) > 0
+        expr: sum(increase(outflare_jobs_processed_total{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan)",outcome="dead"}[30m])) > 0
         for: 5m
         labels: { severity: warning }
         annotations:
@@ -1315,6 +1343,27 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Most Coverage pages are unreachable; inspect DNS, network access and page-reader results."
+
+      - alert: OutflarePresenceSearchesFailing
+        expr: sum(increase(outflare_coverage_search_runs_total{outcome=~"connector_(invalid|unavailable)"}[1h])) > 5 and sum(increase(outflare_coverage_search_runs_total{outcome=~"connector_(invalid|unavailable)"}[1h])) > sum(increase(outflare_coverage_search_runs_total{outcome="done"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Presence web searches are failing more often than they work; inspect coverage.search logs and the search results connectors."
+
+      - alert: OutflarePresenceCompetitorScansFailing
+        expr: sum(increase(outflare_coverage_competitor_scans_total{outcome=~"connector_(invalid|unavailable)|provider_error|internal"}[1h])) > 5 and sum(increase(outflare_coverage_competitor_scans_total{outcome=~"connector_(invalid|unavailable)|provider_error|internal"}[1h])) > sum(increase(outflare_coverage_competitor_scans_total{outcome="done"}[1h]))
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Competitor presence scans are failing more often than they work; inspect coverage.competitor_scan logs and the search results and SEO connectors."
+
+      - alert: OutflareCompetitorSuggestionsFailing
+        expr: sum(increase(outflare_seo_competitor_suggestions_total{outcome="error"}[6h])) > 5 and sum(increase(outflare_seo_competitor_suggestions_total{outcome="error"}[6h])) > sum(increase(outflare_seo_competitor_suggestions_total{outcome="ok"}[6h]))
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "The daily look for new competitors fails more often than it works; inspect seo.sync logs (suggest) and the SEO connectors."
 
       - alert: OutflareCoverageReviewsFailing
         expr: sum(increase(outflare_coverage_reviews_total{status="review_failed"}[1h])) > 5
@@ -1337,3 +1386,16 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Personal CRM Google capture jobs are over fifteen minutes late; check worker capacity and database access."
+
+      - alert: OutflareFunnelsTimingOut
+        expr: sum(increase(outflare_insights_runs_total{outcome="timeout"}[30m])) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Insight queries (funnels, trends, retention, shared dashboards, alert checks or the digest) are hitting their 30-second limit; check the Insights panels for run time by kind and the database's load."
+      - alert: OutflareFunnelsFailing
+        expr: sum(increase(outflare_insights_runs_total{outcome="error"}[30m])) > 3
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Insight queries are failing with errors; the Insights panels say which kind, and the server log has each error by request id."

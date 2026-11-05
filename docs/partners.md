@@ -15,7 +15,7 @@ Outflare never holds or sends money. It works out what each partner is owed, and
 ## How it fits together
 
 - **A partner is a customer record.** It has no separate partner list: the same person can be a customer, a lead and a partner. Joining a program adds `partner.joined` to their timeline.
-- **A program** holds the rules: landing page, credit rule, reward rules, hold, minimum payout and groups. Each brand can run its own programs, and one person can be a partner in several of them.
+- **A program** holds the rules: landing page, credit rule, reward rules, hold, minimum payout and groups. Every program belongs to one brand, and its partners, links, conversions, rewards and payouts are that brand's alone. One person can be a partner in several programs. The API is under `/v1/brands/{brand}/` (`partner-programs`, `partners`, `partner-conversions`, `partner-referrals`, `partner-rewards`, `partner-payouts`, `partner-leads`, `partner-conversion-log`); the workspace routes are deprecated and act across the brands the caller sees.
 - **Each partner** has:
   - a ref code (`ana`)
   - a tracking campaign on the `affiliates` channel, named after the code so their real name never shows in `utm_campaign`
@@ -23,7 +23,7 @@ Outflare never holds or sends money. It works out what each partner is owed, and
   - a campaign link
   - any number of promo codes
 - **The referred customer** is a customer record too. Referral, conversion and reward rows point at records, so merging two people moves them. A person's record page (People), and their panel in Visitors and Leads, show the programs they are a partner in and who referred them; through the API, filter `GET .../partners` and `GET .../partner-referrals` by `record_id`.
-- **People and tokens limited to some brands** work in their brands' programs: their partners, rewards and payouts. They can read programs shared by every brand but not change them, and another brand's programs answer 404. Reporting conversions (`partners.conversions`) needs a token for every brand, because a conversion can credit any program's partner.
+- **People and tokens limited to some brands** work in their brands' programs: their partners, rewards and payouts. Another brand's programs answer 404. Each brand's backend reports its conversions to `POST /v1/brands/{brand}/partner-conversions`, which credits only that brand's partners, even when a ref code, click id or promo code belongs to another brand's partner. The deprecated workspace route needs a token for every brand, because it can credit any program's partner.
 
 ## Links
 
@@ -36,23 +36,37 @@ Outflare never holds or sends money. It works out what each partner is owed, and
 
 The program's settings (Install) give the website snippet ready to paste as an HTML tag, a Next.js `<Script>` or a Google Tag Manager Custom HTML tag, with your site key filled in, and the calls your backend makes (API, Node.js or the postback URL).
 
-Either way, the visit is stored with its `ref` ([website tracking](website-tracking.md)). A visit only *proposes* a partner. The partner is credited (*bound*) only when your backend reports a sign-up or sale for that person.
+Either way, the visit is stored with its `ref` ([website tracking](website-tracking.md)). A visit only *proposes* a partner. The partner is credited (*bound*) only when that person signs up or pays: from the events and transactions you already send, or a report to the partner conversions API.
 
-## Three ways to record a sign-up
+## From your events and transactions
 
-Pick the one your site allows. Each credits the partner whose link the visitor came from, by their own visits with a `ref`, under the program's window and credit rule.
+A brand's programs read the data your product already sends Outflare, so they need no partner-specific code:
+
+| What happens | What you already send | What the program does |
+| --- | --- | --- |
+| Someone signs up | `identify` with their `userId` and the browser's `anonymousId` (`outflare.anonymousId()`), or a `Signed Up` track event ([customer events](customers.md)) | A `signup` conversion (source `events`): the partner whose link they came from is credited, or the one the event's `ref` or `promo_code` property names. |
+| They do something a reward rule pays for | A track event with that name, such as `Trial Started` (a rule whose trigger is `trial_started`) | A `custom` conversion, once per event. |
+| They pay or get a refund | A payment or refund to the [transactions API](transactions.md), or an Order Completed event | A partner sale or refund, once per payment, when the program takes its sales from transactions (the default for a brand's program). |
+
+- **A sign-up is a person's first user id**: the first event that carries their `userId` (usually your sign-up's `identify`), or a `Signed Up` event. Signing in again is not a sign-up. An `identify` whose `created_at` trait is more than a day before the event is an existing user whose events just started arriving, and isn't taken as a sign-up.
+- **Once per customer.** A customer signs up once in a program, however many ways it is reported (an event, the API, an import), and a payment is credited once by its id.
+- **Order doesn't matter.** A payment that reaches Outflare before the sign-up that links the referral (up to an hour before it) is credited when the referral is made.
+- **A deleted transaction** (Recently deleted) takes its sale's reward back, as a full refund would. Restoring it doesn't credit it again: add the reward by hand if you need it.
+- **Only the brand's own programs.** Programs shared by every brand don't read events or transactions, so one brand's customers never credit another's partners. Browser events never credit anyone: anyone can send them.
+
+## Other ways to record a sign-up
 
 - **No code: the website snippet and your billing.** Put the snippet on your site and connect Stripe (Settings → "Also take sales and refunds from connected Stripe"). Sales come from Stripe; there is no lead until the first payment.
 - **A little code: `outflare.signup(email)`.** Call it in the browser once your sign-up form succeeds, on a page with the snippet. The lead shows at once (a `signup` conversion with source `browser`). Anyone can call it with any address, so it pays no sign-up reward unless the program turns on **Pay for sign-ups the browser reports** (`pay_browser_signups`, off by default). Money still comes only from your server or billing.
-- **Developers: your backend.** Report the sign-up with the conversion API or the postback URL (below), with the partner's `ref`, a `promo_code`, the visitor's `anonymous_id` (`outflare.anonymousId()` from the page), or just the customer's email or id when they visited with a ref.
+- **The partner conversions API.** Report the sign-up with the conversion API or the postback URL (below), with the partner's `ref`, a `promo_code`, the visitor's `anonymous_id` (`outflare.anonymousId()` from the page), or just the customer's email or id when they visited with a ref.
 
 Doing both is fine: the browser makes the lead, and your server's report of the same customer finds the same referral.
 
 ## Reporting conversions from your backend
 
-Your backend reports every `signup` (or `lead`), `sale`, `refund` and `custom` conversion, server to server. Outflare credits the ones a partner referred. It is the same job your backend does with Tolt's API today. [Moving from Tolt](partners-tolt-migration.md) maps each Tolt call to this one.
+If your product already sends events and transactions, you don't need this API (above). It is a shortcut for a backend that reports to Tolt's API today: it reports every `signup` (or `lead`), `sale`, `refund` and `custom` conversion, server to server, and Outflare credits the ones a partner referred. [Moving from Tolt](partners-tolt-migration.md) maps each Tolt call to this one.
 
-Every conversion you report also becomes a customer event on the person's timeline, whether a partner referred them or not, so [attribution](attribution.md) credits it with no setup. The event names are the ones attribution reads by default:
+What you report is stored as the same events and transactions your product would send, with the same ids, so a customer reported both ways counts once. A `sale` or `refund` with an `external_id` and an amount, for a customer of a brand, is saved as that brand's [transaction](transactions.md) with `source_id` set to your `external_id`: sending the same payment to the transactions API too is that one transaction, with one `payment.succeeded`. Every other conversion becomes a customer event on the person's timeline, whether a partner referred them or not, so [attribution](attribution.md) credits it with no setup. The event names are the ones attribution reads by default:
 
 | `type` | Customer event |
 | --- | --- |
@@ -61,7 +75,7 @@ Every conversion you report also becomes a customer event on the person's timeli
 | `refund` | `payment.refunded`, with the sale's `payment_id` |
 | `custom` | your `event_name` (such as `trial_started`), with `amount_minor` when you send a value |
 
-Send payments one way: if a billing connection such as Stripe also records `payment.succeeded` for the same payments, attribution counts them twice.
+A billing connection such as Stripe records its own payments: a sale also reported here is matched to the same payment when it has the same id, or the same person, amount and currency within 15 minutes.
 
 ```sh
 curl -X POST https://outflare.example.com/v1/workspaces/acme/partner-conversions \
@@ -95,6 +109,8 @@ Report every sale and let Outflare pick out the referred ones.
 ### Sales from your billing account
 
 Turn on `sales_source: "stripe"` on a program (Settings, "Also take sales and refunds from connected Stripe") and the payments and refunds Outflare reads from your connected Stripe account become partner sales too, beside what your backend reports. A referral already bound to the customer, or their own visits, decide the partner, as for the API. They count once: the payment's own customer event comes from the Stripe sync.
+
+A brand's program takes the payments and refunds you already send Outflare for that brand: Settings, "Also take this brand's payments and refunds sent to Outflare" (`sales_source: "transactions"`, on by default for a new brand program). Every payment the [transactions API](transactions.md) or an Order Completed event counts (each once, however it arrives) becomes a partner sale for that brand's programs, and every refund (with `refund_of`) takes its reward back. Your backend then needs no partner call for sales at all ("From your events and transactions" above). Programs shared by every brand don't take them, so one brand's sales never credit another's partners.
 
 Promo codes can be made in Stripe for you: add one with a `coupon` (the id of a coupon you already have) and Outflare makes the promotion code with your own key. The key needs Write access to Promotion codes. Without a coupon, make the code in your billing system yourself; Outflare only matches it.
 
@@ -309,7 +325,7 @@ Bring a Tolt program in with your own Tolt API key (Connectors → Tolt): partne
 
 ## Missions
 
-A mission can aim at referred revenue: `goal_metric` `revenue_referred`, in whole US dollars. It counts credited partner sales less refunds, in the partner programs of the mission's brand (every program when it has no brand), from when the mission started. Imported history never counts ([attribution](attribution.md)).
+A mission can aim at referred revenue: `goal_metric` `revenue_referred`, in whole US dollars. It counts credited partner sales less refunds, in the partner programs of the mission's brand, from when the mission started. Imported history never counts ([attribution](attribution.md)).
 
 ## Webhooks
 
@@ -327,9 +343,11 @@ Operators get all three. Viewers get `partners.read`.
 
 ## API and MCP
 
+Every call below is under the brand, `/v1/brands/{brand}/`; the same calls under `/v1/workspaces/{ws}/` are deprecated. The MCP tools take the brand.
+
 | Call | Scope |
 | --- | --- |
-| `GET`/`POST /v1/workspaces/{ws}/partner-programs`, `GET`/`PATCH .../partner-programs/{id}` | read / manage |
+| `GET`/`POST /v1/brands/{brand}/partner-programs`, `GET`/`PATCH .../partner-programs/{id}` | read / manage |
 | `GET .../partner-programs/{id}/stats`: the program's totals across all its partners (partners by status, clicks, customers, sales, rewards on hold, due and paid) | read |
 | `PUT .../partner-programs/{id}/rules`, `POST .../groups`, `PATCH`/`DELETE .../groups/{group}`, `POST .../groups/{group}/partners`, `POST .../postback` | manage |
 | `GET`/`POST .../partners`, `GET`/`PATCH .../partners/{id}`, `POST`/`DELETE .../promo-codes`, `POST .../fees`, `POST .../adjustments` | read / manage |
@@ -423,7 +441,7 @@ Set `terms_url` on the program and `portal.terms_revision` when that document ch
 
 ### Automatic hosted sign-in
 
-A brand backend can call `POST /v1/workspaces/{ws}/partner-programs/{id}/portal-sessions` with `customer_id` and optional `email`/`name`, using `partners.conversions`. Only send an email after verifying it in your own app; otherwise omit it. Identify the customer from the authenticated server session, never an arbitrary browser-supplied user ID. Redirect that customer to `sign_in_url`. The URL carries a single-use code in its fragment and expires after 60 seconds; the portal exchanges it for an HttpOnly cookie and clears the fragment. Never cache the URL, log it, share it, or put an administrative key in the browser.
+A brand backend can call `POST /v1/brands/{brand}/partner-programs/{id}/portal-sessions` with `customer_id` and optional `email`/`name`, using `partners.conversions`. Only send an email after verifying it in your own app; otherwise omit it. Identify the customer from the authenticated server session, never an arbitrary browser-supplied user ID. Redirect that customer to `sign_in_url`. The URL carries a single-use code in its fragment and expires after 60 seconds; the portal exchanges it for an HttpOnly cookie and clears the fragment. Never cache the URL, log it, share it, or put an administrative key in the browser.
 
 This uses the same customer identity and membership as embedded widget sessions and conversion tracking. Send the stable customer ID on every call so email changes do not create a new partner. Admission rules and the program terms still apply. This is a backend handoff; it does not configure an external OpenID Connect identity provider.
 

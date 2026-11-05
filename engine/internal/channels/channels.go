@@ -130,8 +130,8 @@ func (c Channel) Check(connected []playbooks.ConnectorInfo, have map[string]bool
 // inbox, site_tracking, seo_site, mailboxes, leads) come from playbooks.
 var dataQueries = map[string]string{
 	"ad_accounts":     `SELECT EXISTS (SELECT 1 FROM ad_accounts WHERE workspace_id = $1 AND status = 'active')`,
-	"social_accounts": `SELECT EXISTS (SELECT 1 FROM social_accounts WHERE workspace_id = $1)`,
-	"review_pages":    `SELECT EXISTS (SELECT 1 FROM review_pages WHERE workspace_id = $1)`,
+	"social_accounts": `SELECT EXISTS (SELECT 1 FROM social_accounts WHERE workspace_id = $1 AND competitor_id IS NULL)`,
+	"review_pages":    `SELECT EXISTS (SELECT 1 FROM review_pages WHERE workspace_id = $1 AND competitor_id IS NULL)`,
 	"brand_context":   `SELECT EXISTS (SELECT 1 FROM brand_context WHERE workspace_id = $1 AND (about <> '' OR audience <> ''))`,
 	"brand_accounts":  `SELECT EXISTS (SELECT 1 FROM brand_accounts WHERE workspace_id = $1 AND status <> 'archived')`,
 }
@@ -240,7 +240,7 @@ var channels = []Channel{
 		Tests:     []string{"TestEmailBroadcasts", "TestEmailBroadcastHoldout"},
 	},
 	{
-		ID: "website_conversion", Name: "Website conversion", Summary: "A/B tests, experiments and feature flags on the brand's own site through its website script: versions of a page, who sees what, and results with lift, for a person to ship.",
+		ID: "website_conversion", Name: "Website conversion", Summary: "A/B tests, experiments and feature flags on the brand's own site through its website script: versions of a page built with no code, who sees what, and results with lift, for a person to start and ship.",
 		Goals: []string{"activation", "revenue"},
 		Needs: playbooks.Needs{
 			Data: []playbooks.DataNeed{data("site_tracking", "The website script installed on the brand's site")},
@@ -248,7 +248,8 @@ var channels = []Channel{
 		Actions: []Action{
 			{Kind: "ab_test.create", OperationID: "createABTest", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 2},
 			{Kind: "ab_test.update", OperationID: "updateABTest", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 10},
-			{Kind: "ab_test.start", OperationID: "startABTest", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 2},
+			{Kind: "ab_test.version", OperationID: "setABTestVersion", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 20},
+			{Kind: "ab_test.start", OperationID: "startABTest", Category: CategoryAlwaysPerson, Undoable: true},
 			{Kind: "ab_test.end", OperationID: "endABTest", Category: CategoryRoutine, Undoable: false, DefaultDailyLimit: 2},
 			{Kind: "ab_test.ship", OperationID: "shipABTest", Category: CategoryAlwaysPerson, Undoable: false},
 			{Kind: "experiment.create", OperationID: "createExperiment", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 2},
@@ -257,14 +258,14 @@ var channels = []Channel{
 			{Kind: "flag.create", OperationID: "createFlag", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 5},
 			{Kind: "flag.update", OperationID: "updateFlag", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 10},
 		},
-		Reads:     []string{"listABTests", "getABTest", "getABTestResults", "listABTestLearnings", "listExperiments", "getExperiment", "listFlags", "getFlag"},
+		Reads:     []string{"listABTests", "getABTest", "getABTestResults", "getABTestVersion", "getABTestPreviews", "getABTestChecklist", "listABTestLearnings", "listExperiments", "getExperiment", "listFlags", "getFlag"},
 		Measures:  []Measure{{Metric: "ab_test_lift", Source: "each test's results against its control", OperationID: "getABTestResults"}, {Metric: "experiment_results", Source: "SEO experiments' page results", OperationID: "getExperiment"}},
 		Playbooks: []string{"test-your-best-page"},
 		Docs:      "docs/ab-tests.md",
 		Dashboard: "Feature flags",
 		Metrics:   []string{"outflare_flags_requests_total", "outflare_flags_request_seconds"},
 		Alerts:    []string{"OutflareFlagsFailing", "OutflareFlagsSlow"},
-		Tests:     []string{"TestABTests", "TestABTestsChecklistAndShip", "TestExperiments", "TestFlags"},
+		Tests:     []string{"TestABTests", "TestABTestsChecklistAndShip", "TestABTestVersionsForAgents", "TestExperiments", "TestFlags"},
 	},
 	{
 		ID: "competitor_watch", Name: "Competitor watch", Summary: "Competitors tracked on the brand's own SEO and web search connections: their pages, gaps and dead links, and the news about them, fed into what the agent tries next.",
@@ -341,15 +342,16 @@ var channels = []Channel{
 			{Kind: "campaign.resume", OperationID: "resumeAdCampaign", Category: CategorySpend, Undoable: true, DefaultDailyLimit: 10},
 			{Kind: "campaign.budget", OperationID: "updateAdCampaign", Category: CategorySpend, Undoable: true, DefaultDailyLimit: 10},
 			{Kind: "campaigns.pause_all", OperationID: "pauseAllAds", Category: CategorySpend, Undoable: true, DefaultDailyLimit: 1},
+			{Kind: "ad.draft", OperationID: "createAdDraft", Category: CategoryRoutine, Undoable: true, DefaultDailyLimit: 10},
 		},
-		Reads:     []string{"getAdsSummary", "listAdCampaigns", "listAdItems", "listAdChanges", "getAttributionAds", "listAdConversionActions"},
+		Reads:     []string{"getAdsSummary", "listAdCampaigns", "listAdItems", "listAdChanges", "getAttributionAds", "listAdConversionActions", "listAdDrafts"},
 		Measures:  []Measure{{Metric: "ad_conversions_30d", Source: "the ad platforms' reported conversions", OperationID: "getAdsSummary"}, {Metric: "ad_attributed_signups", Source: "attribution", OperationID: "getAttributionAds"}},
-		Playbooks: []string{"move-ad-budget-to-what-works"},
+		Playbooks: []string{"move-ad-budget-to-what-works", "write-new-ads"},
 		Docs:      "docs/paid-media.md",
 		Dashboard: "Paid media (managing campaigns)",
-		Metrics:   []string{"outflare_ads_changes_total", "outflare_ads_item_days_synced_total"},
-		Alerts:    []string{"OutflareAdChangesFailing", "OutflareAdChangesUnverified"},
-		Tests:     []string{"TestAdCampaignChanges", "TestAdCampaignChangesByAnAgent", "TestAdsGrantsGetDefaultSpendCaps", "TestAdsSyncAndReports"},
+		Metrics:   []string{"outflare_ads_changes_total", "outflare_ads_item_days_synced_total", "outflare_ads_draft_steps_total"},
+		Alerts:    []string{"OutflareAdChangesFailing", "OutflareAdChangesUnverified", "OutflareAdDraftsFailing"},
+		Tests:     []string{"TestAdDrafts", "TestAdCampaignChanges", "TestAdCampaignChangesByAnAgent", "TestAdsGrantsGetDefaultSpendCaps", "TestAdsSyncAndReports"},
 	},
 	{
 		ID: "content", Name: "Content", Summary: "Posts and pages written in Outflare for the brand's website, published through its own CMS as drafts or live.",

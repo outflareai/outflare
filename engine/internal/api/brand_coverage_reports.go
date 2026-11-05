@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jackc/pgx/v5"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +53,105 @@ func (s *Server) coverageReport(ctx context.Context, a *access, from, to, filter
  'growth',coalesce((SELECT jsonb_agg(x) FROM (SELECT month::date::text AS month,(SELECT count(*) FROM p WHERE created_at>=greatest(m.month,$3::date) AND created_at<least(m.month+interval '1 month',$4::date+interval '1 day')) AS discovered,(SELECT count(*) FROM p WHERE first_verified_at>=greatest(m.month,$3::date) AND first_verified_at<least(m.month+interval '1 month',$4::date+interval '1 day')) AS first_verified,(SELECT count(*) FROM p WHERE baseline AND first_verified_at>=greatest(m.month,$3::date) AND first_verified_at<least(m.month+interval '1 month',$4::date+interval '1 day')) AS baseline_verified,(SELECT count(*) FROM p WHERE published_on>=greatest(m.month,$3::date) AND published_on<least(m.month+interval '1 month',$4::date+interval '1 day')) AS published,(SELECT count(*) FROM transitions t WHERE t.created_at>=greatest(m.month,$3::date) AND t.created_at<least(m.month+interval '1 month',$4::date+interval '1 day') AND t.health='gone' AND t.previous='up') AS lost,(SELECT count(*) FROM transitions t JOIN p ON p.id=t.placement_id WHERE t.created_at>=greatest(m.month,$3::date) AND t.created_at<least(m.month+interval '1 month',$4::date+interval '1 day') AND t.health='up' AND t.previous='gone' AND p.first_verified_at<t.created_at) AS regained,(SELECT count(*) FROM p WHERE (SELECT c.health FROM conclusive c WHERE c.placement_id=p.id AND c.created_at<m.month+interval '1 month' ORDER BY c.created_at DESC LIMIT 1)='up') AS last_confirmed_available FROM months m ORDER BY month)x),'[]'),
  'retention',coalesce((SELECT jsonb_agg(x) FROM (SELECT date_trunc('month',v.first_verified_at)::date::text AS cohort,d.days,count(*) AS eligible,count(*) FILTER(WHERE evidence.health='up') AS available,count(*) FILTER(WHERE evidence.health='gone') AS gone,count(*) FILTER(WHERE evidence.health IS NULL) AS unverified FROM p v CROSS JOIN (VALUES (30),(90),(180)) d(days) LEFT JOIN LATERAL (SELECT c.health FROM conclusive c WHERE c.placement_id=v.id AND c.created_at BETWEEN v.first_verified_at+make_interval(days=>d.days-7) AND v.first_verified_at+make_interval(days=>d.days+7) ORDER BY c.created_at DESC LIMIT 1) evidence ON true WHERE v.first_verified_at+make_interval(days=>d.days+7)<=$4::date+interval '1 day' GROUP BY date_trunc('month',v.first_verified_at),d.days ORDER BY cohort,d.days)x),'[]'),
  'reported_delivery',coalesce((SELECT jsonb_agg(x) FROM (SELECT d.source,sum(d.impressions) AS impressions,sum(d.clicks) AS clicks,sum(d.sessions) AS sessions,sum(d.leads) AS leads,sum(d.conversions) AS conversions,count(*) AS reports FROM coverage_delivery_reports d JOIN p ON p.id=d.placement_id WHERE d.workspace_id=$1 AND d.brand_id=$2 AND d.starts_on>=$3::date AND d.ends_on<=$4::date GROUP BY d.source)x),'[]'),'measurement_note','Discovery, publication and first verification are separate. Historical imports are not new publication. Missing referral and ad delivery data are unknown. Reported delivery counts are source claims, not deduplicated or causal attribution; overlapping reports can overlap. Historical segments use current placement metadata. Last-confirmed inventory is evidence as of each month, not continuous verification.')`, args...).Scan(&data)
-	return data, err
+	if err != nil {
+		return nil, err
+	}
+	return s.coverageMomentum(ctx, a, where, args, data)
+}
+
+// coverageMomentum adds the CMO view to a report: are placements growing,
+// and how fast (the last 28 days against the 28 before, weighted by links
+// and traction), twelve weeks of new against lost, and the brand's share of
+// voice against each tracked competitor.
+func (s *Server) coverageMomentum(ctx context.Context, a *access, where string, args []any, data json.RawMessage) (json.RawMessage, error) {
+	var extra struct {
+		Momentum     map[string]any   `json:"momentum"`
+		ShareOfVoice []map[string]any `json:"share_of_voice"`
+	}
+	var raw json.RawMessage
+	err := s.pool.QueryRow(ctx, `WITH p AS (SELECT * FROM coverage_placements WHERE `+where+`),
+ lost AS (SELECT o.placement_id,o.created_at FROM (SELECT placement_id,created_at,evidence->>'effective_health' AS health,lag(evidence->>'effective_health') OVER (PARTITION BY placement_id ORDER BY created_at) AS previous FROM coverage_observations WHERE workspace_id=$1 AND brand_id=$2 AND source='page_read' AND placement_id IN (SELECT id FROM p) AND evidence->>'effective_health' IN ('up','gone')) o WHERE o.health='gone' AND o.previous='up'),
+ w AS (SELECT n, $4::date+interval '1 day'-make_interval(days=>28*(n+1)) AS starts, $4::date+interval '1 day'-make_interval(days=>28*n) AS ends FROM (VALUES (0),(1)) v(n) WHERE $3::text IS NOT NULL AND $5::text IS NOT NULL),
+ win AS (SELECT w.n,
+   (SELECT count(*) FROM p WHERE first_verified_at>=w.starts AND first_verified_at<w.ends) AS gained,
+   (SELECT count(*) FROM lost l WHERE l.created_at>=w.starts AND l.created_at<w.ends) AS lost,
+   (SELECT coalesce(sum(1+CASE WHEN link_status='present' THEN 1 ELSE 0 END+CASE traction WHEN 'steady' THEN 1 WHEN 'taking_off' THEN 2 ELSE 0 END),0) FROM p WHERE first_verified_at>=w.starts AND first_verified_at<w.ends) AS weight_gained,
+   (SELECT coalesce(sum(1+CASE WHEN p.link_status='present' THEN 1 ELSE 0 END+CASE p.traction WHEN 'steady' THEN 1 WHEN 'taking_off' THEN 2 ELSE 0 END),0) FROM lost l JOIN p ON p.id=l.placement_id WHERE l.created_at>=w.starts AND l.created_at<w.ends) AS weight_lost
+   FROM w),
+ weeks AS (SELECT n, $4::date+interval '1 day'-make_interval(days=>7*(n+1)) AS starts, $4::date+interval '1 day'-make_interval(days=>7*n) AS ends FROM generate_series(0,11) n)
+ SELECT jsonb_build_object(
+  'momentum',(SELECT jsonb_build_object('days',28,
+    'gained',max(gained) FILTER(WHERE n=0),'lost',max(lost) FILTER(WHERE n=0),'net',max(gained-lost) FILTER(WHERE n=0),
+    'weighted_net',max(weight_gained-weight_lost) FILTER(WHERE n=0),
+    'previous_gained',max(gained) FILTER(WHERE n=1),'previous_lost',max(lost) FILTER(WHERE n=1),'previous_net',max(gained-lost) FILTER(WHERE n=1),
+    'previous_weighted_net',max(weight_gained-weight_lost) FILTER(WHERE n=1),
+    'taking_off',(SELECT count(*) FROM p WHERE health='up' AND traction='taking_off'),
+    'quiet',(SELECT count(*) FROM p WHERE health='up' AND traction='quiet')) FROM win),
+  'weeks',coalesce((SELECT jsonb_agg(jsonb_build_object('week',starts::date::text,'gained',(SELECT count(*) FROM p WHERE first_verified_at>=weeks.starts AND first_verified_at<weeks.ends),'lost',(SELECT count(*) FROM lost l WHERE l.created_at>=weeks.starts AND l.created_at<weeks.ends)) ORDER BY n DESC) FROM weeks),'[]'),
+  'share_of_voice',(SELECT jsonb_agg(x ORDER BY x.placements DESC) FROM (
+    SELECT 'brand' AS who,NULL::uuid AS competitor_id,NULL::text AS name,(SELECT count(*) FROM p WHERE health='up') AS placements
+    UNION ALL
+    SELECT 'competitor',c.id,coalesce(nullif(c.name,''),c.host),(SELECT count(*) FROM coverage_competitor_placements cc WHERE cc.workspace_id=$1 AND cc.brand_id=$2 AND cc.competitor_id=c.id AND cc.gone_at IS NULL)
+    FROM seo_competitors c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status='tracked') x))`, args...).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	var parts struct {
+		Momentum     map[string]any   `json:"momentum"`
+		Weeks        []map[string]any `json:"weeks"`
+		ShareOfVoice []map[string]any `json:"share_of_voice"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, err
+	}
+	extra.Momentum = parts.Momentum
+	extra.Momentum["trend"] = momentumTrend(num(parts.Momentum["weighted_net"]), num(parts.Momentum["previous_weighted_net"]))
+	extra.Momentum["weeks"] = parts.Weeks
+	extra.ShareOfVoice = parts.ShareOfVoice
+	if extra.ShareOfVoice == nil {
+		extra.ShareOfVoice = []map[string]any{}
+	}
+	var total float64
+	for _, r := range extra.ShareOfVoice {
+		total += num(r["placements"])
+	}
+	for _, r := range extra.ShareOfVoice {
+		share := 0.0
+		if total > 0 {
+			share = math.Round(num(r["placements"])/total*1000) / 10
+		}
+		r["share"] = share
+	}
+	var report map[string]any
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil, err
+	}
+	report["momentum"] = extra.Momentum
+	report["share_of_voice"] = extra.ShareOfVoice
+	return json.Marshal(report)
+}
+
+// momentumTrend names the direction and pace: shrinking below zero, flat
+// at zero, then growing, accelerating or slowing against the period before.
+func momentumTrend(now, before float64) string {
+	switch {
+	case now < 0:
+		return "shrinking"
+	case now == 0:
+		return "flat"
+	case before <= 0:
+		return "growing"
+	case now/before >= 1.25:
+		return "accelerating"
+	case now/before >= 0.8:
+		return "growing"
+	}
+	return "slowing"
+}
+
+func num(v any) float64 {
+	f, _ := v.(float64)
+	return f
 }
 func (s *Server) coverageListSnapshots(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())

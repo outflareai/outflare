@@ -1,7 +1,7 @@
 import { PickBrand } from "@/components/pick-brand";
 import { pickedBrandId } from "@/lib/brand";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AnalyticsMetrics, AnalyticsOverviewSite, AnalyticsPoint, AnalyticsReport, AnalyticsReportName, AnalyticsSitePlan, AnalyticsSource, AnalyticsSummaryItem, AnalyticsSync, SEOSource } from "@outflare/sdk";
+import type { AnalyticsMetrics, AnalyticsOverviewSite, AnalyticsPoint, AnalyticsReport, AnalyticsReportName, AnalyticsSitePlan, AnalyticsSource, AnalyticsSummaryItem, AnalyticsSync, SEOSource, SiteAnalyticsReport } from "@outflare/sdk";
 import { useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, Empty, ErrorText, field, Loading, PageHeader, Stat, Stats, toast } from "../ui";
@@ -148,8 +148,9 @@ function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; 
       <div className="space-y-6">
         {header}
         {snippet}
+        {tracking && <OwnTracking days={days} setDays={setDays} go={go} />}
         <Empty
-          title="Connect the analytics you already use"
+          title={tracking ? "Compare with the analytics you already use" : "Connect the analytics you already use"}
           action={canManage ? <Button onClick={() => go("connectors", "analytics")}>Choose a tool</Button> : <p className="text-[13px] text-muted-foreground">Ask a workspace admin to connect one.</p>}
         >
           Google Analytics, Search Console, Bing Webmaster Tools, PostHog, Plausible, Fathom, Matomo, Umami, Mixpanel, Amplitude, Cloudflare, Simple Analytics, Clarity or Vercel. Google tools connect with a sign-in; the rest take an API key. For rankings and backlinks, add DataForSEO or Ahrefs from the SEO connectors. Nothing else in Outflare needs this.
@@ -161,6 +162,7 @@ function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; 
     <div className="space-y-6">
       {header}
       {snippet}
+      {tracking && <OwnTracking days={days} setDays={setDays} go={go} />}
       <Websites ws={ws} days={days} sources={sources} seo={seo} selected={source?.id} onPick={pick} canManage={canManage} />
       {seo.length > 0 && (
         <p className="text-[13px] text-muted-foreground">
@@ -171,6 +173,96 @@ function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; 
     </div>
   );
 }
+
+// The brand's traffic as Outflare's own tag counted it, live, today
+// included: there whether or not an analytics tool is connected.
+function OwnTracking({ days, setDays, go }: { days: number; setDays: (d: number) => void; go: (t: Tab, item?: string) => void }) {
+  const [data, setData] = useState<SiteAnalyticsReport | null>(null);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<OwnBreakdown>("pages");
+  // website narrows everything to one host; sites are the hosts seen with
+  // no filter, so the picker keeps every choice while one is picked.
+  const [website, setWebsite] = useState("");
+  const [sites, setSites] = useState<string[]>([]);
+  useEffect(() => {
+    setData(null);
+    api.GET("/v1/brands/{brand}/analytics/tracking", { params: { path: { brand: pickedBrandId() }, query: { ...range(days), ...(website ? { website } : {}) } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setError("");
+      setData(data);
+      if (!website) setSites(data.websites.map((w) => w.key).filter((k) => k !== "(none)"));
+    });
+  }, [days, website]);
+  const rows = data?.[tab] ?? [];
+  const shown = ownBreakdowns.find((b) => b.id === tab)!;
+  return (
+    <section className="space-y-3" aria-label="Outflare tracking">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-[13px] font-medium">Outflare tracking <span className="font-normal text-muted-foreground">· every visit your tag records, live</span></h2>
+        <span className="flex-1" />
+        {(sites.length > 1 || website) && (
+          <select aria-label="Website" className={field} value={website} onChange={(e) => setWebsite(e.target.value)}>
+            <option value="">All websites</option>
+            {sites.map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+        )}
+        <select aria-label="Period" className={field} value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {periods.map((p) => <option key={p.days} value={p.days}>{p.label}</option>)}
+        </select>
+        <Button variant="ghost" onClick={() => go("visitors")}>See who's visiting</Button>
+      </div>
+      <ErrorText>{error}</ErrorText>
+      {!data && !error && <Loading />}
+      {data && (
+        <>
+          <Traffic report={{ ...data, report: "traffic", site: "", integration_id: "", connector: "outflare", cached: false, fetched_at: "", rows: undefined }} />
+          <Tabs value={tab} onValueChange={(v) => setTab(v as OwnBreakdown)}>
+            <TabsList className="h-8">
+              {ownBreakdowns.map((b) => <TabsTrigger key={b.id} value={b.id} className="px-2.5 text-[12px]">{b.label}</TabsTrigger>)}
+            </TabsList>
+          </Tabs>
+          <DataTable
+            data={rows}
+            rowId={(r: Row & { website?: string }) => `${r.website ?? ""}${r.key}`}
+            columnsMenu={false}
+            empty={`No ${shown.label.toLowerCase()} in this period.`}
+            columns={[
+              ...(tab === "pages"
+                ? [{ id: "website", header: "Website", accessorFn: (r: Row & { website?: string }) => r.website ?? "", cell: ({ row: { original: r } }: { row: { original: Row & { website?: string } } }) => (
+                    <button type="button" className="text-muted-foreground hover:text-foreground hover:underline" title={`Only ${r.website}`} onClick={() => r.website && r.website !== "(none)" && setWebsite(r.website)}>{r.website === "(none)" ? "Unknown" : r.website}</button>
+                  ) }]
+                : []),
+              { id: "key", header: shown.key, accessorFn: (r: Row) => r.key, cell: ({ row: { original: r } }: { row: { original: Row } }) => <span className="block max-w-[28rem] truncate font-medium" title={r.key}>{shown.show ? shown.show(r.key) : r.key}</span> },
+              ...metrics.filter((m) => rows.some((r) => r[m.key] !== undefined && r[m.key] !== null)).map((m) => ({
+                id: m.key,
+                header: m.label,
+                accessorFn: (r: Row) => r[m.key] ?? -1,
+                meta: { align: "right" as const, mono: true },
+                cell: ({ row: { original: r } }: { row: { original: Row } }) => show(r, m.key),
+              })),
+            ]}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+type OwnBreakdown = "pages" | "sources" | "websites" | "countries" | "devices";
+const regionNames = (() => {
+  try {
+    return new Intl.DisplayNames(undefined, { type: "region" });
+  } catch {
+    return null;
+  }
+})();
+const ownBreakdowns: { id: OwnBreakdown; label: string; key: string; show?: (k: string) => string }[] = [
+  { id: "pages", label: "Pages", key: "Page" },
+  { id: "sources", label: "Sources", key: "Source", show: (k) => (k === "(direct)" ? "Direct" : k.replaceAll("_", " ")) },
+  { id: "websites", label: "Websites", key: "Website" },
+  { id: "countries", label: "Countries", key: "Country", show: (k) => (k === "(none)" ? "Unknown" : regionNames?.of(k) ?? k) },
+  { id: "devices", label: "Devices", key: "Device", show: (k) => (k === "(none)" ? "Unknown" : k[0].toUpperCase() + k.slice(1)) },
+];
 
 const syncedAgo = (s?: AnalyticsSync) => (s?.last_ok_at ? `Synced ${ago(s.last_ok_at)}` : s?.last_run_at ? "Sync failed" : "Not synced yet");
 

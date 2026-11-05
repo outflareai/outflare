@@ -17,6 +17,10 @@ import (
 type Postgres struct {
 	Pool *pgxpool.Pool
 	Log  *slog.Logger
+	// PageReaders are the connector ids that read pages (review pages,
+	// public profiles), so a review page in a workspace without one
+	// connected is counted as waiting for a reader, not as unread.
+	PageReaders []string
 
 	mu      sync.Mutex
 	at      time.Time
@@ -96,11 +100,11 @@ var (
 	bulkOldest              = desc("bulk_edits", "oldest_pending_seconds", "How long the oldest queued or running bulk edit has waited since it was made. A large edit takes minutes; hours means it is stuck.")
 	journeysWaiting         = desc("journeys", "waiting_runs", "Journey runs on a wait_until step, waiting for an event, conditions or their timeout.")
 	journeysOverdue         = desc("journeys", "oldest_due_seconds", "How long past its time the most overdue run of an active journey is (a wait, a wait_until check or timeout, or a call that never came back). Runs move on within seconds of their time, so this stays near 0.")
-	reviewPages             = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed).", "platform", "state")
+	reviewPages             = desc("reviews", "pages", "Review pages being read, by platform and state (ok, failing: the last read failed, no_reader: the workspace has no page reader connected).", "platform", "state")
 	reviewStuck             = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
 	socialStuck             = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
 	syncStuck               = desc("sync", "stuck", "Scheduled reads (connections' syncs, SEO site reads, news searches, competitor looks) whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
-	reviewOldest            = desc("reviews", "oldest_read_seconds", "How long since the least recently read active review page was read (or added, if never read), by platform.", "platform")
+	reviewOldest            = desc("reviews", "oldest_read_seconds", "How long since a read of the least recently tried active review page ended, read or failed (or since it was added, if never tried), by platform; pages without a connected page reader are left out.", "platform")
 	socialScheduled         = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue           = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
 	scrapeErrors            = desc("metrics", "scrape_errors", "Queries that failed in the last database scrape.")
@@ -156,8 +160,8 @@ func (p *Postgres) query() []prometheus.Metric {
 		out = append(out, prometheus.MustNewConstMetric(d, t, v, labels...))
 	}
 	failed := 0
-	run := func(name, sql string, scan func(rowser) error) {
-		rows, err := p.Pool.Query(ctx, sql)
+	run := func(name, sql string, scan func(rowser) error, args ...any) {
+		rows, err := p.Pool.Query(ctx, sql, args...)
 		if err == nil {
 			err = scan(rows)
 			rows.Close()
@@ -480,10 +484,17 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		return nil
 	})
+	// A page is "tried" when a read last ended, read or failed; a page in a
+	// workspace with no connected page reader is no_reader (its page in the
+	// app says which connection to add) and left out of the oldest age,
+	// which says whether the scheduler and the reads are running.
 	run("review_pages", `
-		SELECT platform, CASE WHEN last_error IS NULL THEN 'ok' ELSE 'failing' END, count(*),
-			coalesce(max(extract(epoch FROM now() - coalesce(last_read_at, created_at))), 0)::float8
-		FROM review_pages WHERE status = 'active' GROUP BY 1, 2`, func(r rowser) error {
+		SELECT p.platform, CASE WHEN NOT r.connected THEN 'no_reader' WHEN p.last_error IS NULL THEN 'ok' ELSE 'failing' END, count(*),
+			coalesce(max(extract(epoch FROM now() - coalesce(greatest(p.last_read_at, p.last_failed_at), p.created_at))) FILTER (WHERE r.connected), 0)::float8
+		FROM review_pages p
+		CROSS JOIN LATERAL (SELECT cardinality($1::text[]) = 0 OR EXISTS (SELECT 1 FROM integrations i
+			WHERE i.workspace_id = p.workspace_id AND i.connector = ANY($1) AND i.status = 'connected') AS connected) r
+		WHERE p.status = 'active' GROUP BY 1, 2`, func(r rowser) error {
 		oldest := map[string]float64{}
 		for r.Next() {
 			var platform, state string
@@ -499,7 +510,7 @@ func (p *Postgres) query() []prometheus.Metric {
 			add(reviewOldest, gauge, age, platform)
 		}
 		return nil
-	})
+	}, append([]string{}, p.PageReaders...))
 	run("syncs_stuck", `
 		SELECT x.module, coalesce(x.code, 'unknown'), count(*) FROM (
 			SELECT 'analytics' AS module, a.last_error_code AS code, a.integration_id FROM analytics_syncs a WHERE a.failures >= 3

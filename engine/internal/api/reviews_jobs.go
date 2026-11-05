@@ -154,44 +154,70 @@ func (s *Server) reviewsReadJob(ctx context.Context, job jobs.Job) error {
 // syncReviewPages makes a review page of every review link in the brands'
 // links, and marks the pages no longer linked removed (their reviews stay).
 func (s *Server) syncReviewPages(ctx context.Context, ws string) error {
+	// The brands' own review pages, then their tracked competitors'
+	// confirmed ones; a page both claim is the brand's.
 	rows, err := s.pool.Query(ctx, `
-		SELECT b.id::text, l->>'kind', l->>'url' FROM brands b, jsonb_array_elements(b.links) l
+		SELECT b.id::text, '', l->>'kind', l->>'url', b.created_at FROM brands b, jsonb_array_elements(b.links) l
 		WHERE b.workspace_id = $1 AND b.status = 'active' AND l->>'kind' = ANY($2)
-		ORDER BY b.created_at`, ws, reviews.Platforms)
+		UNION ALL
+		SELECT c.brand_id::text, c.id::text, l->>'kind', l->>'url', c.created_at FROM seo_competitors c
+			JOIN brands b ON b.id = c.brand_id AND b.workspace_id = c.workspace_id, jsonb_array_elements(c.links) l
+		WHERE c.workspace_id = $1 AND c.status = 'tracked' AND b.status = 'active' AND l->>'kind' = ANY($2) AND l->>'state' = 'confirmed'
+		ORDER BY 2, 5`, ws, reviews.Platforms)
 	if err != nil {
 		return err
 	}
-	type link struct{ brand, kind, url string }
+	type link struct {
+		brand, competitor, kind, url string
+		at                           time.Time
+	}
 	var links []link
 	var l link
-	if _, err := pgx.ForEachRow(rows, []any{&l.brand, &l.kind, &l.url}, func() error { links = append(links, l); return nil }); err != nil {
+	if _, err := pgx.ForEachRow(rows, []any{&l.brand, &l.competitor, &l.kind, &l.url, &l.at}, func() error { links = append(links, l); return nil }); err != nil {
 		return err
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		keep := []string{}
+		seen := map[string]bool{}
 		for _, l := range links {
 			p, ok := reviews.ParsePage(l.url)
 			if !ok || p.Platform != l.kind {
 				continue
 			}
+			key := p.Platform + " " + truncate(p.ID, 500)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			var competitor *string
+			if l.competitor != "" {
+				competitor = &l.competitor
+			}
 			var id string
 			var inserted bool
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO review_pages (workspace_id, brand_id, platform, external_id, url)
-				VALUES ($1, $2, $3, $4, $5)
+				INSERT INTO review_pages (workspace_id, brand_id, platform, external_id, url, competitor_id)
+				VALUES ($1, $2, $3, $4, $5, $6)
 				ON CONFLICT (workspace_id, platform, external_id) DO UPDATE SET brand_id = EXCLUDED.brand_id, url = EXCLUDED.url,
+					competitor_id = EXCLUDED.competitor_id,
 					status = CASE WHEN review_pages.status = 'removed' THEN 'active' ELSE review_pages.status END,
 					next_read_at = CASE WHEN review_pages.status = 'removed' THEN now() ELSE review_pages.next_read_at END,
 					updated_at = now()
-				RETURNING id::text, xmax = 0`, ws, l.brand, p.Platform, truncate(p.ID, 500), truncate(p.URL, 2000)).Scan(&id, &inserted); err != nil {
+				RETURNING id::text, xmax = 0`, ws, l.brand, p.Platform, truncate(p.ID, 500), truncate(p.URL, 2000), competitor).Scan(&id, &inserted); err != nil {
 				return err
 			}
 			keep = append(keep, id)
 			if inserted {
+				data := map[string]any{"platform": p.Platform, "brand_id": l.brand}
+				if competitor != nil {
+					data["competitor_id"] = l.competitor
+				}
 				if err := audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "review_page.added", TargetType: "review_page",
-					TargetID: id, Data: map[string]any{"platform": p.Platform, "brand_id": l.brand}}); err != nil {
+					TargetID: id, Data: data}); err != nil {
 					return err
 				}
+			}
+			if inserted && competitor == nil {
 				// A review profile is an appearance of the brand: coverage
 				// keeps it as a live placement of the review site.
 				if _, _, err := coverage.Record(ctx, tx, ws, l.brand, coverage.Placement{URL: p.URL, Title: p.Platform + " reviews", Kind: "review", Arrangement: "earned",
@@ -237,6 +263,9 @@ type dueReviewPage struct {
 	jobAt         time.Time
 	// backfillTries is how many first reads stopped partway.
 	backfillTries int
+	// competitor is a tracked competitor's page: only its rating and
+	// review count are read, from its first page, never its reviews.
+	competitor bool
 }
 
 // A review page read that found no reviews or rating on a page that wasn't
@@ -255,14 +284,14 @@ func (s *Server) ReadReviewPages(ctx context.Context, ws, integrationID string) 
 		return err
 	}
 	rows, err := s.pool.Query(ctx, `SELECT id::text, platform, url, brand_id::text, backfilled_at IS NOT NULL, failures, render_js,
-		COALESCE(pending_job_id, ''), COALESCE(pending_job_url, ''), COALESCE(pending_job_at, 'epoch'), backfill_tries FROM review_pages
+		COALESCE(pending_job_id, ''), COALESCE(pending_job_url, ''), COALESCE(pending_job_at, 'epoch'), backfill_tries, competitor_id IS NOT NULL FROM review_pages
 		WHERE workspace_id = $1 AND status = 'active' AND next_read_at <= now() + interval '1 minute' ORDER BY next_read_at LIMIT 200`, ws)
 	if err != nil {
 		return err
 	}
 	var due []dueReviewPage
 	var d dueReviewPage
-	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled, &d.failures, &d.renderJS, &d.jobID, &d.jobURL, &d.jobAt, &d.backfillTries},
+	if _, err := pgx.ForEachRow(rows, []any{&d.id, &d.platform, &d.url, &d.brand, &d.backfilled, &d.failures, &d.renderJS, &d.jobID, &d.jobURL, &d.jobAt, &d.backfillTries, &d.competitor},
 		func() error { due = append(due, d); return nil }); err != nil {
 		return err
 	}
@@ -348,7 +377,19 @@ func (s *Server) fetchReviewURL(ctx context.Context, ws string, o *connectors.Op
 		return f.FetchPage(ctx, o.Client, o.Creds, url, render)
 	}
 	id := ""
-	if p.jobID != "" && p.jobURL == url && time.Since(p.jobAt) < reviewJobKeep {
+	if p.jobID != "" && p.jobURL == url {
+		if time.Since(p.jobAt) >= reviewJobKeep {
+			// The reader didn't finish the page within the hour: a slow
+			// page, kept on it and tried again later (retry.After), so a
+			// page the reader never finishes isn't resent every hour
+			// forever without a failure anyone can see.
+			p.jobID = ""
+			if _, err := s.pool.Exec(ctx, `UPDATE review_pages SET pending_job_id = NULL, pending_job_url = NULL, pending_job_at = NULL
+				WHERE workspace_id = $1 AND id = $2`, ws, p.id); err != nil {
+				return connectors.FetchedPage{}, &reviewBug{err}
+			}
+			return connectors.FetchedPage{}, &connectors.PageError{Code: "JOB_TOO_SLOW"}
+		}
 		id = p.jobID
 	}
 	if id == "" {
@@ -387,6 +428,17 @@ func (s *Server) fetchReviewURL(ctx context.Context, ws string, o *connectors.Op
 	}
 }
 
+// refusedPlainRead says whether a read without a browser was turned away
+// by the site: the page reader saw a bot check or a login wall, or the
+// site answered with a challenge instead of the reviews.
+func refusedPlainRead(platform string, res connectors.FetchedPage, err error) bool {
+	var pe *connectors.PageError
+	if errors.As(err, &pe) {
+		return pe.Blocked
+	}
+	return err == nil && res.Blocked() && !reviews.Parse(platform, res.HTML, time.Now()).Found()
+}
+
 // readReviewPage reads one review page and keeps what it found.
 func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Opened, f connectors.PageFetcher, p dueReviewPage) error {
 	start := time.Now()
@@ -398,7 +450,13 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 	if !p.backfilled {
 		limit = reviewBackfillPages
 	}
-	render := reviews.RenderJS(p.platform) || p.renderJS
+	if p.competitor {
+		limit = 1
+	}
+	ev.Props["competitor"] = p.competitor
+	// A page whose browser read is still running at the page reader is
+	// read in a browser again, so that job is picked up, not sent anew.
+	render := reviews.RenderJS(p.platform) || p.renderJS || p.jobID != ""
 	var first reviews.Read
 	var found []reviews.Review
 	tokens := 0.0
@@ -410,6 +468,7 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 		ev.Props["tokens"] = tokens
 		ev.Props["render_js"] = render
 		ev.Props["duration_ms"] = time.Since(start).Milliseconds()
+		ev.Outcome = readEventOutcome(code)
 		track.Fail(ctx, s.log, ev, code, err)
 		metrics.ReviewPageRead(p.platform, readOutcome(code), 0)
 		wait := retry.After(p.failures + 1)
@@ -430,7 +489,7 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 		}
 		return nil // the page's own failure, kept on it above
 	}
-	if p.backfilled {
+	if p.backfilled && !p.competitor {
 		rows, err := s.pool.Query(ctx, `SELECT external_id FROM reviews WHERE page_id = $1 ORDER BY posted_at DESC LIMIT 500`, p.id)
 		if err != nil {
 			return fail(readSaveFailed, err)
@@ -450,6 +509,15 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 	for n := 1; n <= limit; n++ {
 		res, err := s.fetchReviewURL(ctx, ws, o, f, &p, reviews.PageURL(page, n), render)
 		tokens += res.Cost.Units
+		if n == 1 && !render && refusedPlainRead(p.platform, res, err) {
+			// The site turned a plain read away (a bot check, a login
+			// wall, an empty challenge page): read it once more in a
+			// browser. If that works, the page is read that way from now
+			// on (render_js, kept when the read is saved).
+			render = true
+			res, err = s.fetchReviewURL(ctx, ws, o, f, &p, reviews.PageURL(page, n), render)
+			tokens += res.Cost.Units
+		}
 		var bug *reviewBug
 		switch {
 		case errors.As(err, &bug):
@@ -481,7 +549,7 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 				case res.Status == 404 || res.Status == 410:
 					return fail(readNotFound, fmt.Errorf("the review site says this page doesn't exist (HTTP %d): check the address in the brand's links", res.Status))
 				case res.Blocked():
-					return fail(readBlocked, errors.New("the review site showed a bot check instead of the page, also when read in a browser; Outflare tries again later"))
+					return fail(readBlocked, errors.New("the review site showed a bot check instead of the page, also when read in a browser; Outflare tries again later today"))
 				}
 				return fail(reviewNotAPage, errors.New("the page didn't show any reviews or a rating: the site may have changed how its page looks, or the address may be wrong"))
 			}
@@ -514,7 +582,13 @@ func (s *Server) readReviewPage(ctx context.Context, ws string, o *connectors.Op
 		}
 	}
 	p.renderJS = render
-	added, replied, err := s.saveReviews(ctx, ws, p, first, found, !p.backfilled, complete)
+	var added, replied int
+	var err error
+	if p.competitor {
+		err = s.saveCompetitorReviewHead(ctx, ws, p, first)
+	} else {
+		added, replied, err = s.saveReviews(ctx, ws, p, first, found, !p.backfilled, complete)
+	}
 	if err != nil {
 		return fail(readSaveFailed, err)
 	}
@@ -626,6 +700,27 @@ func (s *Server) saveReviews(ctx context.Context, ws string, p dueReviewPage, he
 		return syncReviewFixes(ctx, tx, ws, p.id)
 	})
 	return added, replied, err
+}
+
+// saveCompetitorReviewHead keeps a competitor's page's rating and review
+// count for today. Its reviews aren't kept, so nothing about them (fixes,
+// alerts, reply drafts, momentum) reaches the brand's own reviews.
+func (s *Server) saveCompetitorReviewHead(ctx context.Context, ws string, p dueReviewPage, head reviews.Read) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE review_pages SET score = COALESCE($3, score), review_count = COALESCE($4, review_count),
+			name = COALESCE(NULLIF($5, ''), name), last_read_at = now(), last_error = NULL, last_error_code = NULL, failures = 0,
+			render_js = $7, backfilled_at = COALESCE(backfilled_at, now()), next_read_at = now() + make_interval(secs => $6), updated_at = now()
+			WHERE workspace_id = $1 AND id = $2`, ws, p.id, head.Score, head.Count, truncate(head.Name, 300), reviewReadEvery.Seconds(), p.renderJS); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO review_page_days (workspace_id, page_id, brand_id, day, score, review_count)
+			VALUES ($1, $2, $3, (now() AT TIME ZONE 'UTC')::date, $4, $5)
+			ON CONFLICT (page_id, day) DO UPDATE SET score = COALESCE(EXCLUDED.score, review_page_days.score),
+				review_count = COALESCE(EXCLUDED.review_count, review_page_days.review_count), brand_id = EXCLUDED.brand_id, updated_at = now()`,
+			ws, p.id, p.brand, head.Score, head.Count)
+		return err
+	})
 }
 
 // pageRatings are a page's (or several pages') reviews' stars and dates.

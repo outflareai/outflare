@@ -16,12 +16,13 @@ var Erased = []Ref{
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"},
+	{"coverage_parties", "record_id"},
 	{"customer_events", "record_id"}, {"consents", "record_id"},
 	// The events as sent, kept in the event inbox.
 	{"event_inbox", "record_id"},
 	{"leads", "record_id"}, {"messages", "record_id"}, {"inbound_messages", "record_id"},
 	{"meetings", "record_id"}, {"emails", "record_id"}, {"email_broadcast_recipients", "record_id"},
-	{"journey_runs", "record_id"}, {"site_sessions", "record_id"}, {"site_visitors", "record_id"},
+	{"journey_runs", "record_id"}, {"site_sessions", "record_id"}, {"site_visitors", "record_id"}, {"visitor_links", "record_id"},
 	{"ad_conversion_sends", "record_id"}, {"attribution_conversions", "record_id"}, {"link_prospects", "record_id"},
 	{"rule_firings", "record_id"}, {"link_prospect_contacts", "record_id"}, {"link_pitches", "record_id"},
 	// Lists they were put on by hand, an import or a journey.

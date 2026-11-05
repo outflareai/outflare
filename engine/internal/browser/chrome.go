@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"os"
 	"os/exec"
 	"strings"
@@ -41,6 +42,9 @@ func FindChrome() string {
 	return ""
 }
 
+// startTimeout bounds starting a browser, as withDeadline bounds each step.
+const startTimeout = 30 * time.Second
+
 type chromeDriver struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -72,13 +76,40 @@ func (c Chrome) Open(ctx context.Context, b Boundary) (Driver, error) {
 	actx, acancel := chromedp.NewExecAllocator(context.WithoutCancel(ctx), opts...)
 	bctx, bcancel := chromedp.NewContext(actx)
 	d := &chromeDriver{ctx: bctx, cancel: func() { bcancel(); acancel() }, b: b}
-	// Every request is paused and checked before it leaves; one outside
-	// the boundary fails as if blocked by the client. The subscription is
-	// made before interception is turned on, so no request slips past.
-	paused := chromedp.Events(bctx, fetch.RequestPaused)
-	if _, err := chromedp.Run(bctx, chromedp.Evaluate[chromedp.Void]("1")); err != nil {
+	// The browser outlives ctx (it is the task's, until Close), so starting
+	// it can't take ctx's deadline as its own. It is bounded like every
+	// other step instead: by ctx and by startTimeout, so a browser that
+	// never comes up can't hold a worker.
+	type started struct {
+		paused iter.Seq2[fetch.EventRequestPaused, error]
+		err    error
+	}
+	done := make(chan started, 1)
+	go func() {
+		// Every request is paused and checked before it leaves; one
+		// outside the boundary fails as if blocked by the client. The
+		// subscription is made before interception is turned on, so no
+		// request slips past.
+		paused := chromedp.Events(bctx, fetch.RequestPaused)
+		_, err := chromedp.Run(bctx, chromedp.Evaluate[chromedp.Void]("1"))
+		done <- started{paused, err}
+	}()
+	timer := time.NewTimer(startTimeout)
+	defer timer.Stop()
+	var paused iter.Seq2[fetch.EventRequestPaused, error]
+	select {
+	case s := <-done:
+		if s.err != nil {
+			d.cancel()
+			return nil, fmt.Errorf("starting the browser: %w", s.err)
+		}
+		paused = s.paused
+	case <-ctx.Done():
 		d.cancel()
-		return nil, fmt.Errorf("starting the browser: %w", err)
+		return nil, fmt.Errorf("starting the browser: %w", ctx.Err())
+	case <-timer.C:
+		d.cancel()
+		return nil, fmt.Errorf("starting the browser: no answer within %s", startTimeout)
 	}
 	target := chromedp.FromContext(bctx).Target
 	go func() {
@@ -93,7 +124,11 @@ func (c Chrome) Open(ctx context.Context, b Boundary) (Driver, error) {
 			_, _ = cdp.Call(bctx, target, fetch.ContinueRequest, fetch.ContinueRequestParams{RequestID: ev.RequestID})
 		}
 	}()
-	if _, err := cdp.Call(bctx, target, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*", RequestStage: fetch.RequestStageRequest}}}); err != nil {
+	ectx, ecancel := context.WithTimeout(bctx, startTimeout)
+	defer ecancel()
+	stop := context.AfterFunc(ctx, ecancel)
+	defer stop()
+	if _, err := cdp.Call(ectx, target, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*", RequestStage: fetch.RequestStageRequest}}}); err != nil {
 		d.cancel()
 		return nil, fmt.Errorf("intercepting requests: %w", err)
 	}
@@ -104,7 +139,10 @@ func (d *chromeDriver) Navigate(ctx context.Context, url string) error {
 	if err := d.b.Check(ctx, url); err != nil {
 		return err
 	}
-	return d.do(ctx, chromedp.Navigate(url), chromedp.Sleep(300*time.Millisecond))
+	if err := d.do(ctx, chromedp.Navigate(url), chromedp.Sleep(300*time.Millisecond)); err != nil {
+		return fmt.Errorf("opening the page: %w", err)
+	}
+	return nil
 }
 
 // snapshotJS numbers the page's interactive elements (data-outflare-ref)

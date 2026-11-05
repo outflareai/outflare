@@ -247,7 +247,7 @@ func (s *Service) Make(ctx context.Context, ws string, p Payload) (*Digest, erro
 		err := tx.QueryRow(ctx, `
 			INSERT INTO digests (workspace_id, frequency, trigger, period_start, period_end, sections)
 			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (workspace_id, frequency, period_end) WHERE trigger = 'scheduled' DO NOTHING
+			ON CONFLICT DO NOTHING
 			RETURNING id::text, created_at`, ws, p.Frequency, p.Trigger, p.Start, p.End, raw).Scan(&d.ID, &d.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			d = nil // made already

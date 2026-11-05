@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/outflareai/outflare/engine/internal/adsuggest"
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/classify"
 	"github.com/outflareai/outflare/engine/internal/connectors"
@@ -67,6 +68,7 @@ type Host struct {
 	stages          *pipeline.Runner
 	inboundEmail    *inboundemail.Service
 	supportAuto     func(ctx context.Context, workspaceID string) bool
+	adAutoApprove   func(ctx context.Context, workspaceID, brandID, kind string) bool
 }
 
 type route struct {
@@ -129,6 +131,23 @@ func (h *Host) SetSupportAutoReplies(fn func(ctx context.Context, workspaceID st
 	h.supportAuto = fn
 	h.AddCapability("support_auto_replies")
 }
+
+// SetAdAutoApprove decides when an agent may approve a paid ads
+// suggestion without a person: fn gets the workspace, the suggestion's
+// brand and its kind, and says yes or no. The engine asks it only for
+// kinds that save money (AdSavingKinds: a lower budget, a pause, a
+// negative keyword) on a brand's own campaigns; anything that can spend
+// more always waits for a person. The agent's grants still apply, and the
+// change is measured and judged like one a person approved. Without it
+// only a person approves suggestions.
+func (h *Host) SetAdAutoApprove(fn func(ctx context.Context, workspaceID, brandID, kind string) bool) {
+	h.adAutoApprove = fn
+	h.AddCapability("ad_suggestions_auto")
+}
+
+// AdSavingKinds are the kinds of paid ads suggestion an agent may approve
+// on its own when SetAdAutoApprove allows it.
+func AdSavingKinds() []string { return adsuggest.SavingKinds() }
 
 // Metrics is the registry the engine's private metrics port serves
 // (OUTFLARE_METRICS_ADDR). An extension registers its own collectors here so

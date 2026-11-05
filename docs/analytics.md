@@ -10,6 +10,25 @@ tools and added up without calling the providers again (see
 analytics connected. SEO tools (DataForSEO, Ahrefs) are covered in
 [seo.md](seo.md); their figures join the same websites by domain.
 
+## Outflare's own tracking
+
+A brand with Outflare's [website tracking](website-tracking.md) tag on its
+site has numbers before it connects any tool: Website analytics shows the
+visitors, visits, page views, bounce rate and average visit length the tag
+counted, one point per day, with the top pages, sources, websites, countries
+and devices. It is computed live from the brand's visits, so today counts
+too, and it sits next to any connected tool so the two can be compared. Bots
+and crawlers are left out; a visitor who doesn't allow cookies counts once per
+visit.
+
+```sh
+# The last 28 days, or any range up to a year
+curl -H "Authorization: Bearer $OUTFLARE_TOKEN" \
+  "$OUTFLARE_URL/v1/brands/$BRAND/analytics/tracking?from=2026-10-01&to=2026-10-31"
+```
+
+Pick one website (`?website=app.example.com`) to narrow every number to it; each page says which website it is on. Agents use the MCP tool `get_site_analytics`.
+
 ## Providers
 
 | Provider | Connect with | Reports |

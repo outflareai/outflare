@@ -78,3 +78,67 @@ func TestPartnerBillingSource(t *testing.T) {
 		t.Fatalf("codes = %v", codes)
 	}
 }
+
+// A brand's program that takes its sales from transactions credits the
+// brand's payments sent to Outflare, once each however they arrive, with no
+// second payment.succeeded, and leaves another brand's payments alone.
+func TestPartnerSalesFromTransactions(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	ctx := context.Background()
+	var brand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&brand); err != nil {
+		t.Fatal(err)
+	}
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Trailcast"})["id"].(string)
+	prog := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Affiliates", "kind": "affiliate",
+		"landing_url": "https://northpeak.example/", "brand": brand, "sales_source": "transactions", "auto_approve": true, "hold_days": 0})
+	if prog["sales_source"] != "transactions" {
+		t.Fatalf("program = %v", prog)
+	}
+	gil := owner.must(201, "POST", base+"/partners", map[string]any{"program": "affiliates", "email": "gil@example.com", "code": "gil"})
+	owner.must(201, "POST", base+"/partner-conversions", map[string]any{"type": "signup", "customer_id": "u_ann", "email": "ann@acme.example", "ref": "gil"})
+	e.runCRMImports(t)
+
+	pay := func(b string, body map[string]any) {
+		t.Helper()
+		owner.must(201, "POST", "/v1/brands/"+b+"/transactions", body)
+	}
+	pay(brand, map[string]any{"kind": "payment", "amount_minor": 4900, "currency": "USD", "source_id": "ch_1", "user_id": "u_ann"})
+	// The same payment as an order event: one payment, one sale.
+	owner.must(200, "POST", base+"/customer-events", map[string]any{"type": "track", "userId": "u_ann", "event": "Order Completed",
+		"messageId": "order-ch_1", "properties": map[string]any{"order_id": "ch_1", "revenue": 49, "currency": "USD"}})
+	pay(brand, map[string]any{"kind": "refund", "amount_minor": 1000, "currency": "USD", "source_id": "re_1", "refund_of": "ch_1", "user_id": "u_ann"})
+	// Another brand's payment by the same person credits nothing here.
+	pay(other, map[string]any{"kind": "payment", "amount_minor": 9900, "currency": "USD", "source_id": "ch_9", "user_id": "u_ann"})
+
+	var sales, refunds int
+	for range 250 {
+		if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE type = 'sale'), count(*) FILTER (WHERE type = 'refund')
+			FROM partner_conversions WHERE workspace_id = $1 AND source = 'billing'`, ws).Scan(&sales, &refunds); err != nil {
+			t.Fatal(err)
+		}
+		if sales == 1 && refunds == 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // let a wrong second sale show up
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE type = 'sale'), count(*) FILTER (WHERE type = 'refund')
+		FROM partner_conversions WHERE workspace_id = $1 AND source = 'billing'`, ws).Scan(&sales, &refunds); err != nil {
+		t.Fatal(err)
+	}
+	if sales != 1 || refunds != 1 {
+		t.Fatalf("partner sales from transactions: %d sales, %d refunds", sales, refunds)
+	}
+	var events int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM customer_events WHERE workspace_id = $1 AND name = 'payment.succeeded'
+		AND properties->>'payment_id' = 'ch_1'`, ws).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("payment events for ch_1 = %d, %v", events, err)
+	}
+	st := owner.must(200, "GET", base+"/partners/"+gil["id"].(string), nil)["stats"].(map[string]any)
+	if st["customers"] != float64(1) || st["sales_cents"] != float64(3900) {
+		t.Fatalf("stats = %v", st)
+	}
+}

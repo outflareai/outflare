@@ -50,6 +50,11 @@ export const tabNames: Record<Tab, string> = {
   analytics: "Website analytics",
   links: "Campaign links",
   partners: "Partners",
+  funnels: "Funnels",
+  trends: "Trends",
+  retention: "Retention",
+  paths: "Paths",
+  dashboards: "Dashboards",
   channels: "Channels",
   tracking: "Website tracking",
   flags: "Feature flags",
@@ -64,10 +69,11 @@ export const tabNames: Record<Tab, string> = {
   keywords: "Keywords",
   "ai-visibility": "AI visibility",
   backlinks: "Backlinks",
+  competition: "Overview",
   competitors: "Competitors",
   "link-building": "Link building",
   "link-autopilot": "Link autopilot",
-  coverage: "Coverage",
+  coverage: "Presence",
   news: "News watch",
   stories: "Stories",
   "pr-autopilot": "PR autopilot",
@@ -166,7 +172,7 @@ export const tabBlurbs: Record<Tab, string> = {
   providers: "Amazon SES, Postmark or Resend, connected step by step, and the domains you send from.",
   "link-building": "Pages that could link to your site, from every way of earning links, followed until the link is live; one website pitched at a time.",
   "link-autopilot": "An aim of new live links a month and a budget; Outflare's agent runs the link building playbooks toward it, and you approve each change.",
-  coverage: "Publisher relationships, mentions, placements and ongoing maintenance.",
+  coverage: "Everywhere your brand appears: placements, mentions, links, videos, posts, reviews and listings, with publisher relationships and upkeep.",
   news: "Saved news searches on your own Geonode: follow a topic and who writes about it, and keep every article about your brand as its coverage.",
   stories: "Press releases with a source behind every number and only quotes your experts approved, checked before a person approves them.",
   "pr-autopilot": "Each morning, your experts' comments on today's news, drafted for them to approve and pitched to the journalists covering it.",
@@ -178,6 +184,11 @@ export const tabBlurbs: Record<Tab, string> = {
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
   flags: "Turn things on for some visitors, or split them between versions to see which works better.",
   "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
+  funnels: "Follow people from an ad visit to sign-up to payment, and see exactly where they drop off.",
+  trends: "Any number over time: visits, events, revenue, ad spend, or a formula between them such as cost per sign-up.",
+  dashboards: "Your saved funnels, trends and retention on one page, all over the same dates.",
+  retention: "Of the people who first did something in a week, how many came back the week after, and the one after that.",
+  paths: "Where people go step by step: the pages they view and the things they do, from a start or on the way to an end.",
   channels: "Visits, sign-ups, revenue and cost for every channel, credited the same way in every report.",
   links: "Tag every link with one channel, source and campaign, so each visit, lead and sale is credited to the right place.",
   partners: "Referral, affiliate and influencer programs: paid or voluntary tasks, partner websites and channels, referral links, rewards and payouts.",
@@ -190,6 +201,7 @@ export const tabBlurbs: Record<Tab, string> = {
   keywords: "What Google shows each page for, the keyword each page targets, where it ranks, pages that compete for one search, and how Google indexed them, from your Search Console.",
   backlinks: "Who links to your sites, what you gained and lost, and which links are worth getting back.",
   "ai-visibility": "How often AI assistants name each brand against its competitors, whether they get its facts right, and which AI crawlers read its sites.",
+  competition: "Who is dominating: your rank against every competitor you track, where you lead, where you trail, and whether you are catching up.",
   competitors: "Who you compete with in search, and the keywords and links they have that you don't.",
   visitors: "The companies and people on your website, scored for buying intent, from your site snippet and clicks on your emails.",
   ads: "Spend, clicks and platform-reported conversions from your own Google, Meta, Microsoft, Reddit, X and LinkedIn ad accounts, by brand.",
@@ -258,6 +270,11 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   experiments: "/docs/guides/seo-experiments/",
   links: "/docs/guides/campaign-links/",
   partners: "/docs/guides/partners/",
+  funnels: "/docs/guides/funnels/",
+  trends: "/docs/guides/trends/",
+  retention: "/docs/guides/retention/",
+  paths: "/docs/guides/paths/",
+  dashboards: "/docs/guides/dashboards/",
   channels: "/docs/guides/attribution/",
   tracking: "/docs/guides/website-tracking/",
   flags: "/docs/guides/feature-flags/",
@@ -267,6 +284,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   audits: "/docs/guides/site-audits/",
   fixes: "/docs/guides/site-audits/#the-fixes-list",
   backlinks: "/docs/guides/backlinks/",
+  competition: "/docs/guides/competitors/#who-is-dominating",
   competitors: "/docs/guides/competitors/",
   keywords: "/docs/guides/keywords/",
   reddit: "/docs/guides/reddit/",
@@ -289,16 +307,16 @@ export const tabDocs: Partial<Record<Tab, string>> = {
 };
 
 // "g" then this key opens the page.
-export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", missions: "a", outcomes: "c", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
+export const shortcuts: Partial<Record<Tab, string>> = { overview: "o", tools: "t", reports: "r", analytics: "w", inbox: "i", agents: "a", outcomes: "c", sequences: "s", people: "h", leads: "l", suppression: "x", mailboxes: "m", domains: "d", infrastructure: "f", warmup: "u", seo: "e", fixes: "k", connectors: "n" };
 
 export type NavGroup = { label?: string; tabs: Tab[] };
 
 // The sidebar: the everyday pages, then one item per module, then the
 // company hub. A module's pages show beneath it while you are in it. A new
 // tool joins its module; a new module is one more entry here, in this
-// order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Social, Reviews, Paid ads,
+// order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, Competitors, Social, Reviews, Paid ads,
 // Partners, Analytics, Playbooks. A module with no pages yet is left out.
-export const everyday: Tab[] = ["overview", "inbox", "missions", "agents"];
+export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
@@ -307,12 +325,15 @@ export const modules: Module[] = [
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
-  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "seo", "backlinks", "ai-visibility", "competitors"] },
+  { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "seo", "backlinks", "ai-visibility"] },
+  // Competitors: how the brand stands against everyone it competes with,
+  // across search, AI answers, Presence and, as they arrive, social and reviews.
+  { id: "competitors", label: "Competitors", icon: "competitors", tabs: ["competition", "competitors"] },
   { id: "social", label: "Social", icon: "social", tabs: ["social", "reddit", "reddit-campaigns"] },
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // Answering customers: the support inbox.
@@ -329,7 +350,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -873,7 +894,7 @@ function BrandSlash({ ws }: { ws: string }) {
 
 const uuidish = /^[0-9a-f]{8}-[0-9a-f]{4}-/i;
 
-export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen }: { ws?: Workspace; tab: Tab; item?: string; itemName?: string; onTab: (t: Tab) => void; onApi: () => void; apiOpen: boolean }) {
+export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent, agentOpen = false }: { ws?: Workspace; tab: Tab; item?: string; itemName?: string; onTab: (t: Tab) => void; onApi: () => void; apiOpen: boolean; onAgent?: () => void; agentOpen?: boolean }) {
   // Pages can name the open item (a mission's name) with an
   // "outflare:item-name" event; otherwise IDs are shown shortened.
   const [named, setNamed] = useState<{ id: string; name: string } | null>(null);
@@ -917,6 +938,12 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen }: { ws?
       </nav>
       <WhatsNewButton />
       <FeedbackButton page={tab} />
+      {onAgent && (
+        <button onClick={onAgent} aria-pressed={agentOpen} title="Talk to this brand's agent (Ctrl+J)" className={cn("inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[12px] font-medium shadow-xs transition-colors", agentOpen ? "border-brand/50 bg-brand/10 text-brand-strong dark:text-brand" : "text-muted-foreground hover:bg-accent hover:text-foreground")}>
+          <Icon name="sparkles" className="size-3.5" />
+          Agent
+        </button>
+      )}
       <button onClick={onApi} aria-pressed={apiOpen} className={cn("inline-flex h-7 items-center gap-1.5 rounded-md border px-2 font-mono text-[12px] shadow-xs transition-colors", apiOpen ? "border-brand/50 bg-brand/10 text-brand-strong dark:text-brand" : "text-muted-foreground hover:bg-accent hover:text-foreground")}>
         <Icon name="code" className="size-3.5" />
         API
@@ -968,12 +995,14 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "AI visibility for each cohort", path: "/v1/workspaces/{ws}/ai-visibility", params: base, mcp: "get_ai_visibility", ask: "How often do AI answers name us against our competitors, and what do they get wrong about us?", scope: "seo.read" };
     case "fixes":
       return { title: "Fix tickets", path: "/v1/workspaces/{ws}/fix-tickets", params: base, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
+    case "competition":
+      return { title: "Who is dominating", path: "/v1/brands/{brand}/competition", params: { brand: "{brand}" }, mcp: "get_competition", ask: "Who is dominating our market, where are we behind, and are we closing the gap?", scope: "seo.read" };
     case "competitors":
       return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "link-building":
       return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
     case "coverage":
-      return { title: "Brand coverage", path: "/v1/workspaces/{ws}/brands", params: base, scope: "coverage.read", ask: "Find this brand, then use its coverage API to review placements, outstanding work and publisher relationships." };
+      return { title: "Brand presence", path: "/v1/workspaces/{ws}/brands", params: base, scope: "coverage.read", ask: "Find this brand, then use its coverage API to review placements, outstanding work and publisher relationships." };
     case "news":
       return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
     case "pr-autopilot":
@@ -1006,10 +1035,20 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Feature flags", path: "/v1/workspaces/{ws}/flags", params: base, mcp: "list_flags", ask: "Set up a test of a new pricing headline on half of our visitors, shown only on the pricing page.", scope: "analytics.read" };
     case "ab-tests":
       return { title: "A/B tests", path: "/v1/workspaces/{ws}/ab-tests", params: base, mcp: "list_ab_tests", ask: "How is our pricing headline test doing, and is it safe to stop?", scope: "analytics.read" };
+    case "trends":
+      return { title: "Your saved trends", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_trend", ask: "Plot visits, sign-ups and ad spend by week for the last 90 days, and the cost per sign-up.", scope: "analytics.read" };
+    case "paths":
+      return { title: "Your saved paths questions", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_paths", ask: "Where do people go after landing on the pricing page, and where do most of them leave?", scope: "analytics.read" };
+    case "retention":
+      return { title: "Your saved retention questions", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_retention", ask: "Of the people who signed up each week this quarter, what share came back the week after, and which cohort sticks best?", scope: "analytics.read" };
+    case "dashboards":
+      return { title: "Your dashboards", path: "/v1/brands/{brand}/dashboards", params: { brand: "BRAND_ID" }, mcp: "list_dashboards", ask: "Make a Weekly numbers dashboard with the sign-up funnel and a cost-per-sign-up trend on it.", scope: "analytics.read" };
+    case "funnels":
+      return { title: "Your saved funnels", path: "/v1/brands/{brand}/insights", params: { brand: "BRAND_ID" }, mcp: "run_funnel", ask: "Of the people who visited from Google ads last month, how many signed up within 7 days and paid within 3 days of signing up, by campaign?", scope: "analytics.read" };
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/workspaces/{ws}/attribution/channels", params: base, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "partners":
-      return { title: "Partners and what they earned", path: "/v1/workspaces/{ws}/partners", params: base, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
+      return { title: "Partners and what they earned", path: "/v1/brands/{brand}/partners", params: base, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/workspaces/{ws}/tracking-campaigns", params: base, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":

@@ -33,10 +33,10 @@ type emailTopicView struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
-// topicBrand is a topic's brand. Topics are still the workspace's (every
-// brand's) in the schema; reading the brand this way lets a later
-// migration add email_topics.brand_id while this version serves.
-const topicBrand = `NULLIF(to_jsonb(t) ->> 'brand_id', '')::uuid`
+// topicBrand is a topic's brand: every topic is one brand's (migration
+// 0431), except one the version before it made, which has none and is
+// every brand's until the contract step.
+const topicBrand = `t.brand_id`
 
 const emailTopicSelect = `
 	SELECT t.id, ` + topicBrand + `::text, t.key, t.name, t.description, t.subscribed_by_default, t.visibility, t.status,
@@ -78,8 +78,8 @@ func (s *Server) listEmailTopics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The brand's topics (the route's, or the one ?brand= picks, else the
-	// first brand's) and the workspace's, which every brand uses until
-	// topics move to brands.
+	// first brand's). A topic with no brand is only in a workspace that
+	// has none.
 	sel, ok := s.dataBrand(w, r)
 	if !ok {
 		return
@@ -108,9 +108,11 @@ func (s *Server) listEmailTopics(w http.ResponseWriter, r *http.Request) {
 
 // findEmailTopic finds a topic by id or key.
 func (s *Server) findEmailTopic(w http.ResponseWriter, r *http.Request, ws, ref string) (*emailTopicView, bool) {
-	// The workspace's topics are every brand's; one of a brand's own only
-	// that brand's.
-	v, err := scanEmailTopic(s.pool.QueryRow(r.Context(), emailTopicSelect+` AND (t.id::text = $2 OR t.key = $2)`, ws, ref))
+	// A topic is its brand's: on a brand route only that brand's (or one
+	// with no brand, which the version before 0431 makes for every brand),
+	// and on the workspace route the first brand's before the others.
+	v, err := scanEmailTopic(s.pool.QueryRow(r.Context(), emailTopicSelect+` AND (t.id::text = $2 OR t.key = $2) AND ($3 = '' OR t.brand_id IS NULL OR t.brand_id = $3::uuid)
+		ORDER BY t.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, t.created_at LIMIT 1`, ws, ref, accessFrom(r.Context()).Brand))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && v.BrandID != nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email topic not found")
 		return nil, false
@@ -130,11 +132,12 @@ func topicID(ctx context.Context, q interface {
 	if ref == "" {
 		return nil, nil
 	}
-	// Another brand's own topic is not found; the workspace's are every
-	// brand's.
+	// Another brand's topic is not found: the brand's own, else (with no
+	// brand named) the first brand's.
 	var id, status string
 	err := q.QueryRow(ctx, `SELECT id, status FROM email_topics t WHERE workspace_id = $1 AND (id::text = $2 OR key = $2)
-		AND ($3::uuid IS NULL OR `+topicBrand+` IS NULL OR `+topicBrand+` = $3)`, ws, ref, brand).Scan(&id, &status)
+		AND ($3::uuid IS NULL OR `+topicBrand+` IS NULL OR `+topicBrand+` = $3)
+		ORDER BY `+topicBrand+` IS NOT DISTINCT FROM $3 DESC, `+topicBrand+` IS NOT DISTINCT FROM outflare_first_brand($1) DESC LIMIT 1`, ws, ref, brand).Scan(&id, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errInvalid("topic not found: " + truncate(ref, 63))
 	}
@@ -214,19 +217,28 @@ func (s *Server) createEmailTopic(w http.ResponseWriter, r *http.Request) {
 	byDefault := boolOr(f.SubscribedByDefault, true)
 	ctx := r.Context()
 	var id string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	brand, err := s.rowBrand(ctx, a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM email_topics WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM email_topics WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM NULLIF($2, '')::uuid`,
+			a.WorkspaceID, brand).Scan(&n); err != nil {
 			return err
 		}
 		if n >= 100 {
-			return errInvalid("a workspace can have at most 100 topics")
+			return errInvalid("a brand can have at most 100 topics")
 		}
+		// The topic is the brand's. Any unique rule it breaks (the key is
+		// taken in the brand, or until the contract step in the workspace)
+		// is a conflict.
 		err := tx.QueryRow(ctx, `
-			INSERT INTO email_topics (workspace_id, key, name, description, subscribed_by_default, visibility)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (workspace_id, key) DO NOTHING RETURNING id`,
-			a.WorkspaceID, *f.Key, strings.TrimSpace(*f.Name), strings.TrimSpace(deref(f.Description)), byDefault, visibility).Scan(&id)
+			INSERT INTO email_topics (workspace_id, key, name, description, subscribed_by_default, visibility, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid)
+			ON CONFLICT DO NOTHING RETURNING id`,
+			a.WorkspaceID, *f.Key, strings.TrimSpace(*f.Name), strings.TrimSpace(deref(f.Description)), byDefault, visibility, brand).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}

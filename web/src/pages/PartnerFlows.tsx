@@ -5,6 +5,7 @@
 // or competes with them, and other rates for some partners or products.
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { pickedBrandId } from "@/lib/brand";
 import type { Partner, PartnerProgram, PartnerRuleInput } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Empty, ErrorText, field, Input, Loading, Menu, ask, toast } from "../ui";
@@ -73,8 +74,8 @@ export function Flows({ ws, program, canManage, onChanged }: { ws: string; progr
   const [error, setError] = useState("");
   const load = useCallback(async () => {
     const [prog, list] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/partner-programs/{id}", { params: { path: { ws, id: program.id } } }),
-      api.GET("/v1/workspaces/{ws}/partners", { params: { path: { ws }, query: { program: program.id, limit: 500 } } }),
+      api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } }),
+      api.GET("/v1/brands/{brand}/partners", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: 500 } } }),
     ]);
     if (prog.error || !prog.data) return setError(errorMessage(prog.error));
     setP(prog.data);
@@ -86,7 +87,7 @@ export function Flows({ ws, program, canManage, onChanged }: { ws: string; progr
   if (!p) return error ? <ErrorText>{error}</ErrorText> : <Loading />;
 
   async function save(rules: PartnerRuleInput[], msg: string) {
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/partner-programs/{id}/rules", { params: { path: { ws, id: p!.id } }, body: { rules } });
+    const { data, error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/rules", { params: { path: { brand: pickedBrandId(), id: p!.id } }, body: { rules } });
     if (error || !data) return errorMessage(error);
     setP(data);
     toast(msg);

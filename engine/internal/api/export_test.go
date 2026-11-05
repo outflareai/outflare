@@ -67,3 +67,36 @@ func SetPrivacyExportLimit(n int64) func() {
 	old := exportLimit.Swap(n)
 	return func() { exportLimit.Store(old) }
 }
+
+// SetLinkJobWait shortens how the link finder waits for a page job; the
+// returned func restores it.
+func SetLinkJobWait(poll, wait time.Duration) func() {
+	p, w := linkJobPoll, linkJobWait
+	linkJobPoll, linkJobWait = poll, wait
+	return func() { linkJobPoll, linkJobWait = p, w }
+}
+
+// RefreshPresenceTraction runs the daily traction refresh for one brand,
+// as the discover job's last step does.
+func (s *Server) RefreshPresenceTraction(ctx context.Context, ws, brand string) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+	n, err := coverageRefreshTraction(ctx, tx, ws, brand)
+	if err != nil {
+		return 0, err
+	}
+	return n, tx.Commit(ctx)
+}
+
+// CompetitorNamesFor writes names as a brand's competitor list knows them.
+func (s *Server) CompetitorNamesFor(ctx context.Context, ws string, brand *string, names []string) ([]string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	return competitorNamesFor(ctx, tx, ws, brand, names)
+}

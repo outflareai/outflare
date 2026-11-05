@@ -131,7 +131,7 @@ func (s *Service) Step(ctx context.Context, ws, runID string, step int) error {
 	if err != nil {
 		return err
 	}
-	set, err := LoadSettings(ctx, s.Pool, ws)
+	set, err := LoadSettings(ctx, s.Pool, ws, deref(cohort.BrandID))
 	if err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func (s *Service) sample(ctx context.Context, ws, runID string, c Cohort, set Se
 	if p.target.WebSearch {
 		estimate = estimateWebSearchCents
 	}
-	spent, err := MonthSpent(ctx, s.Pool, ws, s.now())
+	spent, err := MonthSpent(ctx, s.Pool, ws, deref(c.BrandID), s.now())
 	if err != nil {
 		return "", err
 	}

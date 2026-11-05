@@ -220,6 +220,11 @@ func TestCheckChanges(t *testing.T) {
 		`{"changes": [{"selector": "h1.hero", "text": "Ship today"}, {"selector": ".old", "hide": true}, {"selector": "a.cta", "href": "/signup"},
 			{"selector": "img.hero", "src": "https://cdn.example.com/a.png", "alt": "A team"}]}`,
 		`{"changes": []}`,
+		`{"css": "h1 { color: #0f766e } @media (max-width: 600px) { h1 { font-size: 24px } }", "redirect": "/pricing-b", "changes": [
+			{"selector": "h1", "rich": "**Ship** today", "device": "mobile"}, {"selector": "h1", "style": {"font-size": "40px", "color": "rgb(15, 118, 110)", "font-family": "'Geist', sans-serif"}},
+			{"selector": "#faq", "move": "after", "target": "#pricing"},
+			{"selector": "#hero", "insert": {"where": "after", "kind": "button", "text": "Start free", "href": "/signup"}},
+			{"selector": "#hero", "insert": {"where": "before", "kind": "image", "src": "https://cdn.example.com/a.png", "alt": "A"}}]}`,
 	}
 	for _, p := range ok {
 		if msg := CheckChanges(json.RawMessage(p)); msg != "" {
@@ -235,6 +240,22 @@ func TestCheckChanges(t *testing.T) {
 		`{"changes": [{"selector": "a", "href": "//evil.example"}]}`,
 		`{"changes": [{"selector": "img", "src": "data:text/html,x"}]}`,
 		`{"changes": [{"selector": "h1 } body { color: red", "text": "x"}]}`,
+		`{"changes": [{"selector": "h1", "style": {"background-image": "none"}}]}`,
+		`{"changes": [{"selector": "h1", "style": {"background-color": "url(https://evil.example/x)"}}]}`,
+		`{"changes": [{"selector": "h1", "style": {"color": "red; background: blue"}}]}`,
+		`{"changes": [{"selector": "h1", "style": {}}]}`,
+		`{"changes": [{"selector": "#a", "move": "after"}]}`,
+		`{"changes": [{"selector": "#a", "move": "inside", "target": "#b"}]}`,
+		`{"changes": [{"selector": "#a", "insert": {"where": "after", "kind": "button", "text": "Go", "href": "javascript:x"}}]}`,
+		`{"changes": [{"selector": "#a", "insert": {"where": "over", "kind": "text", "text": "Go"}}]}`,
+		`{"changes": [{"selector": "#a", "insert": {"where": "after", "kind": "script", "text": "x"}}]}`,
+		`{"changes": [{"selector": "h1", "text": "x", "device": "watch"}]}`,
+		`{"css": "body { background: url(https://evil.example/x) }"}`,
+		`{"css": "@import 'https://evil.example/x.css';"}`,
+		`{"css": "</style><script>alert(1)</script>"}`,
+		`{"css": 42}`,
+		`{"redirect": "javascript:alert(1)"}`,
+		`{"redirect": "//evil.example"}`,
 	}
 	for _, p := range bad {
 		if CheckChanges(json.RawMessage(p)) == "" {

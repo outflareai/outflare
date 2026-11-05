@@ -24,13 +24,11 @@ import (
 
 func (s *Server) routesAttribution(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeAnalyticsManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/attribution/settings", s.inWorkspace(read, s.getAttributionSettings))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/attribution/settings", s.inWorkspace(manage, s.updateAttributionSettings))
-	// What a brand's visits and conversions were credited to is the
-	// brand's (brand_website.go). The settings, models and conversion
-	// definitions stay the workspace's, held by its first brand, until
-	// the attribution runner and ad send-back read them per brand.
+	// What a brand's visits and conversions were credited to, and its
+	// settings, are the brand's (brand_website.go).
 	for _, t := range s.twins("attribution") {
+		mux.HandleFunc("GET "+t.path+"/settings", t.on(s.inWorkspace)(read, s.getAttributionSettings))
+		mux.HandleFunc("PATCH "+t.path+"/settings", t.on(s.inWorkspace)(manage, s.updateAttributionSettings))
 		mux.HandleFunc("GET "+t.path+"/channels", t.on(s.inWorkspace)(read, s.attributionChannels))
 		mux.HandleFunc("GET "+t.path+"/campaigns", t.on(s.inWorkspace)(read, s.attributionCampaigns))
 		mux.HandleFunc("GET "+t.path+"/ads", t.on(s.inWorkspace)(read, s.attributionAds))
@@ -53,21 +51,43 @@ type attributionSettings struct {
 	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
-// loadAttributionSettings reads a workspace's settings, making the row
-// with the defaults on first use.
-func (s *Server) loadAttributionSettings(ctx context.Context, ws string) (attributionSettings, error) {
+// settingsBrand is the brand whose settings row $n is, for a brand id or
+// "" (the workspace's first brand; none when it has no brand). $1 is the
+// workspace.
+func settingsBrand(n string) string {
+	return `COALESCE(NULLIF(` + n + `, '')::uuid, outflare_first_brand($1))`
+}
+
+// loadAttributionSettings reads a brand's settings ("": the workspace's
+// first brand's), making the row with the defaults on first use.
+func (s *Server) loadAttributionSettings(ctx context.Context, ws, brand string) (attributionSettings, error) {
 	v := attributionSettings{Models: attribution.Models}
 	err := s.pool.QueryRow(ctx, `
-		WITH ins AS (INSERT INTO attribution_settings (workspace_id, lookback_days) VALUES ($1, $2) ON CONFLICT DO NOTHING
+		WITH ins AS (INSERT INTO attribution_settings (workspace_id, brand_id, lookback_days) VALUES ($1, `+settingsBrand("$3")+`, $2) ON CONFLICT DO NOTHING
 			RETURNING model, lookback_days, conversion_events, backfilled_at, updated_at)
 		SELECT * FROM ins
-		UNION ALL SELECT model, lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings WHERE workspace_id = $1
-		LIMIT 1`, ws, attribution.DefaultLookbackDays).Scan(&v.Model, &v.LookbackDays, &v.ConversionEvents, &v.BackfilledAt, &v.UpdatedAt)
+		UNION ALL (SELECT model, lookback_days, conversion_events, backfilled_at, updated_at FROM attribution_settings
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$3")+`)
+		LIMIT 1`, ws, attribution.DefaultLookbackDays, brand).Scan(&v.Model, &v.LookbackDays, &v.ConversionEvents, &v.BackfilledAt, &v.UpdatedAt)
 	return v, err
 }
 
+// recreditBrand has the attribution runner credit a brand's conversions
+// again ("": the workspace's first brand's), in tx.
+func recreditBrand(ctx context.Context, tx pgx.Tx, ws, brand string) error {
+	_, err := tx.Exec(ctx, `UPDATE attribution_settings SET backfilled_at = NULL, updated_at = now()
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$2"), ws, brand)
+	return err
+}
+
 func (s *Server) getAttributionSettings(w http.ResponseWriter, r *http.Request) {
-	v, err := s.loadAttributionSettings(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	a := accessFrom(r.Context())
+	brand, err := s.rowBrand(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	v, err := s.loadAttributionSettings(r.Context(), a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -87,10 +107,15 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 	if !decode(w, r, &in) {
 		return
 	}
+	brand, err := s.rowBrand(r.Context(), a)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	// The default is a built-in model or a workspace model's key, which
 	// follows its latest version (a pinned version is for one module).
 	if in.Model != nil {
-		if _, _, err := attribution.Resolve(r.Context(), s.pool, a.WorkspaceID, *in.Model); err != nil || strings.Contains(*in.Model, "@") {
+		if _, _, err := attribution.Resolve(r.Context(), s.pool, a.WorkspaceID, brand, *in.Model); err != nil || strings.Contains(*in.Model, "@") {
 			if err != nil && !errors.Is(err, attribution.ErrUnknownModel) && !errors.Is(err, attribution.ErrNotCredited) {
 				s.internal(w, r, err)
 				return
@@ -126,7 +151,7 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	ctx := r.Context()
-	before, err := s.loadAttributionSettings(ctx, a.WorkspaceID)
+	before, err := s.loadAttributionSettings(ctx, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -147,22 +172,24 @@ func (s *Server) updateAttributionSettings(w http.ResponseWriter, r *http.Reques
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE attribution_settings SET model = $2, lookback_days = $3, conversion_events = $4, updated_by = $5, updated_at = now(),
 				backfilled_at = CASE WHEN $6 THEN NULL ELSE backfilled_at END
-			WHERE workspace_id = $1`, a.WorkspaceID, after.Model, after.LookbackDays, after.ConversionEvents, nullIfEmpty(a.ActorID), recredit); err != nil {
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$7"), a.WorkspaceID, after.Model, after.LookbackDays, after.ConversionEvents,
+			nullIfEmpty(a.ActorID), recredit, brand); err != nil {
 			return err
 		}
 		if recredit {
-			if _, err := tx.Exec(ctx, `DELETE FROM attribution_conversions WHERE workspace_id = $1`, a.WorkspaceID); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM attribution_conversions WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM `+settingsBrand("$2"),
+				a.WorkspaceID, brand); err != nil {
 				return err
 			}
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "attribution.settings_updated", "workspace", a.WorkspaceID,
-			map[string]any{"model": after.Model, "lookback_days": after.LookbackDays, "events": len(after.ConversionEvents), "recredit": recredit})
+			map[string]any{"model": after.Model, "lookback_days": after.LookbackDays, "events": len(after.ConversionEvents), "recredit": recredit, "brand_id": nullIfEmpty(brand)})
 	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	v, err := s.loadAttributionSettings(ctx, a.WorkspaceID)
+	v, err := s.loadAttributionSettings(ctx, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -274,7 +301,7 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 	if !ok {
 		return attributionFilter{}, false
 	}
-	settings, err := s.loadAttributionSettings(r.Context(), accessFrom(r.Context()).WorkspaceID)
+	settings, err := s.loadAttributionSettings(r.Context(), accessFrom(r.Context()).WorkspaceID, oneBrand(brand))
 	if err != nil {
 		s.internal(w, r, err)
 		return attributionFilter{}, false
@@ -284,7 +311,13 @@ func (s *Server) attributionQuery(w http.ResponseWriter, r *http.Request) (attri
 	}
 	f := attributionFilter{from: from.Format(time.DateOnly), to: to.Format(time.DateOnly), ref: ref, settings: settings, brand: brand,
 		identified: match == "identified" || match == "signed_in", signedIn: match == "signed_in"}
-	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, ref)
+	model, version, err := attribution.Resolve(r.Context(), s.pool, accessFrom(r.Context()).WorkspaceID, groupBrand(brand), ref)
+	if errors.Is(err, attribution.ErrUnknownModel) && q.Get("model") == "" {
+		// The default model is another brand's own: this brand's reports
+		// fall back to the built-in default.
+		f.ref = attribution.LastNonDirect
+		model, version, err = attribution.LastNonDirect, nil, nil
+	}
 	switch {
 	case errors.Is(err, attribution.ErrUnknownModel):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "model is one of "+strings.Join(attribution.Models, ", ")+
@@ -765,7 +798,7 @@ func (s *Server) listAttributionConversions(w http.ResponseWriter, r *http.Reque
 		cr, err := s.pool.Query(ctx, `SELECT cr.event_id::text, cr.channel, cr.source, cr.campaign, cr.tracking_campaign_id::text, cr.session_id::text,
 				cr.touch_at, cr.tag_method, cr.weight::float8,
 				CASE WHEN ss.id IS NULL THEN 'none' WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id THEN 'record' ELSE 'browser' END,
-				CASE WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id AND sv.identified_by IN ('product', 'email_click') THEN sv.identified_by ELSE '' END
+				CASE WHEN ss.record_id IS NOT NULL AND ss.record_id = c.record_id AND sv.identified_by IN ('product', 'email_click', 'link') THEN sv.identified_by ELSE '' END
 			FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id
 			LEFT JOIN site_sessions ss ON ss.id = cr.session_id
 			LEFT JOIN site_visitors sv ON sv.workspace_id = ss.workspace_id AND sv.anonymous_id = ss.anonymous_id

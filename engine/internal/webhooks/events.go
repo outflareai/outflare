@@ -290,6 +290,7 @@ var Catalog = []Event{
 	{"coverage_record.approved", "coverage", "A Coverage record was approved. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
 	{"coverage_record.discovered", "coverage", "A Coverage record was discovered. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
 	{"coverage_record.confirmed", "coverage", "A Coverage record was confirmed. The target identifies its type and ID; GET it with the appropriate brand and finance scopes."},
+	{"coverage_record.deleted", "coverage", "A Coverage record was removed, such as a party taken off a placement. data names the placement, the CRM record and its role."},
 	// Workspace
 	{"workspace.updated", "workspace", "The workspace was renamed or its slug (its name in URLs) changed. data has the new and previous values."},
 	// Webhooks

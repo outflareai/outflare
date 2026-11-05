@@ -557,12 +557,15 @@ func actionHash(method, path, query string, body []byte) string {
 
 // alwaysPerson is why a change always waits for a person, whatever the
 // token's grants say, or "" when it doesn't.
-func (s *Server) alwaysPerson(ctx context.Context, ws string, r *http.Request) (string, error) {
+func (s *Server) alwaysPerson(ctx context.Context, ws string, r *http.Request, body []byte) (string, error) {
 	if heldForBuiltin(r.Method, r.URL.Path) {
 		return "changes to mailboxes, sending, sign-ins, tokens, webhooks, connections, suppressions and company context always need a person", nil
 	}
 	if missionDecision.MatchString(r.URL.Path) {
 		return "approving or resuming a mission, or deciding its held changes, always needs a person", nil
+	}
+	if why, err := s.testHold(ctx, ws, r, body); why != "" || err != nil {
+		return why, err
 	}
 	return s.fixHold(ctx, ws, r)
 }
@@ -599,7 +602,7 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 	}
 	path := actionPath(r)
 
-	why, err := s.alwaysPerson(ctx, a.WorkspaceID, r)
+	why, err := s.alwaysPerson(ctx, a.WorkspaceID, r, head)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -1365,6 +1368,9 @@ func (s *Server) decideActions(w http.ResponseWriter, r *http.Request) {
 
 var (
 	adCampaignChange = regexp.MustCompile(`^/v1/workspaces/[^/]+/ads/campaigns/([0-9a-fA-F-]{36})(/resume)?/?$`)
+	// adTargetingChange is a change to a campaign's bidding, audiences or
+	// countries: an agent's always waits for a person.
+	adTargetingChange = regexp.MustCompile(`^/v1/workspaces/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries)$`)
 	// adBudgetRaiseMax is the largest raise of a campaign's daily budget
 	// an agent makes on its own: a fifth. More always needs a person.
 	adBudgetRaiseMax = 0.2
@@ -1377,6 +1383,9 @@ var (
 // active campaigns would be budgeted a day after the change, in cents of
 // their accounts' currencies.
 func (s *Server) adsHold(ctx context.Context, ws string, r *http.Request, body map[string]any, g grantRule) (string, string, error) {
+	if r.Method == http.MethodPost && adTargetingChange.MatchString(strings.TrimSuffix(r.URL.Path, "/")) {
+		return ruleAlwaysPerson, "changing how a campaign bids, its audiences or its countries can change what it spends and whom it reaches, so a person always approves it", nil
+	}
 	m := adCampaignChange.FindStringSubmatch(strings.TrimSuffix(r.URL.Path, "/"))
 	if m == nil {
 		return "", "", nil

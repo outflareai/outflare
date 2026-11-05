@@ -80,7 +80,7 @@ func coverageFilterSQL(raw string, res coverageResource, args *[]any) (string, e
 			if !validUUID(rule.Value) {
 				return "", errInvalid("filter needs a valid record ID")
 			}
-		case "money", "number", "hours":
+		case "money", "number", "hours", "count":
 			cast = "numeric"
 			if value, err := strconv.ParseFloat(rule.Value, 64); err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
 				return "", errInvalid("filter needs a number")

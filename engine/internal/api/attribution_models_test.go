@@ -99,7 +99,7 @@ func TestAttributionCustomModels(t *testing.T) {
 	}
 
 	// An affiliate program pins version 1.
-	if _, err := attribution.Pin(ctx, e.pool, ws, "paid-first", "partners", "program-1"); err != nil {
+	if _, err := attribution.Pin(ctx, e.pool, ws, "", "paid-first", "partners", "program-1"); err != nil {
 		t.Fatal(err)
 	}
 	// Paid ads only count for 7 days now: version 2 credits email.

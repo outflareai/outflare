@@ -15,7 +15,7 @@ Facts in a body come from the brand's context and the knowledge base ([knowledge
 
 ## Delivering to your own site
 
-Outflare doesn't need access to a site's code or CMS. A brand adds a webhook endpoint for `content.*` events (Settings, Webhooks, or `POST /v1/workspaces/{ws}/webhooks`). When a person approves an item, the `content.approved` webhook sends that endpoint the whole item. The receiver can be the site's own code, an automation tool (Zapier, Make, n8n), a GitHub Action that opens a pull request, or a coding agent, and it puts the page in place under the site's own review. Then it reports the live address back with `POST /v1/brands/{brand}/content/{id}/delivered` (MCP: `deliver_content`, scope `content.manage`). The item becomes `published` at that address, and Outflare starts measuring it.
+Outflare doesn't need access to a site's code or CMS. A brand adds a webhook endpoint for `content.*` events (Settings, Webhooks, or `POST /v1/workspaces/{ws}/webhooks`). When a person approves an item, the `content.approved` webhook sends that endpoint the whole item. The receiver can be the site's own code, an automation tool (Zapier, Make, n8n), or a coding agent, and it puts the page in place under the site's own review. Then it reports the live address back with `POST /v1/brands/{brand}/content/{id}/delivered` (MCP: `deliver_content`, scope `content.manage`). The item becomes `published` at that address, and Outflare starts measuring it.
 
 The webhook's `data` holds:
 
@@ -31,6 +31,8 @@ The webhook's `data` holds:
 | `media` | Images, each with a `url`, `role` (featured, inline, social), `alt`, `caption`, size, `filename` and `credit`. Copy them onto the site's own storage. |
 | `brief` | `goal`, `opportunity` (why the page exists), `measure`, `check_before_live` (facts a person should confirm), `overlaps` (pages competing for the same search, and what to do) and `redirects`. |
 | `review`, `callback` | Who approved it and when, and the path and scope to report the live address to. |
+
+A site whose pages live in a GitHub repository can use the Outflare content GitHub Action instead ([`integrations/github-action/content`](../integrations/github-action/content/README.md)). It runs in the site owner's own repository with their own Outflare token (`content.read` and `content.manage`), so Outflare never holds access to the repository. Each run lists the brand's approved items, writes each as a Markdown file with front matter (`outflare_id` and `outflare_revision` included) on its own branch, `outflare/content-<id>`, and opens a pull request with the brief, the links to add from other pages and the images. Approving the item again updates that pull request; a closed one isn't reopened for the same revision. Once the file is on the base branch at the approved revision, the next run reports the item live at its address on the site (`site-url` and `url`).
 
 In the web app, the **Content** page (under SEO) lists a brand's posts and pages. A person can approve one there, copy it as Markdown (with front matter) or HTML, download it as a `.md` file to put in place by hand, and mark it live at its address.
 

@@ -47,6 +47,14 @@ const (
 // How long one step may read for. Tests make it small.
 var partnerImportStep = 60 * time.Second
 
+// partnerImportOutage is how long a step waits before its next attempt
+// when the platform was down or rate limited (attempt is the one that
+// failed): longer than the queue's usual backoff, so an outage of up to
+// about half an hour doesn't use up the import's attempts.
+var partnerImportOutage = func(attempt int) time.Duration {
+	return []time.Duration{time.Minute, 3 * time.Minute, 8 * time.Minute, 20 * time.Minute}[min(max(attempt, 1), 4)-1]
+}
+
 type partnerImportView struct {
 	ID            string               `json:"id"`
 	ProgramID     string               `json:"program_id"`
@@ -156,10 +164,10 @@ func scanPartnerImport(row pgx.Row) (partnerImportView, error) {
 
 func (s *Server) routesPartnerImports(mux *http.ServeMux) {
 	read, manage := auth.ScopePartnersRead, auth.ScopePartnersManage
-	mux.HandleFunc("POST /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inBrand(manage, s.startPartnerImport))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports", s.inBrand(read, s.listPartnerImports))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/imports/{import}", s.inBrand(read, s.getPartnerImport))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/partner-programs/{id}/import-sources", s.inBrand(manage, s.listPartnerImportSources))
+	s.twinRoute(mux, "POST", "partner-programs/{id}/imports", s.inBrand, manage, s.startPartnerImport)
+	s.twinRoute(mux, "GET", "partner-programs/{id}/imports", s.inBrand, read, s.listPartnerImports)
+	s.twinRoute(mux, "GET", "partner-programs/{id}/imports/{import}", s.inBrand, read, s.getPartnerImport)
+	s.twinRoute(mux, "GET", "partner-programs/{id}/import-sources", s.inBrand, manage, s.listPartnerImportSources)
 }
 
 // partnerImportIntegration finds the connected partner platform: the one
@@ -365,7 +373,13 @@ func (s *Server) partnerImportJob(ctx context.Context, job jobs.Job) error {
 	if err := json.Unmarshal(job.Payload, &p); err != nil || job.WorkspaceID == nil || !validUUID(p.ImportID) {
 		return fmt.Errorf("%w: bad payload", jobs.ErrPermanent)
 	}
-	return s.runPartnerImportStep(ctx, *job.WorkspaceID, p.ImportID, job.Attempt >= job.MaxAttempts)
+	err := s.runPartnerImportStep(ctx, *job.WorkspaceID, p.ImportID, job.Attempt >= job.MaxAttempts)
+	var ce *connectors.Error
+	if errors.As(err, &ce) && (ce.Kind == connectors.ErrUnavailable || ce.Kind == connectors.ErrQuota) {
+		// The platform is down or rate limited: give it time.
+		return jobs.RetryLater(err, partnerImportOutage(job.Attempt))
+	}
+	return err
 }
 
 type partnerImportRun struct {
@@ -382,6 +396,8 @@ type partnerImportRun struct {
 	// asked holds the partners fetched by id in this step, or found
 	// missing there, so each is asked for once.
 	asked map[string]bool
+	// last is the step's last attempt: what still fails is left out.
+	last bool
 }
 
 // runPartnerImportStep reads pages until the step's time is up, then
@@ -389,7 +405,7 @@ type partnerImportRun struct {
 // an outage) is retried; on the last attempt, or when the connection is
 // refused, the import ends as failed with the reason.
 func (s *Server) runPartnerImportStep(ctx context.Context, ws, id string, last bool) error {
-	run := &partnerImportRun{s: s, ws: ws, id: id}
+	run := &partnerImportRun{s: s, ws: ws, id: id, last: last}
 	var program, actorType string
 	var integration, actorID *string
 	var progress []byte
@@ -584,6 +600,7 @@ func (r *partnerImportRun) save(ctx context.Context) error {
 func (r *partnerImportRun) finish(ctx context.Context, runErr error) error {
 	status, msg := "done", (*string)(nil)
 	code := ""
+	data := map[string]any{"connector": r.connector}
 	if runErr != nil {
 		status = "failed"
 		m := runErr.Error()
@@ -595,15 +612,20 @@ func (r *partnerImportRun) finish(ctx context.Context, runErr error) error {
 		if errors.As(runErr, new(*connectors.UnreadableError)) {
 			code = "unreadable"
 		}
-		track.Fail(ctx, r.s.log, track.Event{Name: "partner_import.failed", WorkspaceID: r.ws, Surface: "job",
-			Props: map[string]any{"import_id": r.id, "connector": r.connector}}, code, runErr)
+		props := map[string]any{"import_id": r.id, "connector": r.connector}
+		if k := r.progress.Kind; k >= 0 && k < len(connectors.PartnerImportKinds) {
+			// The kind it was reading, so the failing list shows without the log.
+			props["kind"] = connectors.PartnerImportKinds[k]
+			data["kind"] = connectors.PartnerImportKinds[k]
+		}
+		track.Fail(ctx, r.s.log, track.Event{Name: "partner_import.failed", WorkspaceID: r.ws, Surface: "job", Props: props}, code, runErr)
 	}
 	metrics.PartnerImport(r.connector, status)
 	if runErr == nil {
 		r.reconcilePartners()
 	}
 	r.progress.Codes, r.progress.Listed = nil, nil
-	data := map[string]any{"connector": r.connector, "status": status, "issues": len(r.sum.Issues) + r.sum.MoreIssues}
+	data["status"], data["issues"] = status, len(r.sum.Issues)+r.sum.MoreIssues
 	if r.prog != nil {
 		data["program_id"], data["program_kind"] = r.prog.ID, r.prog.Kind
 	}
@@ -746,8 +768,10 @@ func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.
 			continue
 		}
 		p, err := f.PartnerByID(ctx, r.o.Client, r.o.Creds, r.source, id)
+		var ce *connectors.Error
+		isConn := errors.As(err, &ce)
 		switch {
-		case errors.As(err, new(*connectors.UnreadableError)) || connectors.KindOf(err) == connectors.ErrInvalid:
+		case errors.As(err, new(*connectors.UnreadableError)) || isConn && ce.Kind == connectors.ErrInvalid:
 			// Gone there, or not readable: what names it is skipped.
 			why := "the platform refused the request"
 			var u *connectors.UnreadableError
@@ -755,6 +779,12 @@ func (r *partnerImportRun) missingPartners(ctx context.Context, page connectors.
 				why = u.Message
 			}
 			r.warnWhy(connectors.PartnerKindPartners, id, "partner_unavailable", why)
+			continue
+		case r.last && isConn && ce.Kind != connectors.ErrAuth:
+			// The platform failed this one partner on every attempt (an
+			// HTTP 5xx, no answer): it is left out, as a list it can't
+			// give is, instead of stopping the whole import.
+			r.warnWhy(connectors.PartnerKindPartners, id, "partner_unavailable", cutUTF8(ce.Message, 300))
 			continue
 		case err != nil:
 			return err
@@ -802,9 +832,21 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		})
 		var reason importSkip
 		var why importSkipWhy
+		var pe *pgconn.PgError
 		switch {
 		case errors.As(err, &reason):
 			r.issue(kind, external, string(reason))
+			return nil
+		case errors.As(err, &pe) && (strings.HasPrefix(pe.Code, "22") || strings.HasPrefix(pe.Code, "23")):
+			// The database refused this one object (a value out of range,
+			// a check it fails): it would fail every retry, so it is left
+			// out and the rest come over. The issue names the check, never
+			// the values.
+			r.sum.count(kind).Skipped++
+			metrics.PartnerImportObjects(kind, "skipped", 1)
+			r.warnWhy(kind, external, "rejected", partnerImportRefusal(pe))
+			track.Fail(ctx, r.s.log, track.Event{Name: "partner_import.object_skipped", WorkspaceID: r.ws, Surface: "job",
+				Props: map[string]any{"import_id": r.id, "connector": r.connector, "kind": kind, "sqlstate": pe.Code}}, "rejected", err)
 			return nil
 		case errors.As(err, &why):
 			r.sum.count(kind).Skipped++
@@ -893,6 +935,18 @@ func (r *partnerImportRun) page(ctx context.Context, kind string, page connector
 		}
 	}
 	return nil
+}
+
+// partnerImportRefusal says which check refused an object: the SQLSTATE
+// and the constraint, column or table, never the values.
+func partnerImportRefusal(pe *pgconn.PgError) string {
+	msg := "the database refused it (SQLSTATE " + pe.Code
+	for _, v := range []struct{ name, val string }{{"constraint", pe.ConstraintName}, {"column", pe.ColumnName}, {"table", pe.TableName}} {
+		if v.val != "" {
+			msg += ", " + v.name + " " + v.val
+		}
+	}
+	return msg + ")"
 }
 
 // importSkip is why one object couldn't come over.

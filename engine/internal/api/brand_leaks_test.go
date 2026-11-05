@@ -356,39 +356,45 @@ func (s *seeder) wanted() []string {
 // seedValues are values for columns whose constraints the seeder can't
 // work out, as table.column. They are set even where the column may be null.
 var seedValues = map[string]string{
-	"mailbox_platforms.status":       "ok",
-	"sending_domains.spf":            "pending",
-	"sending_domains.dkim":           "pending",
-	"sending_domains.dmarc":          "pending",
-	"request_logs.surface":           "api",
-	"fixes.source":                   "seo_audit",
-	"fixes.rule":                     "title_missing",
-	"fixes.subject_type":             "seo_site",
-	"allocation_changes.action":      "assign",
-	"deploys.kind":                   "push",
-	"integrations.connector":         "plausible",
-	"social_accounts.channel":        "x",
-	"integrations.brand_ids":         "{}",
-	"customer_events.name":           "bravo_event",
-	"site_keys.key":                  "ofk_bravo",
-	"social_watches.keywords":        "{bravo}",
-	"spend_entries.units":            "1",
-	"tracking_campaigns.code":        "bravoleak1",
-	"tracking_campaigns.medium":      "email",
-	"tracking_campaigns.source":      "bravo",
-	"reviews.platform":               "g2",
-	"record_types.key":               "bravo_type",
-	"option_sets.key":                "bravo_options",
-	"field_definitions.key":          "bravo_field",
-	"event_definitions.name":         "bravo.defined",
-	"record_identities.namespace":    "email",
-	"record_relationships.kind":      "bravo_link",
-	"record_merge_candidates.reason": "email",
-	"import_items.kind":              "campaign",
-	"lifecycle_stages.key":           "bravo_stage",
-	"lifecycle_moves.key":            "bravo_move",
-	"lifecycle_moves.kind":           "usage",
-	"product_aliases.status":         "mapped",
+	"insights.spec":                     `{"steps": [{"kind": "visit"}, {"kind": "page"}]}`,
+	"insights.kind":                     "funnel",
+	"partner_reward_rules.kind":         "fixed",
+	"partner_reward_rules.amount_cents": "100",
+	"partner_reward_rules.trigger":      "payment",
+	"dashboard_tiles.note":              "bravo",
+	"mailbox_platforms.status":          "ok",
+	"sending_domains.spf":               "pending",
+	"sending_domains.dkim":              "pending",
+	"sending_domains.dmarc":             "pending",
+	"request_logs.surface":              "api",
+	"fixes.source":                      "seo_audit",
+	"fixes.rule":                        "title_missing",
+	"fixes.subject_type":                "seo_site",
+	"allocation_changes.action":         "assign",
+	"deploys.kind":                      "push",
+	"integrations.connector":            "plausible",
+	"social_accounts.channel":           "x",
+	"integrations.brand_ids":            "{}",
+	"customer_events.name":              "bravo_event",
+	"site_keys.key":                     "ofk_bravo",
+	"social_watches.keywords":           "{bravo}",
+	"spend_entries.units":               "1",
+	"tracking_campaigns.code":           "bravoleak1",
+	"tracking_campaigns.medium":         "email",
+	"tracking_campaigns.source":         "bravo",
+	"reviews.platform":                  "g2",
+	"record_types.key":                  "bravo_type",
+	"option_sets.key":                   "bravo_options",
+	"field_definitions.key":             "bravo_field",
+	"event_definitions.name":            "bravo.defined",
+	"record_identities.namespace":       "email",
+	"record_relationships.kind":         "bravo_link",
+	"record_merge_candidates.reason":    "email",
+	"import_items.kind":                 "campaign",
+	"lifecycle_stages.key":              "bravo_stage",
+	"lifecycle_moves.key":               "bravo_move",
+	"lifecycle_moves.kind":              "usage",
+	"product_aliases.status":            "mapped",
 }
 
 // seedPairs are tables that point at two different rows of one table (a
@@ -432,6 +438,10 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 	switch tbl + "." + c.name {
 	case "attribution_model_pins.module", "conversion_definitions.event_name":
 		return cast, "bravo"
+	case "ad_conversion_rules.event_name":
+		return cast, "bravo.converted"
+	case "attribution_models.spec":
+		return cast, `{"base": "linear"}`
 	case "tracking_link_clicks.click_key":
 		return cast, "bravo00000000000"
 	case "visitor_alerts.kind":
@@ -554,6 +564,8 @@ func (s *seeder) seed(tbl string) map[string]any {
 		if !need && !s.branded[f.ref] && !slices.Contains(s.wanted(), f.ref) {
 			continue
 		}
+		r, ok := s.rows[f.ref]
+		cycle := ok && r == nil // f.ref is being seeded further up
 		row := s.parent(f.ref)
 		if p, ok := seedPairs[tbl]; ok && p.ref == f.ref && slices.Contains(f.cols, p.b) {
 			// The second end is another row of the same table.
@@ -563,6 +575,11 @@ func (s *seeder) seed(tbl string) map[string]any {
 			s.rows[p.ref] = saved
 		}
 		if row == nil {
+			if need && cycle {
+				// Not a failure: tbl is seeded again once f.ref has its row.
+				delete(s.rows, tbl)
+				return nil
+			}
 			if need {
 				delete(s.rows, tbl)
 				s.failed[tbl] = "no " + f.ref + " row to point at"

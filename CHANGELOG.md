@@ -6,6 +6,97 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.85.0] - 2026-11-05
+
+### Changed
+
+- Two brands in one workspace can now use the same campaign slug, email topic key, template handle, lead email address and lead list name. Each stays unique within its brand.
+- Each brand has its own attribution, ad consent and visitor settings, under `/v1/brands/{brand}/.../settings`, and two brands of one workspace can use the same flag key, exclusion group, conversion key or attribution model key. The workspace settings routes are deprecated and act on the first brand.
+- Every partner program belongs to one brand, and its partners, links, conversions, rewards and payouts are that brand's alone. A brand's backend reports conversions to its own brand route, which credits only that brand's partners.
+- Each brand has its own AI visibility settings (models, samples and monthly limit) and link building settings (pitch cool-down, weekly reads and their budget share). A second brand's opt-out of an address no longer applies to every brand.
+- Email topics belong to one brand: each brand lists and uses only its own, and another brand's topic is not found. Topics that were shared by every brand moved to the workspace's first brand. Partner groups and reward rules now carry their program's brand and move with it.
+
+### Fixed
+
+- The changes from v0.84.0, which didn't pass the release checks, are now published.
+
+## [0.84.0] - 2026-11-05
+
+### Added
+
+- Follow competitors' social profiles and review pages: Outflare suggests the ones their website links to, you say yes or no, and their followers, rating and review count are read daily on your own Geonode account and added to the ranking.
+- Competitors is now its own menu. Overview ranks your brand against every competitor you track with a score out of 100, shows where you lead or trail and whether you're gaining share, and says when you pass the one ahead. Each competitor has its own page.
+- A GitHub Action for sites kept in a repository: it opens a pull request for each page approved in Outflare and reports the page live once merged, from your own repository and token.
+- People has a Developer setup tab per brand: a live checklist of sign-ups, orders, payments, refunds and website/server agreement, each with what to send to fix it, and refunds whose payment is unknown to link by hand.
+- Funnels: follow people from an ad click or website visit through product events and conversions to a first payment, with a time limit on any step, and see where they drop off, broken down by campaign or source, over time, and the people behind every step. Save funnels for the team, and agents can run them too.
+- A Lifecycle view on the Retention page shows, per day, week or month, how many active people were new, returning or resurrected and how many went dormant. Funnels can run in any order, what converters did differently now includes people's properties, and trend tiles on dashboards carry the brand's notes.
+- Funnels now take exclusion steps and run by company, save a step's people or drop-off as a list, and show what converters did differently. A new Paths insight draws where people went step by step, and annotations mark a day on every chart.
+- Share a dashboard by link, with a password if you like: anyone with it sees the dashboard read-only and live, and you can take the link back any time. Set an alert on a saved trend (above or below a value, or up or down by a percentage) and hear once when it crosses, like every other alert. Put a dashboard's trends in the weekly digest.
+- On Google search campaigns, Paid ads suggests keywords to add (searches that convert), negative keywords (searches that cost money and never convert), and keywords worth an ad group of their own, and shows Google Ads' own recommendations for an account. Each waits for your approval and is measured like other suggestions.
+- Paid ads opens at three levels: every network, one network, or one ad account, picked from a trail at the top of the page, and every tab narrows to it. A new **Changes** tab lists every pause, resume and budget change at that level and whether the platform shows it.
+- The brand agent can write new ads, ad groups and Google search campaigns as drafts. You approve one under Paid ads, Suggestions, it is made on Google Ads or Meta paused so you can check it, and you turn it on. Nothing spends until you do.
+- Paid ads suggests changes to your campaigns: raise or lower a daily budget, pause a campaign that spends without converting, or resume one that did well, each with why. Nothing changes until you approve it; approved changes are measured long enough to judge and marked Worked, Didn't work or Not sure.
+- Change how a Google Ads campaign bids, and add or remove audiences and countries on Google Ads and Meta campaigns, from the campaign's page. Paid ads also suggests a target cost per conversion for Google campaigns with enough conversions.
+- Paid ads has a Tests tab: try a new target cost per conversion on a Google Ads campaign, or a new daily budget on a Meta campaign, on part of its traffic, see which side did better, then keep it or roll it back.
+- Presence has a Competitors tab showing where the competitors you track appear, with each site's domain rating and traffic, "Likely paid" only when there's a reason, and the sites you're not on yet. Top competitors are scanned weekly and the rest monthly, on your own search and SEO connections; change either on the tab.
+- Presence now says whether each live placement has taken off, from AI answers that cite it and visits it sends, and the coverage report shows momentum: placements gained and lost in the last 28 days against the 28 before, twelve weeks of trend, and share of voice against tracked competitors.
+- Presence has an Opportunities tab: the places worth your team's effort, ranked by SEO and AI answers together, such as pages your competitors are on and you aren't, articles that name you without a link, and links that were removed. Each says what to do next; pick, dismiss or mark one won, and it is marked won by itself once you get there.
+- Website analytics now shows what Outflare's own tracking tag counted: visitors, visits, page views, bounce rate and visit length by day, with top pages, sources, websites, countries and devices. It works with no analytics tool connected, and sits next to GA4 or PostHog when you have one.
+- Trends chart any number over time, such as visits, sign-ups, revenue or ad spend, with breakdowns, formulas like cost per sign-up and the period before. Retention shows how many people came back in each week or month after their first. Dashboards put saved funnels, trends and notes on one page, and Paid ads, Visitors and Home carry their own panels. Agents can do all of this too.
+- Visitors now lists everyone on your site, anonymous visitors included, and opens each one's journey: visits, pages and events. A person's timeline shows when and how they went from anonymous to known, visitor links join a phone where they never sign in, and Website tracking walks you through serving the script from your own domain and checks it works.
+
+### Changed
+
+- Missions leaves the sidebar now that agent runs replaced it; old links still open its history. The Agents page has a slot for a brand's own agent, which opens first where the server provides one, and G then A opens Agents.
+- Agents cost much less on Claude: each step of a turn now reads the conversation so far from Anthropic's prompt cache, at a tenth of the price, instead of paying full price for it again.
+- The brand's agent is part of the dashboard: an Agent button in the top bar (or Ctrl+J) opens a chat with it beside any page, and Home shows what it is doing and what waits for you, on servers that add one.
+- Each brand has its own conversion definitions and attribution models. Attribution credits a brand's conversions with its own definitions, models and visits only, and a refund only nets against a payment in the same brand. Conversion definitions and attribution models have brand routes; the workspace routes are deprecated.
+- Each brand has its own event catalog: two brands in one workspace can send events with the same name, such as `order_completed`, and each brand approves and defines its own. Events from a second brand are no longer held because another brand uses the name.
+- Flags, conversion definitions and attribution models are found by key within their brand, and an ad conversion rule uses its ad account's brand's conversion definitions. Visitor, ad and attribution settings are read for the brand, ready for each brand to have its own.
+- Find links shows a spinner and a "Reading the website" note while it works, and hides the last read's error until the new read is done.
+- Brands keep their tracking apart: exclusion groups and their holdouts, holdout reports, ad conversion rules and the conversions sent to ad networks now show and count only the selected brand's data.
+- Competitors are one list per brand with no limit. New ones are suggested every day, from your SEO connection and from sites ranking beside you, and you say yes or no with one click. Competitors you add in AI visibility join the list.
+- A conversion sent only from your server, for someone your website never saw, now takes its country from the event itself (`context.location.country` or `context.ip`), so it is no longer skipped as "country unknown".
+- Each payment counts once, whether it arrives as a transaction from the API, an Order Completed event with revenue or a billing connector's charge, matched on the order id (or the same person, amount and currency within 15 minutes). Transactions also take your own `user_id`.
+- Paid ads: Fix tracking links shows its progress while it runs, then how many URL suffixes it changed and each one Google refused with its reason, or why it failed. Also by API and with the `get_ad_tracking_run` agent tool.
+- Run an A/B test on any page without a developer: New test → Test a page, then change each version in a bigger visual editor (styles, moves, new buttons, split URLs). Funnels and trends can split by test version, and an agent's changes always wait for a person.
+- Send a conversion such as a sign-up from both the website and your server with the same event id, and Outflare sends it to ad platforms once. The website script's `outflare.track()` now takes your own id as `messageId`.
+- Conversions sent from both the website and your server count once even when the two copies don't share a `messageId`: they are matched on the event name, the person and the time (within 15 minutes), and the server's copy is sent. Paid ads → Tracking health warns when this happens, with the one-line fix.
+- Your own server's events can be kept under one brand of your events workspace, the one whose website tag is on your site, so each person who uses Outflare joins the visits they made before signing in, even if they signed in long ago.
+- Partner flows now say which sales they pay on, such as "10% on the first sale, within 1 year of sign-up", instead of "on every sale" when their conditions narrow it.
+- A brand's partner program can take its sales from the payments you already send Outflare (the transactions API or Order Completed events): turn on "Also take this brand's payments and refunds sent to Outflare" in the program's settings, and each payment credits the partner once, with no extra call from your backend.
+- Partner programs read the events and payments you already send: a sign-up or an event a reward rule names credits the partner, sales come from transactions, and the partner API counts the same customer once.
+- Presence now finds where your brand appears every day by itself, from news, backlinks, social watches, pages AI answers cite and new web searches on your own DataForSEO or Geonode connection. Each find gets its type from its address, such as a YouTube video, forum thread or MCP directory.
+- Presence watches each placement for a link to your brand and a mention of it, and shows "Mention removed" or "Offline since" once two checks agree. Placements checked against Knowledge are checked again soon after your published Knowledge changes.
+- Coverage is now Presence: tag placements as influencer posts, YouTube videos, forum threads, MCP directories or app store listings, mark them organic (free, unprompted), record who delivered them (in-house, an agency or a partner), link each one to its CRM deal, and keep the agencies, partners and creators involved as CRM records on it.
+- Refunds work like payments: send one as a transaction, an Order Refunded event, or both, and it counts once. A refund can name its payment by its order id, its order's messageId or Outflare's id, and one that arrives before its payment counts when the payment comes.
+- Refunds reach Google Ads: a partial refund lowers the conversion's value and a full refund retracts it, so bidding learns from net revenue. An order's website and server copies with the same order_id now count as one conversion, without a shared messageId.
+- Outflare tracking on Website analytics now shows which website each page is on, with a picker to see one website (such as your app's subdomain) on its own. Visitors opens on Everyone, so anonymous visitors show first.
+- Your own server's users are joined to their earlier website visits as soon as they open any signed-in page, without needing to save or change anything first.
+
+### Fixed
+
+- An API token kept to one brand, such as a brand's agent, can now read the link building settings and the brand's SEO connections instead of being refused.
+- Journeys, rules and lifecycle stages react to an event only when the event's own brand has approved its name. Approving a name in one brand no longer lets it drive automations in another.
+- Find links waits long enough for a brand website behind a bot check: the second read runs as a Geonode job for up to a few minutes, and a read that still doesn't get through is shown as blocked or too slow instead of a Geonode outage.
+- Browser tasks that can't start the browser now stop within their time limit with a clear error, instead of waiting for good and holding a browser worker.
+- Connected AI apps no longer get "the MCP server is starting" errors during updates and restarts, and leads or unsubscribes that weren't linked to their person records because of an update are now linked.
+- One-click DNS approval: a DNS host that fails to answer once is asked again, and a domain whose DNS host doesn't support one-click approval now says so instead of showing a lookup error.
+- A mailbox whose mail server keeps refusing its sign-in now asks you to connect it again after 5 failed syncs in a row, instead of failing quietly every two minutes. A mailbox that keeps failing is tried less often, and a server that is only busy no longer counts against it.
+- Inbox sync handles bursts of new mail on slow mail servers: it reads new messages a few at a time and keeps what it has read, so replies and bounces no longer arrive late when one sync runs out of time.
+- When the app can't reach Outflare (offline, a dropped connection), pages now say so instead of loading forever, and the SEO overview keeps checking back on a first SEO read. A brand's link search that fails because the page reader is out of credits or down now says which.
+- A review page the page reader hasn't finished reading after an hour now shows as a slow page and is tried again later the same day, instead of being sent again every hour. When X, LinkedIn or the page reader is down, each account tries again on its own schedule instead of the whole read repeating several times over.
+- Reviews: a review page Geonode can't read (the site fails, or puts it behind a login) now shows why on the page and is tried again later the same day, instead of being retried every hour as a Geonode outage or left for a day as a wrong address.
+- The database no longer grows with every tracked website visit: finished background work that runs once per batch of events is now cleaned up after 14 days like other finished work, and the events workspace keeps successful API and MCP calls once an hour per person instead of every one.
+- Opt-out syncing with EmailBison, Instantly and Smartlead keeps going when reading their blocklist fails: your opt-outs still go out, their list is read every 6 hours instead of every few minutes, and a failed try waits 30 minutes. Website tracking no longer answers with an error when a company lookup for a visitor fails.
+- Tolt imports no longer stop over one object Outflare can't store, or over a Tolt page that fails: the object is listed under issues and the rest come over, a failing page is asked for again in smaller pieces, and the import waits longer between attempts while Tolt is down.
+- The Tolt import now brings over flows with a "Lead date" condition, such as "first year after sign-up", and reads condition operators however Tolt words them, instead of skipping those flows.
+- The notice that some connections or accounts have no brand shows once at the top of the page again. Moving between pages could add another copy each time, pushing the page down.
+
+### Upgrading
+
+- set `OUTFLARE_EVENTS_BRAND` to that brand's id or handle, next to `OUTFLARE_EVENTS_WORKSPACE`.
+
 ## [0.83.0] - 2026-11-04
 
 ### Added

@@ -107,9 +107,9 @@ function ChannelsPage({ ws, canManage, go }: Props) {
   const load = useCallback(async () => {
     const query = { ...range(), ...(brandKey ? { brand: brandKey } : {}), ...(model ? { model } : {}), ...(match !== "all" ? { match } : {}) };
     const [s, r, m] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/attribution/settings", { params: { path: { brand: pickedBrandId() } } }),
       api.GET("/v1/brands/{brand}/attribution/channels", { params: { path: { brand: pickedBrandId() }, query } }),
-      api.GET("/v1/workspaces/{ws}/attribution/models", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/attribution/models", { params: { path: { brand: pickedBrandId() } } }),
     ]);
     setError(s.error || r.error ? errorMessage(s.error ?? r.error) : "");
     if (s.data) setSettings(s.data);
@@ -122,7 +122,7 @@ function ChannelsPage({ ws, canManage, go }: Props) {
 
   async function makeDefault() {
     if (!model) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/attribution/settings", { params: { path: { ws } }, body: { model } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/attribution/settings", { params: { path: { brand: pickedBrandId() } }, body: { model } });
     if (error) return toast(errorMessage(error), "error");
     toast(`${models.find((m) => m.id === model)?.label} is now the default for every report.`);
     setModel("");

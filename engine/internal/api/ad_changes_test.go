@@ -90,6 +90,15 @@ func TestAdCampaignChanges(t *testing.T) {
 	if len(l) != 1 || !strings.Contains(l[0].(map[string]any)["error"].(string), "Invalid parameter") {
 		t.Fatalf("refused: %v", l)
 	}
+	// One network or one account narrows the list; another shows none.
+	acct := owner.must(200, "GET", base+"/ads/accounts", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	if l := owner.must(200, "GET", base+"/ads/changes?connector=meta_ads&account_id="+acct, nil)["data"].([]any); len(l) < 2 {
+		t.Fatalf("one account's changes: %v", l)
+	}
+	if l := owner.must(200, "GET", base+"/ads/changes?connector=google_ads", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("another network's changes: %v", l)
+	}
+	owner.must(400, "GET", base+"/ads/changes?account_id=nope", nil)
 	metaState.Lock()
 	metaState.refuse = false
 	metaState.Unlock()

@@ -1,7 +1,13 @@
 package partnerapps
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -161,5 +167,85 @@ func TestToltFlowV2(t *testing.T) {
 	if u := toltFlow(flow("odd", "equals", "1", map[string]any{"event": "click_created"})); len(u.Unsupported) != 1 || u.Unsupported[0] != "trigger" ||
 		u.Detail != `its event: event: "click_created", trigger: null` {
 		t.Errorf("odd event = %v %q", u.Unsupported, u.Detail)
+	}
+}
+
+// TestToltSmallerPages: a list page Tolt fails at 100 objects (HTTP 502)
+// is asked for again with fewer from the same cursor, the import goes on
+// from there, and the next page asks for 100 again. One it fails at every
+// size is still an unavailable error, for the job to retry.
+func TestToltSmallerPages(t *testing.T) {
+	var asked []string
+	failAll := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		asked = append(asked, q.Get("starting_after")+"/"+q.Get("limit"))
+		n, _ := strconv.Atoi(q.Get("limit"))
+		if failAll || n > 25 && q.Get("starting_after") == "" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		var data []map[string]any
+		for i := range n {
+			data = append(data, map[string]any{"id": fmt.Sprintf("t%d", i), "customer_id": "cus_1", "amount": 100})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": data, "has_more": q.Get("starting_after") == "", "next_cursor": "cur_2"}) //nolint:errcheck
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"tolt": srv.URL}}
+	creds := c.Creds{"api_key": "tlt_test_not_a_real_key"}
+	page, next, err := Tolt{}.PartnerPage(context.Background(), cl, creds, "prg_1", c.PartnerKindTransactions, "")
+	if err != nil || len(page.Transactions) != 25 || next != "cur_2" {
+		t.Fatalf("page of %d, next %q, err %v, asked %v", len(page.Transactions), next, err, asked)
+	}
+	if _, _, err := (Tolt{}).PartnerPage(context.Background(), cl, creds, "prg_1", c.PartnerKindTransactions, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(asked, " "); got != "/100 /25 cur_2/100" {
+		t.Fatalf("asked %s", got)
+	}
+	failAll, asked = true, nil
+	_, _, err = Tolt{}.PartnerPage(context.Background(), cl, creds, "prg_1", c.PartnerKindTransactions, "")
+	if c.KindOf(err) != c.ErrUnavailable || strings.Join(asked, " ") != "/100 /25 /5" {
+		t.Fatalf("asked %v, err %v", asked, err)
+	}
+}
+
+// TestToltLeadDate: flows as a real account sends them, with the lead date
+// (customer_lead_date) and operators spelled as words, come over instead
+// of being skipped; an operator still unknown is named in the issue so the
+// next import can learn it.
+func TestToltLeadDate(t *testing.T) {
+	flow := func(countOp, dateOp string) c.ImportFlow {
+		return toltFlow(map[string]any{"id": "flw_1", "event": "transaction_created", "action_type": "generate_commission",
+			"action": map[string]any{"type": "percentage", "value": 20.0},
+			"conditions": map[string]any{"kind": "group", "operator": "AND", "children": []any{
+				map[string]any{"id": "c1", "kind": "condition", "logicalOperator": "AND", "type": "customer_transaction_count", "operator": countOp, "value": "1"},
+				map[string]any{"id": "c2", "kind": "condition", "logicalOperator": "AND", "type": "customer_lead_date", "operator": dateOp, "unit": "years", "value": "1"},
+			}}})
+	}
+	for _, tc := range []struct{ countOp, dateOp, op, window string }{
+		{"equals", "within", "eq", "within"},
+		{"is greater than", "less than", "gt", "within"},
+		{"Greater-Than", "is more than", "gt", "not_within"},
+		{"equals", "in the last", "eq", "within"},
+	} {
+		f := flow(tc.countOp, tc.dateOp)
+		if len(f.Unsupported) != 0 {
+			t.Errorf("%q/%q: unsupported %v (%s)", tc.countOp, tc.dateOp, f.Unsupported, f.Detail)
+			continue
+		}
+		cs := f.Conditions.Groups[0].Conditions
+		if cs[0].Op != tc.op || cs[1].Field != "customer.signed_up_at" || cs[1].Op != tc.window ||
+			cs[1].Value.(map[string]any)["amount"] != 1.0 || cs[1].Value.(map[string]any)["unit"] != "years" {
+			t.Errorf("%q/%q: conditions %+v", tc.countOp, tc.dateOp, cs)
+		}
+	}
+	u := flow("equals", "is on or before")
+	if len(u.Unsupported) == 0 || !strings.Contains(u.Detail, `operator: "is on or before"`) {
+		t.Errorf("unknown operator: %v %q", u.Unsupported, u.Detail)
+	}
+	if s := toltSettings(map[string]any{"operator": "write to ana@acme.example"}); strings.Contains(s, "@") {
+		t.Errorf("settings = %q", s)
 	}
 }

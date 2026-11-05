@@ -142,7 +142,7 @@ func GetProgress(ctx context.Context, q outcomes.Querier, ws, missionID string) 
 				WHERE sp.workspace_id = $1 AND sp.mission_id = $2 AND sp.utm_content = ss.utm_content))
 			OR (tc.object_kind = 'social_watch' AND ss.utm_content <> '' AND EXISTS (SELECT 1 FROM social_actions sa
 				WHERE sa.workspace_id = $1 AND sa.mission_id = $2 AND sa.utm_content = ss.utm_content)))
-		  AND cr.model = coalesce((SELECT model FROM attribution_settings WHERE workspace_id = $1), 'last_non_direct')`,
+		  AND cr.model = coalesce((SELECT model FROM attribution_settings WHERE workspace_id = $1 ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand(workspace_id) DESC LIMIT 1), 'last_non_direct')`,
 		ws, missionID).Scan(&attributed); err != nil {
 		return p, err
 	}

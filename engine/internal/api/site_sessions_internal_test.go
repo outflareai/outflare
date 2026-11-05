@@ -218,9 +218,87 @@ func TestSiteFlagsClient(t *testing.T) {
 		t.Fatalf("preview not kept for the visit: %v", got.Stored)
 	}
 
-	// Without data-flags, nothing is asked.
-	if got := run(map[string]any{"href": "https://northpeak.example/"}); got.FlagAsks != 0 {
-		t.Fatalf("asked for flags without data-flags: %+v", got)
+	// Without data-flags, nothing is asked once Outflare said the site has
+	// no visual tests.
+	off := map[string]string{"of_tests": `{"key":"ofk_test_not_a_real_key","on":false,"until":99999999999999}`}
+	if got := run(map[string]any{"href": "https://northpeak.example/", "local": off}); got.FlagAsks != 0 {
+		t.Fatalf("asked for flags on a site without tests: %+v", got)
+	}
+}
+
+// No-code tests: with no data-flags on the tag, the script asks for the
+// visitor's versions by itself, applies the visual editor's changes and
+// remembers whether the site runs tests and what to hide on the next
+// visit. A site without tests is asked about once in a while, never on
+// every page; data-flags="off" stops it.
+func TestSiteNoCodeTests(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	type el struct{ Text string }
+	run := func(opts map[string]any) (got struct {
+		FlagAsks int
+		Tracked  []struct {
+			Event      string
+			Properties map[string]any
+		}
+		Elements map[string][]el
+		Local    map[string]string
+		Hidden   []struct {
+			CSS     string
+			Removed bool
+		}
+	}) {
+		t.Helper()
+		b, _ := json.Marshal(opts)
+		out, err := exec.Command(node, "testdata/run_site.mjs", "site.js", string(b)).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("%v: %s", err, out)
+		}
+		return got
+	}
+	key := "ofk_test_not_a_real_key"
+	answer := map[string]any{"flags": map[string]any{"hero": "faster"}, "payloads": map[string]any{"hero": map[string]any{"changes": []map[string]any{{"selector": "h1", "text": "Ship faster"}}}},
+		"tests": true, "hide": []string{"h1"}}
+	got := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "loaded": true, "elements": map[string]int{"h1": 1}})
+	if got.FlagAsks != 1 || got.Elements["h1"][0].Text != "Ship faster" {
+		t.Fatalf("not applied without data-flags: %+v", got)
+	}
+	if len(got.Tracked) != 1 || got.Tracked[0].Event != "Experiment Viewed" {
+		t.Fatalf("exposure: %+v", got.Tracked)
+	}
+	if !strings.Contains(got.Local["of_tests"], `"on":true`) || !strings.Contains(got.Local["of_hide"], `"sel":"h1"`) {
+		t.Fatalf("not remembered: %v", got.Local)
+	}
+
+	// A site with no visual tests is remembered as such, with nothing to hide.
+	got = run(map[string]any{"href": "https://northpeak.example/", "flags": map[string]any{"flags": map[string]any{}, "payloads": map[string]any{}, "tests": false, "hide": []string{}}, "noTag": true, "quiet": true,
+		"local": map[string]string{"of_hide": `{"sel":"h1","until":99999999999999}`}})
+	if !strings.Contains(got.Local["of_tests"], `"on":false`) || got.Local["of_hide"] != "" {
+		t.Fatalf("no tests: %v", got.Local)
+	}
+
+	// data-flags="off" never asks by itself.
+	if got := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "flagsAttr": "off", "quiet": true}); got.FlagAsks != 0 {
+		t.Fatalf(`asked with data-flags="off": %+v`, got)
+	}
+
+	// On the next visit, only what the visitor's version changes is hidden,
+	// and shown again once their version is in.
+	local := map[string]string{"of_tests": `{"key":"` + key + `","on":true,"until":99999999999999}`, "of_hide": `{"sel":"h1,.promo","until":99999999999999}`}
+	got = run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "loaded": true, "local": local, "elements": map[string]int{"h1": 1}})
+	if len(got.Hidden) != 1 || got.Hidden[0].CSS != "h1,.promo{opacity:0!important}" || !got.Hidden[0].Removed {
+		t.Fatalf("hide: %+v", got.Hidden)
+	}
+
+	// Selectors that could add CSS rules of their own are never used.
+	local["of_hide"] = `{"sel":"h1{}body","until":99999999999999}`
+	if got := run(map[string]any{"href": "https://northpeak.example/", "flags": answer, "noTag": true, "quiet": true, "local": local}); len(got.Hidden) != 0 {
+		t.Fatalf("unsafe hide used: %+v", got.Hidden)
 	}
 }
 
