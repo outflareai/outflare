@@ -61,6 +61,19 @@ func paymentMessageID(brand, source, kind, sourceID string) string {
 	return "payment:" + brand + ":" + sourceID
 }
 
+// lockTransaction makes the saves of one payment or refund id take turns until tx ends.
+func lockTransaction(ctx context.Context, tx pgx.Tx, brand, kind, sourceID string) error {
+	if brand == "" || sourceID == "" {
+		return nil
+	}
+	if kind == "chargeback" {
+		kind = "refund"
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('transaction:' || $1::uuid::text || ':' || $2 || ':' || $3, 0))`,
+		brand, kind, sourceID)
+	return err
+}
+
 // knownPayment is a brand's payment transaction that another source's
 // payment turned out to be.
 type knownPayment struct {
@@ -299,6 +312,9 @@ func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props m
 		return "", nil
 	}
 	key := orderKey(props, messageID)
+	if err := lockTransaction(ctx, tx, brand, "payment", key); err != nil {
+		return "", err
+	}
 	known, found, err := samePayment(ctx, tx, brand, orderSource, key, rec, amount, cur, at)
 	if err != nil {
 		return "", err
@@ -372,6 +388,9 @@ func orderRefund(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props ma
 	}
 	if key == "" {
 		key = messageID
+	}
+	if err := lockTransaction(ctx, tx, brand, "refund", key); err != nil {
+		return "", err
 	}
 	if key == "" {
 		if err := tx.QueryRow(ctx, `SELECT 'event:' || gen_random_uuid()::text`).Scan(&key); err != nil {

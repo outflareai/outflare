@@ -245,6 +245,9 @@ func (c *conversionRun) transaction(ctx context.Context, rec string, amount *int
 	if in.Type == "refund" {
 		n.Kind, n.RefundOf = "refund", in.RefundOf
 	}
+	if err := lockTransaction(ctx, c.tx, brand, n.Kind, n.SourceID); err != nil {
+		return false, err
+	}
 	if _, _, _, err := addTransaction(ctx, c.tx, c.p, c.ws, brand, n); err != nil && !errors.Is(err, errTransactionDeleted) {
 		return false, err
 	}

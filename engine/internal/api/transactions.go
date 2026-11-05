@@ -178,7 +178,8 @@ func saveTransaction(ctx context.Context, tx pgx.Tx, p *principal, ws, brand str
 // addTransaction saves a transaction from the API (or a partner
 // conversion reported to it) and counts it as a payment once. The same
 // payment already in from an order event or a billing connector is that
-// one (merged): it isn't added or counted again.
+// one (merged): it isn't added or counted again. The caller holds
+// lockTransaction for n.
 func addTransaction(ctx context.Context, tx pgx.Tx, p *principal, ws, brand string, n newTransaction) (v transactionView, created, merged bool, err error) {
 	// A refund may name its payment by any id the sender has for it
 	// (findPayment); it is kept as that payment's source_id, so it comes
@@ -294,6 +295,9 @@ func (s *Server) createTransaction(w http.ResponseWriter, r *http.Request) {
 	var v transactionView
 	var created, merged bool
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if err := lockTransaction(ctx, tx, a.Brand, n.Kind, n.SourceID); err != nil {
+			return err
+		}
 		if in.RecordID != nil && *in.RecordID != "" {
 			var id string
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM records WHERE workspace_id = $1 AND id = $2 AND merged_into IS NULL AND deleted_at IS NULL
