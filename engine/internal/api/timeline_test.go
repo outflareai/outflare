@@ -15,8 +15,8 @@ func TestRecordTimelineEveryModule(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	ctx := context.Background()
 
-	acme := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "handle": "acme"})["id"].(string)
-	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "handle": "acme"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})
 	company := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Northpeak"})["id"].(string)
 	ana := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ana",
 		"identities": []any{map[string]any{"namespace": "email", "value": "ana@northpeak.example"}}})["id"].(string)
@@ -29,18 +29,19 @@ func TestRecordTimelineEveryModule(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// A visit for each brand, an opt-out and a finished journey.
+	// Two visits, an opt-out and a finished journey, all in Ana's brand
+	// (the workspace's first): brands are fully separate.
 	exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, record_id, brand_id, landing_path, pageviews, started_at, last_seen_at)
-		VALUES ($1, 'a1', $2, $3, '/pricing', 3, $4, $4), ($1, 'a2', $2, $5, '/blog', 1, $6, $6)`,
-		ws, ana, acme, now.Add(-3*time.Hour), other, now.Add(-4*time.Hour))
-	exec(`INSERT INTO suppressions (workspace_id, kind, value, reason, source, method, record_id, created_at)
-		VALUES ($1, 'email', 'ana@northpeak.example', 'unsubscribed', 'unsubscribe_link', 'automated', $2, $3)`, ws, ana, now.Add(-time.Hour))
+		VALUES ($1, 'a1', $2, outflare_first_brand($1), '/pricing', 3, $3, $3), ($1, 'a2', $2, outflare_first_brand($1), '/blog', 1, $4, $4)`,
+		ws, ana, now.Add(-3*time.Hour), now.Add(-4*time.Hour))
+	exec(`INSERT INTO suppressions (brand_id, workspace_id, kind, value, reason, source, method, record_id, created_at)
+		VALUES (outflare_first_brand($1), $1, 'email', 'ana@northpeak.example', 'unsubscribed', 'unsubscribe_link', 'automated', $2, $3)`, ws, ana, now.Add(-time.Hour))
 	var journey string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO journeys (workspace_id, name, brand_id) VALUES ($1, 'Welcome', $2) RETURNING id::text`, ws, acme).Scan(&journey); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO journeys (workspace_id, name, brand_id) VALUES ($1, 'Welcome', outflare_first_brand($1)) RETURNING id::text`, ws).Scan(&journey); err != nil {
 		t.Fatal(err)
 	}
-	exec(`INSERT INTO journey_runs (workspace_id, journey_id, record_id, status, entered_at, finished_at)
-		VALUES ($1, $2, $3, 'completed', $4, $5)`, ws, journey, ana, now.Add(-2*time.Hour), now.Add(-90*time.Minute))
+	exec(`INSERT INTO journey_runs (brand_id, workspace_id, journey_id, record_id, status, entered_at, finished_at)
+		VALUES (outflare_first_brand($1), $1, $2, $3, 'completed', $4, $5)`, ws, journey, ana, now.Add(-2*time.Hour), now.Add(-90*time.Minute))
 
 	type item struct{ kind, title, record string }
 	read := func(path string) []item {
@@ -65,11 +66,8 @@ func TestRecordTimelineEveryModule(t *testing.T) {
 	if got := read(base + "/records/" + company + "/timeline?people=false&kinds=" + kinds); len(got) != 0 {
 		t.Fatalf("company alone = %v", got)
 	}
-	// One brand: its own items and those no brand owns.
-	got := read(base + "/records/" + ana + "/timeline?brand=northpeak&kinds=" + kinds)
-	if !slices.Equal(got, []item{{"opt_out", "unsubscribed", ana}, {"visit", "/blog", ana}}) {
-		t.Fatalf("one brand = %v", got)
-	}
+	// Another brand doesn't have Ana at all.
+	owner.must(404, "GET", base+"/records/"+ana+"/timeline?brand=northpeak&kinds="+kinds, nil)
 	// Pages carry on where the last one ended.
 	page := owner.must(200, "GET", base+"/records/"+ana+"/timeline?limit=2&kinds="+kinds, nil)
 	next, _ := page["next_cursor"].(string)

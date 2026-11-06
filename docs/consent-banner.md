@@ -11,7 +11,7 @@ Every law and framework is on by default, and you can turn each one off per site
 
 ## Turn it on
 
-In the web app, open **Analytics → Website tracking**, choose the site and open **Consent banner**. You can also use the API (`PUT /v1/workspaces/{ws}/site-keys/{id}/consent-banner`) or MCP (`update_consent_banner`):
+In the web app, open **Analytics → Website tracking**, choose the site and open **Consent banner**. You can also use the API (`PUT /v1/brands/{brand}/site-keys/{id}/consent-banner`) or MCP (`update_consent_banner`):
 
 ```json
 { "enabled": true, "policy_url": "/cookies" }
@@ -88,7 +88,7 @@ Each choice that changes something is kept as consents (source `consent_banner`)
 - the banner's `version` and `consent_version`
 - the region, the country when known, Global Privacy Control, the language and the page's path
 
-Before the visitor is known, the consents are kept on their anonymous id. When your product sends `identify` with that `anonymousId`, they join the person's record with their earlier visits and events, and merges move them like everything else on a record. Read them with `GET /v1/workspaces/{ws}/records/{record}/consents`.
+Before the visitor is known, the consents are kept on their anonymous id. When your product sends `identify` with that `anonymousId`, they join the person's record with their earlier visits and events, and merges move them like everything else on a record. Read them with `GET /v1/brands/{brand}/records/{record}/consents`.
 
 ## Asking again
 

@@ -22,7 +22,7 @@ Every campaign belongs to one of nine channels. The channel fixes
 | SEO | `seo` | `organic` | google, bing |
 | AI answers | `ai_answers` | `ai` | chatgpt, perplexity, gemini, claude, copilot |
 
-`GET /v1/workspaces/{ws}/tracking-taxonomy` returns this table.
+`GET /v1/brands/{brand}/tracking-taxonomy` returns this table.
 
 Sources are cleaned when you save them: lowercase, spaces become `-`, and
 common spellings are merged (`fb`, `Facebook` and `facebook.com` are all
@@ -135,11 +135,11 @@ traffic their code didn't bring, or lose imported partner links.
 
 | Call | Scope |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/tracking-taxonomy` | `analytics.read` |
-| `GET /v1/workspaces/{ws}/tracking-campaigns` (filter by `status`, `channel`, `brand`) | `analytics.read` |
-| `POST /v1/workspaces/{ws}/tracking-campaigns` | `analytics.manage` |
-| `GET`, `PATCH /v1/workspaces/{ws}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
-| `GET`, `POST /v1/workspaces/{ws}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
+| `GET /v1/brands/{brand}/tracking-taxonomy` | `analytics.read` |
+| `GET /v1/brands/{brand}/tracking-campaigns` (filter by `status`, `channel`, `brand`) | `analytics.read` |
+| `POST /v1/brands/{brand}/tracking-campaigns` | `analytics.manage` |
+| `GET`, `PATCH /v1/brands/{brand}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
+| `GET`, `POST /v1/brands/{brand}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
 | `GET /l/{code}` (a redirect link) | Public |
 
 Owners, admins and operators have `analytics.manage`; viewers can read.

@@ -32,6 +32,7 @@ import {
 import { FieldInput, RecordDialog, editable } from "../RecordEdit";
 import { Activities } from "./Activities";
 import { RecordMail } from "./Mail";
+import { pickedBrandId } from "@/lib/brand";
 
 type Rec = Schemas["Record"];
 export function RecordPreview({
@@ -66,14 +67,14 @@ export function RecordPreview({
   const load = useCallback(async () => {
     try {
       const [r, l, t] = await Promise.all([
-        api.GET("/v1/workspaces/{ws}/records/{record}", {
-          params: { path: { ws, record: id } },
+        api.GET("/v1/brands/{brand}/records/{record}", {
+          params: { path: { brand: pickedBrandId(), record: id } },
         }),
-        api.GET("/v1/workspaces/{ws}/records/{record}/relationships", {
-          params: { path: { ws, record: id } },
+        api.GET("/v1/brands/{brand}/records/{record}/relationships", {
+          params: { path: { brand: pickedBrandId(), record: id } },
         }),
-        api.GET("/v1/workspaces/{ws}/records/{record}/timeline", {
-          params: { path: { ws, record: id }, query: { limit: 50 } },
+        api.GET("/v1/brands/{brand}/records/{record}/timeline", {
+          params: { path: { brand: pickedBrandId(), record: id }, query: { limit: 50 } },
         }),
       ]);
       if (!r.data) {
@@ -320,10 +321,10 @@ export function RecordPreview({
                   variant="ghost"
                   onClick={async () => {
                     const { data, error } = await api.GET(
-                      "/v1/workspaces/{ws}/records/{record}/timeline",
+                      "/v1/brands/{brand}/records/{record}/timeline",
                       {
                         params: {
-                          path: { ws, record: id },
+                          path: { brand: record.brand_id ?? pickedBrandId(), record: id },
                           query: { cursor: next, limit: 50 },
                         },
                       },
@@ -424,9 +425,9 @@ export function InlineField({
     setError("");
     try {
       const { data, error } = await api.PATCH(
-        "/v1/workspaces/{ws}/records/{record}",
+        "/v1/brands/{brand}/records/{record}",
         {
-          params: { path: { ws, record: record.id } },
+          params: { path: { brand: record.brand_id ?? pickedBrandId(), record: record.id } },
           body: { version: record.version, attributes: { [f.key]: value } },
         },
       );

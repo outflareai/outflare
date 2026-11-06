@@ -297,3 +297,31 @@ func TestArticleInfo(t *testing.T) {
 		}
 	}
 }
+
+// Links in the menu, sidebar and the site's header and footer are
+// boilerplate; an article's own header and footer are its content, and a
+// page linked from both counts as linked from the content.
+func TestBoilerplateLinks(t *testing.T) {
+	base, _ := url.Parse("https://example.com/blog/post")
+	p := ParsePage(base, []byte(`<html><body>
+<header><a href="/">Home</a><nav><a href="/pricing">Pricing</a><a href="/docs">Docs</a></nav></header>
+<main><article>
+  <header><a href="/authors/ana">Ana</a></header>
+  <p>Read <a href="/docs">the docs</a> and <a href="/guide">the guide</a>.</p>
+  <aside><a href="/related">Related</a></aside>
+  <footer><a href="/tags/seo">SEO</a></footer>
+</article></main>
+<footer><a href="/terms">Terms</a><a href="/guide">Guide</a></footer>
+</body></html>`))
+	got := map[string]bool{}
+	for _, l := range p.Links {
+		got[l.URL] = l.Boilerplate
+	}
+	want := map[string]bool{
+		"https://example.com/": true, "https://example.com/pricing": true, "https://example.com/terms": true, "https://example.com/related": true,
+		"https://example.com/docs": false, "https://example.com/guide": false, "https://example.com/authors/ana": false, "https://example.com/tags/seo": false,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("boilerplate:\n got %v\nwant %v", got, want)
+	}
+}

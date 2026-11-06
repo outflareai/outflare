@@ -4,12 +4,14 @@ type StepBody = { subject?: string; body?: string; delay_days?: number };
 
 // A readable view of what a held change will do: the emails of a sequence,
 // how many leads it adds, and its other settings.
-export function ChangePreview({ body }: { body: unknown }) {
+// hide leaves fields out, such as ids nobody can read or one shown elsewhere.
+export function ChangePreview({ body, hide }: { body: unknown; hide?: (key: string) => boolean }) {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
   const b = body as Record<string, unknown>;
   const steps = Array.isArray(b.steps) ? (b.steps as StepBody[]) : [];
-  const lists = Object.entries(b).filter(([, v]) => Array.isArray(v) && v !== b.steps) as [string, unknown[]][];
-  const fields = Object.entries(b).filter(([, v]) => v !== null && ["string", "number", "boolean"].includes(typeof v));
+  const shown = Object.entries(b).filter(([k]) => !hide?.(k));
+  const lists = shown.filter(([, v]) => Array.isArray(v) && v !== b.steps) as [string, unknown[]][];
+  const fields = shown.filter(([, v]) => v !== null && ["string", "number", "boolean"].includes(typeof v));
   if (steps.length === 0 && lists.length === 0 && fields.length === 0) return null;
   const label = (k: string) => k.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
   return (

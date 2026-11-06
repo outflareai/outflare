@@ -78,7 +78,7 @@ func TestBrandIdentities(t *testing.T) {
 	// Duplicates are found and merged within a brand only.
 	owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ben", "brand_id": "bravo",
 		"identities": []map[string]any{{"namespace": "email", "value": "ben@example.com"}}})
-	pairs := owner.must(200, "GET", base+"/records/duplicates?status=all&brand=all", nil)["data"].([]any)
+	pairs := owner.must(200, "GET", base+"/records/duplicates?status=all&brand=bravo", nil)["data"].([]any)
 	if len(pairs) != 1 {
 		t.Fatalf("pairs: %v", pairs)
 	}

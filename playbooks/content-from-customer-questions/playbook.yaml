@@ -33,7 +33,7 @@ steps:
   - say: Check which ones the site already answers and which pages target them.
     tools: [listSEOSites, getSiteSearch, listPageTargets]
   - say: Write a brief for each missing page and post them to the mission.
-    tools: [postMissionUpdate]
+    tools: [addAgentRunUpdate]
 guardrails:
   - Briefs never quote a customer by name or include their email address or company.
 measure:

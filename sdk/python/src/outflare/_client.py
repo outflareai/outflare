@@ -29,6 +29,7 @@ class _Base:
         *,
         base_url: str | None = None,
         workspace: str | None = None,
+        brand: str | None = None,
         mission: str | None = None,
         max_retries: int = 3,
         timeout: float = 60.0,
@@ -39,6 +40,7 @@ class _Base:
             raise ValueError("pass token= or set OUTFLARE_TOKEN to an API token (oft_...)")
         self.base_url = (base_url or os.environ.get("OUTFLARE_URL") or "https://app.outflare.ai").rstrip("/")
         self._workspace = workspace or os.environ.get("OUTFLARE_WORKSPACE") or None
+        self._brand = brand or os.environ.get("OUTFLARE_BRAND") or None
         self.mission = mission
         self.max_retries = max_retries
         self.timeout = timeout
@@ -56,15 +58,28 @@ class _Base:
                 raise ValueError("this token has no workspace of its own: pass workspace=")
         return self._workspace
 
+    @property
+    def brand(self) -> str:
+        """The brand calls to a brand's routes go to: the one given, or else the token's own brand, from whoami."""
+        if not self._brand:
+            token = self._call("GET", "/v1/whoami").get("token") or {}
+            self._brand = token.get("brand_id")
+            if not self._brand:
+                raise ValueError(
+                    "pass brand= (a brand's id or handle) or set OUTFLARE_BRAND: this token works on every brand"
+                )
+        return self._brand
+
     def with_options(self, **changes: Any) -> Any:
         """A copy with some settings changed, sharing the connection pool.
 
-        client.with_options(workspace="acme") or with_options(mission=mission_id)
+        client.with_options(workspace="acme"), with_options(brand="northpeak") or with_options(mission=mission_id)
         """
         opts: dict[str, Any] = {
             "token": self.token,
             "base_url": self.base_url,
             "workspace": self._workspace,
+            "brand": self._brand,
             "mission": self.mission,
             "max_retries": self.max_retries,
             "timeout": self.timeout,
@@ -169,6 +184,8 @@ class _Base:
     def _fill(self, route: str, path: dict[str, Any]) -> str:
         if "{ws}" in route and not path.get("ws"):
             path["ws"] = self.workspace
+        if "{brand}" in route and not path.get("brand"):
+            path["brand"] = self.brand
         for k, v in path.items():
             if v is None:
                 raise ValueError(f"{k} is required")

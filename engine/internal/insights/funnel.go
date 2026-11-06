@@ -379,7 +379,7 @@ func (f Funnel) Validate() error {
 			}
 		case KindConversion:
 			if s.Conversion == "" {
-				return Invalid(at + ".conversion is a conversion definition's key (GET /v1/workspaces/{ws}/conversion-definitions)")
+				return Invalid(at + ".conversion is a conversion definition's key (GET /v1/brands/{brand}/conversion-definitions)")
 			}
 		case KindPage, KindVisit, KindPayment:
 		default:

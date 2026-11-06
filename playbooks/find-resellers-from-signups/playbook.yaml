@@ -42,7 +42,7 @@ steps:
   - say: Read the brand context and confirm the sign-up event and available customer data.
     tools: [getBrandContext, listEventDefinitions]
   - say: Read sign-up events in the requested window and resolve their existing people and companies; deduplicate by record ID.
-    tools: [listCustomerEvents, getRecord]
+    tools: [listBrandCustomerEvents, getBrandRecord]
   - say: Research relevant public business websites and profiles linked to those records; cite source URLs and dates, and record unresolved identity matches as unknown.
     tools: []
   - say: "Look for agencies, consultants, managed service providers and distributors. Check service pages, case studies, relevant customer segments and existing vendor partnerships. Distinguish referral partners from resellers who would handle billing or support. Recommend a referral, reseller or co-marketing pilot, with open questions about customer access, training, support and commercial terms."

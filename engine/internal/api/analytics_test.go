@@ -43,6 +43,9 @@ func (fakePlausible) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		res = append(res, map[string]any{"dimensions": []any{}, "metrics": []any{30, 90, 40, 25, 61}})
 	case q.Dimensions[0] == "time:day":
 		res = append(res, map[string]any{"dimensions": []any{q.DateRange[0]}, "metrics": []any{10, 30, 12, 20, 50}})
+	case q.Dimensions[0] == "visit:source":
+		res = append(res, map[string]any{"dimensions": []any{"Google"}, "metrics": []any{60, 50}}, map[string]any{"dimensions": []any{"chatgpt.com"}, "metrics": []any{15, 12}},
+			map[string]any{"dimensions": []any{"perplexity.ai"}, "metrics": []any{5, 4}}, map[string]any{"dimensions": []any{"Direct / None"}, "metrics": []any{20, 18}})
 	case q.Dimensions[0] == "event:page":
 		res = append(res, map[string]any{"dimensions": []any{"/pricing"}, "metrics": []any{50, 20}}, map[string]any{"dimensions": []any{"/"}, "metrics": []any{40, 25}})
 	}
@@ -102,6 +105,8 @@ func TestAnalyticsReports(t *testing.T) {
 		t.Fatalf("sites: %v", sites)
 	}
 	owner.must(400, "PUT", base+"/analytics/"+id+"/site", map[string]string{"site": "other-com.example"})
+	// Plausible keeps no filters for internal and test users.
+	owner.must(400, "PATCH", base+"/analytics/"+id+"/sites/example.com", map[string]any{"filter_test_accounts": true})
 	owner.must(200, "PUT", base+"/analytics/"+id+"/site", map[string]string{"site": "example.com"})
 
 	sum := owner.must(200, "GET", base+"/analytics/summary?from=2026-10-01&to=2026-10-03", nil)["data"].([]any)
@@ -260,6 +265,18 @@ func TestPostHogSignIn(t *testing.T) {
 	}
 	if got := owner.must(200, "GET", base+"/integrations/"+cb.Query().Get("integration"), nil); got["auth_method"] != "oauth2" || got["connector"] != "posthog" {
 		t.Fatalf("connection: %v", got)
+	}
+	// A PostHog site can leave out the project's internal and test users;
+	// the setting is kept on the site and the stored days are read again.
+	id := cb.Query().Get("integration")
+	if sites[0].(map[string]any)["filter_test_accounts"] != false {
+		t.Fatalf("filters start off: %v", sites[0])
+	}
+	if got := owner.must(200, "PATCH", base+"/analytics/"+id+"/sites/7", map[string]any{"filter_test_accounts": true}); got["filter_test_accounts"] != true {
+		t.Fatalf("filters on: %v", got)
+	}
+	if again := owner.must(200, "GET", base+"/analytics/"+id+"/sites", nil)["data"].([]any); again[0].(map[string]any)["filter_test_accounts"] != true {
+		t.Fatalf("filters kept: %v", again)
 	}
 }
 

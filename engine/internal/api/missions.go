@@ -165,12 +165,12 @@ func scanMission(row pgx.Row) (missionView, error) {
 // builtinHeld are the writes Outflare's agent never makes on its own: one-off
 // emails to an address it chose (lifecycle emails too), and changes to
 // email providers, mailboxes, sending servers,
-// senders, sign-ins, webhooks, the suppression list and the company context.
-var builtinHeld = regexp.MustCompile(`^/v1/workspaces/[^/]+/(inbox/[^/]+/reply|mailboxes/[^/]+/test-send|mailboxes|mailboxes/import|` +
-	`sending-servers(/.*)?|senders(/.*)?|webhooks(/.*)?|suppressions/[^/]+|context|api-tokens(/.*)?|integrations(/.*)?|emails|email-providers(/.*)?)/?$`)
+// senders, sign-ins, webhooks, the suppression list and a brand's context.
+var builtinHeld = regexp.MustCompile(`^/v1/(workspaces|brands)/[^/]+/(inbox/[^/]+/reply|mailboxes/[^/]+/test-send|mailboxes|mailboxes/import|` +
+	`sending-servers(/.*)?|senders(/.*)?|webhooks(/.*)?|suppressions/[^/]+|context|brands/[^/]+/context|api-tokens(/.*)?|integrations(/.*)?|emails|email-providers(/.*)?)/?$`)
 
 // A mailbox by id: changing or removing one also waits for a person.
-var builtinHeldMailbox = regexp.MustCompile(`^/v1/workspaces/[^/]+/mailboxes/[0-9a-fA-F-]{36}/?$`)
+var builtinHeldMailbox = regexp.MustCompile(`^/v1/(workspaces|brands)/[^/]+/mailboxes/[0-9a-fA-F-]{36}/?$`)
 
 func heldForBuiltin(method, path string) bool {
 	switch method {
@@ -319,11 +319,6 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 	}
 	// What Outflare knows about the company and the mission's brand, so the
 	// agent never asks the person again: their context and pinned memories.
-	company, err := s.loadContext(ctx, a.WorkspaceID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
 	pinned := true
 	memories, _, err := s.loadMemories(ctx, a, memoryFilter{pinned: &pinned, limit: 50})
 	if err != nil {
@@ -350,17 +345,30 @@ func (s *Server) getMission(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// The brand's context: each brand's is its own. One with no brand
+	// reads the workspace's first brand's.
 	var brand *brandContextView
-	md := contextMarkdown(company, memories)
-	if v.BrandID != nil {
-		b, err := s.loadBrandContext(ctx, a.WorkspaceID, *v.BrandID)
+	contextBrand := brandKey
+	if contextBrand == "" {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, a.WorkspaceID).Scan(&contextBrand); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	company := contextView{Version: 1, Missing: append([]string{}, onboardingFields...), AskForMissing: true}
+	var read *brandContextView
+	if contextBrand != "" {
+		b, err := s.loadBrandContext(ctx, a.WorkspaceID, contextBrand)
 		if err != nil {
 			s.internal(w, r, err)
 			return
 		}
-		brand = &b
-		md += brandMarkdown(brand)
+		read, company = &b, companyView(b)
+		if v.BrandID != nil {
+			brand = read
+		}
 	}
+	md := contextMarkdown(read, memories)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"mission": v,
 		"brand":   brand,
@@ -612,8 +620,14 @@ func scanAction(row pgx.Row) (missionActionView, error) {
 	return v, nil
 }
 
-// summarize names a write in words, for people approving it.
+// summarize names a write in words, for people approving it: the
+// operation's own summary in api/openapi.yaml ("Remember something"), else
+// a name made from the path.
 func summarize(method, path string) string {
+	path, _, _ = strings.Cut(path, "?")
+	if s := specSummary(method, path); s != "" {
+		return s
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	// v1 workspaces {ws} <resource> [id] [sub...]
 	if len(parts) < 4 {
@@ -622,6 +636,9 @@ func summarize(method, path string) string {
 	rest := parts[3:]
 	noun := strings.ReplaceAll(rest[0], "-", " ")
 	single := strings.TrimSuffix(noun, "s")
+	if strings.HasSuffix(noun, "ies") {
+		single = strings.TrimSuffix(noun, "ies") + "y"
+	}
 	switch {
 	case len(rest) == 1 && method == http.MethodPost:
 		return "Create " + single

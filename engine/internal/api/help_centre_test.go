@@ -35,8 +35,7 @@ func TestHelpCentre(t *testing.T) {
 	kb := base + "/knowledge"
 	ctx := context.Background()
 
-	owner.must(200, "PATCH", base+"/context", map[string]any{"company": "Northpeak"})
-	if _, err := e.pool.Exec(ctx, `UPDATE workspace_context SET logo_url = 'https://northpeak.example/logo.svg', colors = '{"primary": "#0f766e"}' WHERE workspace_id = $1`, ws); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE brands SET name = 'Northpeak', logo_url = 'https://northpeak.example/logo.svg', colors = '{"primary": "#0f766e"}' WHERE id = outflare_first_brand($1)`, ws); err != nil {
 		t.Fatal(err)
 	}
 
@@ -220,10 +219,12 @@ func TestHelpCentreBrands(t *testing.T) {
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Proxy setup", "brand_id": "geonode", "visibility": "public", "body": "Use the dashboard."})
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Payout schedule", "brand_id": "repocket", "visibility": "public", "body": "Monthly."})
+	// Brands share no knowledge: an item saved with no brand is the
+	// workspace's first brand's, so it isn't in Geonode's help centre.
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Account security", "visibility": "public", "body": "Turn on two-factor sign-in."})
 
 	geo := owner.must(201, "POST", base+"/help-centres", map[string]any{"brand_id": "geonode", "enabled": true})
-	if geo["name"] != "Geonode Help Center" || geo["articles"] != 2.0 {
+	if geo["name"] != "Geonode Help Center" || geo["articles"] != 1.0 {
 		t.Fatalf("brand help centre = %v", geo)
 	}
 	owner.must(400, "POST", base+"/help-centres", map[string]any{"brand_id": "geonode"})
@@ -231,7 +232,7 @@ func TestHelpCentreBrands(t *testing.T) {
 	owner.must(400, "PATCH", base+"/help-centres/"+geo["id"].(string), map[string]any{"brand_id": "repocket"})
 
 	body := helpGet(t, e.h, "GET", "/h/"+geo["slug"].(string)+"/", "", "").Body.String()
-	if !strings.Contains(body, "Proxy setup") || !strings.Contains(body, "Account security") || strings.Contains(body, "Payout schedule") {
+	if !strings.Contains(body, "Proxy setup") || strings.Contains(body, "Account security") || strings.Contains(body, "Payout schedule") {
 		t.Fatalf("brand home = %s", body)
 	}
 	if l := owner.must(200, "GET", base+"/help-centres?brand=repocket", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "Repocket Help" {

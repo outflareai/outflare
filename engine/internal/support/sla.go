@@ -108,8 +108,8 @@ func PolicyFor(ctx context.Context, q jobs.Querier, ws string, brand *string) (*
 	var on bool
 	err := q.QueryRow(ctx, `
 		SELECT enabled, first_reply_minutes, next_reply_minutes, resolution_minutes, timezone, hours FROM support_sla_policies
-		WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid)
-		ORDER BY brand_id IS NULL LIMIT 1`, ws, brand).Scan(&on, &p.FirstReply, &p.NextReply, &p.Resolution, &tz, &hours)
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid
+		LIMIT 1`, ws, brand).Scan(&on, &p.FirstReply, &p.NextReply, &p.Resolution, &tz, &hours)
 	// A brand's own policy that is off turns SLAs off for that brand.
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !on {
 		return nil, nil

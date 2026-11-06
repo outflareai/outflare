@@ -184,8 +184,9 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
     Promise.all([
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad_group", campaign_id: campaign.id, limit: 500 } } }) : null,
       below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad", campaign_id: campaign.id, limit: 1000 } } }) : null,
-      below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "adset" } } }) : null,
-      below ? api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...range, level: "ad" } } }) : null,
+      // What Outflare credits is the campaign's brand's.
+      below && campaign.brand_id ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: campaign.brand_id }, query: { ...range, level: "adset" } } }) : null,
+      below && campaign.brand_id ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: campaign.brand_id }, query: { ...range, level: "ad" } } }) : null,
       google ? api.GET("/v1/workspaces/{ws}/ads/keywords", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 500 } } }) : null,
       google ? api.GET("/v1/workspaces/{ws}/ads/search-terms", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 1000 } } }) : null,
     ]).then(([g, a, os, oa, k, t]) => {

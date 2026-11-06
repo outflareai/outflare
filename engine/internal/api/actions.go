@@ -97,6 +97,17 @@ func actionPath(r *http.Request) string { return pathPattern(r.URL.Path) }
 
 // pathPattern is a URL path as grants match it: the part after
 // /v1/workspaces/{ws}/, or after /v1/ for other routes.
+// brandRelative is a brand route's path within its brand
+// ("brands/<id>/sequences/x" is "sequences/x"); any other path is itself.
+func brandRelative(path string) string {
+	if rest, ok := strings.CutPrefix(path, "brands/"); ok {
+		if id, after, ok := strings.Cut(rest, "/"); ok && validUUID(id) {
+			return after
+		}
+	}
+	return path
+}
+
 func pathPattern(urlPath string) string {
 	p := strings.TrimPrefix(urlPath, "/v1/")
 	if rest, ok := strings.CutPrefix(p, "workspaces/"); ok {
@@ -628,7 +639,13 @@ func (s *Server) actionGate(w http.ResponseWriter, r *http.Request, a *access, n
 		s.internal(w, r, err)
 		return
 	}
-	g, found := pickGrant(grants, r.Method, path, parsed)
+	// A brand's data is under its brand's route; a grant names it as it
+	// was under the workspace ("sequences/**"), for any brand the grant
+	// allows, and that comes first. Else the route's own path.
+	g, found := pickGrant(grants, r.Method, brandRelative(path), parsed)
+	if !found {
+		g, found = pickGrant(grants, r.Method, path, parsed)
+	}
 
 	status, rule, holdWhy := actionHeld, ruleNoGrant, "no grant lets this agent make this change on its own"
 	var grantID *string
@@ -1241,6 +1258,12 @@ func (s *Server) approveAction(w http.ResponseWriter, r *http.Request) {
 		// The template is made in the decision's transaction: approved
 		// and remembered together, or neither.
 		also = func(ctx context.Context, tx pgx.Tx, _ actionView) error {
+			// A change on a brand route keeps the brand in its path, so a
+			// token that isn't bound to a brand gets a template without one.
+			var tokenBrand *string
+			if err := tx.QueryRow(ctx, `SELECT brand_id::text FROM api_tokens WHERE id = $1 AND workspace_id = $2`, in.tokenID, a.WorkspaceID).Scan(&tokenBrand); err == nil && tokenBrand == nil {
+				in.brand = nil
+			}
 			_, err := insertGrantTx(ctx, tx, a, in)
 			return err
 		}

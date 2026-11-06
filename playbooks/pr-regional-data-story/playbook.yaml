@@ -39,7 +39,7 @@ steps:
   - say: Read the brand's context and experts, and save a news search for the topic in each region so local journalists are found.
     tools: [getBrandContext, listPRExperts, createNewsSearch, listNewsSearches]
   - say: Work out the finding for each region from the brand's own data, as aggregates only, and leave out regions with too few to be fair.
-    tools: [listQueryTables, runQuery]
+    tools: [listBrandQueryTables, runBrandQuery]
   - say: Start one story per region with its own facts and sources, and draft the expert's quote for approval.
     tools: [createStory, addStoryFact, addStoryQuote, listStories]
   - say: Draft each release, check it and fix what the check finds. A person approves each one.

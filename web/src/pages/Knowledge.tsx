@@ -1061,8 +1061,8 @@ function Peek({
                 {brands.length > 0 && (
                   <label className="block">
                     <span className="mb-1 block">Brand</span>
-                    <select className={cn(field, "w-full")} disabled={ro || !!folderBrand} value={item.brand_id ?? ""} onChange={(e) => patch({ brand_id: e.target.value || null })}>
-                      <option value="">Every brand</option>
+                    <select className={cn(field, "w-full")} disabled={ro || !!folderBrand} value={item.brand_id ?? ""} onChange={(e) => e.target.value && patch({ brand_id: e.target.value })}>
+                      {!item.brand_id && <option value="">Choose a brand</option>}
                       {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                     {folderBrand && <span className="mt-1 block text-xs text-muted-foreground">Set by its folder ({byId(folderBrand)?.name}).</span>}
@@ -1358,7 +1358,7 @@ function Editor({
             <label className="block">
               <span className="mb-1.5 block font-medium">Brand</span>
               <select className={cn(field, "w-full")} disabled={ro || !!folderBrand} value={form.brand_id ?? ""} onChange={(e) => set("brand_id", e.target.value || null)}>
-                <option value="">Every brand</option>
+                {!form.brand_id && <option value="">Choose a brand</option>}
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
               {folderBrand && <span className="mt-1 block text-xs text-muted-foreground">Set by its folder.</span>}

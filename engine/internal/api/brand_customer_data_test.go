@@ -80,10 +80,11 @@ func TestBrandCustomerData(t *testing.T) {
 		t.Fatalf("merge across brands: %v", refused)
 	}
 
-	// A record moved to another brand takes its identities and consent along.
-	owner.must(200, "PATCH", base+"/records/"+ben, map[string]any{"brand_id": first})
-	if b := brandOf(t, e, `SELECT brand_id::text FROM consents WHERE record_id = $1`, ben); b != first {
-		t.Fatalf("consent after move: %q", b)
+	// Brands are fully separate: a record stays in its brand, with its
+	// identities and consent.
+	owner.must(400, "PATCH", base+"/records/"+ben, map[string]any{"brand_id": first})
+	if b := brandOf(t, e, `SELECT brand_id::text FROM consents WHERE record_id = $1`, ben); b == first {
+		t.Fatalf("consent moved: %q", b)
 	}
 }
 

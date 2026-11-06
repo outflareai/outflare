@@ -490,16 +490,17 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 	var promo, ref, click *membershipRow
 	if in.PromoCode != "" {
 		if promo, err = optMembership(tx.QueryRow(ctx, `SELECT `+membershipCols+`
-			WHERE m.workspace_id = $1 AND (m.id IN (SELECT membership_id FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2)
+			WHERE m.workspace_id = $1 AND ($4 = '' OR m.brand_id = $4::uuid) AND (m.id IN (SELECT membership_id FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2)
  AND NOT COALESCE((rules->>'disabled')::boolean,false)
  AND (NULLIF(rules->>'starts_at','') IS NULL OR (rules->>'starts_at')::timestamptz<=$3)
  AND (NULLIF(rules->>'ends_at','') IS NULL OR (rules->>'ends_at')::timestamptz>$3))
-			OR (lower(m.code)=lower($2) AND NOT EXISTS(SELECT 1 FROM partner_promo_codes pc WHERE pc.workspace_id=$1 AND lower(pc.code)=lower($2))))`, ws, in.PromoCode, in.at)); err != nil {
+			OR (lower(m.code)=lower($2) AND NOT EXISTS(SELECT 1 FROM partner_promo_codes pc WHERE pc.workspace_id=$1 AND pc.brand_id IS NOT DISTINCT FROM m.brand_id AND lower(pc.code)=lower($2))))
+			LIMIT 1`, ws, in.PromoCode, in.at, c.brand)); err != nil {
 			return
 		}
 	}
 	if in.Ref != "" {
-		if ref, err = optMembership(tx.QueryRow(ctx, `SELECT `+membershipCols+` WHERE m.workspace_id = $1 AND lower(m.code) = lower($2)`, ws, in.Ref)); err != nil {
+		if ref, err = optMembership(tx.QueryRow(ctx, `SELECT `+membershipCols+` WHERE m.workspace_id = $1 AND lower(m.code) = lower($2) AND ($3 = '' OR m.brand_id = $3::uuid) LIMIT 1`, ws, in.Ref, c.brand)); err != nil {
 			return
 		}
 	}
@@ -540,7 +541,7 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		       p.block_ad_clicks, p.block_social_clicks, s.click_ids, s.referrer_host,
 		       s.country_source IN ('proxy', 'ip') AND s.country = ANY (p.blocked_countries)
 		FROM site_sessions s
-		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref)
+		JOIN partner_memberships m ON m.workspace_id = s.workspace_id AND lower(m.code) = lower(s.ref) AND (s.brand_id IS NULL OR m.brand_id = s.brand_id)
 		JOIN partner_programs p ON p.id = m.program_id
 		WHERE s.workspace_id = $1 AND (s.record_id = $2 OR ($5 <> '' AND s.anonymous_id = $5)) AND s.ref <> '' AND ($3 = '' OR m.program_id::text = $3)
 		  AND ($6 = '' OR p.brand_id = $6::uuid)

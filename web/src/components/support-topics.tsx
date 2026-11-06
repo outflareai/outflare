@@ -15,7 +15,7 @@ type Draft = { name: string; description: string; assignee_id: string; team_id: 
 const empty: Draft = { name: "", description: "", assignee_id: "", team_id: "", always_handoff: false, brand: "" };
 
 export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage: boolean }) {
-  const { brands } = useBrand(ws);
+  const { brands, brand: picked } = useBrand(ws);
   const [topics, setTopics] = useState<SupportHandoffTopic[] | undefined>(undefined);
   const [members, setMembers] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -37,7 +37,7 @@ export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage:
   function edit(t: SupportHandoffTopic | null) {
     setError("");
     if (!t) {
-      setDraft(empty);
+      setDraft({ ...empty, brand: picked?.id ?? brands[0]?.id ?? "" });
       return setEditing("new");
     }
     setDraft({ name: t.name, description: t.description, assignee_id: t.assignee?.id ?? "", team_id: t.team?.id ?? "", always_handoff: t.always_handoff, brand: t.brand_id ?? "" });
@@ -93,7 +93,7 @@ export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage:
         </select>
         {editing === "new" && brands.length > 0 && (
           <select aria-label="Brand" className={cn(field, "flex-1")} value={draft.brand} onChange={(e) => setDraft({ ...draft, brand: e.target.value })}>
-            <option value="">Every brand</option>
+            {!draft.brand && <option value="">Choose a brand</option>}
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}

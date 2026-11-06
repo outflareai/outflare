@@ -148,7 +148,7 @@ The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a p
 
 ## On your servers
 
-`POST /v1/workspaces/{ws}/flags/evaluate` with a token that has `analytics.read` (MCP `evaluate_flags`):
+`POST /v1/brands/{brand}/flags/evaluate` with a token that has `analytics.read` (MCP `evaluate_flags`):
 
 ```json
 { "anonymous_id": "the visitor's id", "url": "https://northpeak.example/pricing", "properties": { "plan": "pro" } }

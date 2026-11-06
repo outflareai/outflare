@@ -52,12 +52,12 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, canManage]);
 
-  // Alerts are one brand's (the picked one); who hears about them is the
-  // workspace's setting.
+  // Alerts, who hears about them and your mutes are all one brand's (the
+  // picked one): brands share none.
   async function load() {
     const [l, s] = await Promise.all([
       brandId ? api.GET("/v1/brands/{brand}/alerts", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: { data: [] as Alert[], next_cursor: null }, error: undefined }),
-      api.GET("/v1/workspaces/{ws}/alerts/settings", path),
+      brandId ? api.GET("/v1/brands/{brand}/alerts/settings", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: undefined, error: undefined }),
     ]);
     if (l.data) {
       setList(l.data.data);
@@ -85,7 +85,8 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
 
   async function choose(kind: string, email: string) {
     setBusy(kind);
-    const { error } = await api.PUT("/v1/workspaces/{ws}/alerts/settings", { ...path, body: { kind, email: email as "owner" | "admins" | "off" } });
+    if (!brandId) return;
+    const { error } = await api.PUT("/v1/brands/{brand}/alerts/settings", { params: { path: { brand: brandId } }, body: { kind, email: email as "owner" | "admins" | "off" } });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (!error) load();
@@ -94,7 +95,8 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
   async function post(kind: string, channel: string) {
     setBusy(kind);
     const body = channel && slack ? { kind, slack_integration_id: slack.id, slack_channel: channel } : { kind, slack_integration_id: null, slack_channel: null };
-    const { error } = await api.PUT("/v1/workspaces/{ws}/alerts/settings", { ...path, body });
+    if (!brandId) return;
+    const { error } = await api.PUT("/v1/brands/{brand}/alerts/settings", { params: { path: { brand: brandId } }, body });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (!error) load();
@@ -102,15 +104,15 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
 
   async function mute(kind: string, muted: boolean) {
     setBusy("mute-" + kind);
-    const { error } = await api.PUT("/v1/workspaces/{ws}/alerts/mutes", { ...path, body: { kind, muted } });
+    if (!brandId) return;
+    const { error } = await api.PUT("/v1/brands/{brand}/alerts/mutes", { params: { path: { brand: brandId } }, body: { kind, muted } });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (!error) load();
   }
 
-  const mine = (kind: string) => set?.settings.find((s) => s.kind === kind && !s.brand_id);
+  const mine = (kind: string) => set?.settings.find((s) => s.kind === kind);
   const current = (kind: string) => mine(kind)?.email ?? set?.default_email ?? "owner";
-  const brandOverrides = set?.settings.filter((s) => s.brand_id).length ?? 0;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -170,7 +172,6 @@ export function Alerts({ ws, canManage }: { ws: string; canManage: boolean }) {
             </p>
           )}
           {!canManage && <p className="mt-3 text-sm text-muted-foreground">Only owners and admins can change who gets them. Anyone can mute a kind for themselves.</p>}
-          {brandOverrides > 0 && <p className="mt-3 text-sm text-muted-foreground">{brandOverrides} brand {brandOverrides === 1 ? "setting chooses" : "settings choose"} differently from these, set through the API or an agent.</p>}
           <ErrorText>{error}</ErrorText>
         </Card>
       )}

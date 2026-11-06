@@ -49,7 +49,7 @@ func (s *Server) listSupportSLAPolicies(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), supportSLAPolicySelect+` WHERE workspace_id = $1`+sharedBrandSQL(brand, "brand_id", &args)+
+	rows, err := s.pool.Query(r.Context(), supportSLAPolicySelect+` WHERE workspace_id = $1`+brand.sql("brand_id", &args)+
 		` ORDER BY brand_id IS NOT NULL, created_at`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -63,11 +63,16 @@ func (s *Server) listSupportSLAPolicies(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
-// slaScope is the brand a policy is for: nil for "default".
+// slaScope is the brand a policy is for. Brands share none, so "default"
+// is the workspace's first brand (nil only when it has no brand).
 func (s *Server) slaScope(r *http.Request, a *access) (*string, error) {
 	scope := r.PathValue("scope")
 	if scope == "default" {
-		return nil, nil
+		b, err := s.rowBrand(r.Context(), a)
+		if err != nil || b == "" {
+			return nil, err
+		}
+		return &b, nil
 	}
 	id, err := s.brandIDFor(r.Context(), a.WorkspaceID, scope)
 	if errors.Is(err, errNotFound) {

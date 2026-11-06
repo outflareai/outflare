@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Button, confirmAction, ErrorText, field, Loading, PageHeader, Status, toast } from "../ui";
 import { Icon } from "../icons";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { pickedBrandId, useBrand } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { Switch } from "@/components/ui/switch";
 
@@ -405,9 +405,12 @@ function Domain({ ws, hc, canManage, onPatch, go }: { ws: string; hc: HelpCentre
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } } });
+    // Domains are a brand's: the help centre's brand's, else the picked one's.
+    const brand = hc.brand_id ?? pickedBrandId();
+    if (!brand) return setDomains([]);
+    const { data } = await api.GET("/v1/brands/{brand}/tracking-domains", { params: { path: { brand } } });
     if (data) setDomains(data.data as TrackingDomain[]);
-  }, [ws]);
+  }, [ws, hc.brand_id]);
   useEffect(() => void load(), [load]);
 
   const mine = domains?.find((d) => d.id === hc.domain_id);
@@ -418,7 +421,7 @@ function Domain({ ws, hc, canManage, onPatch, go }: { ws: string; hc: HelpCentre
     if (!domain) return;
     setBusy(true);
     // The domain is the help centre's brand's, like the help centre.
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } }, body: { domain, ...(hc.brand_id ? { brand_id: hc.brand_id } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/tracking-domains", { params: { path: { brand: hc.brand_id ?? pickedBrandId() } }, body: { domain } });
     if (error) {
       setBusy(false);
       return toast(errorMessage(error), "error");
@@ -541,13 +544,8 @@ function Designer({ ws, hc, canManage, onClose, onSaved }: { ws: string; hc: Hel
       logo = data?.logo_url ?? "";
       colors = data?.colors ?? {};
     }
-    if (!logo || !colors.primary) {
-      const { data } = await api.GET("/v1/workspaces/{ws}/context", { params: { path: { ws } } });
-      logo ||= data?.context.logo_url ?? "";
-      colors = { ...(data?.context.colors ?? {}), ...Object.fromEntries(Object.entries(colors).filter(([, v]) => v)) };
-    }
     track("ui.help_centre_brand_imported", { found_logo: !!logo, found_color: !!colors.primary });
-    if (!logo && !colors.primary) return toast("No logo or colours saved yet. Add them under Knowledge, About your company.", "error");
+    if (!logo && !colors.primary) return toast("No logo or colours saved yet. Add them to the brand under Knowledge, About your company.", "error");
     setSet((s) => ({ ...s, ...(logo ? { logo_url: logo } : {}), ...(colors.primary ? { color: colors.primary } : {}) }));
     toast("Your brand's logo and colour are in. Save to keep them.");
   }

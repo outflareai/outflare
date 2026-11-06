@@ -1,12 +1,12 @@
 # Digests
 
-A digest is a daily or weekly summary of the whole workspace in one place: what needs a person, fixes found and confirmed, deploys, site health, outreach, lifecycle email, support (conversations, what the support assistant answered or left to the team, and answers waiting for review), missions and channels (visits, conversions, revenue and cost), each number with the period before to compare. Every module that has something to say adds its own section, so a digest covers the whole tool, not one part of it.
+A digest is a daily or weekly summary of one brand in one place: what needs a person, fixes found and confirmed, deploys, site health, outreach, lifecycle email, support (conversations, what the support assistant answered or left to the team, and answers waiting for review), missions, channels (visits, conversions, revenue and cost) and [AI visibility](ai-visibility.md#in-the-digest), each number with the period before to compare. Every module that has something to say adds its own section, so a digest covers the whole tool, not one part of it. Each brand has its own digests and settings, and its numbers count only that brand's data (a connection every brand shares shows in each brand's).
 
 Each digest is kept in the app (**Settings → Digests**), sent as the `digest.ready` webhook (so Slack, a CRM or your own system can post it), and emailed only when you choose to.
 
 ## The schedule
 
-Without changes, a workspace gets a weekly digest on Mondays at 08:00 UTC, kept in the app and sent as a webhook, with no email. Owners and admins change it on the Digests page or with `PUT /v1/workspaces/{ws}/digest-settings`:
+Without changes, each brand gets a weekly digest on Mondays at 08:00 UTC, kept in the app and sent as a webhook, with no email. Owners and admins change it on the Digests page or with `PUT /v1/brands/{brand}/digest-settings`:
 
 | Field | Values |
 | --- | --- |
@@ -23,7 +23,7 @@ A period with nothing in it is skipped rather than sent empty. A server that was
 
 Digest email goes only through the workspace's own email provider (Amazon SES, Postmark or Resend, connected under Email providers), from an address on one of its verified sending domains. Outflare never sends it from an account of its own. Until the provider and sender are set up, digests are still kept and sent as webhooks, and the Digests page says what is missing (`email_problem`).
 
-It goes to members who see every brand (a digest covers all of them) and have confirmed their email address. Anyone can turn it off for themselves on the Digests page or with `PUT .../digest-settings/me` (`{"email": false}`).
+It goes to members who see the brand and have confirmed their email address. Anyone can turn it off for themselves, for every brand, on the Digests page or with `PUT /v1/workspaces/{ws}/digest-settings/me` (`{"email": false}`).
 
 Each email is a transactional email in Sent emails, tagged `digest`, so its delivery, bounces and complaints show there like any other.
 
@@ -31,16 +31,16 @@ Each email is a transactional email in Sent emails, tagged `digest`, so its deli
 
 | Endpoint | MCP tool | What it does |
 | --- | --- | --- |
-| `GET /v1/workspaces/{ws}/digest-settings` | `get_digest_settings` | The schedule, who gets it, and why it can't be emailed yet |
-| `PUT /v1/workspaces/{ws}/digest-settings` | `update_digest_settings` | Change them (`workspace.manage`) |
+| `GET /v1/brands/{brand}/digest-settings` | `get_digest_settings` | The schedule, who gets it, and why it can't be emailed yet |
+| `PUT /v1/brands/{brand}/digest-settings` | `update_digest_settings` | Change them (`workspace.manage`) |
 | `PUT /v1/workspaces/{ws}/digest-settings/me` | | Turn the email off or on for yourself |
-| `GET /v1/workspaces/{ws}/digests` | `list_digests` | The newest 50 digests |
-| `GET /v1/workspaces/{ws}/digests/{id}` | | One digest |
-| `GET /v1/workspaces/{ws}/digests/preview` | `preview_digest` | The digest of the period that ends now, not kept |
-| `POST /v1/workspaces/{ws}/digests` | `send_digest` | Make one now (`workspace.manage`) |
+| `GET /v1/brands/{brand}/digests` | `list_digests` | The newest 50 digests |
+| `GET /v1/brands/{brand}/digests/{id}` | | One digest |
+| `GET /v1/brands/{brand}/digests/preview` | `preview_digest` | The digest of the period that ends now, not kept |
+| `POST /v1/brands/{brand}/digests` | `send_digest` | Make one now (`workspace.manage`) |
 
-The routes read the whole workspace, so brand-limited members and brand tokens can't use them.
+A brand token or a member kept to some brands reaches only their brands' digests. The same routes under `/v1/workspaces/{ws}/` are deprecated: they act on `?brand=` or the workspace's first brand.
 
 ## Adding a section
 
-A package adds a section with `digests.Register(digests.Builder{ID, Title, Build})`. `Build` gets the workspace and the period and returns metrics (with `Previous` for the period before) and items, each linking to the app page that has it. Sections with nothing in them are left out.
+A package adds a section with `digests.Register(digests.Builder{ID, Title, Build})`. `Build` gets the workspace, the brand and the period, keeps every query to the brand, and returns metrics (with `Previous` for the period before) and items, each linking to the app page that has it. Sections with nothing in them are left out.

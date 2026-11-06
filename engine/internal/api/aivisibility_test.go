@@ -49,6 +49,8 @@ func (f fakeOpenRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(question, "best proxy"):
 		answer = "Top picks: **Northpeak** is the best known. Acme (acme.example) is cheaper, and ACME has a free trial. See https://review.example/proxies?utm_source=openai."
 		cites = []map[string]any{{"type": "url_citation", "url_citation": map[string]any{"url": "https://www.acme.example/pricing", "title": "Acme pricing"}}}
+	case strings.Contains(question, "residential"):
+		answer = "Northpeak is the top pick for residential proxies; see https://list.example/best-residential for the full list."
 	case strings.Contains(question, "cheapest"):
 		answer = "Northpeak's starter plan is the cheapest. Acmeville sells none."
 		cites = []map[string]any{{"type": "url_citation", "url_citation": map[string]any{"url": "https://northpeak.example/plans#starter", "title": "Plans"}}}

@@ -28,8 +28,8 @@ type supportArticle struct {
 // there is none.
 func (s *Server) liveHelpCentre(ctx context.Context, ws string, brand *string) (*helpCentreView, error) {
 	v, err := s.scanHelpCentre(s.pool.QueryRow(ctx, helpCentreSelect+`
-		WHERE h.workspace_id = $1 AND h.enabled AND (h.brand_id IS NULL OR h.brand_id = $2::uuid)
-		ORDER BY h.brand_id IS NULL, h.created_at LIMIT 1`, ws, brand))
+		WHERE h.workspace_id = $1 AND h.enabled AND h.brand_id IS NOT DISTINCT FROM $2::uuid
+		ORDER BY h.created_at LIMIT 1`, ws, brand))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

@@ -213,6 +213,9 @@ type SiteConfig struct {
 	Domain           string   `json:"domain,omitempty"`
 	Off              bool     `json:"off,omitempty"`
 	ConversionEvents []string `json:"conversion_events,omitempty"`
+	// FilterTestAccounts leaves out the tool's own internal and test users
+	// (PostHog's project filters).
+	FilterTestAccounts bool `json:"filter_test_accounts,omitempty"`
 }
 
 // Config is the part of a connection's config about sites. Site is the
@@ -243,6 +246,9 @@ type SitePlan struct {
 	// ConversionEvents are the events that count as a conversion when
 	// visits are counted by landing page.
 	ConversionEvents []string `json:"conversion_events"`
+	// FilterTestAccounts: reports leave out the tool's internal and test
+	// users.
+	FilterTestAccounts bool `json:"filter_test_accounts"`
 }
 
 // Plan lines up the sites a tool lists with the connection's settings.
@@ -265,6 +271,7 @@ func Plan(cfg Config, sites []connectors.AnalyticsSite) []SitePlan {
 		if c.ConversionEvents != nil {
 			p.ConversionEvents = c.ConversionEvents
 		}
+		p.FilterTestAccounts = c.FilterTestAccounts
 		p.Domain = Host(c.Domain)
 		if p.Domain == "" && x.ID == cfg.Site {
 			p.Domain = Host(cfg.Domain)
@@ -447,7 +454,7 @@ func (s *Syncer) syncSite(ctx context.Context, o *connectors.Opened, reader conn
 	}
 	var firstErr error
 	if connectors.Supports(reader, connectors.ReportTraffic) {
-		q := connectors.AnalyticsQuery{Report: connectors.ReportTraffic, Site: site, From: day(trafficFrom), To: day(yesterday)}
+		q := connectors.AnalyticsQuery{Report: connectors.ReportTraffic, Site: site, From: day(trafficFrom), To: day(yesterday), TestAccounts: p.FilterTestAccounts}
 		rep, err := s.report(ctx, o, reader, q, res)
 		if err != nil {
 			firstErr = err
@@ -470,7 +477,7 @@ func (s *Syncer) syncSite(ctx context.Context, o *connectors.Opened, reader conn
 				continue
 			}
 			for d := breakdownFrom; !d.After(yesterday); d = d.AddDate(0, 0, 1) {
-				q := connectors.AnalyticsQuery{Report: report, Site: site, From: day(d), To: day(d), Limit: rowsPerDay}
+				q := connectors.AnalyticsQuery{Report: report, Site: site, From: day(d), To: day(d), Limit: rowsPerDay, TestAccounts: p.FilterTestAccounts}
 				rep, err := s.report(ctx, o, reader, q, res)
 				if err != nil {
 					if firstErr == nil {

@@ -246,19 +246,18 @@ func loadBanner(ctx context.Context, q pgx.Tx, ws, keyID string, lock bool) (con
 	v := consentBannerView{SiteKeyID: keyID, Config: defaultBanner(), Version: 0, ConsentVersion: 1}
 	var raw []byte
 	var version, consentVersion *int
-	var brandLogo, companyLogo string
-	var brandColors, companyColors lookColors
+	var brandLogo string
+	var brandColors lookColors
 	sql := `SELECT b.config, b.version, b.consent_version, b.updated_at,
-			COALESCE(br.logo_url, ''), COALESCE(br.colors, '{}'), COALESCE(c.logo_url, ''), COALESCE(c.colors, '{}')
+			COALESCE(br.logo_url, ''), COALESCE(br.colors, '{}')
 		FROM site_keys k
 		LEFT JOIN consent_banners b ON b.site_key_id = k.id
 		LEFT JOIN brands br ON br.id = k.brand_id
-		LEFT JOIN workspace_context c ON c.workspace_id = k.workspace_id
 		WHERE k.id = $1 AND k.workspace_id = $2 AND k.revoked_at IS NULL`
 	if lock {
 		sql += ` FOR UPDATE OF k`
 	}
-	err := q.QueryRow(ctx, sql, keyID, ws).Scan(&raw, &version, &consentVersion, &v.UpdatedAt, &brandLogo, &brandColors, &companyLogo, &companyColors)
+	err := q.QueryRow(ctx, sql, keyID, ws).Scan(&raw, &version, &consentVersion, &v.UpdatedAt, &brandLogo, &brandColors)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, errNotFound
 	}
@@ -271,10 +270,8 @@ func loadBanner(ctx context.Context, q pgx.Tx, ws, keyID string, lock bool) (con
 			return v, err
 		}
 	}
-	v.Look = bannerLook{LogoURL: brandLogo, Colors: brandColors.or(companyColors)}
-	if v.Look.LogoURL == "" {
-		v.Look.LogoURL = companyLogo
-	}
+	// The brand's own look: brands share none.
+	v.Look = bannerLook{LogoURL: brandLogo, Colors: brandColors}
 	return v, nil
 }
 

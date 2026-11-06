@@ -25,8 +25,8 @@ Outflare is the brain of a company's go-to-market. It sends cold email from the 
 
 ## How things connect
 - Workspace: one company. Everything below belongs to exactly one workspace. Members are people with a role (owner, admin, operator, viewer); API tokens are machines with scopes, optionally held to one brand.
-- Company context and memories: what Outflare knows about the business (get_context). Read them before writing anything; save what the person tells you with update_context and remember.
-- Brands: a company can market several brands, each with its own website (list_brands). Connectors, members, tokens and leads are shared; each brand has its own context, memories, lists, sequences, domains and mailboxes. Pass brand to get_context to read the company's context with that brand's on top; a brand's mailboxes send for any of its sequences. Records without a brand are shared.
+- Brand context and memories: what Outflare knows about each brand (get_context). Read them before writing anything; save what the person tells you with update_context and remember.
+- Brands: a company can market several brands, each with its own website (list_brands). Connectors, members, tokens and leads are shared; each brand has its own context, memories, lists, sequences, domains and mailboxes. Brands are fully separate: pass brand to get_context to read that brand's context, which is its own; a brand's mailboxes send for any of its sequences. Records without a brand are shared.
 - Ideal customer profiles: who the company sells to, in words and as list-building filters (list_ideal_customer_profiles); a brand's offer and audience go in its context.
 - Sending: domains hold mailboxes; mailboxes may sign in through a sending server. A mailbox sends cold email only when active and in the ready stage (new ones warm up first). Domain health (SPF, DKIM, DMARC, blocklists, bounces) decides whether mail lands.
 - Leads and lists: leads are people; lead lists group them, and can be built from a data connector. The suppression list is never emailed.
@@ -58,13 +58,13 @@ export function registerContextTools(
     {
       title: "Start here: what Outflare knows and what is blocked",
       description:
-        "Call this first in every conversation. Returns the company context (company, website, about, goals, voice, rules, notes), " +
+        "Call this first in every conversation. Returns one brand's context (company is the brand's name, website, about, goals, voice, rules, notes), " +
         "pinned and recent memories, the brands, the workspace status: a one-line summary, the set-up checklist " +
         "and blockers with the tool that fixes each, and onboarding (see get_onboarding). If context.ask_for_missing is true, ask the person for context.missing in one short message " +
         "(or offer to read their website) and save the answers with update_context. Never ask for anything already here. " +
-        "If brands lists several, the company markets several brands: pass brand (a handle) to add that brand's context and memories, which win over the company's where set " +
-        "(rules add up).",
-      inputSchema: { brand: z.string().optional().describe("A brand's handle or id from brands, or all.") },
+        "Brands are fully separate: each brand's context is its own and none is shared. Without brand this is the workspace's first brand's; if brands lists others, " +
+        "ask which brand the work is for and pass brand (a handle).",
+      inputSchema: { brand: z.string().optional().describe("A brand's handle or id from brands.") },
       annotations: read,
     },
     async (q) => {
@@ -238,31 +238,30 @@ export function registerContextTools(
   server.registerTool(
     "update_context",
     {
-      title: "Save what you learned about the company",
+      title: "Save what you learned about a brand",
       description:
-        "Save the company context: who they are, what they do, goals, voice and rules. Send only the fields to change, in the person's own words where possible; " +
-        "every agent and teammate reads it from then on. Pass the version you read to avoid overwriting someone's edit (409 context_changed means read again). " +
-        "A brand's offer and audience belong in its context (update_brand_context); ideal customers in create_ideal_customer_profile. onboarding_dismissed true stops asking for missing fields.",
+        "Save a brand's context (\"About your company\"): what it does, goals, voice and rules. Each brand's is its own: pass brand, or it is the workspace's first brand's. " +
+        "Send only the fields to change, in the person's own words where possible; every agent and teammate reads it from then on. " +
+        "Pass the version you read to avoid overwriting someone's edit (409 context_changed means read again). The brand's name and website change with update_brand; " +
+        "its audience with update_brand_context; ideal customers in create_ideal_customer_profile. onboarding_dismissed true stops asking for missing fields.",
       inputSchema: {
-        company: z.string().max(200).optional(),
-        website: z.string().max(253).optional(),
-        about: z.string().max(4000).optional().describe("What the company does, in a few sentences."),
+        brand: z.string().optional().describe("A brand's handle or id; defaults to the workspace's first brand."),
+        about: z.string().max(4000).optional().describe("What the brand does, in a few sentences."),
         goals: z.string().max(4000).optional().describe("What the person wants from Outflare, with numbers and dates where given."),
         voice: z.string().max(4000).optional().describe("How emails should sound: tone, length, sign-off, words to avoid."),
-        rules: z.string().max(4000).optional().describe("Things never to do."),
-        notes: z.string().max(100000).optional().describe("Everything else, in Markdown: proof points, competitors, past results."),
-        brands: z.string().max(4000).optional().describe("How the company's brands relate to each other. Each brand's own context goes in update_brand_context."),
-        logo_url: z.string().max(2000).optional().describe("An https address of the company's logo; empty clears it. The consent banner shows it."),
+        rules: z.string().max(10000).optional().describe("Things never to do."),
+        notes: z.string().max(210000).optional().describe("Everything else, in Markdown: proof points, competitors, past results, how it relates to the other brands."),
+        logo_url: z.string().max(2000).optional().describe("An https address of the brand's logo; empty clears it. The consent banner shows it."),
         colors: z
           .object({ primary: z.string(), background: z.string(), text: z.string() })
           .optional()
-          .describe("The company's colours, as hex such as #1d4ed8; empty for none."),
+          .describe("The brand's colours, as hex such as #1d4ed8; empty for none."),
         version: z.number().int().optional().describe("context.version from get_context."),
         onboarding_dismissed: z.boolean().optional().describe("True when the person does not want to be asked for the missing fields."),
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.PATCH("/v1/workspaces/{ws}/context", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/context", { params: { path: path(), query: withBrand({ brand }) }, body })),
   );
 
   server.registerTool(

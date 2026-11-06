@@ -79,7 +79,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "12";
+  var VERSION = "13";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -452,7 +452,7 @@
     try { sessionStorage.setItem(SEEN, JSON.stringify({ anon: anon, flags: seen })); } catch (e) {}
     track("Experiment Viewed", { flag: k, variant: v, source: flagSource, wait_ms: Math.max(flagWait, 0) });
   }
-  function applyFlags(state, source) {
+  function applyFlags(state, source, expose) {
     flagState = state;
     // The first answer shown is the one the visitor saw first.
     if (flagWait < 0) {
@@ -465,6 +465,10 @@
     cls.forEach(function (c) { root.classList.add(c); });
     flagClasses = cls;
     if (classFlags) for (k in state.flags) exposed(k);
+    // No-code tests this page is in, from a fresh answer for this page:
+    // the visitor has seen their version, whichever it is (the control
+    // changes nothing, so applying changes alone would never count it).
+    if (expose && expose.length) for (var e = 0; e < expose.length && e < 100; e++) if (typeof expose[e] === "string") exposed(expose[e]);
     applyChanges();
     // Hidden parts show once their version is in: now, or once the page
     // has loaded when it is still loading.
@@ -661,7 +665,7 @@
         var state = { anon: anon, flags: (out && out.flags) || (flagState && flagState.flags) || {}, payloads: (out && out.payloads) || (flagState && flagState.payloads) || {} };
         if (out) try { sessionStorage.setItem(FLAGS, JSON.stringify(state)); } catch (e) {}
         if (out) remember(out);
-        applyFlags(state, out ? "fetched" : "");
+        applyFlags(state, out ? "fetched" : "", out && out.expose);
       }, function () { applyFlags(flagState || { anon: anon, flags: {}, payloads: {} }); });
   }
   // The server's answer, or else the last one, shows at once; a fresh one

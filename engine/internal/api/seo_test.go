@@ -3,6 +3,7 @@ package api_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -89,6 +90,36 @@ func (fakeDataForSEO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/v3/appendix/user_data":
 		out = task(0, map[string]any{"login": "jo", "money": map[string]any{"balance": 50}})
+	case "/v3/ai_optimization/chat_gpt/llm_scraper/live/advanced", "/v3/ai_optimization/gemini/llm_scraper/live/advanced":
+		// ChatGPT's own screen: names Northpeak first, then Acme; cites a
+		// review page and Acme's pricing; read one page more.
+		out = task(0.004, map[string]any{
+			"model": "gpt-6", "check_url": "https://chatgpt.com/?q=best+proxy",
+			"markdown":        "1. **Northpeak**: the best known.\n2. **Acme**: cheaper, see [pricing](https://acme.example/pricing).",
+			"brand_entities":  []any{map[string]any{"title": "Northpeak"}, map[string]any{"title": "Acme"}, map[string]any{"title": "Lumen Proxies"}},
+			"sources":         []any{map[string]any{"url": "https://review.example/proxies", "title": "Best proxies"}, map[string]any{"url": "https://acme.example/pricing", "title": "Acme pricing"}},
+			"search_results":  []any{map[string]any{"url": "https://review.example/proxies", "title": "Best proxies"}, map[string]any{"url": "https://northpeak.example/blog/proxies", "title": "Northpeak blog"}},
+			"fan_out_queries": []any{"best proxy provider 2026"},
+		})
+	case "/v3/ai_optimization/llm_mentions/search_mentions/live":
+		// Real questions put to ChatGPT whose answers name the brands.
+		out = task(0.1, map[string]any{"items": []any{
+			map[string]any{"platform": "chat_gpt", "question": "Best residential proxies for scraping", "ai_search_volume": 4400,
+				"brand_entities": []any{map[string]any{"title": "Northpeak"}, map[string]any{"title": "Acme"}}},
+			map[string]any{"platform": "google", "question": "is northpeak worth it", "ai_search_volume": 90},
+		}})
+	case "/v3/ai_optimization/ai_keyword_data/keywords_search_volume/live":
+		out = task(0.0105, map[string]any{"items": []any{
+			map[string]any{"keyword": "is acme legit?", "ai_search_volume": 320},
+			map[string]any{"keyword": "best alternatives to northpeak", "ai_search_volume": 0},
+		}})
+	case "/v3/ai_optimization/llm_mentions/multi_target_metrics/live":
+		// The stored AI answers naming each brand.
+		out = task(0.14, map[string]any{"items": []any{
+			map[string]any{"key": "brand", "total": map[string]any{"mentions": 120, "ai_search_volume": 5000},
+				"platform": []any{map[string]any{"key": "chat_gpt", "mentions": 80}, map[string]any{"key": "google", "mentions": 40}}},
+			map[string]any{"key": "c:Northpeak", "total": map[string]any{"mentions": 280, "ai_search_volume": 9000}},
+		}})
 	case "/v3/dataforseo_labs/google/domain_rank_overview/live":
 		out = task(0.0101, map[string]any{"items": []any{map[string]any{"metrics": map[string]any{"organic": map[string]any{"count": 1200, "etv": 3400, "pos_1": 5, "pos_2_3": 10}}}}})
 	case "/v3/backlinks/summary/live":
@@ -142,7 +173,23 @@ func (fakeDataForSEO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			list = append(list, organic(pos, "https://www.example.com/pricing", "www.example.com"))
 		}
+		// Keyword gaps (TestDiscoverCompetitors): more domains rank.
+		if len(tasks) == 1 && strings.HasPrefix(tasks[0].Keyword, "gap ") {
+			list = append(list, organic(2, "https://newrival.example/"+tasks[0].Keyword, "newrival.example"), organic(3, "https://github.com/x", "github.com"))
+			// Google's own redirect link to a page: read as the page.
+			list = append(list, organic(5, "https://www.google.com/url?q=https://redirected.example/"+strings.ReplaceAll(tasks[0].Keyword, " ", "-")+"&sa=U", "www.google.com"))
+			switch tasks[0].Keyword {
+			case "gap alpha":
+				list = append(list, organic(4, "https://once.example/", "once.example"))
+			case "gap beta":
+				list = append(list, organic(4, "https://www.northpeak.example/beta", "www.northpeak.example"))
+			}
+		}
 		out = task(0.02, map[string]any{"items": list})
+	case "/v3/dataforseo_labs/google/relevant_pages/live":
+		out = task(0.0105, map[string]any{"total_count": 1, "items": []any{
+			map[string]any{"page_address": "https://" + dfsTarget(r) + "/pricing", "metrics": map[string]any{"organic": map[string]any{"etv": 900, "count": 40}}},
+		}})
 	case "/v3/backlinks/backlinks/live":
 		dfsLinks.Lock()
 		out = task(0.021, map[string]any{"total_count": len(dfsLinks.items), "items": dfsLinks.items})

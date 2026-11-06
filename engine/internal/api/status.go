@@ -519,13 +519,18 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 		add(b)
 	}
 
-	// Company context.
-	cv, err := s.loadContext(ctx, ws)
+	// The brand's context (each brand's is its own): the brand picked, or
+	// the workspace's first.
+	ctxBrand := ""
+	if brandArg != nil && *brandArg != "none" {
+		ctxBrand = *brandArg
+	}
+	cv, err := s.loadContext(ctx, ws, ctxBrand)
 	if err != nil {
 		return v, err
 	}
 	if cv.AskForMissing {
-		add(statusBlocker{Code: "context_missing", Severity: "info", Area: "context", Title: "Outflare doesn't know the company yet",
+		add(statusBlocker{Code: "context_missing", Severity: "info", Area: "context", Title: "Outflare doesn't know the brand yet",
 			Detail: "Missing: " + strings.Join(cv.Missing, ", ") + ". Ask the person for these in one message (or offer to read the website), then save them with update_context so no one asks again.",
 			Count:  len(cv.Missing), Fix: statusFix{Tool: "update_context", Page: page("company"), Who: "agent"}})
 	}
@@ -533,7 +538,7 @@ func (s *Server) workspaceStatus(ctx context.Context, ws string, sel brandSel) (
 	slices.SortStableFunc(v.Blockers, func(x, y statusBlocker) int { return severityRank[x.Severity] - severityRank[y.Severity] })
 	v.CanSend = c.ready > 0 && healthy
 	v.Setup = []statusStep{
-		{"context", "Tell Outflare about the company", len(cv.Missing) == 0},
+		{"context", "Tell Outflare about the brand", len(cv.Missing) == 0},
 		{"mailboxes", "Connect a mailbox", c.mailboxes > 0},
 		{"ready", "Have a mailbox ready to send on a healthy domain", v.CanSend},
 		{"leads", "Add leads", c.leads > 0},

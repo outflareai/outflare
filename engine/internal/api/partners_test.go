@@ -68,7 +68,7 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	}
 
 	// The backend reports a sign-up with the click id, then a sale.
-	conv := "/v1/workspaces/" + ws + "/partner-conversions"
+	conv := "/v1/workspaces/" + ws + "/partner-conversions?brand=geonode"
 	lead := owner.must(201, "POST", conv, map[string]any{"type": "lead", "customer_id": "u-1", "email": "bo@example.com", "click_id": click})
 	if lead["credited"] != true || lead["partner_id"] != anaID || len(lead["rewards"].([]any)) != 0 || lead["conversion"].(map[string]any)["type"] != "signup" {
 		t.Fatalf("lead = %v", lead)
@@ -151,12 +151,12 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	if st["balance_cents"] != float64(51000) || st["pending_cents"] != float64(1000) || st["clicks"] != float64(2) || st["customers"] != float64(2) {
 		t.Fatalf("stats = %v", st)
 	}
-	payouts := owner.must(200, "POST", base+"/partner-payouts", map[string]any{})["data"].([]any)
+	payouts := owner.must(200, "POST", base+"/partner-payouts?brand=geonode", map[string]any{})["data"].([]any)
 	if len(payouts) != 1 || payouts[0].(map[string]any)["amount_cents"] != float64(51000) || payouts[0].(map[string]any)["status"] != "due" {
 		t.Fatalf("payouts = %v", payouts)
 	}
 	po := payouts[0].(map[string]any)["id"].(string)
-	if again := owner.must(200, "POST", base+"/partner-payouts", map[string]any{})["data"].([]any); len(again) != 0 {
+	if again := owner.must(200, "POST", base+"/partner-payouts?brand=geonode", map[string]any{})["data"].([]any); len(again) != 0 {
 		t.Fatalf("second run = %v", again)
 	}
 	paid := owner.must(200, "POST", base+"/partner-payouts/"+po+"/paid", map[string]any{"note": "Wise batch", "reference": "WISE-123"})
@@ -169,13 +169,13 @@ func TestPartnerAffiliateProgram(t *testing.T) {
 	}
 
 	// Lists.
-	if l := owner.must(200, "GET", base+"/partner-conversions?partner_id="+anaID+"&type=sale", nil)["data"].([]any); len(l) != 2 {
+	if l := owner.must(200, "GET", base+"/partner-conversions?brand=geonode&partner_id="+anaID+"&type=sale", nil)["data"].([]any); len(l) != 2 {
 		t.Fatalf("conversions = %v", l)
 	}
-	if l := owner.must(200, "GET", base+"/partner-referrals?partner_id="+anaID, nil)["data"].([]any); len(l) != 2 {
+	if l := owner.must(200, "GET", base+"/partner-referrals?brand=geonode&partner_id="+anaID, nil)["data"].([]any); len(l) != 2 {
 		t.Fatalf("referrals = %v", l)
 	}
-	if l := owner.must(200, "GET", base+"/partner-rewards?status=paid", nil)["data"].([]any); len(l) != 3 {
+	if l := owner.must(200, "GET", base+"/partner-rewards?brand=geonode&status=paid", nil)["data"].([]any); len(l) != 3 {
 		t.Fatalf("paid rewards = %v", l)
 	}
 

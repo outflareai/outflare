@@ -75,6 +75,17 @@ func TestABTestOfAPage(t *testing.T) {
 		t.Fatalf("split versions: %v", sv)
 	}
 
+	// A test whose new versions don't change the page yet can't start:
+	// every visitor would see the same page.
+	owner.must(409, "POST", base+"/ab-tests/"+ab["id"].(string)+"/start", nil)
+	for _, c := range owner.must(200, "GET", base+"/ab-tests/"+ab["id"].(string)+"/checklist", nil)["checks"].([]any) {
+		if c := c.(map[string]any); c["id"] == "flag" && c["status"] != "fail" {
+			t.Fatalf("unchanged page test checklist: %v", c)
+		}
+	}
+	// A version that sends visitors to another page changes it.
+	owner.must(200, "POST", base+"/ab-tests/"+split["id"].(string)+"/start", nil)
+
 	// A duplicate keeps the page.
 	dup := owner.must(201, "POST", base+"/ab-tests/"+ab["id"].(string)+"/duplicate", nil)
 	if dup["page"] != ab["page"] {

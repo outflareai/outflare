@@ -187,7 +187,7 @@ conversion count is shown next to it for comparison, never added in.
 A campaign with spend and no tracked visits is listed too: it usually has no
 tracking template yet.
 
-`GET /v1/workspaces/{ws}/attribution/ads` (MCP `get_attribution_ads`) gives the
+`GET /v1/brands/{brand}/attribution/ads` (MCP `get_attribution_ads`) gives the
 same rows. It takes `level` (`campaign`, `adset` or `ad`), `from`, `to`,
 `model` and `brand`. Meta and Google ad sets and ads come with their names and
 spend; other platforms sync campaigns only, so their ad sets and ads come with
@@ -290,7 +290,7 @@ How it works:
 - **Consent.** In the EEA, the UK and Switzerland, and whenever a person's
   country is unknown, a conversion is sent only when they said yes to ad data
   (a consent with channel `ads` and purpose `ad_user_data`, recorded with
-  `POST /v1/workspaces/{ws}/records/{id}/consents` when your consent banner
+  `POST /v1/brands/{brand}/records/{record}/consents` when your consent banner
   says yes). Elsewhere the workspace's setting decides: **Everyone,
   unless they opted out** (`opt_out`, the default) or **Only people who said
   yes** (`opt_in`). Anyone who withdrew consent is never sent.

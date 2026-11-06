@@ -268,6 +268,10 @@ export type BacklinkSiteSummary = Schemas["BacklinkSiteSummary"];
 export type SEOCompetitor = Schemas["SEOCompetitor"];
 export type SEOCompetitorEvent = Schemas["SEOCompetitorEvent"];
 export type SEOKeywordGap = Schemas["SEOKeywordGap"];
+export type SEOKeywordResults = Schemas["SEOKeywordResults"];
+export type SEOLinkGapPages = Schemas["SEOLinkGapPages"];
+export type CompetitorSearch = Schemas["CompetitorSearch"];
+export type CompetitorSearchRead = Schemas["CompetitorSearchRead"];
 export type SEOLinkGap = Schemas["SEOLinkGap"];
 export type LinkProspect = Schemas["LinkProspect"];
 export type LinkRead = Schemas["LinkRead"];
@@ -549,7 +553,7 @@ type Page<T> = { data?: T[]; next_cursor?: string | null };
  * Every item of a paged list, fetching page after page by next_cursor.
  * Pass a function that makes the call for a given cursor:
  *
- *   for await (const lead of paginate((cursor) => gtm.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query: { q: "acme", cursor } } }))) {
+ *   for await (const lead of paginate((cursor) => gtm.GET("/v1/brands/{brand}/leads", { params: { path: { brand }, query: { q: "acme", cursor } } }))) {
  *     console.log(lead.email);
  *   }
  *
@@ -673,7 +677,7 @@ export async function verifyWebhook(
  * The tag that hands your server's flag decisions to the page, so the
  * Outflare site script shows the visitor's version at once, with no request
  * and no flash of the original. Decide with `POST .../flags/evaluate`
- * (`gtm.POST("/v1/workspaces/{ws}/flags/evaluate", ...)`) for the visitor's
+ * (`gtm.POST("/v1/brands/{brand}/flags/evaluate", ...)`) for the visitor's
  * id: the `of_aid` cookie when the browser has one, else an id you made
  * (8 to 64 letters, digits and dashes), which the script then uses for
  * this page. Put the tag anywhere in the page, before site.js runs. The

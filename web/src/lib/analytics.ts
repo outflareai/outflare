@@ -138,6 +138,8 @@ export type UiEvent =
   | "ui.ai_device_link_approved" // a computer linked to Outflare for desktop from /connect/computer
   | "ui.copied" // a copy button
   | "ui.shared_dashboard_password_wrong" // a shared dashboard's password was wrong
+  | "ui.shared_ai_visibility_password_wrong" // a shared AI visibility page's password was wrong
+  | "ui.ai_visibility_csv_downloaded" // an AI visibility table downloaded as CSV (table: questions or placements)
   | "ui.data_network_previewed" // the owner opened what joining the data network would share (addresses)
   | "ui.data_network_join_cancelled" // the owner closed that preview without joining (addresses)
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback, browser)

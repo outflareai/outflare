@@ -196,11 +196,16 @@ func TestKnowledgeRetrieval(t *testing.T) {
 		t.Fatalf("uses = %v", it["uses_30d"])
 	}
 
-	// Agents learn what there is from get_context.
+	// Agents learn what their brand has from get_context: the first brand
+	// when none is named, and never another brand's (an item saved without
+	// a brand is the first brand's).
 	c := owner.must(200, "GET", base+"/context", nil)
 	k := c["knowledge"].(map[string]any)
-	if k["articles"] != 3.0 || k["snippets"] != 1.0 || !strings.Contains(c["markdown"].(string), "## Knowledge") {
+	if k["articles"] != 2.0 || k["snippets"] != 1.0 || !strings.Contains(c["markdown"].(string), "## Knowledge") {
 		t.Fatalf("context knowledge = %v", k)
+	}
+	if k := owner.must(200, "GET", base+"/context?brand=repocket", nil)["knowledge"].(map[string]any); k["articles"] != 1.0 || k["snippets"] != 0.0 {
+		t.Fatalf("repocket knowledge = %v", k)
 	}
 
 	seen := map[string]bool{}

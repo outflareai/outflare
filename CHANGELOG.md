@@ -6,6 +6,59 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.86.0] - 2026-11-06
+
+### Added
+
+- How AI describes you lists what the answers say your brand is known for and what they hold against you, for you and each competitor, with where it comes from. Mark a claim as not true and it goes on the fixes list with the pages to correct.
+- Keep one AI visibility question set per market, asked and drafted in that market's language and place, and switch markets at the top of every page.
+- AI visibility is its own menu: a guided three-minute setup (your brand, competitors, drafted questions, assistants and the cost per run), an Overview that says whether you're winning in AI answers and what to do next, and pages for questions, competitors, sources, how AI describes you, traffic and settings.
+- Sources ranks the pages AI answers cite or read by how much being named on each is worth, with the competitors named there; each one is a Presence opportunity. Brands the answers name that you don't track are suggested on the brand's competitor list, with one click to track or dismiss.
+- AI visibility questions now say how much the person asking knows (the problem, the kind of solution, a competitor or your brand) and what they ask for (how do I, how do I fix, who's best, alternatives, X vs Y, best supplier, about you), with persona, topic and monthly demand. Your own AI model can draft questions from your brand, competitors and Search Console searches for you to keep or drop.
+- AI visibility has a score from 0 to 100 for your brand and each competitor, weighted by how many people ask each question, with a range that shows how much it can wobble and which weeks were a real change. A grid shows the score for each awareness level and question type.
+- AI visibility can now ask ChatGPT and Gemini on their own screens, as a signed-out person in your cohort's country sees them, through your own DataForSEO account (about US$0.004 an answer). Each answer shows the searches the assistant ran, every page it read and whether it cited it, and every brand it named.
+- Share a brand's AI visibility by link, with a password and expiry if you like, for anyone to see read-only; download the questions and placements as CSV; and get the score, the questions gained and lost and new objections in the weekly digest.
+- AI visibility now says whether each answer recommends your brand and each competitor, only lists it, or warns against it, with the answer's words, and what kind of sites the answers cite. Brands the answers name that you don't count yet show up as suggested competitors you can add in one click.
+- A brand's website is read for what it offers when you add the brand, through your own Geonode connection and AI model: a summary, the industry and bullets for products, services, features, integrations, capabilities, who it serves and use cases, each linked to its page, on the brand's page for you to edit. AI visibility drafts its questions from it.
+- Competitors now tracks prices. Name one pricing page for your brand and each competitor, and Outflare reads it every week on your own Geonode account, shows the plans and prices side by side, and keeps every change: a new or dropped plan, a price up or down. Prices are read off the page itself, with no AI, and only that one page of each site is read.
+- Connect SE Ranking with your own Data API key to read the keywords a domain ranks for, with position, search volume and ranking page, plus its organic overview and competitors in search. Calls count against the connection's monthly budget like Ahrefs and DataForSEO.
+- Keywords you already track in an SE Ranking project now come into Rankings by themselves each day, with SE Ranking's daily positions and the page that ranked, so Outflare never pays to check them again. Connect SE Ranking and the project for your site's host is picked up; the first import brings the last 90 days.
+
+### Changed
+
+- Search insights: the AI referrals report now works without GA4. When no GA4 landing-page outcomes are synced, it counts visits from ChatGPT, Perplexity, Claude and other assistants in the referrers of your PostHog, Plausible or Matomo connection, for the whole site.
+- Drafting AI visibility questions with a DataForSEO connection now starts from the real questions people ask ChatGPT and Google's AI Overviews about your brand and competitors, and weights each question by how many times a month people ask AI assistants about it.
+- AI visibility counts, once a day on your own DataForSEO account, how many of the real AI answers DataForSEO keeps mention your brand and each competitor, with your share and the mentions gained or lost since the day before.
+- The Overview's trend has a Compare by switch: your score week by week against each competitor, by assistant, by market, or by the questions' awareness level, type, topic or persona.
+- AI visibility puts the questions where AI answers name your brand but recommend a competitor on the fixes list, with what to do, and confirms the fix once answers recommend you.
+- Pages that AI answers to your questions cite, without naming you, now appear in Presence opportunities, scored by how often they are cited and how many competitors those answers name. Pages the assistants read but don't cite are listed too.
+- Each tracked question shows whether AI answers name you, how often they recommend you, the change since the period before and the last weeks as bars, so you can see traction after working on a placement. Sort by the questions not naming you, biggest drops or biggest gains; the Overview lists what you gained and lost.
+- AI visibility shows what AI answers bring your site: visits from AI assistants, the conversions and revenue credited to them, which assistants sent them and the pages they landed on, next to what you spent.
+- Each brand gets its own daily or weekly digest, with its own schedule and recipients, and every number in it counts only that brand. Two brands can also use the same partner program name.
+- Every mailbox and sending domain belongs to one brand and sends only for that brand's sequences. Mailboxes that were shared moved to the brand whose sequence they send for (or their domain's, or the workspace's only brand); any left with no brand are listed under Company → Brands to add to one, and send for no brand until then.
+- About your company is now each brand's own: every brand has its own description, goals, voice, rules, notes, logo and colours, and agents read only the brand they work for. Each brand starts from a copy of what the company had.
+- Each brand has its own knowledge and memories. Items saved with no brand became each brand's own copy, so every brand still has them, and new knowledge and memories always belong to one brand.
+- Each brand has its own support assistant settings, reply time targets, hand-off topics, chat widget, help centre and alert settings. Settings saved for the whole workspace became each brand's own copy, so nothing changes until you edit one brand.
+- Partner and promo codes are unique per brand, so two brands can each give a partner the same code. A program can't move into a brand that already uses its slug or one of its codes; the move says so instead.
+- Brands are fully separate: the old workspace routes for a brand's data answer 410 `route_moved` with the `/v1/brands/{brand}/` route to call instead. Install health names any token or app still calling an old route, and the SDKs, MCP server and web app use the brand routes.
+- Support conversations take the brand of the mailbox they came to (or the workspace's only brand), so each brand's inbox shows its own customers. A partner link on a brand's tracking domain or portal, and a conversion reported on a brand's route, only match that brand's partner and promo codes.
+- Changes waiting for your OK on the Agents page lead with the yes/no question the agent asks, then say which page or site it is about and why. Without a question they say plainly what the change does ("Read who links to a page or domain"). Ids and rule names are gone from the card, and the exact request is one click away.
+- Competitors → Overview has a Refresh all competitors button that reads every tracked competitor now on your own connections, and shows each one's Domain Rating, keywords, domain age and sitemap pages.
+- A competitor's page now lists all their placements, keywords beside yours, top pages and linking sites, with **Read their search data** to read any competitor on your own SEO connection. Click a link gap to see the exact pages linking to each competitor.
+- Competitors suggests more competitors every day from who ranks for your keyword gaps (read on your own SERP connection), and **Find more competitors** reads a batch now. Click a keyword gap to see everyone who ranks for it, with Yes, No or Track beside each site.
+- Competitors: Yes and No now sit right beside each suggested site, and the daily look asks your SEO connection for 50 competitors instead of 10 (and up to 25 from your rankings), so the list keeps growing. Up to 50 tracked competitors a site get their weekly numbers.
+- Platforms like GitHub, YouTube and Reddit are no longer suggested as competitors, and unless you add one by hand, your SEO connection's budget is never spent reading them.
+- Site crawls now tell links in the text apart from menu, sidebar, header and footer links. Each crawled page shows how many pages link to it from their content, and each link says whether it is boilerplate, so you can see which pages your own writing backs, not only which ones every menu repeats.
+- PostHog: leave out your project's internal and test users (bots, your team, a crawler with a fake referrer) in Outflare's reports. Tick it for a site on the Analytics page; every report, the daily sync and conversions by landing page then use PostHog's own filters, and the last 90 days are read again.
+- Presence has a Found tab: every page that links to or mentions your brand, grouped by site. Each page is read once to check it links to you or names your website, so same-name pages about something else stay apart. About us or Not us settles a page or a whole site in one click, and the Overview counts everything found.
+
+### Fixed
+
+- No-code A/B tests now count every visitor on the test's page, including those who see the original, so a running test no longer shows 0 visitors. A page test can't start until at least one new version changes the page.
+- A keyword's results page no longer shows Google redirect links (google.com/goto): every search resolves them to the real page, keyword gaps are read on Geonode first when it's connected, and pages read before are read again.
+- Presence and rank tracking no longer show Google's own redirect links (google.com/goto?url=...) for search results: each result is resolved to the page it leads to, with its real site, and existing finds are fixed on the next daily run. The Presence report now also counts every page and site found.
+- Presence: competitor scans no longer slow the app down. Each brand's daily scans start a little apart, and the brand's opportunities are refreshed once every few minutes for all the scans that finished, instead of by each scan at the same time.
+
 ## [0.85.0] - 2026-11-05
 
 ### Changed

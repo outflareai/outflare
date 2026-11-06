@@ -88,10 +88,10 @@ func (s *Service) email(ctx context.Context, job jobs.Job, d delivery, r Row) er
 	var sentToday int
 	err := s.Pool.QueryRow(ctx, `
 		SELECT u.email,
-			EXISTS (SELECT 1 FROM alert_mutes x WHERE x.workspace_id = $2 AND x.user_id = u.id AND x.kind = $3),
+			EXISTS (SELECT 1 FROM brand_alert_mutes x WHERE x.workspace_id = $2 AND x.brand_id = $4 AND x.user_id = u.id AND x.kind = $3),
 			(SELECT count(*) FROM alert_deliveries x WHERE x.user_id = u.id AND x.status = 'sent' AND x.sent_at > now() - interval '1 day')
 		FROM users u JOIN memberships m ON m.user_id = u.id AND m.workspace_id = $2
-		WHERE u.id = $1 AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL`, *d.userID, d.ws, r.Kind).
+		WHERE u.id = $1 AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL`, *d.userID, d.ws, r.Kind, r.BrandID).
 		Scan(&email, &muted, &sentToday)
 	ev := track.Event{Name: "alert.emailed", WorkspaceID: d.ws, UserID: *d.userID, ActorType: "system", Surface: "job",
 		Props: map[string]any{"kind": r.Kind, "alert_id": r.ID}}

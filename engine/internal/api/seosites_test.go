@@ -77,7 +77,7 @@ func TestSEOSitesVerifyAndCrawl(t *testing.T) {
 			w.Header().Set("Content-Type", "text/html")
 			io.WriteString(w, `<html lang="en"><head><title>Page A</title><meta name="description" content="About A.">`+
 				`<link rel="canonical" href="/a"><script type="application/ld+json">{"@type":"Product"}</script></head>`+
-				`<body><h1>A</h1><img src="x.png"><a href="/">home</a> <a href="/gone">broken</a> <a href="https://elsewhere.example/" rel="sponsored">ad</a></body></html>`)
+				`<body><nav><a href="/">home</a></nav><h1>A</h1><img src="x.png"> <a href="/gone">broken</a> <a href="https://elsewhere.example/" rel="sponsored">ad</a></body></html>`)
 		case "/b":
 			w.Header().Set("Content-Type", "text/html")
 			io.WriteString(w, `<html><head><meta name="robots" content="nofollow"></head><body><a href="/c">c</a></body></html>`)
@@ -160,12 +160,17 @@ func TestSEOSitesVerifyAndCrawl(t *testing.T) {
 		pa["schema_types"].([]any)[0] != "Product" || pa["h1"].([]any)[0] != "A" || !strings.HasSuffix(pa["canonical"].(string), "/a") {
 		t.Fatalf("page a: %v", pa)
 	}
-	if pages["/gone"]["links_in"] != 2.0 {
+	if pages["/gone"]["links_in"] != 2.0 || pages["/gone"]["content_links_in"] != 2.0 {
 		t.Fatalf("links in: %v", pages["/gone"])
+	}
+	// The home page is linked only from page A's menu.
+	if pages["/"]["links_in"] != 1.0 || pages["/"]["content_links_in"] != 0.0 {
+		t.Fatalf("content links in: %v", pages["/"])
 	}
 	one := owner.must(200, "GET", base+"/crawls/"+rid+"/pages/"+pa["id"].(string), nil)
 	out := one["links_out"].([]any)
-	if len(out) != 3 || out[1].(map[string]any)["http_status"] != 404.0 || out[2].(map[string]any)["internal"] != false ||
+	if len(out) != 3 || out[0].(map[string]any)["boilerplate"] != true || out[1].(map[string]any)["boilerplate"] != false ||
+		out[1].(map[string]any)["http_status"] != 404.0 || out[2].(map[string]any)["internal"] != false ||
 		out[2].(map[string]any)["nofollow"] != true || len(one["links_in"].([]any)) != 1 {
 		t.Fatalf("page detail: %v", one)
 	}

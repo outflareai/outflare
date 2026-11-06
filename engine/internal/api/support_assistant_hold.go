@@ -28,7 +28,7 @@ const jobAssistantSend = "support.assistant_send"
 func assistantEmailHold(ctx context.Context, q jobs.Querier, ws string, brand *string) (int, error) {
 	var hold int
 	err := q.QueryRow(ctx, `SELECT email_hold_minutes FROM support_assistant_settings
-		WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid) ORDER BY brand_id IS NULL LIMIT 1`, ws, brand).Scan(&hold)
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand).Scan(&hold)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil
 	}
@@ -82,7 +82,7 @@ func (s *Server) assistantSendJob(ctx context.Context, job jobs.Job) error {
 		if err != nil {
 			return err
 		}
-		if mode != "auto" || !s.autoAvailable(ctx, ws) {
+		if mode != "auto" || !s.autoAvailable(ctx, ws, brand) {
 			// Auto was turned off while it waited: a draft for the team.
 			result = "auto_off"
 			_, err := tx.Exec(ctx, `UPDATE support_assistant_runs SET send_at = NULL WHERE id = $1`, p.Run)

@@ -104,6 +104,7 @@ import (
 
 	spec "github.com/outflareai/outflare/api"
 	"github.com/outflareai/outflare/engine/internal/cli"
+	"github.com/outflareai/outflare/engine/internal/rdap"
 )
 
 // Main runs the command named by os.Args[1] with the given extensions, and
@@ -340,7 +341,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	(&customers.LeadFields{Pool: pool}).Register(queue)
 	hooks := &webhooks.Service{Pool: pool, Box: box, Log: log, AllowPrivate: cfg.WebhooksAllowPrivate}
 	hooks.Register(queue)
-	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, AllowPrivate: cfg.CrawlAllowPrivate,
+	crawler := &crawl.Service{Pool: pool, Log: log, Resolver: net.DefaultResolver, RDAP: &rdap.Client{}, AllowPrivate: cfg.CrawlAllowPrivate,
 		Fallback: &crawl.ConnectorFallback{Store: integrations, Pool: pool, Ledger: pool}, AfterAudit: seointel.AfterAudit,
 		AfterCrawl: indexability.AfterCrawl}
 	crawler.Register(queue)
@@ -458,6 +459,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	browserSvc.Models = apiServer.AIModels()
 	linkChecker.Models = apiServer.AIModels()
 	visibility.Models = apiServer.AIVisibilityModels()
+	visibility.Screens = apiServer.AIVisibilityScreens()
 	// The API server's own background work, such as CRM imports into
 	// customer records.
 	apiServer.RegisterJobs(queue)

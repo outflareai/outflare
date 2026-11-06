@@ -21,7 +21,7 @@ import (
 
 // All returns every available SEO connector.
 func All() []c.Connector {
-	return []c.Connector{DataForSEO{}, Ahrefs{}}
+	return []c.Connector{DataForSEO{}, Ahrefs{}, SERanking{}}
 }
 
 func def(id, name, site, docs, keyURL, summary, description, pricing string, fields []c.Field) c.Definition {

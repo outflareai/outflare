@@ -14,7 +14,7 @@ An agent takes a fix before it changes the site: `POST /v1/workspaces/{ws}/fixes
 | `rules` | Fixes whose crawl rule or category is in `allowed` run straight away. The rest wait. |
 | `autonomous` | Every fix runs straight away, except the ones below. |
 
-Fixes that change redirects, canonicals, indexing, robots.txt or URLs can move or hide a whole site in search, so they **always wait for a person**, in every mode. So does AI visibility's `ai_fact_wrong`, which often means asking another site to correct a page. The list is `always_person` in the setting, and `allowed` can't name one of them.
+Fixes that change redirects, canonicals, indexing, robots.txt or URLs can move or hide a whole site in search, so they **always wait for a person**, in every mode. So do AI visibility's `ai_fact_wrong` and `ai_wrong_claim`, which often mean asking another site to correct a page. The list is `always_person` in the setting, and `allowed` can't name one of them.
 
 Outside a mission, a person or an API token takes any fix: the setting only answers what an agent in a mission could do (`autonomy` in the answer, such as `{"run": false, "reason": "always_person"}`).
 

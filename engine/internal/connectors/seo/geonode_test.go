@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	c "github.com/outflareai/outflare/engine/internal/connectors"
@@ -300,5 +301,42 @@ func TestGeonodePageJobs(t *testing.T) {
 	}
 	if _, err := g.FetchPage(ctx, cl, creds, "https://down.example/", true); errors.As(err, &pe) || c.KindOf(err) != c.ErrUnavailable {
 		t.Fatalf("Geonode down: %v", err)
+	}
+}
+
+type routeAll struct{ h http.Handler }
+
+func (r routeAll) RoundTrip(req *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	r.h.ServeHTTP(w, req)
+	res := w.Result()
+	res.Request = req
+	return res, nil
+}
+
+// Google's redirect links in results are resolved to the page, and one that
+// can't be keeps the site Geonode reports.
+func TestGeonodeSERPGoogleRedirects(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Hostname(), "google.com") {
+			if r.URL.Query().Get("url") == "OK" {
+				w.Header().Set("Location", "https://reviews.example/acme")
+				w.WriteHeader(http.StatusFound)
+				return
+			}
+			io.WriteString(w, "<html></html>")
+			return
+		}
+		io.WriteString(w, `{"pages_returned": 1, "pages": [{"page": 1, "results": [
+			{"title": "Review", "url": "https://google.com/goto?url=OK", "source_host": "reviews.example"},
+			{"title": "Other", "url": "https://google.com/goto?url=NO", "source_host": "www.other.example"}]}]}`)
+	})
+	cl := &c.Client{HTTP: &http.Client{Transport: routeAll{h}}, BaseURLs: map[string]string{"geonode": "https://api.geonode.test"}}
+	res, err := Geonode{}.SERP(context.Background(), cl, c.Creds{"api_key": "k"}, "google", c.SERPQuery{Keyword: "acme", Country: "US", Depth: 10})
+	if err != nil || len(res.Items) != 2 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.Items[0].URL != "https://reviews.example/acme" || res.Items[0].Domain != "reviews.example" || res.Items[1].Domain != "other.example" {
+		t.Fatalf("items: %+v", res.Items)
 	}
 }

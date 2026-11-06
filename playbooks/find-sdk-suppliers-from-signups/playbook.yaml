@@ -42,7 +42,7 @@ steps:
   - say: Read the brand context and confirm the sign-up event and available customer data.
     tools: [getBrandContext, listEventDefinitions]
   - say: Read sign-up events in the requested window and resolve their existing people and companies; deduplicate by record ID.
-    tools: [listCustomerEvents, getRecord]
+    tools: [listBrandCustomerEvents, getBrandRecord]
   - say: Research relevant public business websites and profiles linked to those records; cite source URLs and dates, and record unresolved identity matches as unknown.
     tools: []
   - say: "Look for verified ownership of apps or desktop software, supported operating systems, distribution channels, published active-user figures and monetization models. For a bandwidth-sharing SDK, assess whether the product could support explicit opt-in, clear disclosure, user controls and technical review. Distinguish app downloads from active users. Recommend discovery questions about SDK compatibility, traffic quality and commercial fit; do not declare an integration viable without technical validation."

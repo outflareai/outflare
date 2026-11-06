@@ -265,7 +265,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
     api.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) => setExperts(data?.data ?? []));
     // Approval emails go out through one of the brand's own active sequences.
     if (canManage) {
-      api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) =>
+      if (story.brand_id) api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: story.brand_id } } }).then(({ data }) =>
         setSequences((data?.data ?? []).filter((q) => q.status === "active")),
       );
     }

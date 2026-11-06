@@ -36,7 +36,7 @@ const recredit = "Every conversion is being credited again in the background; re
 function useChannels(ws: string) {
   const [channels, setChannels] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/tracking-taxonomy", { params: { path: { ws } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/tracking-taxonomy", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => {
       setChannels([...(data?.channels ?? []).map((c: TrackingChannel) => ({ id: c.id, label: c.label })), { id: "direct", label: "Direct" }]);
     });
   }, [ws]);

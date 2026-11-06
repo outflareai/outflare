@@ -5,8 +5,8 @@ An alert says something needs a person now. Any part of Outflare raises one, onc
 - **Kept in the app** under Settings → Alerts, and returned by `GET /v1/brands/{brand}/alerts` (MCP `list_alerts`), newest first. An alert belongs to the brand of what raised it (or, from a part of Outflare not on brands yet, the workspace's first brand), and is listed only there. What an alert says is read from what it is about when shown, so it never keeps its own copy of a name or a message.
 - **Sent as the `alert.raised` webhook**, with ids only, so Slack, a CRM or Zapier can act on it.
 - **Counted in the [digest](digests.md)**, by kind.
-- **Emailed** to the person it is for, to every owner and admin, or to nobody, as the workspace chooses per kind, and per brand when a brand should differ.
-- **Posted to Slack**, in a channel the workspace picks per kind (and per brand), through the workspace's own Slack connection.
+- **Emailed** to the person it is for, to every owner and admin, or to nobody, as each brand chooses per kind (brands share no settings).
+- **Posted to Slack**, in a channel each brand picks per kind, through the workspace's own Slack connection.
 
 ## Kinds
 
@@ -28,7 +28,7 @@ A module adds a kind with `alerts.Register` (an id, a title, the scope needed to
 
 Alert emails are Outflare's own account email (the one that sends sign-in links), so they work with no setup. They name what happened and link to it, and never quote a reply, a review or a page. Each person gets at most 50 a day; the rest wait in the app, and the digest says how many. Who caused the alert (the person who labelled the reply) is not emailed about it.
 
-- `PUT /v1/workspaces/{ws}/alerts/settings` with `kind` and `email`: `owner` (the default: the person it is for, else the owners and admins), `admins` or `off`; add `brand_id` for one brand; `null` follows the workspace or the default again. Needs `workspace.manage`.
+- `PUT /v1/workspaces/{ws}/alerts/settings` with `kind` and `email`: `owner` (the default: the person it is for, else the owners and admins), `admins` or `off`; it is the route's brand's (`PUT /v1/brands/{brand}/alerts/settings`), else `brand_id`'s, else the workspace's first brand's; `null` goes back to the default. Needs `workspace.manage`.
 - `PUT /v1/workspaces/{ws}/alerts/mutes` with `kind` and `muted`: anyone can stop a kind for themselves.
 
 ## Slack
@@ -37,7 +37,7 @@ Connect Slack under Connectors, through Slack's consent screen (when the server 
 
 ## Seeing alerts
 
-Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). A brand's alerts are `GET /v1/brands/{brand}/alerts`; the workspace route (`GET /v1/workspaces/{ws}/alerts`) is deprecated and lists the brand `?brand=` picks, else the workspace's first. Who hears about each kind is the workspace's setting (`.../alerts/settings`), and a brand's own choice (`PUT /v1/brands/{brand}/alerts/settings`) wins over it for that brand's alerts. Mutes are each person's own.
+Listing alerts needs `workspace.read` and the scope of the part of Outflare each kind comes from (`inbox.read` for replies, `customers.read` for visitors). A brand's alerts are `GET /v1/brands/{brand}/alerts`; the workspace route (`GET /v1/brands/{brand}/alerts`) is deprecated and lists the brand `?brand=` picks, else the workspace's first. Who hears about each kind is the workspace's setting (`.../alerts/settings`), and a brand's own choice (`PUT /v1/brands/{brand}/alerts/settings`) wins over it for that brand's alerts. Mutes are each person's own.
 
 ## In your CRM
 

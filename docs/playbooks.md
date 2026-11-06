@@ -82,7 +82,7 @@ The first kit, **Creator partnerships**, adds a Partnerships record type with a 
 | `GET /v1/playbooks/{id}` | One playbook |
 | `GET /v1/workspaces/{ws}/playbooks` | Playbooks with `readiness` and `runs` for the workspace (`agents.read`) |
 | `GET /v1/workspaces/{ws}/playbooks/{id}` | One, with its readiness (`agents.read`) |
-| `POST /v1/workspaces/{ws}/playbooks/{id}/runs` | Retired: `410 mission_retired`. Start one as an agent run (`POST .../playbooks/{id}/agent-runs`, `agents.run`); `apply_kit: true` also sets up its kit |
+| `POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs` | Retired: `410 mission_retired`. Start one as an agent run (`POST .../playbooks/{id}/agent-runs`, `agents.run`); `apply_kit: true` also sets up its kit |
 | `GET /v1/kits`, `GET /v1/kits/{id}` | Setup kits, public, with the playbooks that use each |
 | `GET /v1/workspaces/{ws}/kits/{id}/preview` | What the kit would add, extend, reuse or conflict with (`customers.read`) |
 | `POST /v1/workspaces/{ws}/kits/{id}/apply` | Set it up (`catalog.manage`, and `emails.manage` for email drafts); 409 `conflict` names what's in the way |

@@ -4,10 +4,11 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, Loading, toast } from "../ui";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
+import { useBrand } from "@/lib/brand";
 
-// Response times: the workspace's SLA. How fast the team promises to reply
-// and resolve, around the clock or in its working hours. A brand can have
-// its own through the API; this edits the workspace's.
+// Response times: the picked brand's SLA (brands share none). How fast the
+// team promises to reply and resolve, around the clock or in its working
+// hours.
 
 type Unit = "minutes" | "hours" | "days";
 type Target = { on: boolean; value: string; unit: Unit };
@@ -44,6 +45,8 @@ function zones(): string[] {
 }
 
 export function SupportSLA({ ws, canManage, onChanged }: { ws: string; canManage: boolean; onChanged?: () => void }) {
+  const { brand } = useBrand(ws);
+  const scope = brand?.id ?? "default";
   const [policy, setPolicy] = useState<SupportSLAPolicy | null | undefined>(undefined);
   const [first, setFirst] = useState<Target>({ on: true, value: "4", unit: "hours" });
   const [next, setNext] = useState<Target>({ on: false, value: "8", unit: "hours" });
@@ -59,7 +62,7 @@ export function SupportSLA({ ws, canManage, onChanged }: { ws: string; canManage
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/support/sla-policies", { params: { path: { ws } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
-      const p = data.data.find((x) => x.brand_id === null) ?? null;
+      const p = data.data.find((x) => x.brand_id === (brand?.id ?? null)) ?? (brand ? null : data.data[0] ?? null);
       setPolicy(p);
       if (!p) return;
       setFirst((d) => toTarget(p.first_reply_minutes, d));
@@ -76,7 +79,7 @@ export function SupportSLA({ ws, canManage, onChanged }: { ws: string; canManage
         }
       }
     });
-  }, [ws]);
+  }, [ws, brand?.id]);
 
   async function save(enabled = true) {
     const targets = [minutes(first), minutes(next), minutes(resolve)];
@@ -87,7 +90,7 @@ export function SupportSLA({ ws, canManage, onChanged }: { ws: string; canManage
     setBusy(true);
     setError("");
     const { data, error } = await api.PUT("/v1/workspaces/{ws}/support/sla-policies/{scope}", {
-      params: { path: { ws, scope: "default" } },
+      params: { path: { ws, scope } },
       body: {
         enabled,
         first_reply_minutes: targets[0],

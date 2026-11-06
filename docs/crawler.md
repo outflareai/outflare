@@ -78,10 +78,12 @@ Each crawl runs as a chain of jobs that each work for about 90 seconds, so a lar
 
 - `status`: `fetched` (any HTTP answer, 404s included, which are broken links), `blocked` (robots.txt), `failed` (no answer or a 5xx), `skipped` (never reached, because of the limit or a stop), or `queued` while the crawl runs.
 - `source` (`start`, `link`, `sitemap`, `redirect`), `found_on`, and `depth` (clicks from the start page; sitemap pages count as one).
-- `http_status`, `content_type`, `bytes`, `duration_ms`, `redirect_to` (a redirect's target is a page of its own when it is on the site), `noindex`, `nofollow` `x_robots_tag`, `links_out` and `links_in` (pages of the site linking here, so a sitemap page with none is an orphan). A meta refresh counts as a redirect.
+- `http_status`, `content_type`, `bytes`, `duration_ms`, `redirect_to` (a redirect's target is a page of its own when it is on the site), `noindex`, `nofollow` `x_robots_tag`, `links_out` and `links_in` (pages of the site linking here, so a sitemap page with none is an orphan), and `content_links_in`, the pages linking here from their content rather than from the navigation, a sidebar or the site's header and footer. A page every menu points at has a high `links_in` and can still have few content links: that is how much the site's own writing backs it. A meta refresh counts as a redirect.
 - For an HTML page, what an audit checks: `title` and `title_count`, `meta_description`, `canonical` and `canonical_count`, `h1`, `lang`, `hreflang`, the JSON-LD `schema_types`, `word_count` (words a reader sees), `images` and `images_no_alt`, `viewport`, the Open Graph `og_title` and `og_image` link previews use, `insecure_resources` (scripts, styles, images and frames a https page loads over plain http), and `content_hash`, which is the same for pages with the same words. Page text itself is never stored.
 
-`GET .../crawls/{crawl}/pages/{page}` adds every link on the page (up to 500, with the anchor text, whether it is on the site or `nofollow`, and the status the crawl got from it, so broken links show as 404) and the pages that link to it. `?http_status=404` lists one status's pages.
+`GET .../crawls/{crawl}/pages/{page}` adds every link on the page (up to 500, with the anchor text, whether it is on the site or `nofollow`, whether it is `boilerplate` (in the navigation, a sidebar, or a header or footer outside the main content; an article's own header and footer count as content), and the status the crawl got from it, so broken links show as 404) and the pages that link to it. `?http_status=404` lists one status's pages.
+
+To compare how a competitor's site links to its own pages, add it as a site too and crawl both with the same `max_pages`: a site you have not proved is read up to 100 pages, so 100 for both keeps the counts on one scale.
 
 ## The audit
 

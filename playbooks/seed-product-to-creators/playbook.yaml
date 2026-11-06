@@ -40,13 +40,13 @@ steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
     tools: [getBrandContext, listRecordTypes]
   - say: Pick creators from the board at Found or Vetted who fit the offer, and suggest more from your own records who create, up to the number given.
-    tools: [listRecords, searchWorkspace]
+    tools: [listBrandRecords, searchWorkspace]
   - say: Draft a short offer that says what they get and that there's no obligation to post, as a sequence held until a person approves it.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: For each creator who accepts, set the deal type to free product, make their tracked link, save it and their promo code on the partnership, record what the product cost as spend, and move it to Agreed.
-    tools: [updateRecord, createBrandTrackingLink, recordSpend]
+    tools: [updateBrandRecord, createBrandTrackingLink, recordSpend]
   - say: Two weeks later, check who posted, save the post link and move them to Live; suggest a friendly nudge for the rest.
-    tools: [listSocialItems, updateRecord]
+    tools: [listSocialItems, updateBrandRecord]
   - say: After a month, report visits, sign-ups and paying customers per creator, and say who to offer a paid deal.
     tools: [getAnalyticsReport, outcomesReport]
 guardrails:

@@ -35,12 +35,13 @@ var ErrUnknownFeature = features.ErrUnknown
 // Features lists every switchable feature.
 func Features() []Feature { return features.Catalog }
 
-// WorkspaceFeatures returns the features that are on for a workspace.
+// WorkspaceFeatures returns the features that are on for any brand of a
+// workspace.
 func (h *Host) WorkspaceFeatures(ctx context.Context, workspaceID string) ([]string, error) {
 	return features.List(ctx, h.Pool, workspaceID)
 }
 
-// SetWorkspaceFeature switches feature on or off for everyone in a
+// SetWorkspaceFeature switches feature on or off for every brand of a
 // workspace, and records workspace.feature_enabled or
 // workspace.feature_disabled in its audit log when it changes. byUserID is
 // the person who did it. changed is false when it already was that
@@ -48,6 +49,24 @@ func (h *Host) WorkspaceFeatures(ctx context.Context, workspaceID string) ([]str
 func (h *Host) SetWorkspaceFeature(ctx context.Context, workspaceID, feature string, on bool, byUserID string) (changed bool, err error) {
 	err = pgx.BeginFunc(ctx, h.Pool, func(tx pgx.Tx) error {
 		changed, err = features.Set(ctx, tx, workspaceID, feature, on, byUserID)
+		return err
+	})
+	return changed, err
+}
+
+// BrandFeatures returns the features that are on for one brand: brands
+// are fully separate, so each has its own switches.
+func (h *Host) BrandFeatures(ctx context.Context, brandID string) ([]string, error) {
+	return features.BrandList(ctx, h.Pool, brandID)
+}
+
+// SetBrandFeature switches feature on or off for one brand of a
+// workspace, and records brand.feature_enabled or brand.feature_disabled
+// in its audit log when it changes. byUserID and changed are as for
+// SetWorkspaceFeature.
+func (h *Host) SetBrandFeature(ctx context.Context, workspaceID, brandID, feature string, on bool, byUserID string) (changed bool, err error) {
+	err = pgx.BeginFunc(ctx, h.Pool, func(tx pgx.Tx) error {
+		changed, err = features.SetBrand(ctx, tx, workspaceID, brandID, feature, on, byUserID)
 		return err
 	})
 	return changed, err

@@ -166,7 +166,7 @@ func Intake(ctx context.Context, tx pgx.Tx, e Email) (Received, error) {
 		err := tx.QueryRow(ctx, `
 			INSERT INTO support_conversations (workspace_id, brand_id, record_id, mailbox_id, subject, contact_email,
 				first_message_at, last_message_at, inbound_address_id, reply_from)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9) RETURNING id::text`,
+			VALUES ($1, COALESCE($2::uuid, outflare_only_brand($1)), $3, $4, $5, $6, $7, $7, $8, $9) RETURNING id::text`,
 			ws, e.BrandID, record, nilIfEmpty(e.MailboxID), truncate(baseSubject(e.Subject), 1000), from, e.Received,
 			nilIfEmpty(e.InboundAddressID), nilIfEmpty(truncate(strings.ToLower(e.ReplyFrom), 320))).Scan(&conv)
 		if err != nil {

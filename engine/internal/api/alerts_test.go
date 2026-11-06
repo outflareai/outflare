@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/outflareai/outflare/engine/internal/alerts"
 	"github.com/outflareai/outflare/engine/internal/inbox"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -79,11 +80,30 @@ func TestAlerts(t *testing.T) {
 	owner.must(200, "PUT", base+"/alerts/settings", map[string]any{"kind": "reply.hot", "email": "off"})
 	hot()
 	owner.must(200, "PUT", base+"/alerts/settings", map[string]any{"kind": "reply.hot", "email": nil})
-	owner.must(200, "PUT", base+"/alerts/mutes", map[string]any{"kind": "reply.hot", "muted": true})
+	// A mute is the brand's: muting it for the first brand stops these.
+	var first0 string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&first0); err != nil {
+		t.Fatal(err)
+	}
+	owner.must(200, "PUT", "/v1/brands/"+first0+"/alerts/mutes", map[string]any{"kind": "reply.hot", "muted": true})
 	hot()
 	set := owner.must(200, "GET", base+"/alerts/settings", nil)
 	if mu := set["muted"].([]any); len(mu) != 1 || mu[0] != "reply.hot" || len(set["kinds"].([]any)) < 2 {
 		t.Fatalf("settings: %v", set)
+	}
+	if b := owner.must(200, "GET", "/v1/brands/"+first0+"/alerts/settings", nil); len(b["muted"].([]any)) != 1 {
+		t.Fatalf("brand settings: %v", b)
+	}
+	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	if b := owner.must(200, "GET", "/v1/brands/"+other+"/alerts/settings", nil); len(b["muted"].([]any)) != 0 {
+		t.Fatalf("another brand has the mute: %v", b)
+	}
+	owner.must(200, "PUT", base+"/alerts/mutes?brand=northpeak", map[string]any{"kind": "reply.hot", "muted": true})
+	if b := owner.must(200, "GET", "/v1/brands/"+other+"/alerts/settings", nil); len(b["muted"].([]any)) != 1 {
+		t.Fatalf("northpeak mutes: %v", b)
+	}
+	if mu := owner.must(200, "GET", base+"/alerts/settings", nil)["muted"].([]any); len(mu) != 1 || mu[0] != "reply.hot" {
+		t.Fatalf("the first brand's mutes changed: %v", mu)
 	}
 	var queued int
 	e.pool.QueryRow(ctx, `SELECT count(*) FROM alert_deliveries WHERE workspace_id = $1`, ws).Scan(&queued)
@@ -161,7 +181,34 @@ func TestAlerts(t *testing.T) {
 	if n := len(named(ev, "alert.posted")); n != 1 {
 		t.Fatalf("alert.posted: %d", n)
 	}
-	if n := len(named(ev, "alert.muted")); n != 1 {
+	if n := len(named(ev, "alert.muted")); n != 2 {
 		t.Fatalf("alert.muted: %d", n)
+	}
+}
+
+// Brands share no alert settings: a workspace row saved with no brand
+// (before brands were separate) counts for no brand, and a setting saved
+// on the workspace route is the first brand's.
+func TestAlertSettingsAreTheBrands(t *testing.T) {
+	e := freshEnv(t)
+	owner, base, _ := sendingSetup(t, e, &fakeClock{t: time.Now()})
+	ws := strings.TrimPrefix(base, "/v1/workspaces/")
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `INSERT INTO alert_settings (workspace_id, kind, email) VALUES ($1, 'reply.hot', 'off')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if l := owner.must(200, "GET", base+"/alerts/settings", nil)["settings"].([]any); len(l) != 0 {
+		t.Fatalf("the workspace's row counts for a brand: %v", l)
+	}
+	v := owner.must(200, "PUT", base+"/alerts/settings", map[string]any{"kind": "reply.hot", "email": "admins"})
+	var first string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if v["brand_id"] != first {
+		t.Fatalf("saved for %v, want the first brand %s", v["brand_id"], first)
+	}
+	if to, err := alerts.EmailSetting(ctx, e.pool, ws, &first, "reply.hot"); err != nil || to != "admins" {
+		t.Fatalf("the brand's email = %q %v", to, err)
 	}
 }

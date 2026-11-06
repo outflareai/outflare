@@ -67,8 +67,17 @@ export function brandCaller(gtm: MissionClient, workspace: () => string) {
 
 export function registerRecordTools(server: McpServer, gtm: MissionClient, workspace: () => string, readOnly: boolean, call: Call): void {
   const path = () => ({ ws: workspace() });
-  const recordPath = (record: string) => ({ ws: workspace(), record });
   const onBrand = brandCaller(gtm, workspace);
+  // findRecordBrand is the brand a record is in: each brand's records are
+  // only under its own route, so it asks each brand in turn.
+  const findRecordBrand = async (record: string): Promise<string | undefined> => {
+    const brands = await gtm.GET("/v1/workspaces/{ws}/brands", { params: { path: path() } });
+    for (const b of brands.data?.data ?? []) {
+      const found = await gtm.GET("/v1/brands/{brand}/records/{record}", { params: { path: { brand: b.id, record } } });
+      if (found.data) return b.id;
+    }
+    return undefined;
+  };
 
   server.registerTool(
     "get_catalog",
@@ -1032,12 +1041,8 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   // once and can be undone with restore_deletion for 7 days.
   const recoverable = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } as const;
   const version = z.number().int().optional().describe("The record's version, from get_record; required for agents.");
-  const recordBrand = async (record: string, brand: string | undefined): Promise<string | CallToolResult> => {
-    if (brand) return brand;
-    const found = await gtm.GET("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record) } });
-    if (!found.data) return call(async () => found);
-    return found.data.brand_id ?? { isError: true, content: [{ type: "text" as const, text: "This record has no brand; pass brand." }] };
-  };
+  const recordBrand = async (record: string, brand: string | undefined): Promise<string | CallToolResult> =>
+    brand ?? (await findRecordBrand(record)) ?? { isError: true, content: [{ type: "text" as const, text: "No brand has this record; pass brand." }] };
   const brandOpt = brandRef.optional().describe("The record's brand (handle or id). Leave out to use the brand the record belongs to.");
 
   server.registerTool(
@@ -1221,13 +1226,8 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       annotations: write,
     },
     async ({ record, brand }) => {
-      let ref = brand;
-      if (!ref) {
-        const found = await gtm.GET("/v1/workspaces/{ws}/records/{record}", { params: { path: recordPath(record) } });
-        if (!found.data) return call(async () => found);
-        ref = found.data.brand_id ?? undefined;
-        if (!ref) return { isError: true, content: [{ type: "text" as const, text: "This record has no brand; pass brand." }] };
-      }
+      const ref = brand ?? (await findRecordBrand(record));
+      if (!ref) return { isError: true, content: [{ type: "text" as const, text: "No brand has this record; pass brand." }] };
       return call(() =>
         onBrand(ref!, (b) => gtm.POST("/v1/brands/{brand}/records/{record}/privacy-exports", { params: { path: { brand: b, record } } })),
       );

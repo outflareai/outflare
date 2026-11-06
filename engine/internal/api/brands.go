@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/outflareai/outflare/engine/internal/brands"
+	"github.com/outflareai/outflare/engine/internal/features"
 	"github.com/outflareai/outflare/engine/internal/quota"
 	"net/http"
 	"net/url"
@@ -426,7 +427,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -639,6 +640,10 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `SELECT outflare_brand_catalog($1)`, id); err != nil {
 			return err
 		}
+		// Features the operator switched on stay on for the new brand.
+		if err := features.CopyToBrand(ctx, tx, a.WorkspaceID, id); err != nil {
+			return err
+		}
 		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "brand.created", "brand", id, map[string]any{
 			"handle": handle, "domains": len(domains), "platforms": platforms, "links": len(links),
 		}); err != nil {
@@ -648,6 +653,11 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 		// social links straight away, as suggestions.
 		if website != "" {
 			if _, err := s.enqueueLinkDiscovery(ctx, tx, a.WorkspaceID, id, "created"); err != nil {
+				return err
+			}
+			// And for what it offers, so AI visibility and agents know
+			// the brand from the start.
+			if _, err := s.enqueueBrandKnowledge(ctx, tx, a.WorkspaceID, id, "created"); err != nil {
 				return err
 			}
 		}
@@ -777,8 +787,10 @@ var brandContextFields = []struct {
 	{"audience", "Who it is for", 4000},
 	{"goals", "Goals", 4000},
 	{"voice", "Voice", 4000},
-	{"rules", "Rules", 4000},
-	{"notes", "Notes", 100000},
+	// Room for the company's rules and the brand's, which each brand
+	// started from when brands stopped sharing one company context.
+	{"rules", "Rules", 10000},
+	{"notes", "Notes", 210000},
 }
 
 type brandContextView struct {
@@ -794,9 +806,24 @@ type brandContextView struct {
 	Voice     string      `json:"voice"`
 	Rules     string      `json:"rules"`
 	Notes     string      `json:"notes"`
-	Version   int         `json:"version"`
-	UpdatedAt *time.Time  `json:"updated_at"`
-	UpdatedBy *string     `json:"updated_by"`
+	// Knowledge is what the brand's website says it offers, read by the
+	// workspace's page reader and AI model and edited by people.
+	Knowledge       BrandKnowledge `json:"knowledge"`
+	KnowledgeReadAt *time.Time     `json:"knowledge_read_at"`
+	KnowledgePages  int            `json:"knowledge_pages"`
+	KnowledgeError  string         `json:"knowledge_error"`
+	// The brand's logo and colours, which the consent banner, help centre
+	// and anything else on brand start from.
+	LogoURL   string     `json:"logo_url"`
+	Colors    lookColors `json:"colors"`
+	Version   int        `json:"version"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	UpdatedBy *string    `json:"updated_by"`
+	// Onboarding fields still empty.
+	Missing []string `json:"missing"`
+	// Whether an agent should ask for the missing fields: false once they
+	// are all filled or a person dismissed the question.
+	AskForMissing bool `json:"ask_for_missing"`
 	// The brand's active findings, nearest review first (at most 20):
 	// what was learned about its marketing, as data for an agent.
 	Findings []findingView `json:"findings,omitempty"`
@@ -824,21 +851,39 @@ func (v *brandContextView) field(key string) *string {
 // has an empty context at version 1.
 func (s *Server) loadBrandContext(ctx context.Context, ws, id string) (brandContextView, error) {
 	v := brandContextView{Version: 1}
+	var dismissed *time.Time
 	err := s.pool.QueryRow(ctx, `
 		SELECT b.id, b.name, b.handle, b.website, b.platforms, b.links,
 		       COALESCE(c.about, ''), COALESCE(c.audience, ''), COALESCE(c.goals, ''), COALESCE(c.voice, ''),
-		       COALESCE(c.rules, ''), COALESCE(c.notes, ''), COALESCE(c.version, 1), c.updated_at, ac.display_name
+		       COALESCE(c.rules, ''), COALESCE(c.notes, ''), b.logo_url, b.colors, COALESCE(c.version, 1), c.updated_at, ac.display_name,
+		       c.onboarding_dismissed_at,
+		       COALESCE(c.knowledge, '{}'), c.knowledge_read_at, COALESCE(c.knowledge_pages, 0), COALESCE(c.knowledge_error, '')
 		FROM brands b
 		LEFT JOIN brand_context c ON c.brand_id = b.id
 		LEFT JOIN actors ac ON ac.id = c.updated_by
 		WHERE b.id = $1 AND b.workspace_id = $2`, id, ws,
 	).Scan(&v.BrandID, &v.Name, &v.Handle, &v.Website, &v.Platforms, &v.Links, &v.About, &v.Audience, &v.Goals, &v.Voice,
-		&v.Rules, &v.Notes, &v.Version, &v.UpdatedAt, &v.UpdatedBy)
+		&v.Rules, &v.Notes, &v.LogoURL, &v.Colors, &v.Version, &v.UpdatedAt, &v.UpdatedBy, &dismissed,
+		&v.Knowledge, &v.KnowledgeReadAt, &v.KnowledgePages, &v.KnowledgeError)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return v, errNotFound
 	}
+	if err == nil {
+		err = v.Knowledge.normalise()
+	}
+	v.Missing = []string{}
+	for _, k := range brandOnboardingFields {
+		if *v.field(k) == "" {
+			v.Missing = append(v.Missing, k)
+		}
+	}
+	v.AskForMissing = len(v.Missing) > 0 && dismissed == nil
 	return v, err
 }
+
+// brandOnboardingFields are asked for until they are filled or a person
+// dismisses the question.
+var brandOnboardingFields = []string{"about", "goals", "voice"}
 
 func (s *Server) getBrandContext(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
@@ -867,6 +912,8 @@ type brandContextInput struct {
 	// The version the edit was made against. When set and the context has
 	// changed since, the update fails with 409 instead of overwriting.
 	Version *int `json:"version"`
+	// True stops agents asking for the missing fields; false asks again.
+	OnboardingDismissed *bool `json:"onboarding_dismissed"`
 }
 
 func (in *brandContextInput) field(key string) *string {
@@ -896,43 +943,7 @@ func (s *Server) updateBrandContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO brand_context (brand_id, workspace_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, b.ID, a.WorkspaceID); err != nil {
-			return err
-		}
-		var cur brandContextView
-		err := tx.QueryRow(ctx, `
-			SELECT about, audience, goals, voice, rules, notes, version
-			FROM brand_context WHERE brand_id = $1 FOR UPDATE`, b.ID,
-		).Scan(&cur.About, &cur.Audience, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Version)
-		if err != nil {
-			return err
-		}
-		var changed []string
-		for _, f := range brandContextFields {
-			if p := req.field(f.key); p != nil && *p != *cur.field(f.key) {
-				changed = append(changed, f.key)
-			}
-		}
-		if len(changed) == 0 {
-			return nil
-		}
-		if req.Version != nil && *req.Version != cur.Version {
-			return errStaleBrief
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE brand_context SET
-				about = COALESCE($2, about), audience = COALESCE($3, audience), goals = COALESCE($4, goals),
-				voice = COALESCE($5, voice), rules = COALESCE($6, rules), notes = COALESCE($7, notes),
-				version = version + 1, updated_at = now(), updated_by = $8
-			WHERE brand_id = $1`,
-			b.ID, req.About, req.Audience, req.Goals, req.Voice, req.Rules, req.Notes, a.ActorID)
-		if err != nil {
-			return err
-		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "brand.context_updated", "brand", b.ID,
-			map[string]any{"fields": changed, "version": cur.Version + 1})
-	})
+	err := s.writeBrandContext(ctx, a, b.ID, req)
 	if errors.Is(err, errStaleBrief) {
 		writeError(w, r, http.StatusConflict, "context_changed", "the brand's context changed since you loaded it; reload it and apply your edit again")
 		return
@@ -945,6 +956,60 @@ func (s *Server) updateBrandContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// writeBrandContext applies an edit to a brand's context in one
+// transaction, with its audit event. It answers errStaleBrief when the
+// edit was made against an older version.
+func (s *Server) writeBrandContext(ctx context.Context, a *access, brand string, req brandContextInput) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO brand_context (brand_id, workspace_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, brand, a.WorkspaceID); err != nil {
+			return err
+		}
+		var cur brandContextView
+		err := tx.QueryRow(ctx, `
+			SELECT about, audience, goals, voice, rules, notes, version
+			FROM brand_context WHERE brand_id = $1 FOR UPDATE`, brand,
+		).Scan(&cur.About, &cur.Audience, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Version)
+		if err != nil {
+			return err
+		}
+		var changed []string
+		for _, f := range brandContextFields {
+			if p := req.field(f.key); p != nil && *p != *cur.field(f.key) {
+				changed = append(changed, f.key)
+			}
+		}
+		if len(changed) == 0 && req.OnboardingDismissed == nil {
+			return nil
+		}
+		if req.Version != nil && *req.Version != cur.Version && len(changed) > 0 {
+			return errStaleBrief
+		}
+		bump := len(changed) > 0
+		_, err = tx.Exec(ctx, `
+			UPDATE brand_context SET
+				about = COALESCE($2, about), audience = COALESCE($3, audience), goals = COALESCE($4, goals),
+				voice = COALESCE($5, voice), rules = COALESCE($6, rules), notes = COALESCE($7, notes),
+				version = version + CASE WHEN $9 THEN 1 ELSE 0 END,
+				onboarding_dismissed_at = CASE WHEN $10::boolean IS NULL THEN onboarding_dismissed_at
+				                               WHEN $10 THEN COALESCE(onboarding_dismissed_at, now()) END,
+				updated_at = CASE WHEN $9 THEN now() ELSE updated_at END,
+				updated_by = CASE WHEN $9 THEN $8::uuid ELSE updated_by END
+			WHERE brand_id = $1`,
+			brand, req.About, req.Audience, req.Goals, req.Voice, req.Rules, req.Notes, a.ActorID, bump, req.OnboardingDismissed)
+		if err != nil {
+			return err
+		}
+		data := map[string]any{"fields": changed, "version": cur.Version}
+		if bump {
+			data["version"] = cur.Version + 1
+		}
+		if req.OnboardingDismissed != nil {
+			data["onboarding_dismissed"] = *req.OnboardingDismissed
+		}
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "brand.context_updated", "brand", brand, data)
+	})
 }
 
 // ---- Moving records between brands ----
@@ -1127,6 +1192,43 @@ func brandWrite(ctx context.Context, tx interface {
 		return nil, errInvalid("brand not found")
 	}
 	return brand, nil
+}
+
+// ownBrand is brandWrite for a new row of a brand's data, which brands
+// never share: with no brand named it is the route's brand, else the
+// token's one brand, else the workspace's first. It is nil only when the
+// workspace has no brand.
+func ownBrand(ctx context.Context, tx interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, a *access, brand *string) (*string, error) {
+	if brand == nil && a.Brand != "" {
+		b := a.Brand
+		brand = &b
+	}
+	if brand == nil && a.Brands == nil {
+		if err := tx.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, a.WorkspaceID).Scan(&brand); err != nil {
+			return nil, err
+		}
+	}
+	return brandWrite(ctx, tx, a, brand)
+}
+
+// refuseNoBrand stops a move of a brand's data to no brand, which every
+// brand would share, in a workspace that has brands.
+func refuseNoBrand(ctx context.Context, tx interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, ws string, brand *string) error {
+	if brand != nil {
+		return nil
+	}
+	var has bool
+	if err := tx.QueryRow(ctx, `SELECT outflare_first_brand($1) IS NOT NULL`, ws).Scan(&has); err != nil {
+		return err
+	}
+	if has {
+		return errInvalid("brand_id must be one of the workspace's brands: brands share nothing")
+	}
+	return nil
 }
 
 // listBusinessModels is the list a brand's business model and revenue

@@ -24,10 +24,10 @@ import (
 
 const (
 	// competitorRows is how many competitors a site's read suggests.
-	competitorRows = 10
+	competitorRows = 50
 	// MaxTrackedNumbers is how many tracked competitors per site get an
 	// overview each week, oldest first, so one site can't spend the budget.
-	MaxTrackedNumbers = 10
+	MaxTrackedNumbers = 50
 	// MaxGapCompetitors is how many of them also get their keywords and
 	// linking domains read for the gaps.
 	MaxGapCompetitors = 5
@@ -94,7 +94,7 @@ func (s *Syncer) SuggestSiteCompetitors(ctx context.Context, o *connectors.Opene
 	n := 0
 	for _, row := range a.Rows {
 		host := CompetitorHost(row.Key)
-		if host == "" || host == target || strings.HasSuffix(host, "."+target) {
+		if host == "" || host == target || strings.HasSuffix(host, "."+target) || platform(host) {
 			continue
 		}
 		tag, err := s.Pool.Exec(ctx, `
@@ -107,12 +107,49 @@ func (s *Syncer) SuggestSiteCompetitors(ctx context.Context, o *connectors.Opene
 		}
 		n += int(tag.RowsAffected())
 	}
+	if err := withdrawPlatforms(ctx, s.Pool, ws, site.ID); err != nil {
+		return n, cost, err
+	}
 	return n, cost, LinkCompetitorRecords(ctx, s.Pool, ws, site.ID)
+}
+
+// withdrawPlatforms dismisses a site's suggestions that are platforms
+// (suggested before platforms were left out), so nobody says yes to one.
+func withdrawPlatforms(ctx context.Context, pool *pgxpool.Pool, ws, siteID string) error {
+	rows, err := pool.Query(ctx, `UPDATE seo_competitors c SET status = 'dismissed', updated_at = now()
+		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'suggested' AND NOT `+notPlatform("$3")+`
+		RETURNING c.id::text`, ws, siteID, platformList())
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := audit.Record(ctx, pool, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "seo_competitor.platform_withdrawn",
+			TargetType: "seo_competitor", TargetID: id, Data: map[string]any{"site_id": siteID}}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SyncSiteCompetitors suggests a site's competitors and snapshots the
 // tracked ones' numbers.
 func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string, now time.Time) (CompetitorRun, error) {
+	return s.syncSiteCompetitors(ctx, o, r, site, country, now, false)
+}
+
+// RefreshSiteCompetitors reads now the numbers of a site's tracked
+// competitors (the same ones and the same reads as the weekly snapshot)
+// that this connection hasn't read today, without asking for new
+// suggestions. Asking twice in a day costs nothing more.
+func (s *Syncer) RefreshSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string, now time.Time) (CompetitorRun, error) {
+	return s.syncSiteCompetitors(ctx, o, r, site, country, now, true)
+}
+
+func (s *Syncer) syncSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string, now time.Time, refresh bool) (CompetitorRun, error) {
 	ws := o.WorkspaceID
 	run := CompetitorRun{SiteID: site.ID, Host: site.Host}
 	unit := Unit(r)
@@ -123,14 +160,17 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		run.Error = &msg
 		return run, err
 	}
-	n, cost, err := s.SuggestSiteCompetitors(ctx, o, r, site, country)
-	run.Suggested += n
-	run.Cost += cost
-	if err != nil {
-		return fail(err)
+	if !refresh {
+		n, cost, err := s.SuggestSiteCompetitors(ctx, o, r, site, country)
+		run.Suggested += n
+		run.Cost += cost
+		if err != nil {
+			return fail(err)
+		}
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id::text, host FROM seo_competitors
-		WHERE workspace_id = $1 AND site_id = $2 AND status = 'tracked' ORDER BY created_at, host LIMIT $3`, ws, site.ID, MaxTrackedNumbers)
+	rows, err := s.Pool.Query(ctx, `SELECT c.id::text, c.host FROM seo_competitors c
+		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'tracked' AND `+notPlatform("$4")+`
+		ORDER BY c.created_at, c.host LIMIT $3`, ws, site.ID, MaxTrackedNumbers, platformList())
 	if err != nil {
 		return fail(err)
 	}
@@ -148,6 +188,16 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		q, err := connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOOverview, Target: c.host, Country: country})
 		if err != nil {
 			continue
+		}
+		if refresh {
+			var today bool
+			if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM seo_snapshots
+				WHERE integration_id = $1 AND host = $2 AND report = 'overview' AND key = '' AND day = $3)`, o.ID, c.host, day).Scan(&today); err != nil {
+				return fail(err)
+			}
+			if today {
+				continue
+			}
 		}
 		var before *connectors.SEOMetrics
 		var raw []byte

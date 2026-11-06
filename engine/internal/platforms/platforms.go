@@ -343,8 +343,8 @@ func (s *Service) mailbox(ctx context.Context, tx pgx.Tx, ws, connector, email s
 	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO mailboxes (workspace_id, email, display_name, provider, smtp_host, smtp_port, smtp_username, imap_host, imap_port,
-		                       imap_username, credentials, status, status_reason, daily_limit, source, has_login)
-		VALUES ($1, $2, $3, 'other', '', 0, '', '', 0, '', '\x', 'active', $4, $5, $6, false)
+		                       imap_username, credentials, status, status_reason, daily_limit, source, has_login, brand_id)
+		VALUES ($1, $2, $3, 'other', '', 0, '', '', 0, '', '\x', 'active', $4, $5, $6, false, outflare_mailbox_brand($1, $2, NULL))
 		RETURNING id::text`,
 		ws, email, m.Name, "Sends through "+connector+"; Outflare has no login for it.", limit, connector).Scan(&id)
 	return id, err

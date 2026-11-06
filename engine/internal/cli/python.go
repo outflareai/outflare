@@ -55,7 +55,7 @@ func writePythonMethod(b *bytes.Buffer, op *operation) {
 		a := arg{py: pyName(p.Name), api: p.Name, in: p.In, hint: pyHint(p.Schema), required: p.Required}
 		used[a.py] = true
 		switch {
-		case p.In == "path" && (p.Name == "ws" || p.Name == "ag"):
+		case p.In == "path" && (p.Name == "ws" || p.Name == "ag" || p.Name == "brand"):
 			a.required = false // filled from the client
 			keyword = append(keyword, a)
 		case p.In == "path":

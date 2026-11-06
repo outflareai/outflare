@@ -568,7 +568,6 @@ function LeadDialog({
   const [match, setMatch] = useState<Schemas["Record"] | null>(null);
   const [checking, setChecking] = useState(false);
   const touched = useRef(new Set<string>());
-  const { query: brandQuery } = useBrand(ws);
   const [values, setValues] = useState<Record<LeadField, string>>(
     () =>
       Object.fromEntries(
@@ -602,11 +601,12 @@ function LeadDialog({
     }));
   }
   useEffect(() => {
-    if (!lead?.record_id) return;
+    const brand = lead?.brand_id ?? brandId;
+    if (!lead?.record_id || !brand) return;
     let active = true;
     api
-      .GET("/v1/workspaces/{ws}/records/{record}", {
-        params: { path: { ws, record: lead.record_id } },
+      .GET("/v1/brands/{brand}/records/{record}", {
+        params: { path: { brand, record: lead.record_id } },
       })
       .then(({ data }) => {
         const ids = data?.attributes.companies;
@@ -616,9 +616,9 @@ function LeadDialog({
     return () => {
       active = false;
     };
-  }, [ws, lead?.record_id]);
+  }, [ws, lead?.record_id, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (lead || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (lead || !brandId || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setMatch(null);
       return;
     }
@@ -627,14 +627,13 @@ function LeadDialog({
     setMatch(null);
     const timer = setTimeout(async () => {
       try {
-        const { data } = await api.GET("/v1/workspaces/{ws}/records", {
+        const { data } = await api.GET("/v1/brands/{brand}/records", {
           params: {
-            path: { ws },
+            path: { brand: brandId },
             query: {
               type: "person",
               q: email.trim(),
               limit: 20,
-              ...brandQuery,
             },
           },
           signal: controller.signal,
@@ -673,9 +672,9 @@ function LeadDialog({
             !touched.current.has("company")
           ) {
             const company = await api.GET(
-              "/v1/workspaces/{ws}/records/{record}",
+              "/v1/brands/{brand}/records/{record}",
               {
-                params: { path: { ws, record: String(refs[0]) } },
+                params: { path: { brand: brandId, record: String(refs[0]) } },
                 signal: controller.signal,
               },
             );
@@ -697,7 +696,7 @@ function LeadDialog({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [ws, email, lead, brandQuery.brand]);
+  }, [ws, email, lead, brandId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();

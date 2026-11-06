@@ -64,7 +64,7 @@ func (p Period) before() Period { return Period{Start: p.Start.Add(-p.End.Sub(p.
 type Builder struct {
 	ID    string
 	Title string
-	Build func(ctx context.Context, q Querier, ws string, p Period) (Section, error)
+	Build func(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error)
 }
 
 var builders []Builder
@@ -84,12 +84,14 @@ func init() {
 	Register(Builder{ID: "missions", Title: "Missions", Build: missions})
 }
 
-// Build runs every section for a workspace and keeps the ones with
-// something in them.
-func Build(ctx context.Context, q Querier, ws string, p Period) ([]Section, error) {
+// Build runs every section for one brand of a workspace and keeps the
+// ones with something in them. A section counts only the brand's own data
+// (and, where a row can be every brand's, such as a connection, those
+// too).
+func Build(ctx context.Context, q Querier, ws, brand string, p Period) ([]Section, error) {
 	out := []Section{}
 	for _, b := range builders {
-		s, err := b.Build(ctx, q, ws, p)
+		s, err := b.Build(ctx, q, ws, brand, p)
 		if err != nil {
 			return nil, fmt.Errorf("digest section %s: %w", b.ID, err)
 		}
@@ -109,15 +111,15 @@ func Build(ctx context.Context, q Querier, ws string, p Period) ([]Section, erro
 
 // counts runs one query of count columns over a period and the one before,
 // and returns metrics with previous values. sql takes $1 workspace, $2
-// start, $3 end.
-func counts(ctx context.Context, q Querier, ws string, p Period, sql string, labels [][2]string) ([]Metric, error) {
+// start, $3 end, $4 brand.
+func counts(ctx context.Context, q Querier, ws, brand string, p Period, sql string, labels [][2]string) ([]Metric, error) {
 	read := func(p Period) ([]float64, error) {
 		vals := make([]float64, len(labels))
 		ptrs := make([]any, len(labels))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
-		return vals, q.QueryRow(ctx, sql, ws, p.Start, p.End).Scan(ptrs...)
+		return vals, q.QueryRow(ctx, sql, ws, p.Start, p.End, brand).Scan(ptrs...)
 	}
 	now, err := read(p)
 	if err != nil {
@@ -135,19 +137,19 @@ func counts(ctx context.Context, q Querier, ws string, p Period, sql string, lab
 	return out, nil
 }
 
-func attention(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func attention(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var errorsOpen, held float64
 	if err := q.QueryRow(ctx, `SELECT
-		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND status IN ('open', 'in_progress') AND severity = 'error')::float8,
-		(SELECT count(*) FROM mission_actions WHERE workspace_id = $1 AND status = 'pending')::float8`, ws).Scan(&errorsOpen, &held); err != nil {
+		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2 AND status IN ('open', 'in_progress') AND severity = 'error')::float8,
+		(SELECT count(*) FROM mission_actions WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2 AND status = 'pending')::float8`, ws, brand).Scan(&errorsOpen, &held); err != nil {
 		return s, err
 	}
 	s.Metrics = []Metric{
 		{Key: "fixes_errors_open", Label: "Open errors to fix", Value: errorsOpen},
 		{Key: "mission_actions_waiting", Label: "Mission actions waiting for you", Value: held},
 	}
-	rows, err := q.Query(ctx, `SELECT name FROM integrations WHERE workspace_id = $1 AND status = 'error' ORDER BY name LIMIT 5`, ws)
+	rows, err := q.Query(ctx, `SELECT name FROM integrations WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2) AND status = 'error' ORDER BY name LIMIT 5`, ws, brand)
 	if err != nil {
 		return s, err
 	}
@@ -158,7 +160,7 @@ func attention(ctx context.Context, q Querier, ws string, p Period) (Section, er
 	for _, n := range names {
 		s.Items = append(s.Items, Item{Text: n + " needs to be connected again.", Tab: "connectors", Tone: "bad"})
 	}
-	rows, err = q.Query(ctx, `SELECT name FROM deploy_targets WHERE workspace_id = $1 AND status = 'active' AND last_error IS NOT NULL ORDER BY name LIMIT 3`, ws)
+	rows, err = q.Query(ctx, `SELECT name FROM deploy_targets WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2) AND status = 'active' AND last_error IS NOT NULL ORDER BY name LIMIT 3`, ws, brand)
 	if err != nil {
 		return s, err
 	}
@@ -175,19 +177,19 @@ func attention(ctx context.Context, q Querier, ws string, p Period) (Section, er
 	return s, nil
 }
 
-func fixes(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func fixes(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND created_at >= $2 AND created_at < $3)::float8,
-		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND status = 'done' AND fixed_at >= $2 AND fixed_at < $3)::float8,
-		(SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'fix.reopened' AND created_at >= $2 AND created_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND created_at >= $2 AND created_at < $3)::float8,
+		(SELECT count(*) FROM fixes WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status = 'done' AND fixed_at >= $2 AND fixed_at < $3)::float8,
+		(SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND action = 'fix.reopened' AND created_at >= $2 AND created_at < $3)::float8`,
 		[][2]string{{"fixes_found", "New fixes found"}, {"fixes_done", "Fixes confirmed done"}, {"fixes_reopened", "Fixes that came back"}})
 	if err != nil {
 		return s, err
 	}
 	var open float64
-	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM fixes WHERE workspace_id = $1 AND status IN ('open', 'in_progress')`, ws).Scan(&open); err != nil {
+	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM fixes WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2 AND status IN ('open', 'in_progress')`, ws, brand).Scan(&open); err != nil {
 		return s, err
 	}
 	s.Metrics = append(s.Metrics, Metric{Key: "fixes_open", Label: "Open now", Value: open})
@@ -197,8 +199,8 @@ func fixes(ctx context.Context, q Querier, ws string, p Period) (Section, error)
 	// The biggest open errors, worth taking first.
 	rows, err := q.Query(ctx, `SELECT f.rule, f.group_key, f.count, f.unit, COALESCE(si.host, '')
 		FROM fixes f LEFT JOIN seo_sites si ON f.subject_type = 'seo_site' AND si.id = f.subject_id
-		WHERE f.workspace_id = $1 AND f.status = 'open' AND f.severity = 'error'
-		ORDER BY f.count DESC, f.rule LIMIT 3`, ws)
+		WHERE f.workspace_id = $1 AND COALESCE(f.brand_id, outflare_first_brand(f.workspace_id)) = $2 AND f.status = 'open' AND f.severity = 'error'
+		ORDER BY f.count DESC, f.rule LIMIT 3`, ws, brand)
 	if err != nil {
 		return s, err
 	}
@@ -226,20 +228,20 @@ func fixes(ctx context.Context, q Querier, ws string, p Period) (Section, error)
 	return s, rows.Err()
 }
 
-func deploys(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func deploys(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM deploys WHERE workspace_id = $1 AND state = 'ready' AND deployed_at >= $2 AND deployed_at < $3)::float8,
-		(SELECT count(*) FROM deploys WHERE workspace_id = $1 AND state = 'failed' AND deployed_at >= $2 AND deployed_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM deploys WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND state = 'ready' AND deployed_at >= $2 AND deployed_at < $3)::float8,
+		(SELECT count(*) FROM deploys WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND state = 'failed' AND deployed_at >= $2 AND deployed_at < $3)::float8`,
 		[][2]string{{"deploys_live", "Went live"}, {"deploys_failed", "Failed"}})
 	if err != nil {
 		return s, err
 	}
 	rows, err := q.Query(ctx, `SELECT COALESCE(si.host, t.name), count(*)
 		FROM deploys d JOIN deploy_targets t ON t.id = d.target_id LEFT JOIN seo_sites si ON si.id = d.site_id
-		WHERE d.workspace_id = $1 AND d.state = 'ready' AND d.deployed_at >= $2 AND d.deployed_at < $3
-		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5`, ws, p.Start, p.End)
+		WHERE d.workspace_id = $1 AND COALESCE(d.brand_id, outflare_first_brand(d.workspace_id)) = $4 AND d.state = 'ready' AND d.deployed_at >= $2 AND d.deployed_at < $3
+		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5`, ws, p.Start, p.End, brand)
 	if err != nil {
 		return s, err
 	}
@@ -255,7 +257,7 @@ func deploys(ctx context.Context, q Querier, ws string, p Period) (Section, erro
 	return s, rows.Err()
 }
 
-func sites(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func sites(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	// Each site's latest audited crawl by the end, against its latest one
 	// before the period.
@@ -264,7 +266,7 @@ func sites(ctx context.Context, q Querier, ws string, p Period) (Section, error)
 		  (SELECT r.health_score FROM crawl_runs r WHERE r.site_id = si.id AND r.health_score IS NOT NULL AND r.finished_at < $3 ORDER BY r.finished_at DESC LIMIT 1),
 		  (SELECT r.health_score FROM crawl_runs r WHERE r.site_id = si.id AND r.health_score IS NOT NULL AND r.finished_at < $2 ORDER BY r.finished_at DESC LIMIT 1),
 		  (SELECT count(*) FROM crawl_runs r WHERE r.site_id = si.id AND r.finished_at >= $2 AND r.finished_at < $3)
-		FROM seo_sites si WHERE si.workspace_id = $1 ORDER BY si.host LIMIT 20`, ws, p.Start, p.End)
+		FROM seo_sites si WHERE si.workspace_id = $1 AND COALESCE(si.brand_id, outflare_first_brand(si.workspace_id)) = $4 ORDER BY si.host LIMIT 20`, ws, p.Start, p.End, brand)
 	if err != nil {
 		return s, err
 	}
@@ -296,21 +298,21 @@ func sites(ctx context.Context, q Querier, ws string, p Period) (Section, error)
 	return s, rows.Err()
 }
 
-func outreach(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func outreach(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM messages WHERE workspace_id = $1 AND status = 'sent' AND created_at >= $2 AND created_at < $3)::float8,
-		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND kind = 'reply' AND received_at >= $2 AND received_at < $3)::float8,
-		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND kind = 'reply' AND category IN ('interested', 'meeting_booked') AND received_at >= $2 AND received_at < $3)::float8,
-		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND kind = 'bounce' AND received_at >= $2 AND received_at < $3)::float8,
-		(SELECT count(*) FROM meetings WHERE workspace_id = $1 AND booked_at >= $2 AND booked_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM messages WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status = 'sent' AND created_at >= $2 AND created_at < $3)::float8,
+		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND kind = 'reply' AND received_at >= $2 AND received_at < $3)::float8,
+		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND kind = 'reply' AND category IN ('interested', 'meeting_booked') AND received_at >= $2 AND received_at < $3)::float8,
+		(SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND kind = 'bounce' AND received_at >= $2 AND received_at < $3)::float8,
+		(SELECT count(*) FROM meetings WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND booked_at >= $2 AND booked_at < $3)::float8`,
 		[][2]string{{"emails_sent", "Emails sent"}, {"replies", "Replies"}, {"replies_interested", "Interested replies"}, {"bounces", "Bounces"}, {"meetings_booked", "Meetings booked"}})
 	if err != nil {
 		return s, err
 	}
 	var unread int
-	if err := q.QueryRow(ctx, `SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND kind = 'reply' AND NOT read AND NOT done`, ws).Scan(&unread); err != nil {
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM inbound_messages WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2 AND kind = 'reply' AND NOT read AND NOT done`, ws, brand).Scan(&unread); err != nil {
 		return s, err
 	}
 	if unread > 0 {
@@ -319,13 +321,13 @@ func outreach(ctx context.Context, q Querier, ws string, p Period) (Section, err
 	return s, nil
 }
 
-func lifecycle(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func lifecycle(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND NOT test AND sent_at >= $2 AND sent_at < $3)::float8,
-		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND NOT test AND opened_at >= $2 AND opened_at < $3)::float8,
-		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND NOT test AND status IN ('bounced', 'complained') AND sent_at >= $2 AND sent_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND NOT test AND sent_at >= $2 AND sent_at < $3)::float8,
+		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND NOT test AND opened_at >= $2 AND opened_at < $3)::float8,
+		(SELECT count(*) FROM emails WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND NOT test AND status IN ('bounced', 'complained') AND sent_at >= $2 AND sent_at < $3)::float8`,
 		[][2]string{{"lifecycle_sent", "Sent"}, {"lifecycle_opened", "Opened"}, {"lifecycle_bounced", "Bounced or marked spam"}})
 	return s, err
 }
@@ -333,20 +335,20 @@ func lifecycle(ctx context.Context, q Querier, ws string, p Period) (Section, er
 // supportSection is the support inbox and its assistant: conversations,
 // what the assistant answered or left to the team, and answers it found
 // that wait for a person to approve them.
-func supportSection(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func supportSection(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM support_conversations WHERE workspace_id = $1 AND first_message_at >= $2 AND first_message_at < $3)::float8,
-		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND action IN ('answer', 'clarify') AND created_at >= $2 AND created_at < $3)::float8,
-		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND action = 'handoff' AND created_at >= $2 AND created_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM support_conversations WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND first_message_at >= $2 AND first_message_at < $3)::float8,
+		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND action IN ('answer', 'clarify') AND created_at >= $2 AND created_at < $3)::float8,
+		(SELECT count(*) FROM support_assistant_runs WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND action = 'handoff' AND created_at >= $2 AND created_at < $3)::float8`,
 		[][2]string{{"support_conversations", "Conversations"}, {"support_assistant_answered", "Answered by the assistant"},
 			{"support_assistant_handed_off", "Left to your team by the assistant"}})
 	if err != nil {
 		return s, err
 	}
 	var waiting float64
-	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM knowledge_suggestions WHERE workspace_id = $1 AND status = 'pending'`, ws).Scan(&waiting); err != nil {
+	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM knowledge_suggestions WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2 AND status = 'pending'`, ws, brand).Scan(&waiting); err != nil {
 		return s, err
 	}
 	s.Metrics = append(s.Metrics, Metric{Key: "knowledge_suggestions_waiting", Label: "Answers waiting for review", Value: waiting})
@@ -357,12 +359,12 @@ func supportSection(ctx context.Context, q Querier, ws string, p Period) (Sectio
 	return s, nil
 }
 
-func missions(ctx context.Context, q Querier, ws string, p Period) (Section, error) {
+func missions(ctx context.Context, q Querier, ws, brand string, p Period) (Section, error) {
 	var s Section
 	var err error
-	s.Metrics, err = counts(ctx, q, ws, p, `SELECT
-		(SELECT count(*) FROM mission_actions WHERE workspace_id = $1 AND status = 'executed' AND created_at >= $2 AND created_at < $3)::float8,
-		(SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND action = 'mission.completed' AND created_at >= $2 AND created_at < $3)::float8`,
+	s.Metrics, err = counts(ctx, q, ws, brand, p, `SELECT
+		(SELECT count(*) FROM mission_actions WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status = 'executed' AND created_at >= $2 AND created_at < $3)::float8,
+		(SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND action = 'mission.completed' AND created_at >= $2 AND created_at < $3)::float8`,
 		[][2]string{{"mission_actions_run", "Agent actions run"}, {"missions_completed", "Missions completed"}})
 	return s, err
 }

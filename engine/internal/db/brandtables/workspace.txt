@@ -3,7 +3,6 @@
 # (plans/brands/README.md). Add a table here only when it can never hold
 # a brand's data.
 actors
-alert_mutes
 brands
 # Facts about an address or a mail domain (deliverable, risky, its address
 # shape), the same for every brand, like a hard bounce: a verifier's answer
@@ -14,15 +13,12 @@ email_verifications
 idempotency_keys
 # The team's inbox labels and saved inbox filters; which reply carries a
 # label is on the reply, which belongs to a brand.
-inbox_tags
-inbox_views
 invites
 jobs
 memberships
 oauth_grants
 teams
 workspace_ai_settings
-workspace_features
 workspace_onboarding
 workspace_roles
 workspace_slug_history
@@ -45,3 +41,68 @@ digest_optouts
 inbound_forwarders
 # What the workspace pays each provider per unit, for cost reports: billing.
 spend_rates
+# A connection's machinery: connections are shared by the workspace
+# (decision 4), and what one brings in carries its brand on the rows it
+# lands in. Its sync state, webhooks and their raw deliveries, rate limits
+# and their alerts, sign-ins and connect links, and the maps between its
+# ids and Outflare's.
+ad_syncs
+ai_bot_syncs
+connect_requests
+connection_hook_events
+connection_hooks
+connection_limit_alerts
+connection_limits
+emailbison_compat_calls
+emailbison_compat_ids
+oauth_connections
+outcome_links
+outcome_syncs
+platform_syncs
+seo_syncs
+suppression_syncs
+vendor_mailboxes
+vendor_syncs
+# Work in stages and its rate limits (engine/internal/pipeline): each
+# feature keeps its data, and its brand, in its own tables.
+pipeline_items
+pipeline_limits
+pipeline_runs
+pipeline_stage_stats
+# A Query session's scope: which brands it may read, not data.
+query_scopes
+# The team's sending set-up: the servers mailboxes send through and the
+# team's mailbox groups. Which brand a mailbox sends for is on the mailbox,
+# and who it sends as is the brand's (senders, since 0473).
+mailbox_pools
+sending_servers
+# What the shared AI key was used for and cost, like ai_usage_readings, and
+# whether the workspace's search uses it.
+ai_calls
+semantic_search_settings
+# Facts about an address or a domain from a shared tool, the same for every
+# brand, like email_checks: what an enrichment provider or research found.
+domain_research
+enrichment_cache
+# A news article, once per workspace; which brand's watch found it is on
+# its hit (news_hits), and who wrote it in news_article_authors.
+news_articles
+# The company behind the brands: what agents know about the business as a
+# whole. Each brand's own context is brand_context.
+workspace_context
+# Guard rails for every mailbox and lead, like the send policy: when a
+# mailbox pauses itself for bounces, and how the workspace's verifier
+# connection is used. They hold nothing about a brand's people.
+health_settings
+verification_settings
+# Maps to the items they name, which carry their brand: short names for
+# links, and the search index's vectors (no text).
+item_slugs
+search_embeddings
+# Read only by the previous version since 0471, which gave each brand its
+# own copy (brand_alert_mutes, brand_features), and since 0472 (brand_inbox_tags,
+# brand_inbox_views); dropped in a later release.
+alert_mutes
+inbox_tags
+inbox_views
+workspace_features

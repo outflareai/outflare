@@ -237,6 +237,9 @@ type SEOQuery struct {
 	// Page makes Target one page's URL in the links report: only the
 	// links to that exact page.
 	Page bool `json:"page,omitempty"`
+	// From keeps only links from pages on this domain (and its
+	// subdomains) in the links report, like youtube.com.
+	From string `json:"from,omitempty"`
 }
 
 // SEOReport is a provider's answer, in provider-neutral terms.
@@ -289,6 +292,12 @@ func CheckSEOQuery(q SEOQuery) (SEOQuery, error) {
 		u, err := url.Parse(q.Target)
 		if q.Report != SEOLinks || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return q, Errf(ErrInvalid, "a page's links are read with the links report and a page URL, like https://example.com/guide")
+		}
+	}
+	if q.From != "" {
+		q.From = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(q.From)), "www.")
+		if q.Report != SEOLinks || strings.ContainsAny(q.From, "/:?# ") || !strings.Contains(q.From, ".") {
+			return q, Errf(ErrInvalid, "from is a linking domain, like example.com, for the links report")
 		}
 	}
 	if q.Since != "" {

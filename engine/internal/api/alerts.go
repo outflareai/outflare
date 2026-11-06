@@ -22,13 +22,14 @@ func (s *Server) routesAlerts(mux *http.ServeMux) {
 	// An alert belongs to the brand of what raised it: listed under the
 	// brand, and under the workspace until the contract step
 	// (brand_activation.go). A brand's settings override the workspace's
-	// defaults; mutes and chat channels are the team's.
+	// defaults; mutes are each brand's, and chat channels the team's.
 	for _, b := range s.activationBases("alerts", s.inBrand) {
 		mux.HandleFunc("GET "+b.path, b.on(read, s.listAlerts))
 		mux.HandleFunc("GET "+b.path+"/settings", b.on(read, s.getAlertSettings))
 	}
 	mux.HandleFunc("PUT /v1/brands/{brand}/alerts/settings", s.onBrand(manage, s.setAlertSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/alerts/settings", s.inWorkspace(manage, s.setAlertSettings))
+	mux.HandleFunc("PUT /v1/brands/{brand}/alerts/mutes", s.onBrand(read, s.setAlertMute))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/alerts/mutes", s.inBrand(read, s.setAlertMute))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/alerts/channels", s.inWorkspace(manage, s.listAlertChannels))
 }
@@ -144,20 +145,19 @@ func scanAlertSetting(row pgx.Row) (alertSetting, error) {
 func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	// ?brand= keeps the workspace's settings and that brand's own; none
-	// keeps only the workspace's.
-	sel, ok := s.brandFilter(w, r)
+	// The settings are one brand's: the route's, else ?brand=, else the
+	// workspace's first. Brands share none.
+	brand, ok := s.settingsBrand(w, r)
 	if !ok {
 		return
 	}
 	var picked *string
-	if sel.id != "" && sel.id != "none" {
-		picked = &sel.id
+	if brand != "" {
+		picked = &brand
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+alertSettingCols+` FROM alert_settings
-		WHERE workspace_id = $1 AND ($2::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY ($2))
-			AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3) AND (NOT $4 OR brand_id IS NULL)
-		ORDER BY brand_id NULLS FIRST, kind`, a.WorkspaceID, a.Brands, picked, sel.id == "none")
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid
+		ORDER BY kind`, a.WorkspaceID, picked)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -167,10 +167,12 @@ func (s *Server) getAlertSettings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// Mutes are the caller's for one brand: the one picked, else the
+	// workspace's first.
 	muted := []string{}
 	if u := alertUser(a); u != "" {
-		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(array_agg(kind ORDER BY kind), '{}') FROM alert_mutes WHERE workspace_id = $1 AND user_id = $2`,
-			a.WorkspaceID, u).Scan(&muted); err != nil {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(array_agg(kind ORDER BY kind), '{}') FROM brand_alert_mutes
+			WHERE workspace_id = $1 AND brand_id::text = $2 AND user_id = $3`, a.WorkspaceID, brand, u).Scan(&muted); err != nil {
 			s.internal(w, r, err)
 			return
 		}
@@ -206,7 +208,8 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is not a kind of alert; GET .../alerts/settings lists them")
 		return
 	}
-	// Under a brand the setting is that brand's own.
+	// The setting is one brand's own: the route's, else brand_id, else the
+	// workspace's first. Brands share none.
 	if a.Brand != "" {
 		if req.BrandID != nil && *req.BrandID != a.Brand {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id can only be this route's brand")
@@ -214,8 +217,17 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		req.BrandID = &a.Brand
 	}
+	if req.BrandID == nil {
+		b, ok := s.settingsBrand(w, r)
+		if !ok {
+			return
+		}
+		if b != "" {
+			req.BrandID = &b
+		}
+	}
 	if req.Email.Value != nil && !slices.Contains([]string{alerts.ToOwner, alerts.ToAdmins, alerts.ToOff}, *req.Email.Value) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "email must be owner, admins or off, or null to follow the workspace")
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "email must be owner, admins or off, or null for the default (the owner)")
 		return
 	}
 	if req.SlackIntegration.Set != req.SlackChannel.Set || (req.SlackIntegration.Value == nil) != (req.SlackChannel.Value == nil) {
@@ -281,7 +293,7 @@ func (s *Server) setAlertSettings(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		data := map[string]any{"brand_id": req.BrandID, "kind": req.Kind, "email": v.Email, "slack": v.SlackIntegration != nil}
-		// Nothing chosen any more: the row goes, so it follows the next one up.
+		// Nothing chosen any more: the row goes, so the default applies.
 		if v.Email == nil && v.SlackIntegration == nil {
 			if _, err := tx.Exec(ctx, `DELETE FROM alert_settings WHERE `+match, a.WorkspaceID, req.BrandID, req.Kind); err != nil {
 				return err
@@ -379,17 +391,27 @@ func (s *Server) setAlertMute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "alerts are muted for a person; this token has no person behind it")
 		return
 	}
+	// A mute is for one brand: the route's, else ?brand=, else the
+	// workspace's first.
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	if brand == "" {
+		writeError(w, r, http.StatusConflict, "conflict", "the workspace has no brand yet: add one first")
+		return
+	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		q, action := `DELETE FROM alert_mutes WHERE workspace_id = $1 AND user_id = $2 AND kind = $3`, "alert.unmuted"
+		q, action := `DELETE FROM brand_alert_mutes WHERE workspace_id = $1 AND user_id = $2 AND kind = $3 AND brand_id = $4`, "alert.unmuted"
 		if req.Muted {
-			q, action = `INSERT INTO alert_mutes (workspace_id, user_id, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, "alert.muted"
+			q, action = `INSERT INTO brand_alert_mutes (workspace_id, user_id, kind, brand_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, "alert.muted"
 		}
-		tag, err := tx.Exec(ctx, q, a.WorkspaceID, user, req.Kind)
+		tag, err := tx.Exec(ctx, q, a.WorkspaceID, user, req.Kind, brand)
 		if err != nil || tag.RowsAffected() == 0 {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "user", user, map[string]any{"kind": req.Kind})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "user", user, map[string]any{"kind": req.Kind, "brand_id": brand})
 	})
 	if err != nil {
 		s.internal(w, r, err)

@@ -208,11 +208,6 @@ func (s *Server) getAgentRun(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunError(w, r, err) {
 		return
 	}
-	company, err := s.loadContext(ctx, a.WorkspaceID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
 	pinned := true
 	memories, _, err := s.loadMemories(ctx, a, memoryFilter{pinned: &pinned, limit: 50})
 	if err != nil {
@@ -233,17 +228,30 @@ func (s *Server) getAgentRun(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// The brand's context: each brand's is its own. One with no brand
+	// reads the workspace's first brand's.
 	var brand *brandContextView
-	md := contextMarkdown(company, memories)
-	if v.BrandID != nil {
-		b, err := s.loadBrandContext(ctx, a.WorkspaceID, *v.BrandID)
+	contextBrand := brandKey
+	if contextBrand == "" {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, a.WorkspaceID).Scan(&contextBrand); err != nil {
+			s.internal(w, r, err)
+			return
+		}
+	}
+	company := contextView{Version: 1, Missing: append([]string{}, onboardingFields...), AskForMissing: true}
+	var read *brandContextView
+	if contextBrand != "" {
+		b, err := s.loadBrandContext(ctx, a.WorkspaceID, contextBrand)
 		if err != nil {
 			s.internal(w, r, err)
 			return
 		}
-		brand = &b
-		md += brandMarkdown(brand)
+		read, company = &b, companyView(b)
+		if v.BrandID != nil {
+			brand = read
+		}
 	}
+	md := contextMarkdown(read, memories)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"run":     v,
 		"brand":   brand,

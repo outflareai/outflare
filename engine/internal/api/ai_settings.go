@@ -89,12 +89,13 @@ var aiTasks = []aiTask{
 	{taskStories, "PR stories", "Suggesting story ideas from your coverage and the news, and drafting press releases from a story's sourced facts and approved quotes, for a person to check and approve."},
 	{taskLinkPitches, "Link pitches", "Writing openers for link pitches, for a person to approve, and reading the replies: agreed, declined or asking for payment."},
 	{taskCoverageReview, "Coverage assistance", "Review cited brand facts, classify placements, draft outreach for review and extract quoted commercial terms."},
+	{taskBrandKnowledge, "Brand knowledge", "Reading a brand's own website and writing what it offers: products, services, features, integrations, capabilities, who it serves and use cases, for a person to edit."},
 }
 
 // taskTier says which of the provider's cheaper models a task defaults to.
 func taskTier(task string, p llm.Provider) string {
 	switch task {
-	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories:
+	case taskCoverageReview, taskCheckIn, taskAIVisibility, taskSocialReplies, taskSocialPosts, taskReviewReplies, taskFixTickets, taskABTests, taskLinkPitches, taskKnowledge, taskSupport, taskJourneys, taskStories, taskBrandKnowledge:
 		return p.LightModel
 	case taskReplyLabelling, taskDomainResearch, taskEmailVerification, taskLinkPages:
 		if p.CheapModel != "" {

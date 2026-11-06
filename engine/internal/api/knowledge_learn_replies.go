@@ -64,7 +64,7 @@ func (s *Server) listReplyImports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), replyImportSelect+` WHERE workspace_id = $1`+sharedBrandSQL(brand, "brand_id", &args)+
+	rows, err := s.pool.Query(r.Context(), replyImportSelect+` WHERE workspace_id = $1`+brand.sql("brand_id", &args)+
 		` ORDER BY created_at DESC LIMIT 20`, args...)
 	if err != nil {
 		s.internal(w, r, err)

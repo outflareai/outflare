@@ -67,7 +67,7 @@ func (s *Server) listHandoffTopics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), handoffTopicSelect+` WHERE t.workspace_id = $1`+sharedBrandSQL(brand, "t.brand_id", &args)+
+	rows, err := s.pool.Query(r.Context(), handoffTopicSelect+` WHERE t.workspace_id = $1`+brand.sql("t.brand_id", &args)+
 		` ORDER BY t.brand_id IS NOT NULL, lower(t.name)`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -163,9 +163,21 @@ func (s *Server) createHandoffTopic(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brand = &id
-	} else if !a.writes(nil) {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "say which of your brands the topic is for (brand)")
-		return
+	} else {
+		// Brands share no topics: with no brand named it is the route's,
+		// else the workspace's first.
+		id, err := s.rowBrand(ctx, a)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if id != "" {
+			brand = &id
+		}
+		if !a.writes(brand) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "say which of your brands the topic is for (brand)")
+			return
+		}
 	}
 	desc := ""
 	if req.Description != nil {
@@ -293,11 +305,10 @@ type handoffTopic struct {
 	Always                bool
 }
 
-// handoffTopics are the topics for a conversation's brand: its own and the
-// workspace's.
+// handoffTopics are the topics of a conversation's brand; brands share none.
 func handoffTopics(ctx context.Context, q partnerQuerier, ws string, brand *string) ([]handoffTopic, error) {
 	rows, err := q.Query(ctx, `SELECT id::text, name, description, assignee_id::text, team_id::text, always_handoff FROM support_handoff_topics
-		WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid) ORDER BY brand_id IS NULL, lower(name) LIMIT 60`, ws, brand)
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid ORDER BY lower(name) LIMIT 60`, ws, brand)
 	if err != nil {
 		return nil, err
 	}

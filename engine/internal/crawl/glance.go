@@ -13,6 +13,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/rdap"
 	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/sociallinks"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -214,6 +215,11 @@ func (s *Service) glance(ctx context.Context, job jobs.Job) error {
 		}
 		return uerr
 	}
+	// How old its domain (and the brand's own) is, from the public
+	// registration record; it doesn't touch their site.
+	if !test {
+		s.readRegistered(ctx, ws, p.CompetitorID, siteID, host)
+	}
 	if out, err := OptedOut(ctx, s.Pool, host); err != nil {
 		return err
 	} else if out {
@@ -407,4 +413,49 @@ func suggestCompetitorLinks(ctx context.Context, tx pgx.Tx, ws, competitorID str
 	}
 	_, err := tx.Exec(ctx, `UPDATE seo_competitors SET links = $3 WHERE id = $1 AND workspace_id = $2`, competitorID, ws, list)
 	return added, err
+}
+
+// registeredEvery is how often a domain's registration date is read again:
+// it only changes when a domain lapses and is registered anew.
+const registeredEvery = 180 * 24 * time.Hour
+
+// readRegistered reads when a competitor's domain, and its SEO site's,
+// was registered, if not read in the last half year. A registry that
+// doesn't answer is tried again at the next look.
+func (s *Service) readRegistered(ctx context.Context, ws, competitorID, siteID, host string) {
+	if s.RDAP == nil {
+		return
+	}
+	targets := []struct{ table, id, host string }{{"seo_competitors", competitorID, host}}
+	var siteHost string
+	var due bool
+	if err := s.Pool.QueryRow(ctx, `SELECT host, registered_checked_at IS NULL OR registered_checked_at < now() - $3::interval
+		FROM seo_sites WHERE id = $1 AND workspace_id = $2`, siteID, ws, registeredEvery.String()).Scan(&siteHost, &due); err == nil && due {
+		targets = append(targets, struct{ table, id, host string }{"seo_sites", siteID, siteHost})
+	}
+	for i, t := range targets {
+		if i == 0 {
+			var due bool
+			if err := s.Pool.QueryRow(ctx, `SELECT registered_checked_at IS NULL OR registered_checked_at < now() - $3::interval
+				FROM seo_competitors WHERE id = $1 AND workspace_id = $2`, t.id, ws, registeredEvery.String()).Scan(&due); err != nil || !due {
+				continue
+			}
+		}
+		at, err := s.RDAP.Registered(ctx, t.host)
+		var on *time.Time
+		switch {
+		case err == nil:
+			on = &at
+		case errors.Is(err, rdap.ErrNotFound):
+		default:
+			s.Log.Debug("rdap read failed", "table", t.table, "id", t.id, "err", err)
+			continue
+		}
+		// Both tables are written with the same statement shape; the
+		// table name comes from the list above, never from input.
+		if _, err := s.Pool.Exec(ctx, `UPDATE `+t.table+` SET registered_on = $3, registered_checked_at = now()
+			WHERE id = $1 AND workspace_id = $2`, t.id, ws, on); err != nil {
+			s.Log.Warn("saving registration date", "table", t.table, "err", err)
+		}
+	}
 }

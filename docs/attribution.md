@@ -113,16 +113,16 @@ archived.
 
 ## Reports
 
-- `GET /v1/workspaces/{ws}/attribution/channels`: for every channel, visits,
+- `GET /v1/brands/{brand}/attribution/channels`: for every channel, visits,
   credited conversions (fractional under the shared models), revenue per
   currency, and the spend recorded against it in the cost ledger. Spend with
   no channel is `unallocated_cost`.
-- `GET /v1/workspaces/{ws}/attribution/campaigns?channel=`: the same per
+- `GET /v1/brands/{brand}/attribution/campaigns?channel=`: the same per
   source and campaign. `tracking_campaign=` keeps one campaign link
   campaign, and `split=content` splits each campaign by the visit's
   `utm_content` (credit by the credited visit's), such as the sequence step
   a link went out in.
-- `GET /v1/workspaces/{ws}/attribution/ads?level=`: the same per paid ad
+- `GET /v1/brands/{brand}/attribution/ads?level=`: the same per paid ad
   campaign, ad set or ad, by the network's ids the tracking template
   recorded, beside the platform's spend and conversion count
   ([paid-media.md](paid-media.md#what-each-campaign-brought)).
@@ -147,7 +147,7 @@ archived.
   company. A deal none of them had a credited conversion for is counted
   under `unattributed`. `brand` filters by the deal's brand and by its
   people's conversions' brand.
-- `GET /v1/workspaces/{ws}/attribution/conversions`: credited conversions,
+- `GET /v1/brands/{brand}/attribution/conversions`: credited conversions,
   newest first, with the visits that got the credit.
 - `GET` and `PATCH /v1/brands/{brand}/attribution/settings`: the brand's
   default model (built in or one of the brand's own), `lookback_days` and

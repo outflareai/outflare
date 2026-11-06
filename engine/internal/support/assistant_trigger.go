@@ -22,7 +22,7 @@ func AssistantMode(ctx context.Context, q jobs.Querier, ws string, brand *string
 	}
 	var mode string
 	err := q.QueryRow(ctx, `SELECT `+col+` FROM support_assistant_settings
-		WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid) ORDER BY brand_id IS NULL LIMIT 1`, ws, brand).Scan(&mode)
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand).Scan(&mode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "off", nil
 	}

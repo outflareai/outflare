@@ -11,7 +11,7 @@
 // load a page at a time from the server, with bulk actions that take
 // everything matching a filter.
 
-import { useBrand } from "@/lib/brand";
+import { everyBrand, useBrand } from "@/lib/brand";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { CustomerProfile, Sequence } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -475,13 +475,12 @@ function Notice({ canManage, onAccept }: { canManage: boolean; onAccept: () => v
 function CampaignFields({ ws, campaign, onChange }: { ws: string; campaign: Campaign; onChange: (c: Campaign) => void }) {
   const [sequences, setSequences] = useState<Sequence[]>([]);
   // A sequence is one brand's: the picked brand's, or every brand's to choose from.
-  const brandId = useBrand(ws).brand?.id;
+  const { brand, active } = useBrand(ws);
+  const brandId = brand?.id;
   useEffect(() => {
-    const req = brandId
-      ? api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: brandId } } })
-      : api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: "all" } } });
-    req.then(({ data }) => setSequences((data?.data ?? []).filter((q) => q.status !== "archived")));
-  }, [ws, brandId]);
+    const list = (brand: string) => api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand } } });
+    (brandId ? list(brandId).then(({ data }) => data?.data ?? []) : everyBrand(list)).then((rows) => setSequences(rows.filter((q) => q.status !== "archived")));
+  }, [ws, brandId, active.length]);
   return (
     <div className="space-y-3">
       <label className="block space-y-1 text-[13px]">

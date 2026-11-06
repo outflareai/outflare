@@ -103,9 +103,6 @@ func TestBrandActivation(t *testing.T) {
 	if l := ids(owner, base+"/rules?brand=alpha"); len(l) != 1 {
 		t.Fatalf("workspace rules of alpha: %v", l)
 	}
-	if l := ids(owner, base+"/rules?brand=all"); len(l) != 2 {
-		t.Fatalf("workspace rules of every brand: %v", l)
-	}
 	// A rule made on the workspace route goes to the first brand.
 	if r := owner.must(201, "POST", base+"/rules", map[string]any{"name": "First", "trigger": map[string]any{"kind": "event", "event": "x"},
 		"emit_event": "y.z"}); r["brand_id"] != first {

@@ -287,9 +287,10 @@ function WorkspaceBody({
     setSelected(new Set());
     const timer = setTimeout(async () => {
       try {
-        const { data, error } = await api.GET("/v1/workspaces/{ws}/records", {
+        if (!brandId) return;
+        const { data, error } = await api.GET("/v1/brands/{brand}/records", {
           params: {
-            path: { ws },
+            path: { brand: brandId },
             query: {
               type,
               limit: pageSize,
@@ -300,7 +301,6 @@ function WorkspaceBody({
               attribute: Object.entries(config.filters)
                 .filter(([, v]) => v)
                 .map(([k, v]) => `${k}:${v}`),
-              ...query,
             },
           },
           signal: controller.signal,
@@ -376,14 +376,14 @@ function WorkspaceBody({
         ),
       ),
     ].slice(0, 200);
-    if (!ids.length) {
+    if (!ids.length || !brandId) {
       setReferenceNames({});
       return;
     }
     const controller = new AbortController();
     api
-      .GET("/v1/workspaces/{ws}/records", {
-        params: { path: { ws }, query: { ids, limit: 200, ...query } },
+      .GET("/v1/brands/{brand}/records", {
+        params: { path: { brand: brandId }, query: { ids, limit: 200 } },
         signal: controller.signal,
       })
       .then(({ data }) => {
@@ -496,9 +496,9 @@ function WorkspaceBody({
     for (const row of chosen) {
       try {
         const { data, error } = await api.PATCH(
-          "/v1/workspaces/{ws}/records/{record}",
+          "/v1/brands/{brand}/records/{record}",
           {
-            params: { path: { ws, record: row.id } },
+            params: { path: { brand: row.brand_id ?? brandId, record: row.id } },
             body: {
               version: row.version,
               ...(archive

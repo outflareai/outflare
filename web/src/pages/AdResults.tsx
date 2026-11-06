@@ -20,7 +20,9 @@ export function AdResults({ ws, from, to, brand, go }: { ws: string; from: strin
   const [rows, setRows] = useState<AttributionAdRow[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path: { ws }, query: { from, to, ...(brand ? { brand } : {}) } } }).then(({ data, error }) => {
+    // Credit is a brand's: nothing to show until one is picked.
+    if (!brand) return setRows([]);
+    api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand }, query: { from, to } } }).then(({ data, error }) => {
       setError(error ? errorMessage(error) : "");
       setRows(data?.data ?? []);
     });

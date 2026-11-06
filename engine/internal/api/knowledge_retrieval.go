@@ -243,8 +243,8 @@ func knowledgeChunkFilter(a *access, kq knowledgeQuery, args *[]any) string {
 	n := len(*args)
 	return fmt.Sprintf(` AND i.deleted_at IS NULL AND i.status = 'published'
 		AND (NOT $%d OR i.visibility IN ('public', 'customers_ai'))
-		AND ($%d::uuid IS NULL OR i.brand_id IS NULL OR i.brand_id = $%d::uuid)
-		AND ($%d::uuid[] IS NULL OR i.brand_id IS NULL OR i.brand_id = ANY($%d::uuid[]))`, n-2, n-1, n-1, n, n)
+		AND ($%d::uuid IS NULL OR i.brand_id = $%d::uuid)
+		AND ($%d::uuid[] IS NULL OR i.brand_id = ANY($%d::uuid[]))`, n-2, n-1, n-1, n, n)
 }
 
 const knowledgePassageColumns = `c.id::text, i.id::text, i.kind, i.title, c.heading, c.text, i.visibility, i.brand_id::text, i.collection_id::text`
@@ -685,8 +685,8 @@ func (s *Server) knowledgeSummary(ctx context.Context, a *access, brand string) 
 		SELECT count(*) FILTER (WHERE kind = 'article'), count(*) FILTER (WHERE kind = 'snippet'), max(updated_at)
 		FROM knowledge_items
 		WHERE workspace_id = $1 AND deleted_at IS NULL AND status = 'published'
-		  AND ($2 = '' OR brand_id IS NULL OR brand_id::text = $2)
-		  AND ($3::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY($3))`, a.WorkspaceID, brand, a.Brands).Scan(&articles, &snippets, &updated)
+		  AND ($2 = '' OR brand_id::text = $2)
+		  AND ($3::uuid[] IS NULL OR brand_id = ANY($3))`, a.WorkspaceID, brand, a.Brands).Scan(&articles, &snippets, &updated)
 	if err != nil {
 		return nil, err
 	}

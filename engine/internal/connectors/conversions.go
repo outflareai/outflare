@@ -19,6 +19,9 @@ type PageConversionQuery struct {
 	To     string
 	Events []string
 	Limit  int
+	// TestAccounts leaves out the project's internal and test users, as on
+	// AnalyticsQuery.
+	TestAccounts bool
 }
 
 // PageConversionRow is one landing page on one day. A visit counts on the

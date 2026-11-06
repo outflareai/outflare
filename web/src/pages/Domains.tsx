@@ -741,7 +741,7 @@ function TrackingStepMark({ state, n }: { state: TrackingStep["state"]; n: numbe
 function TrackingDNS({ ws, brand, t, canManage, reload }: { ws: string; brand: string; t: TrackingDomain; canManage: boolean; reload: () => void }) {
   const records = [{ type: "CNAME", name: t.domain, value: t.target }];
   return (
-    <DNSWays ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id }} connections={t.dns_connections} canManage={canManage} reload={reload}
+    <DNSWays ws={ws} page="domains" item={t.id} approval={{ kind: "tracking_domain", id: t.id, brand: t.brand_id ?? undefined }} connections={t.dns_connections} canManage={canManage} reload={reload}
       records={records} run={t.dns_install} {...dnsHelp(t.domain, records, "so links in our emails use our own domain")}
       used={(way, how) => track("ui.dns_one_click_used", { where: "tracking_domain", way, how })}
       manual={<>

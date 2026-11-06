@@ -520,8 +520,9 @@ function Tracking({ ws, template: t, canManage, go, onChange }: { ws: string; te
   const [busy, setBusy] = useState("");
   const [linkDomain, setLinkDomain] = useState<string | null | undefined>();
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } } }).then(({ data }) => data && setLinkDomain(data.data.find((d) => d.status === "verified")?.domain ?? null));
-  }, [ws]);
+    if (!brandId) return;
+    api.GET("/v1/brands/{brand}/tracking-domains", { params: { path: { brand: brandId } } }).then(({ data }) => data && setLinkDomain(data.data.find((d) => d.status === "verified")?.domain ?? null));
+  }, [ws, brandId]);
   async function toggle(key: "track_opens" | "track_clicks", on: boolean) {
     setBusy(key);
     const { data, error } = await api.PATCH("/v1/brands/{brand}/email-templates/{id}", { params: { path: { brand: brandId, id: t.id } }, body: { [key]: on } });

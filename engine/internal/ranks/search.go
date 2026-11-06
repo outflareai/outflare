@@ -117,10 +117,46 @@ func search(ctx context.Context, pool *pgxpool.Pool, store *connectors.Store, o 
 	if err != nil && connectors.KindOf(err) == connectors.ErrAuth {
 		_ = store.Checked(ctx, pool, o.WorkspaceID, o.ID, nil, err)
 	}
+	if err == nil {
+		res.Items = resolveRedirects(ctx, o.Client, res.Items)
+	}
 	if res.Items == nil {
 		res.Items = []connectors.SERPItem{}
 	}
 	return res, err
+}
+
+// resolveRedirects swaps Google's own redirect links (google.com/goto,
+// /url, /aclk) in results for the pages they lead to, whichever
+// connection read them, and drops the ones that can't be followed to a
+// page, so no result is ever google.com.
+func resolveRedirects(ctx context.Context, cl *connectors.Client, items []connectors.SERPItem) []connectors.SERPItem {
+	urls := make([]string, len(items))
+	found := false
+	for i, it := range items {
+		urls[i] = it.URL
+		found = found || connectors.IsGoogleRedirect(it.URL)
+	}
+	if !found {
+		return items
+	}
+	pages := connectors.ResolveGoogleRedirects(ctx, cl, urls)
+	out := items[:0:0]
+	for i, it := range items {
+		if !connectors.IsGoogleRedirect(it.URL) {
+			out = append(out, it)
+			continue
+		}
+		if pages[i] == "" || connectors.IsGoogleRedirect(pages[i]) {
+			continue
+		}
+		it.URL = pages[i]
+		if d := connectors.ResultDomain(pages[i]); d != "" {
+			it.Domain = d
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // SearchErrorCode is the outcome of a search for metrics and events:

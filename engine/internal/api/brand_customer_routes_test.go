@@ -95,9 +95,6 @@ func TestBrandCustomerRoutes(t *testing.T) {
 	if n := names(owner, base+"/records?brand=alpha&type=person"); strings.Join(n, ",") != "Ana Lima,Same" {
 		t.Fatalf("workspace records of alpha: %v", n)
 	}
-	if n := names(owner, base+"/records?brand=all&type=person"); len(n) != 4 {
-		t.Fatalf("workspace records of every brand: %v", n)
-	}
 	// A brand-limited caller's workspace list is its own brand's.
 	if n := names(op, base+"/records"); strings.Join(n, ",") != "Ben" {
 		t.Fatalf("operator's workspace records: %v", n)
@@ -105,9 +102,6 @@ func TestBrandCustomerRoutes(t *testing.T) {
 	bravoApp.must(404, "GET", a+"/records", nil)
 	op.must(404, "GET", a+"/records", nil)
 	// The path's brand can't be widened.
-	if n := names(owner, a+"/records?brand=all&type=person"); len(n) != 2 {
-		t.Fatalf("?brand= on a brand route: %v", n)
-	}
 
 	// Duplicates and merges, in the brand.
 	dup := owner.must(201, "POST", a+"/records", map[string]any{"type": "person", "name": "Ana again",
@@ -323,9 +317,6 @@ func TestBrandQuery(t *testing.T) {
 	}
 	if r := rows(owner, base+"/query?brand=bravo", "select name from people where name <> ''"); len(r) != 1 || r[0][0] != "Ben" {
 		t.Fatalf("workspace query of bravo: %v", r)
-	}
-	if r := rows(owner, base+"/query?brand=all", "select name from people where name <> ''"); len(r) != 3 {
-		t.Fatalf("workspace query of every brand: %v", r)
 	}
 
 	ran := named(got(), "query.ran")

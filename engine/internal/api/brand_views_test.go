@@ -86,8 +86,8 @@ func TestBrandViewsShowOnlyTheBrand(t *testing.T) {
 		t.Helper()
 		return owner.must(200, "GET", base+"/leads"+q, nil)["total"].(float64)
 	}
-	if leads("?brand=all") != 2 || leads("") != 1 || leads("?brand=geonode") != 1 || leads("?brand=repocket") != 0 || leads("?brand=none") != 0 {
-		t.Fatalf("leads: %v %v %v %v %v", leads("?brand=all"), leads(""), leads("?brand=geonode"), leads("?brand=repocket"), leads("?brand=none"))
+	if leads("?brand=geonode") != 1 || leads("?brand=repocket") != 0 {
+		t.Fatalf("leads: %v %v", leads("?brand=geonode"), leads("?brand=repocket"))
 	}
 	owner.must(200, "GET", base+"/allocation/attention?brand=geonode", nil)
 	owner.must(200, "GET", base+"/infra-plans?brand=geonode", nil)

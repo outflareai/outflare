@@ -298,7 +298,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       if (n?.choice !== "ok" || !n.value.trim()) return;
       note = n.value.trim();
     }
-    const { error } = await api.POST(`/v1/workspaces/{ws}/partners/{id}/${kind}`, { params: { path: { ws, id: p.id } }, body: { amount_cents: cents, note } });
+    const { error } = await api.POST(`/v1/brands/{brand}/partners/{id}/${kind}`, { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { amount_cents: cents, note } });
     if (error) return toast(errorMessage(error), "error");
     toast(fee ? "Fee logged." : "Balance corrected.");
     load();
@@ -1350,8 +1350,9 @@ function PortalSection({ ws, program: p, canManage }: { ws: string; program: Par
   const [ga, setGA] = useState(p.portal.ga_measurement_id ?? "");
   const [siteKeys, setSiteKeys] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws } } }).then(({ data }) => setSiteKeys((data?.data ?? []).map((k) => ({ id: k.id, name: k.name }))));
-  }, [ws]);
+    // The program's brand's site keys.
+    if (p.brand_id) api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: p.brand_id } } }).then(({ data }) => setSiteKeys((data?.data ?? []).map((k) => ({ id: k.id, name: k.name }))));
+  }, [ws, p.brand_id]);
   const [url, setUrl] = useState(p.portal_url);
   const [assets, setAssets] = useState<PartnerAsset[]>([]);
   const [busy, setBusy] = useState(false);

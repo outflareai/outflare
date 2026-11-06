@@ -88,6 +88,12 @@ func logRequest(in *conversionInput) map[string]any {
 // never changes it: a failure is logged and recorded as an event.
 func (s *Server) saveConversionLog(r *http.Request, ws string, l *conversionLog) {
 	ctx := context.WithoutCancel(r.Context())
+	// A call that names no program is logged under the brand whose route
+	// it came in on, so that brand's log shows it.
+	var routeBrand *string
+	if a := accessFrom(r.Context()); a != nil && a.Brand != "" {
+		routeBrand = &a.Brand
+	}
 	outcome, reason := "rejected", ""
 	var program, record, conversion *string
 	if l.program != "" {
@@ -132,9 +138,9 @@ func (s *Server) saveConversionLog(r *http.Request, ws string, l *conversionLog)
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO partner_conversion_log (workspace_id, brand_id, program_id, record_id, conversion_id, source, type,
 			request, email_hash, status, outcome, reason, response, duration_ms, request_id)
-		VALUES ($1, (SELECT brand_id FROM partner_programs WHERE workspace_id = $1 AND id = $2), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		VALUES ($1, COALESCE((SELECT brand_id FROM partner_programs WHERE workspace_id = $1 AND id = $2), $15::uuid), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		ws, program, record, conversion, l.source, typ, logRequest(l.in), emailHash(email), l.status, outcome, cutUTF8(reason, 60), resp,
-		time.Since(l.start).Milliseconds(), cutUTF8(RequestID(ctx), 100))
+		time.Since(l.start).Milliseconds(), cutUTF8(RequestID(ctx), 100), routeBrand)
 	if err != nil {
 		track.Fail(ctx, s.log, track.Event{Name: "partner_conversion.log_failed", WorkspaceID: ws, Surface: "system", ActorType: "system"}, "internal", err)
 	}

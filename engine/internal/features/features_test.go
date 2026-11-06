@@ -40,7 +40,90 @@ func newWS(t *testing.T, pool *pgxpool.Pool) string {
 		Scan(&ws); err != nil {
 		t.Fatal(err)
 	}
+	// Acme is made first, so it is the workspace's first brand.
+	if _, err := pool.Exec(context.Background(), `INSERT INTO brands (workspace_id, name, handle, created_at) VALUES ($1, 'Acme', 'acme', now() - interval '1 minute'), ($1, 'Northpeak', 'northpeak', now())`, ws); err != nil {
+		t.Fatal(err)
+	}
 	return ws
+}
+
+func brandOf(t *testing.T, pool *pgxpool.Pool, ws, handle string) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(context.Background(), `SELECT id::text FROM brands WHERE workspace_id = $1 AND handle = $2`, ws, handle).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// Brands are fully separate: each has its own switches, a workspace switch
+// sets every brand's, and a brand added later starts with the first's.
+func TestSwitchPerBrand(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	ws := newWS(t, pool)
+	acme, north := brandOf(t, pool, ws, "acme"), brandOf(t, pool, ws, "northpeak")
+	switchBrand := func(brand string, on bool) bool {
+		t.Helper()
+		var changed bool
+		if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			var err error
+			changed, err = SetBrand(ctx, tx, ws, brand, SupportAutoBlocked, on, "")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	if !switchBrand(north, true) || switchBrand(north, true) {
+		t.Fatal("switching one brand on")
+	}
+	if on, _ := BrandEnabled(ctx, pool, north, SupportAutoBlocked); !on {
+		t.Error("should be on for Northpeak")
+	}
+	if on, _ := BrandEnabled(ctx, pool, acme, SupportAutoBlocked); on {
+		t.Error("on for Acme too")
+	}
+	if l, _ := BrandList(ctx, pool, acme); len(l) != 0 {
+		t.Errorf("Acme's list = %v", l)
+	}
+	if on, _ := Enabled(ctx, pool, ws, SupportAutoBlocked); !on {
+		t.Error("the workspace has it for a brand")
+	}
+	var audits int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id = $1 AND brand_id::text = $2 AND action = 'brand.feature_enabled'`, ws, north).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("brand audits = %d %v", audits, err)
+	}
+	// Someone in another workspace can't switch this one's brand.
+	other := newWS(t, pool)
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		changed, err := SetBrand(ctx, tx, other, acme, SupportAutoBlocked, true, "")
+		if changed {
+			t.Error("switched another workspace's brand")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	set(t, pool, ws, AIAccounts, true)
+	for _, b := range []string{acme, north} {
+		if on, _ := BrandEnabled(ctx, pool, b, AIAccounts); !on {
+			t.Errorf("workspace switch didn't reach brand %s", b)
+		}
+	}
+	var later string
+	if err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Later', 'later') RETURNING id::text`, ws).Scan(&later); err != nil {
+			return err
+		}
+		return CopyToBrand(ctx, tx, ws, later)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := BrandList(ctx, pool, later); !slices.Equal(l, []string{AIAccounts}) {
+		t.Errorf("a later brand starts with %v, want the first brand's", l)
+	}
 }
 
 func set(t *testing.T, pool *pgxpool.Pool, ws, feature string, on bool) bool {

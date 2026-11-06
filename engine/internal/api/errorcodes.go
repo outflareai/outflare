@@ -136,6 +136,7 @@ var errorCodes = []errorCode{
 	{"mission_paused", []int{409}, "The mission is paused, so calls inside it are refused.", false},
 	{"mission_ended", []int{409}, "The mission is finished or stopped.", false},
 	{"mission_state", []int{409}, "The mission is not in a state that allows this.", false},
+	{"route_moved", []int{410}, "This workspace route stopped working when brands became fully separate: brand data is under /v1/brands/{brand}/ now. The message names the route to call instead, with the same request and response.", false},
 	{"mission_retired", []int{410}, "Missions are retired: what they did stays readable, and nothing changes one any more, including a change sent with the Outflare-Mission header. Make changes as your own API token on the action layer, or start the work as an agent run (POST /v1/workspaces/{ws}/playbooks/{id}/agent-runs, or the MCP tool run_playbook).", false},
 	{"automation_state", []int{409}, "The playbook automation is not in a state that allows this: not approved yet, already running, or held by a limit (the message says which).", false},
 	{"context_changed", []int{409}, "The company context changed since you loaded it. Reload it and apply your edit again.", false},
@@ -160,6 +161,7 @@ var errorCodes = []errorCode{
 	{"ai_run_running", []int{409}, "A run of this AI visibility cohort is already going. Stop it or wait for it to finish.", false},
 
 	// AI models.
+	{"website_needed", []int{409}, "The brand needs a website first, so there is something to read.", false},
 	{"ai_model_needed", []int{409}, "The workspace's AI model needs a choice first: a model, or its price. The message says which, under Settings, AI model.", false},
 	{"ai_budget_reached", []int{409}, "AI calls reached the workspace's monthly limit. An admin can raise it under Settings, AI model.", false},
 	{"ai_failed", []int{502}, "The workspace's AI model did not answer, or not usably. Retry; the message says more.", true},

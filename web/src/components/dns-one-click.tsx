@@ -32,7 +32,8 @@ const watchEvery = 10_000;
 type Approval = components["schemas"]["DNSApproval"];
 // What the records belong to, for the one-off approval at the provider.
 // dkim is the DKIM key pasted from the mail host, for a sending domain.
-export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain" | "sending_domain"; id: string; dkim?: string[] };
+// brand is the tracking domain's brand id (else the picked brand's).
+export type DNSApprovalFor = { kind: "seo_site" | "tracking_domain" | "email_domain" | "sending_domain"; id: string; dkim?: string[]; brand?: string };
 
 async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
   const query = { return: ret };
@@ -40,9 +41,8 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
     case "seo_site":
       return api.GET("/v1/workspaces/{ws}/seo-sites/{site}/dns/approval", { params: { path: { ws, site: f.id }, query } });
     case "tracking_domain":
-      // A tracking domain is its brand's: the brand route when one is picked.
-      if (pickedBrandId()) return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand: pickedBrandId(), id: f.id }, query } });
-      return api.GET("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
+      // A tracking domain is its brand's, so it is under the brand's route.
+      return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand: f.brand || pickedBrandId(), id: f.id }, query } });
     case "email_domain":
       return api.GET("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", { params: { path: { ws, id: f.id }, query } });
     case "sending_domain":
@@ -55,8 +55,7 @@ async function reportApproval(ws: string, f: DNSApprovalFor, body: { error?: str
     case "seo_site":
       return api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns/approved", { params: { path: { ws, site: f.id } }, body });
     case "tracking_domain":
-      if (pickedBrandId()) return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand: pickedBrandId(), id: f.id } }, body });
-      return api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });
+      return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand: f.brand || pickedBrandId(), id: f.id } }, body });
     case "email_domain":
       return api.POST("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved", { params: { path: { ws, id: f.id } }, body });
     case "sending_domain":

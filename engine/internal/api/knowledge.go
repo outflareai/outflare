@@ -231,7 +231,7 @@ func (s *Server) createKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 				brand = p.BrandID
 			}
 		}
-		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
+		if brand, err = ownBrand(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		if err := checkKnowledgeParent(ctx, tx, a, "", in.ParentID.Value, brand); err != nil {
@@ -297,6 +297,9 @@ func (s *Server) updateKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 			}
 			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move folders between your own brands")
+			}
+			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, brand); err != nil {
+				return err
 			}
 		}
 		parent := cur.ParentID
@@ -691,7 +694,7 @@ func (s *Server) createKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 		if brand, err = knowledgeCollectionBrand(ctx, tx, a, in.CollectionID.Value, brand, in.BrandID.Set); err != nil {
 			return err
 		}
-		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
+		if brand, err = ownBrand(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		owner := nullIfEmpty(a.ActorID)
@@ -787,6 +790,9 @@ func (s *Server) updateKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 			}
 			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move knowledge between your own brands")
+			}
+			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, brand); err != nil {
+				return err
 			}
 		}
 		collection := cur.CollectionID

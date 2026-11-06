@@ -19,6 +19,9 @@ import (
 
 const ws = "11111111-1111-4111-8111-111111111111"
 
+// brand is the brand brand routes act on, from OUTFLARE_BRAND.
+const brand = "22222222-2222-4222-8222-222222222222"
+
 type seen struct {
 	method, path, query, body string
 	header                    http.Header
@@ -58,6 +61,8 @@ func run(t *testing.T, srv *httptest.Server, dir string, stdin string, args ...s
 				return "oft_test"
 			case "OUTFLARE_WORKSPACE":
 				return ws
+			case "OUTFLARE_BRAND":
+				return brand
 			}
 			return ""
 		},
@@ -108,7 +113,7 @@ func TestFlagsBecomeParametersAndBody(t *testing.T) {
 		t.Fatalf("code %d out %q err %q", code, out, errs)
 	}
 	r := (*got)[0]
-	if r.method != "POST" || r.path != "/v1/workspaces/"+ws+"/leads" || r.header.Get("Authorization") != "Bearer oft_test" {
+	if r.method != "POST" || r.path != "/v1/brands/"+brand+"/leads" || r.header.Get("Authorization") != "Bearer oft_test" {
 		t.Fatalf("request %+v", r)
 	}
 	var body map[string]any
@@ -212,7 +217,7 @@ func TestAllFollowsPages(t *testing.T) {
 
 func TestCurlAndLogin(t *testing.T) {
 	_, out, _ := run(t, &httptest.Server{URL: "https://gtm.example"}, t.TempDir(), "", "list-leads", "--q", "ana", "--curl")
-	if !strings.Contains(out, "curl -X GET 'https://gtm.example/v1/workspaces/"+ws+"/leads?q=ana'") || !strings.Contains(out, "$OUTFLARE_TOKEN") {
+	if !strings.Contains(out, "curl -X GET 'https://gtm.example/v1/brands/"+brand+"/leads?q=ana'") || !strings.Contains(out, "$OUTFLARE_TOKEN") {
 		t.Fatalf("curl %s", out)
 	}
 

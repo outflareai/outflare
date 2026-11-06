@@ -182,6 +182,33 @@ pages that came back, the check counts as incomplete (its `last_error` says
 so) and runs again, rather than recording the site as outside the
 top 100. The pages that came back are still paid.
 
+### Keywords tracked in SE Ranking
+
+Keywords you already track in an SE Ranking project come in by themselves
+when SE Ranking is connected (see [SE Ranking](seo.md)), so Outflare never
+pays to check them again. Once a day, and when someone asks for a check, each
+active site is matched to the SE Ranking project whose website is the site's
+host (with or without www). Each of the project's keywords on each of its
+search engines becomes a tracked keyword marked with the SE Ranking
+connection (`integration_id`), checked daily, with one position a day and the
+page that ranked, from SE Ranking's own checks: the last 90 days the first
+time, then the last 7 days so a late check is still picked up. A position SE
+Ranking did not find, or a place in the maps block, is "not in the top 100".
+The history has no top 10 for these days.
+
+- The search engine's name gives the country and device (Google USA, Google
+  Mobile Germany). An engine whose country Outflare does not know, or a second
+  engine for the same country and device (two cities), is skipped.
+- A keyword someone already tracks with DataForSEO or Geonode, or has paused,
+  keeps its own checks; the import leaves it alone. A site keeps at most 1,000
+  tracked keywords.
+- Reading projects takes no Data API credits. `imports` in the list names the
+  connections that import, and the Rankings tab shows "from SE Ranking" on
+  their keywords.
+- Each import is the product event `rank.imported`, with `site_id`,
+  `integration_id`, `connector`, `project_found`, `keywords`, `added`,
+  `days` and `skipped` (counts, never keywords or URLs).
+
 A check that fails (an outage, a refused key, an incomplete answer, a spent
 budget) is tried again the same day, so the day still gets a position:
 after 15 minutes, then 1 and 2 hours, then every 4 hours until one works.

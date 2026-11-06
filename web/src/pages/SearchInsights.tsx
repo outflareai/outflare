@@ -51,7 +51,7 @@ const descriptions: Record<Report, string> = {
   attribution:
     "Measured GA4 landing-page outcomes and estimated query allocation using visible Search Console clicks.",
   "ai-referrals":
-    "Measure visits and outcomes from known AI assistant referrers in GA4. Missing referrers cannot be attributed.",
+    "Measure visits and outcomes from known AI assistant referrers in GA4, or site-wide visits from PostHog, Plausible or Matomo referrers when GA4 is not synced. Missing referrers cannot be attributed.",
   migrations:
     "Compare settled search traffic around a migration and inspect redirect evidence from stored crawls.",
   vitals:

@@ -49,22 +49,24 @@ func TestQuery(t *testing.T) {
 	other := owner.must(201, "POST", "/v1/workspaces", map[string]string{"name": "Other"})["id"].(string)
 	owner.must(201, "POST", "/v1/workspaces/"+other+"/records", map[string]any{"type": "person", "name": "Elsewhere"})
 
-	out := owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select name, email from people order by name;"})
+	// A query reads one brand's records.
+	out := owner.must(200, "POST", base+"/query?brand=repocket", map[string]any{"sql": "select name, email from people order by name;"})
 	rows := queryRows(t, out)
-	if len(rows) != 3 || rows[0][0] != "Ada" || rows[0][1] != "ada@acme.example" || rows[2][0] != "Shared" {
+	if len(rows) != 1 || rows[0][0] != "Ada" || rows[0][1] != "ada@acme.example" {
 		t.Fatalf("people: %v", out)
 	}
 	if cols := out["columns"].([]any); cols[0].(map[string]any)["name"] != "name" || cols[0].(map[string]any)["type"] != "text" {
 		t.Fatalf("columns: %v", cols)
 	}
-	out = owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select record_type, count(*) from records group by 1 order by 1"})
-	if rows := queryRows(t, out); len(rows) != 2 || rows[0][0] != "account" || rows[1][1] != float64(3) {
+	// Made without a brand, Shared and Acme are the first brand's.
+	out = owner.must(200, "POST", base+"/query", map[string]any{"sql": "select record_type, count(*) from records group by 1 order by 1"})
+	if rows := queryRows(t, out); len(rows) != 2 || rows[0][0] != "account" || rows[1][1] != float64(1) {
 		t.Fatalf("counts: %v", out)
 	}
 
 	// Limits.
-	out = owner.must(200, "POST", base+"/query?brand=all", map[string]any{"sql": "select * from people", "limit": 2})
-	if out["row_count"] != float64(2) || out["truncated"] != true {
+	out = owner.must(200, "POST", base+"/query", map[string]any{"sql": "select * from records", "limit": 1})
+	if out["row_count"] != float64(1) || out["truncated"] != true {
 		t.Fatalf("limit: %v", out)
 	}
 
@@ -157,8 +159,7 @@ func TestQuery(t *testing.T) {
 func TestQueryTablesMatchSchema(t *testing.T) {
 	h := freshServer(t)
 	owner, ws := setupOwner(t, h)
-	// Every brand: a brand's query lists its record types too.
-	listed := owner.must(200, "GET", "/v1/workspaces/"+ws+"/query/tables?brand=all", nil)["data"].([]any)
+	listed := owner.must(200, "GET", "/v1/workspaces/"+ws+"/query/tables", nil)["data"].([]any)
 	pool, err := pgx.Connect(context.Background(), os.Getenv("TEST_DATABASE_URL"))
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +178,14 @@ func TestQueryTablesMatchSchema(t *testing.T) {
 			t.Errorf("%s: listed but not in the query schema", m["name"])
 		}
 	}
+	// A brand's query also lists its own record types (such as deal),
+	// which are views made per query, not in the schema.
+	types, _ := pool.Query(context.Background(), `SELECT key FROM record_types WHERE workspace_id = $1`, ws)
+	own, err := pgx.CollectRows(types, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	names = slices.DeleteFunc(names, func(n string) bool { return slices.Contains(own, n) && !slices.Contains(views, n) })
 	slices.Sort(names)
 	// The database can be newer than this code: the previous version runs on
 	// the next version's schema during a deploy and after a rollback. Compare

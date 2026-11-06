@@ -149,7 +149,7 @@ func TestSearchInsightReportsAndBrandIsolation(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind='search_insights.refresh' AND payload->>'schedule_id'=$1`, scheduleID).Scan(&queued); err != nil || queued != 1 {
 		t.Fatal(queued, err)
 	}
-	digest := owner.must(200, "GET", base+"/digests/preview", nil)
+	digest := owner.must(200, "GET", "/v1/brands/"+brand+"/digests/preview", nil)
 	hasSearch := false
 	for _, section := range digest["sections"].([]any) {
 		if section.(map[string]any)["id"] == "search_insights" {

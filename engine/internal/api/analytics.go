@@ -54,6 +54,20 @@ type analyticsSource struct {
 	Reports []string `json:"reports"`
 }
 
+// filtersTestAccounts reports whether a site's reports leave out the tool's
+// own internal and test users, as set on the site.
+func filtersTestAccounts(o *connectors.Opened, reader connectors.AnalyticsReader, site string) bool {
+	if _, ok := reader.(connectors.TestAccountFilterer); !ok {
+		return false
+	}
+	for _, x := range analyticsync.ParseConfig(o.Integration.Config).Sites {
+		if x.ID == site {
+			return x.FilterTestAccounts
+		}
+	}
+	return false
+}
+
 func siteOf(i connectors.Integration) string {
 	var cfg struct {
 		Site string `json:"site"`
@@ -125,7 +139,7 @@ func (s *Server) openAnalytics(w http.ResponseWriter, r *http.Request) (*connect
 	c, _ := s.integrations.Registry.Get(i.Connector)
 	reader, isReader := c.(connectors.AnalyticsReader)
 	if !isReader {
-		writeError(w, r, http.StatusBadRequest, "not_analytics", i.Name+" is not an analytics connection; GET /v1/workspaces/{ws}/analytics lists them")
+		writeError(w, r, http.StatusBadRequest, "not_analytics", i.Name+" is not an analytics connection; GET /v1/brands/{brand}/analytics lists them")
 		return nil, nil, false
 	}
 	o, err := s.integrations.Open(r.Context(), s.pool, i.WorkspaceID, i.ID)
@@ -235,12 +249,19 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	id := r.PathValue("site")
 	var req struct {
-		Sync             *bool     `json:"sync"`
-		Domain           *string   `json:"domain"`
-		ConversionEvents *[]string `json:"conversion_events"`
+		Sync               *bool     `json:"sync"`
+		Domain             *string   `json:"domain"`
+		ConversionEvents   *[]string `json:"conversion_events"`
+		FilterTestAccounts *bool     `json:"filter_test_accounts"`
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.FilterTestAccounts != nil {
+		if _, ok := reader.(connectors.TestAccountFilterer); !ok {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", o.Name+" keeps no filters for internal and test users; PostHog does")
+			return
+		}
 	}
 	var events []string
 	if req.ConversionEvents != nil {
@@ -315,7 +336,7 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	entry := analyticsync.SiteConfig{ID: id, Domain: plan.Domain, Off: !plan.Sync, ConversionEvents: plan.ConversionEvents}
+	entry := analyticsync.SiteConfig{ID: id, Domain: plan.Domain, Off: !plan.Sync, ConversionEvents: plan.ConversionEvents, FilterTestAccounts: plan.FilterTestAccounts}
 	if len(entry.ConversionEvents) == 0 {
 		entry.ConversionEvents = nil
 	}
@@ -336,6 +357,12 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 		if len(events) == 0 {
 			entry.ConversionEvents = nil
 		}
+	}
+	// Turning the filters on or off reads the stored days again, so the
+	// history and the days to come count the same visitors.
+	refilter := req.FilterTestAccounts != nil && *req.FilterTestAccounts != plan.FilterTestAccounts
+	if req.FilterTestAccounts != nil {
+		entry.FilterTestAccounts = *req.FilterTestAccounts
 	}
 	cfg.Sites = append(kept, entry)
 	err = pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
@@ -361,7 +388,17 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			}
-		} else if req.Domain != nil {
+		} else if refilter {
+			for _, q := range []string{
+				`UPDATE analytics_syncs SET backfilled = false WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+				`UPDATE page_conversion_syncs SET backfilled_at = NULL WHERE workspace_id = $1 AND integration_id = $2 AND site = $3`,
+			} {
+				if _, err := tx.Exec(r.Context(), q, a.WorkspaceID, o.ID, id); err != nil {
+					return err
+				}
+			}
+		}
+		if !entry.Off && req.Domain != nil {
 			host := domain
 			if host == "" {
 				host = analyticsync.HostOf(plan.AnalyticsSite)
@@ -376,13 +413,13 @@ func (s *Server) updateAnalyticsSite(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "analytics.site_updated", "integration", o.ID, map[string]any{"site": id, "sync": !entry.Off, "domain": entry.Domain, "conversion_events": len(entry.ConversionEvents)})
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "analytics.site_updated", "integration", o.ID, map[string]any{"site": id, "sync": !entry.Off, "domain": entry.Domain, "conversion_events": len(entry.ConversionEvents), "filter_test_accounts": entry.FilterTestAccounts})
 	})
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	plan.Sync, plan.Domain = !entry.Off, entry.Domain
+	plan.Sync, plan.Domain, plan.FilterTestAccounts = !entry.Off, entry.Domain, entry.FilterTestAccounts
 	if plan.ConversionEvents = entry.ConversionEvents; plan.ConversionEvents == nil {
 		plan.ConversionEvents = []string{}
 	}
@@ -516,7 +553,8 @@ func (s *Server) analyticsFetch(ctx context.Context, o *connectors.Opened, reade
 		return out, err
 	}
 	q.Site = site
-	key := strings.Join([]string{q.Report, q.Site, q.From, q.To, strconv.Itoa(q.Limit)}, "|")
+	q.TestAccounts = filtersTestAccounts(o, reader, site)
+	key := strings.Join([]string{q.Report, q.Site, q.From, q.To, strconv.Itoa(q.Limit), strconv.FormatBool(q.TestAccounts)}, "|")
 	if !fresh {
 		if at, ok := s.cached(ctx, o, key, cacheTTL(reader), &out.AnalyticsReport); ok {
 			out.Cached, out.FetchedAt = true, at

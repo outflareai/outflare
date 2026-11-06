@@ -152,11 +152,11 @@ func TestSupportInbox(t *testing.T) {
 		t.Fatalf("suggest: %v", sug)
 	}
 
-	// With a brand picked, conversations of no brand (this mailbox is
-	// shared by every brand) still show.
+	// The mailbox is the workspace's only brand's, so a second brand
+	// doesn't see its conversations.
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket", "website": "https://repocket.com"})
-	if l := owner.must(200, "GET", base+"/support/conversations?status=all&brand=repocket", nil); l["total"] != 2.0 {
-		t.Fatalf("brand picked: %v", l)
+	if l := owner.must(200, "GET", base+"/support/conversations?status=all&brand=repocket", nil); l["total"] != 0.0 {
+		t.Fatalf("other brand: %v", l)
 	}
 
 	stats := owner.must(200, "GET", base+"/support/stats", nil)

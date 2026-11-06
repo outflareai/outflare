@@ -18,13 +18,13 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 
 	// A workspace starts with one brand, named after it (plans/brands). This
-	// test is about brands people add, so it archives that one first; its
-	// context then says nothing about brands.
+	// test is about brands people add, so it archives that one first; the
+	// context then lists no other brands.
 	if l := owner.must(200, "GET", base+"/brands", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["handle"] != "acme-outbound" {
 		t.Fatalf("new workspace's brands: %v", l)
 	}
 	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"status": "archived"})
-	if c := owner.must(200, "GET", base+"/context", nil); len(c["brands"].([]any)) != 0 || c["brand"] != nil {
+	if c := owner.must(200, "GET", base+"/context", nil); len(c["brands"].([]any)) != 0 {
 		t.Fatalf("context without brands: %v", c)
 	}
 
@@ -61,11 +61,9 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	}
 	owner.must(404, "GET", base+"/brands/nope", nil)
 
-	// Brand context: versioned like the company's, and layered on it.
-	owner.must(200, "PATCH", base+"/context", map[string]any{
-		"company": "Geonode Group", "rules": "Never promise uptime numbers.",
-		"brands": "Repocket pays people for spare bandwidth that Geonode resells.",
-	})
+	// Brand context: versioned, and each brand's own. Geonode is now the
+	// workspace's first brand, so the workspace context route edits it.
+	owner.must(200, "PATCH", base+"/context", map[string]any{"rules": "Never promise uptime numbers."})
 	bc := owner.must(200, "PATCH", base+"/brands/repocket/context", map[string]any{
 		"about": "Earn passive income by sharing unused internet.\nMore detail here.", "voice": "Friendly and casual.",
 		"rules": "Never mention Geonode.", "version": 1,
@@ -89,25 +87,27 @@ func TestBrandsContextAndFilters(t *testing.T) {
 		t.Fatalf("geonode memory: %v", gm)
 	}
 
-	// Without a brand: the company layer and a line per brand.
+	// Without a brand: the first brand's context and a line per other brand.
 	c := owner.must(200, "GET", base+"/context", nil)
 	md := c["markdown"].(string)
-	if c["memory_count"] != 1.0 || len(c["brands"].([]any)) != 2 || !strings.Contains(md, "Repocket (brand repocket, repocket.com): Earn passive income") ||
-		!strings.Contains(md, "How our brands relate") || c["projects"] != nil {
-		t.Fatalf("company context: %v\n%s", c, md)
+	if c["memory_count"] != 2.0 || len(c["brands"].([]any)) != 2 || !strings.Contains(md, "Repocket (brand repocket, repocket.com): Earn passive income") ||
+		!strings.Contains(md, "Never promise uptime") || c["projects"] != nil {
+		t.Fatalf("first brand's context: %v\n%s", c, md)
 	}
-	// With a brand: company and brand together, other brands' memories left out.
+	// With a brand: that brand's alone, other brands' rules and memories
+	// left out.
 	c = owner.must(200, "GET", base+"/context?brand=repocket", nil)
 	md = c["markdown"].(string)
-	if c["brand"].(map[string]any)["brand_id"] != rid || c["memory_count"] != 2.0 ||
-		!strings.Contains(md, "Never promise uptime") || !strings.Contains(md, "# Brand: Repocket") || !strings.Contains(md, "- Fire TV: https://www.amazon.com/dp/B0") || !strings.Contains(md, "Never mention Geonode") {
+	if c["brand"].(map[string]any)["brand_id"] != rid || c["memory_count"] != 1.0 ||
+		strings.Contains(md, "Never promise uptime") || !strings.Contains(md, "# Repocket") || !strings.Contains(md, "- Fire TV: https://www.amazon.com/dp/B0") || !strings.Contains(md, "Never mention Geonode") {
 		t.Fatalf("repocket context: %v\n%s", c, md)
 	}
 	if c := owner.must(200, "GET", base+"/context?brand=geonode", nil); c["memory_count"] != 2.0 {
 		t.Fatalf("geonode context: %v", c)
 	}
 	owner.must(404, "GET", base+"/context?brand=nope", nil)
-	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 1.0 {
+	// Brands share no memories, so none is left without a brand.
+	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 0.0 {
 		t.Fatalf("company memories: %v", n)
 	}
 
@@ -133,8 +133,8 @@ func TestBrandsContextAndFilters(t *testing.T) {
 		t.Fatalf("counts: %v", c)
 	}
 	owner.must(200, "POST", base+"/brands/repocket/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
-	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=none", nil)["data"].([]any)); n != 1 {
-		t.Fatalf("shared again: %d", n)
+	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("repocket lists after remove: %d", n)
 	}
 
 	// Archiving hides a brand from the default list but keeps it.
@@ -245,8 +245,8 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 		}
 		return n
 	}
-	if visitors("&brand=all") != 30 || visitors("&brand=geonode") != 10 || visitors("&brand=repocket") != 10 || visitors("&brand=none") != 10 {
-		t.Fatalf("by assignment: %v %v %v %v", visitors("&brand=all"), visitors("&brand=geonode"), visitors("&brand=repocket"), visitors("&brand=none"))
+	if visitors("&brand=geonode") != 10 || visitors("&brand=repocket") != 10 {
+		t.Fatalf("by assignment: %v %v", visitors("&brand=geonode"), visitors("&brand=repocket"))
 	}
 	// A day stored before the site's domain was known still lists it once.
 	if _, err := e.pool.Exec(ctx, `INSERT INTO analytics_daily (workspace_id, integration_id, connector, site, host, report, day, key, visitors)
@@ -268,7 +268,7 @@ func TestAnalyticsSitesByBrand(t *testing.T) {
 	if sb := owner.must(200, "PUT", base+"/analytics/"+ga+"/site-brand", map[string]any{"site": "properties/1", "brand": "none"}); sb["brand_id"] != nil || sb["source"] != "set" {
 		t.Fatalf("shared: %v", sb)
 	}
-	if visitors("&brand=repocket") != 20 || visitors("&brand=geonode") != 0 || visitors("&brand=none") != 10 {
+	if visitors("&brand=repocket") != 20 || visitors("&brand=geonode") != 0 {
 		t.Fatal("after mapping")
 	}
 	if b := blockers(); b["analytics_site_unmapped"] != nil {
@@ -306,6 +306,7 @@ func TestBrandAccess(t *testing.T) {
 	rpSeq := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Bandwidth sharers"})["id"].(string)
 	shared := owner.must(201, "POST", base+"/sequences", map[string]any{"name": "Partners"})["id"].(string)
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Geonode pricing is secret", "brand_id": "geonode"})
+	// Brands share no memories: one saved with no brand is the first brand's.
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Company fact"})
 	geoList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Geonode buyers"})["id"].(string)
 	sharedList := owner.must(201, "POST", base+"/lead-lists", map[string]any{"name": "Everyone"})["id"].(string)
@@ -352,7 +353,7 @@ func TestBrandAccess(t *testing.T) {
 	agent.must(404, "GET", base+"/lead-lists/"+geoList, nil)
 	agent.must(404, "GET", base+"/context?brand=geonode", nil)
 	c := agent.must(200, "GET", base+"/context", nil)
-	if c["brand"].(map[string]any)["brand_id"] != rp || strings.Contains(c["markdown"].(string), "Geonode pricing") || !strings.Contains(c["markdown"].(string), "Company fact") {
+	if c["brand"].(map[string]any)["brand_id"] != rp || strings.Contains(c["markdown"].(string), "Geonode pricing") || strings.Contains(c["markdown"].(string), "Company fact") {
 		t.Fatalf("agent context: %v", c)
 	}
 	for _, m := range agent.must(200, "GET", base+"/memories", nil)["data"].([]any) {
@@ -438,6 +439,10 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	owner, base, srv := sendingSetup(t, e, clock)
 	geonode := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode"})["id"].(string)
 	repocket := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket"})["id"].(string)
+	// A mailbox sends only for its own brand's sequences (brands step 6).
+	boxes := mailboxIDs(t, owner, base)
+	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"mailbox_ids": []string{boxes["ana@acme.test"]}})
+	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
 	code, imp := owner.raw("POST", base+"/leads/import?list=Founders", "text/csv", "email,first_name\nli@one-io.example,Li\nmo@two-io.example,Mo\n")
 	if code != 200 || imp["created"] != 2.0 {
 		t.Fatalf("lead import: %d %v", code, imp)
@@ -454,6 +459,10 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 		// emails them, as if the brand had taken them over.
 		if _, err := e.pool.Exec(context.Background(), `UPDATE leads SET brand_id = (SELECT id FROM brands WHERE handle = $2 AND workspace_id = leads.workspace_id)
 			WHERE workspace_id::text = $1`, strings.TrimPrefix(base, "/v1/workspaces/"), brand); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(context.Background(), `UPDATE lead_lists SET brand_id = (SELECT id FROM brands WHERE handle = $2 AND workspace_id = lead_lists.workspace_id)
+			WHERE id::text = $1`, list, brand); err != nil {
 			t.Fatal(err)
 		}
 		owner.must(200, "POST", base+"/sequences/"+id+"/enrollments", map[string]any{"list_id": list})
@@ -503,6 +512,7 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	}
 	owner.must(404, "POST", base+"/recipients/check", map[string]any{"emails": []string{"li@one-io.example"}, "brand": "nope"})
 
+	owner.must(200, "POST", base+"/brands/repocket/add", map[string]any{"mailbox_ids": []string{boxes["bo@acme.test"]}})
 	repSeq := sequence("Repocket founders", "repocket")
 	owner.must(200, "PATCH", base+"/sequences/"+repSeq, map[string]any{"status": "active"})
 	clock.Add(10 * time.Minute)
@@ -578,9 +588,9 @@ func TestCrossBrandRuleReportsAndWebhooks(t *testing.T) {
 	if a, g, r := deliveries(first, all["id"].(string)), deliveries(geonode, geo["id"].(string)), deliveries(repocket, rep["id"].(string)); a != 0 || g != 1 || r != 1 {
 		t.Fatalf("webhook deliveries: first brand %d, geonode %d, repocket %d", a, g, r)
 	}
-	// Null moves it to the first brand: nothing is for every brand.
+	// Null keeps it in its brand: brands are fully separate.
 	owner.must(200, "PATCH", base+"/webhooks/"+geo["id"].(string), map[string]any{"brand": nil})
-	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != first {
+	if w := owner.must(200, "GET", base+"/webhooks/"+geo["id"].(string), nil); w["brand_id"] != geonode {
 		t.Fatalf("webhook brand cleared: %v", w)
 	}
 }

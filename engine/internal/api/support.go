@@ -284,13 +284,12 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 }
 
 // supportBrandSQL keeps a list to the picked brand: its conversations and
-// those of no brand (a mailbox or address shared by every brand), which
-// are every brand's to answer.
-func supportBrandSQL(b brandSel, args *[]any) string { return sharedBrandSQL(b, "c.brand_id", args) }
-
-// sharedBrandSQL keeps rows to the picked brand's and those of no brand,
-// which every brand shares.
-func sharedBrandSQL(b brandSel, col string, args *[]any) string {
+// those of no brand, which every brand sees so no customer's mail is lost.
+// A conversation takes its mailbox's or address's brand, else the
+// workspace's only brand, so only mail to a mailbox or address that isn't
+// in a brand yet, in a workspace of several brands, has none.
+func supportBrandSQL(b brandSel, args *[]any) string {
+	const col = "c.brand_id"
 	if b.id == "" || b.id == "none" {
 		return b.sql(col, args)
 	}

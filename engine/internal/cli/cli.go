@@ -115,6 +115,10 @@ type settings struct {
 	URL       string `json:"url"`
 	Token     string `json:"token"`
 	Workspace string `json:"workspace,omitempty"`
+	// Brand is the brand (id or handle) a brand route acts on when
+	// --brand is left out: brands are fully separate, so every brand's
+	// data is under /v1/brands/{brand}/.
+	Brand string `json:"brand,omitempty"`
 }
 
 func (c *runner) configPath() (string, error) {
@@ -130,7 +134,7 @@ func (c *runner) configPath() (string, error) {
 }
 
 // settings reads the saved login, overridden by OUTFLARE_URL,
-// OUTFLARE_TOKEN and OUTFLARE_WORKSPACE (the same
+// OUTFLARE_TOKEN, OUTFLARE_WORKSPACE and OUTFLARE_BRAND (the same
 // variables the MCP server reads).
 func (c *runner) settings() settings {
 	var s settings
@@ -139,7 +143,7 @@ func (c *runner) settings() settings {
 			json.Unmarshal(b, &s) //nolint:errcheck
 		}
 	}
-	for name, dst := range map[string]*string{"URL": &s.URL, "TOKEN": &s.Token, "WORKSPACE": &s.Workspace} {
+	for name, dst := range map[string]*string{"URL": &s.URL, "TOKEN": &s.Token, "WORKSPACE": &s.Workspace, "BRAND": &s.Brand} {
 		if v := strings.TrimSpace(c.env.Getenv("OUTFLARE_" + name)); v != "" {
 			*dst = v
 		}
@@ -160,13 +164,16 @@ func (c *runner) login(ctx context.Context, args []string) int {
 	if v := fl.take("workspace"); v != "" {
 		s.Workspace = v
 	}
+	if v := fl.take("brand"); v != "" {
+		s.Brand = v
+	}
 	if fl.has("token-stdin") {
 		fl.take("token-stdin")
 		b, _ := io.ReadAll(c.env.Stdin)
 		s.Token = strings.TrimSpace(string(b))
 	}
 	if len(fl.values) > 0 {
-		return c.fail(2, fmt.Errorf("login takes --url, --workspace and --token-stdin"))
+		return c.fail(2, fmt.Errorf("login takes --url, --workspace, --brand and --token-stdin"))
 	}
 	in := bufio.NewReader(c.env.Stdin)
 	if s.URL == "" {
@@ -303,6 +310,16 @@ func (c *runner) call(ctx context.Context, op *operation, args []string) int {
 					s.Workspace = c.tokenWorkspace(ctx, s)
 				}
 				v = s.Workspace
+			}
+			if v == "" && p.Name == "brand" {
+				if s.Brand == "" && !curl {
+					// A token bound to a brand knows its brand.
+					s.Brand = c.tokenBrand(ctx, s)
+				}
+				v = s.Brand
+			}
+			if v == "" && p.Name == "brand" {
+				return c.fail(2, errors.New(`--brand is required: pass a brand's id or handle, set OUTFLARE_BRAND, or run "outflare login --brand <brand>" (outflare list-brands lists them)`))
 			}
 			if v == "" {
 				return c.fail(2, fmt.Errorf("--%s is required%s", name, describeParam(p)))
@@ -683,6 +700,27 @@ func (c *runner) tokenWorkspace(ctx context.Context, s settings) string {
 		return ""
 	}
 	return *who.Token.WorkspaceID
+}
+
+// tokenBrand asks whoami which brand the token is bound to; empty for a
+// workspace token or when the server cannot say.
+func (c *runner) tokenBrand(ctx context.Context, s settings) string {
+	if s.Token == "" {
+		return ""
+	}
+	status, body, _, err := c.send(ctx, s, "GET", s.URL+"/v1/whoami", "", nil, "")
+	if err != nil || status != http.StatusOK {
+		return ""
+	}
+	var who struct {
+		Token *struct {
+			BrandID *string `json:"brand_id"`
+		} `json:"token"`
+	}
+	if json.Unmarshal(body, &who) != nil || who.Token == nil || who.Token.BrandID == nil {
+		return ""
+	}
+	return *who.Token.BrandID
 }
 
 func (c *runner) fail(code int, err error) int {

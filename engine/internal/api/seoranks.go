@@ -81,13 +81,26 @@ type rankConnection struct {
 // rankConnections are the workspace's connected SERP connections, the one
 // checks use by default first.
 func (s *Server) rankConnections(r *http.Request) ([]rankConnection, error) {
-	list := []rankConnection{}
 	if s.integrations == nil {
-		return list, nil
+		return []rankConnection{}, nil
 	}
+	return s.connectionsOf(r, ranks.SERPConnectors(s.integrations.Registry))
+}
+
+// rankImports are the workspace's connected rank trackers, whose own
+// projects' keywords are imported.
+func (s *Server) rankImports(r *http.Request) ([]rankConnection, error) {
+	if s.integrations == nil {
+		return []rankConnection{}, nil
+	}
+	return s.connectionsOf(r, ranks.TrackedConnectors(s.integrations.Registry))
+}
+
+func (s *Server) connectionsOf(r *http.Request, connectors []string) ([]rankConnection, error) {
+	list := []rankConnection{}
 	rows, err := s.pool.Query(r.Context(), `SELECT id::text, name, connector FROM integrations
 		WHERE workspace_id = $1 AND connector = ANY($2) AND status = 'connected'
-		ORDER BY array_position($2, connector), created_at, id`, accessFrom(r.Context()).WorkspaceID, ranks.SERPConnectors(s.integrations.Registry))
+		ORDER BY array_position($2, connector), created_at, id`, accessFrom(r.Context()).WorkspaceID, connectors)
 	if err != nil {
 		return nil, err
 	}
@@ -129,11 +142,16 @@ func (s *Server) listRankings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	imports, err := s.rankImports(r)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	var conn *rankConnection
 	if len(conns) > 0 {
 		conn = &conns[0]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "connection": conn, "connections": conns})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "connection": conn, "connections": conns, "imports": imports})
 }
 
 var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
@@ -406,18 +424,33 @@ func (s *Server) checkRankings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if len(conns) == 0 {
-		writeError(w, r, http.StatusConflict, "connector_needed", "rank tracking needs a SERP connection: connect DataForSEO or Geonode on the Connectors page")
-		return
-	}
 	ctx := r.Context()
+	needed := false
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Keywords tracked in the workspace's own rank tracker (SE Ranking)
+		// are read again from it.
+		imports := 0
+		if s.integrations != nil {
+			n, err := ranks.EnqueueImports(ctx, tx, s.integrations.Registry, a.WorkspaceID, site.ID, RequestID(ctx))
+			if err != nil {
+				return err
+			}
+			imports = n
+		}
+		if len(conns) == 0 && imports == 0 {
+			needed = true
+			return nil
+		}
 		if _, err := ranks.Enqueue(ctx, tx, a.WorkspaceID, site.ID, true, "ranks:"+site.ID+":"+RequestID(ctx)); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "rank.check_requested", "seo_site", site.ID, map[string]any{"site_id": site.ID})
 	})
 	if s.allocError(w, r, err) {
+		return
+	}
+	if needed {
+		writeError(w, r, http.StatusConflict, "connector_needed", "rank tracking needs a SERP connection: connect DataForSEO or Geonode on the Connectors page, or SE Ranking to bring in the keywords its projects track")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"queued": true})

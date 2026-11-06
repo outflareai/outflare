@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Digest, DigestSection, DigestSettings } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Button, Card, Empty, ErrorText, field, Input, PageHeader, Status, toast } from "../ui";
+import { pickedBrandId } from "@/lib/brand";
 import { appPath, type Tab } from "@/lib/paths";
 
 type Provider = { id: string; name: string; connector: string };
@@ -19,11 +20,12 @@ const zones = (() => {
 const when = (s: { period_start: string; period_end: string }) =>
   `${new Date(s.period_start).toLocaleDateString()} to ${new Date(s.period_end).toLocaleDateString()}`;
 
-// Digests: a daily or weekly summary of the whole workspace, kept here,
+// Digests: a daily or weekly summary of the brand, kept here,
 // sent as the digest.ready webhook and, when the workspace picks its own
 // email provider, emailed to its members.
 export function Digests({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab) => void }) {
   const path = { params: { path: { ws } } };
+  const brandPath = { params: { path: { brand: pickedBrandId() } } };
   const [set, setSet] = useState<DigestSettings | null>(null);
   const [form, setForm] = useState<Partial<DigestSettings>>({});
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -35,9 +37,9 @@ export function Digests({ ws, canManage, go }: { ws: string; canManage: boolean;
 
   async function load() {
     const [s, l, p] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/digest-settings", path),
-      api.GET("/v1/workspaces/{ws}/digests", path),
-      api.GET("/v1/workspaces/{ws}/digests/preview", path),
+      api.GET("/v1/brands/{brand}/digest-settings", brandPath),
+      api.GET("/v1/brands/{brand}/digests", brandPath),
+      api.GET("/v1/brands/{brand}/digests/preview", brandPath),
     ]);
     if (s.data) {
       setSet(s.data);
@@ -57,8 +59,8 @@ export function Digests({ ws, canManage, go }: { ws: string; canManage: boolean;
   async function save() {
     setBusy("save");
     const { frequency, weekday, hour, timezone, recipients, provider_id, from_address } = form;
-    const { data, error } = await api.PUT("/v1/workspaces/{ws}/digest-settings", {
-      ...path,
+    const { data, error } = await api.PUT("/v1/brands/{brand}/digest-settings", {
+      ...brandPath,
       body: { frequency, weekday, hour, timezone, recipients, provider_id, from_address },
     });
     setBusy("");
@@ -72,7 +74,7 @@ export function Digests({ ws, canManage, go }: { ws: string; canManage: boolean;
 
   async function sendNow() {
     setBusy("send");
-    const { error } = await api.POST("/v1/workspaces/{ws}/digests", { ...path, body: { frequency: set?.frequency === "daily" ? "daily" : "weekly" } });
+    const { error } = await api.POST("/v1/brands/{brand}/digests", { ...brandPath, body: { frequency: set?.frequency === "daily" ? "daily" : "weekly" } });
     setBusy("");
     setError(error ? errorMessage(error) : "");
     if (!error) {
@@ -97,7 +99,7 @@ export function Digests({ ws, canManage, go }: { ws: string; canManage: boolean;
     <div className="max-w-3xl space-y-6">
       <PageHeader
         title="Digests"
-        description="A daily or weekly summary of the whole workspace: fixes, deploys, site health, outreach, lifecycle email, missions and what needs you."
+        description="A daily or weekly summary of the brand: fixes, deploys, site health, outreach, lifecycle email, missions and what needs you."
         action={canManage && <Button variant="ghost" disabled={busy !== "" || set.frequency === "off"} onClick={sendNow}>{busy === "send" ? "Making…" : "Make one now"}</Button>}
       />
 

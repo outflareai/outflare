@@ -675,6 +675,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   const [rows, setRows] = useState<TrackedKeyword[] | null>(null);
   const [conn, setConn] = useState<RankConnection | null | undefined>(undefined);
   const [conns, setConns] = useState<RankConnection[]>([]);
+  const [imports, setImports] = useState<RankConnection[]>([]);
   const [source, setSource] = useState("");
   const [error, setError] = useState("");
   const [keywords, setKeywords] = useState("");
@@ -689,6 +690,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
       setRows(data.data);
       setConn(data.connection);
       setConns(data.connections);
+      setImports(data.imports);
     });
   }, [ws, site, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -725,6 +727,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
     done(error, `Checked through ${conns.find((c) => c.integration_id === id)?.name ?? "that connection"}`);
   };
   const sourceOf = (t: TrackedKeyword) => conns.find((c) => c.integration_id === t.integration_id) ?? conn;
+  const importOf = (t: TrackedKeyword) => imports.find((c) => c.integration_id === t.integration_id);
   const remove = async (t: TrackedKeyword) => {
     setBusy(true);
     const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } } });
@@ -733,7 +736,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
 
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!rows || conn === undefined) return <Loading />;
-  if (!conn && rows.length === 0)
+  if (!conn && imports.length === 0 && rows.length === 0)
     return (
       <Empty
         title="Connect DataForSEO or Geonode to track rankings"
@@ -741,6 +744,7 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
           <div className="flex gap-2">
             <Button onClick={() => go("connectors", "dataforseo")}>Connect DataForSEO</Button>
             <Button variant="ghost" onClick={() => go("connectors", "geonode")}>Connect Geonode</Button>
+            <Button variant="ghost" onClick={() => go("connectors", "seranking")}>Connect SE Ranking</Button>
           </div>
         }
       >
@@ -785,7 +789,8 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
       <p className="text-xs text-muted-foreground">
         {conn
           ? `Checked on Google (US unless you choose) through ${conns.length > 1 ? "the connection each keyword names" : conn.name}, within its monthly budget. Each check is on Outcomes.`
-          : "The rank tracking connection was removed, so checks have stopped."} Agents use list_rankings and track_keywords.
+          : imports.length === 0 ? "The rank tracking connection was removed, so checks have stopped." : ""}
+        {imports.length > 0 && ` Keywords tracked in a ${imports[0].name} project for this site come in from it each day, at no cost here.`} Agents use list_rankings and track_keywords.
       </p>
       <DataTable
         data={rows}
@@ -808,7 +813,9 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
                 <div>{row.original.keyword} {row.original.status === "paused" && <Badge>Paused</Badge>}</div>
                 <div className="text-xs text-muted-foreground">
                   {row.original.country} · {row.original.device} · {row.original.frequency}
-                  {conns.length > 1 && (
+                  {importOf(row.original) ? (
+                    ` · from ${importOf(row.original)?.name}`
+                  ) : conns.length > 1 && (
                     <>
                       {" · "}
                       <select

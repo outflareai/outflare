@@ -103,6 +103,16 @@ func TestActionLayer(t *testing.T) {
 		t.Fatalf("always a person: %d %v", code, res)
 	}
 	hook := res["action"].(map[string]any)["id"].(string)
+	// The same on the brand's own route.
+	var firstBrand string
+	if err := e.pool.QueryRow(context.Background(), `SELECT outflare_first_brand($1)::text`, strings.TrimPrefix(base, "/v1/workspaces/")).Scan(&firstBrand); err != nil {
+		t.Fatal(err)
+	}
+	code, res = agent.do("POST", "/v1/brands/"+firstBrand+"/webhooks", map[string]any{"url": "https://hooks.example.com/y", "events": []string{"lead.created"}})
+	if code != 202 || res["action"].(map[string]any)["decided_by_rule"] != "always_person" {
+		t.Fatalf("always a person on the brand route: %d %v", code, res)
+	}
+	owner.must(200, "POST", base+"/actions/decide", map[string]any{"reject": []string{res["action"].(map[string]any)["id"].(string)}})
 
 	// A batch: approve one and reject one in one request.
 	b := owner.must(200, "POST", base+"/actions/decide", map[string]any{"approve": []string{third}, "reject": []string{hook}, "note": "batch"})
@@ -262,7 +272,8 @@ func TestActionTemplates(t *testing.T) {
 		t.Fatalf("template grant: %v", grants)
 	}
 	g := grants[0].(map[string]any)
-	if g["path"] != "sequences" || g["method"] != "POST" || g["mode"] != "run" || g["match"].(map[string]any)["timezone"] != "Europe/London" {
+	// A change on a brand route keeps its brand in the template's path.
+	if p, _ := g["path"].(string); !strings.HasPrefix(p, "brands/") || !strings.HasSuffix(p, "/sequences") || g["method"] != "POST" || g["mode"] != "run" || g["match"].(map[string]any)["timezone"] != "Europe/London" {
 		t.Fatalf("template grant: %v", g)
 	}
 

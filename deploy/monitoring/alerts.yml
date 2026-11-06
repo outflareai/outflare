@@ -469,6 +469,13 @@ groups:
         annotations:
           summary: "Jobs of kind {{ $labels.kind }} ran past their lease and were put back in the queue, so they may run twice."
 
+      - alert: OutflareJobKindTakesWorkers
+        expr: max by (kind) (outflare_jobs_running) > 0.5 * scalar(sum(outflare_jobs_workers))
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Jobs of kind {{ $labels.kind }} hold over half the job workers (and their database connections); other work and page loads wait. Spread that kind's jobs out or make them shorter."
+
       - alert: OutflareJobsReleasedAtShutdown
         expr: sum by (kind) (increase(outflare_jobs_processed_total{outcome="released"}[1h])) > 0
         labels: { severity: info }
@@ -1027,6 +1034,27 @@ groups:
         annotations:
           summary: "Over half of review page reads fail: a review site may have changed its page or started blocking reads; check the review_page.read_failed events by platform and error code."
 
+      - alert: OutflarePricingPagesNotRead
+        # Pages are read once a week and a failed read is tried again the
+        # next day; nine days with no read ending, read or failed, on a
+        # page with a connected page reader means the hourly scheduler or
+        # the pricing.read jobs are stuck.
+        expr: max(outflare_pricing_oldest_read_seconds) > 9 * 24 * 3600
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "No read of a pricing page has ended, read or failed, for over nine days; check the pricing.read jobs and the engine log for pricing.scheduler_failed."
+
+      - alert: OutflarePricingPageReadsFailing
+        # blocked (a bot check) is the page reader's to get past and is
+        # left out; no_prices_found over half the time means the price
+        # finder misses a common layout.
+        expr: sum(rate(outflare_pricing_page_reads_total{outcome!~"success|blocked"}[1d])) / sum(rate(outflare_pricing_page_reads_total[1d])) > 0.5 and sum(increase(outflare_pricing_page_reads_total[1d])) > 20
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of pricing page reads fail; check the pricing_page.read_failed events by error code (no_prices_found means the price finder in engine/internal/pricing misses the pages' layout)."
+
       - alert: OutflareNewsSearchesOverdue
         # Searches are queued every minute once due; one an hour late
         # means the scheduler or the news.run jobs are stuck.
@@ -1244,6 +1272,38 @@ groups:
         annotations:
           summary: "Over half of web searches (search-results) fail for reasons other than a budget: DataForSEO's or Geonode's search API may be failing or have changed; check api.called for readSearchResults by error code."
 
+      - alert: OutflareAIScreenAnswersFailing
+        # budget_reached is a workspace's own limit working as meant.
+        expr: sum(rate(outflare_ai_visibility_screen_answers_total{outcome!~"done|budget_reached"}[6h])) / sum(rate(outflare_ai_visibility_screen_answers_total[6h])) > 0.5 and sum(increase(outflare_ai_visibility_screen_answers_total[6h])) > 10
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of AI visibility answers read from ChatGPT's and Gemini's own screens fail for reasons other than a budget: DataForSEO's LLM Scraper may be failing or have changed; check ai_sample.failed events by error code and provider dataforseo."
+
+      - alert: OutflareAIDemandReadsFailing
+        # budget_reached is a workspace's own limit working as meant.
+        expr: sum(rate(outflare_ai_visibility_demand_reads_total{outcome!~"done|budget_reached"}[6h])) / sum(rate(outflare_ai_visibility_demand_reads_total[6h])) > 0.5 and sum(increase(outflare_ai_visibility_demand_reads_total[6h])) > 5
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of reads of what people ask AI assistants fail for reasons other than a budget: DataForSEO's LLM Mentions or AI keyword data may be failing or have changed; check ai_prompt.demand_failed events by error code."
+
+      - alert: OutflareAIStanceReadsFailing
+        # skipped and ai_model_needed are a workspace's own settings working as meant.
+        expr: sum(rate(outflare_ai_visibility_stance_reads_total{outcome=~"ai_failed|refused|provider_error|provider_auth|timeout"}[6h])) / sum(rate(outflare_ai_visibility_stance_reads_total[6h])) > 0.5 and sum(increase(outflare_ai_visibility_stance_reads_total[6h])) > 10
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of AI visibility answers can't be read for how they treat the brands they name: the reader's answers may not parse or a provider is failing; check ai_stance.failed events by error code."
+
+      - alert: OutflareAIPromptDraftsFailing
+        # Budgets and missing models are a workspace's own settings working as meant.
+        expr: sum(rate(outflare_ai_visibility_prompt_drafts_total{outcome=~"ai_failed|connector_auth"}[6h])) / sum(rate(outflare_ai_visibility_prompt_drafts_total[6h])) > 0.5 and sum(increase(outflare_ai_visibility_prompt_drafts_total[6h])) > 5
+        for: 1h
+        labels: { severity: info }
+        annotations:
+          summary: "Over half of AI visibility question drafts fail: the drafting prompt's answers may not parse or a provider is failing; check ai_prompt.draft_failed events by error code."
+
       - alert: OutflarePlaybookAutomationsFailing
         # held and capped are limits working as meant; failed retries in 15 minutes.
         expr: sum(increase(outflare_playbooks_automation_runs_total{outcome="failed"}[1h])) > 3 and sum(increase(outflare_playbooks_automation_runs_total{outcome="started"}[1h])) == 0
@@ -1326,13 +1386,13 @@ groups:
           summary: "Review invitation batches are failing repeatedly. Inspect reviews.dispatch jobs and email configuration."
 
       - alert: OutflareCoverageChecksOverdue
-        expr: max(outflare_jobs_oldest_due_seconds{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan)"}) > 900
+        expr: max(outflare_jobs_oldest_due_seconds{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan|opportunities_refresh)"}) > 900
         for: 15m
         labels: { severity: warning }
         annotations:
           summary: "Coverage checks are over fifteen minutes late; inspect coverage.check workers and scheduler errors."
       - alert: OutflareCoverageChecksFailing
-        expr: sum(increase(outflare_jobs_processed_total{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan)",outcome="dead"}[30m])) > 0
+        expr: sum(increase(outflare_jobs_processed_total{kind=~"coverage[.](check|review|extract|discover|search|competitor_scan|opportunities_refresh)",outcome="dead"}[30m])) > 0
         for: 5m
         labels: { severity: warning }
         annotations:

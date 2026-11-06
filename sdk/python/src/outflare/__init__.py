@@ -25,7 +25,7 @@ class Outflare(Operations, _Base):
     https://app.outflare.ai). The workspace is the token's own unless you
     pass workspace= (an ID or slug) or set OUTFLARE_WORKSPACE. Every
     operation in the API is a method, named after its operationId:
-    listLeads is list_leads. Writes carry an Idempotency-Key and are
+    listBrandLeads is list_brand_leads. Writes carry an Idempotency-Key and are
     retried safely; rate limits and busy servers are retried with backoff,
     honouring Retry-After. Errors raise OutflareError.
     """

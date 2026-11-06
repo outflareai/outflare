@@ -176,6 +176,28 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 
 	other := owner.must(201, "POST", "/v1/workspaces", map[string]any{"name": "Other"})
 	owner.must(404, "PATCH", "/v1/workspaces/"+other["id"].(string)+"/inbox-tags/"+tags["follow up"]["id"].(string), map[string]any{"color": "red"})
+
+	// Tags and views are each brand's own: another brand has none of the
+	// first's, a tag of the same name there is its own, and one brand's
+	// tag can't be changed through the other.
+	north := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak"})["id"].(string)
+	nb := "/v1/brands/" + north
+	if l := owner.must(200, "GET", nb+"/inbox-tags", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("a new brand has tags: %v", l)
+	}
+	if l := owner.must(200, "GET", nb+"/inbox-views", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("a new brand has views: %v", l)
+	}
+	mineN := owner.must(201, "POST", nb+"/inbox-tags", map[string]any{"name": "follow up", "color": "teal"})
+	owner.must(404, "PATCH", nb+"/inbox-tags/"+tags["follow up"]["id"].(string), map[string]any{"color": "red"})
+	owner.must(404, "DELETE", base+"/inbox-tags/"+mineN["id"].(string), nil)
+	if l := owner.must(200, "GET", base+"/inbox-tags?brand=northpeak", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["color"] != "teal" {
+		t.Fatalf("northpeak tags: %v", l)
+	}
+	owner.must(201, "POST", nb+"/inbox-views", map[string]any{"name": "Northpeak hot", "shared": true, "filters": map[string]any{"group": "hot"}})
+	if vs := owner.must(200, "GET", base+"/inbox-views", nil)["data"].([]any); len(vs) != 2 {
+		t.Fatalf("the first brand's views changed: %v", vs)
+	}
 }
 
 func TestWebhooksForSomeLabels(t *testing.T) {

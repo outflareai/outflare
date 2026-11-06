@@ -27,7 +27,7 @@ type Method = "oneclick" | "developer" | "ai" | "manual";
 // The groups still to approve at the provider, kept in the tab while the
 // browser is away on the provider's screen.
 const queueKey = "outflare.dns_batch";
-type Queued = { brand: string; provider: string; left: { subject: Group["subject"]; id: string }[]; total: number };
+type Queued = { brand: string; brand_id: string; provider: string; left: { subject: Group["subject"]; id: string }[]; total: number };
 
 function readQueue(): Queued | null {
   try {
@@ -47,24 +47,24 @@ function writeQueue(q: Queued | null) {
   }
 }
 
-async function approvalLink(ws: string, g: { subject: Group["subject"]; id: string }, ret: string) {
+async function approvalLink(ws: string, brand: string, g: { subject: Group["subject"]; id: string }, ret: string) {
   const query = { return: ret };
   switch (g.subject) {
     case "seo_site":
       return api.GET("/v1/workspaces/{ws}/seo-sites/{site}/dns/approval", { params: { path: { ws, site: g.id }, query } });
     case "tracking_domain":
-      return api.GET("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approval", { params: { path: { ws, id: g.id }, query } });
+      return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand, id: g.id }, query } });
     case "email_domain":
       return api.GET("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approval", { params: { path: { ws, id: g.id }, query } });
   }
 }
 
-async function reportApproval(ws: string, g: { subject: Group["subject"]; id: string }, body: { error?: string; provider?: string }) {
+async function reportApproval(ws: string, brand: string, g: { subject: Group["subject"]; id: string }, body: { error?: string; provider?: string }) {
   switch (g.subject) {
     case "seo_site":
       return api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns/approved", { params: { path: { ws, site: g.id } }, body });
     case "tracking_domain":
-      return api.POST("/v1/workspaces/{ws}/tracking-domains/{id}/dns/approved", { params: { path: { ws, id: g.id } }, body });
+      return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand, id: g.id } }, body });
     case "email_domain":
       return api.POST("/v1/workspaces/{ws}/email-provider-domains/{id}/dns/approved", { params: { path: { ws, id: g.id } }, body });
   }
@@ -138,7 +138,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     if (!done) return;
     const rest = q.left.filter((g) => g.id !== back.id);
     track("ui.dns_one_click_used", { where: "brand_dns", how: back.error ? "approval_cancelled" : "approved", groups: q.total });
-    void reportApproval(ws, done, { error: back.error, provider: q.provider }).then(async ({ error }) => {
+    void reportApproval(ws, q.brand_id, done, { error: back.error, provider: q.provider }).then(async ({ error }) => {
       if (error) toast(errorMessage(error), "error");
       if (back.error) {
         writeQueue(null);
@@ -155,7 +155,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
       }
       writeQueue({ ...q, left: rest });
       setProgress(`${q.total - rest.length} of ${q.total} approved. Opening the next one at ${q.provider}…`);
-      const { data } = await approvalLink(ws, rest[0], location.pathname + location.search);
+      const { data } = await approvalLink(ws, q.brand_id, rest[0], location.pathname + location.search);
       if (data?.available && data.url) location.assign(data.url);
       else {
         writeQueue(null);
@@ -171,7 +171,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
   useEffect(() => {
     if (!canManage || pending.length === 0) return setApprovals({});
     let live = true;
-    Promise.all(pending.map((g) => approvalLink(ws, g, location.pathname + location.search).then(({ data }) => [g.id, data] as const))).then((list) => {
+    Promise.all(pending.map((g) => approvalLink(ws, dns!.brand_id, g, location.pathname + location.search).then(({ data }) => [g.id, data] as const))).then((list) => {
       if (!live) return;
       const out: Record<string, Approval> = {};
       for (const [id, a] of list) if (a) out[id] = a;
@@ -219,7 +219,7 @@ export function BrandDNS({ ws, brand, website, canManage, page, onChange }: {
     const first = pending[0];
     const a = approvals[first.id];
     if (!a?.url) return;
-    writeQueue({ brand, provider, left: pending.map((g) => ({ subject: g.subject, id: g.id })), total: pending.length });
+    writeQueue({ brand, brand_id: dns!.brand_id, provider, left: pending.map((g) => ({ subject: g.subject, id: g.id })), total: pending.length });
     track("ui.dns_one_click_used", { where: "brand_dns", how: "approval", groups: pending.length });
     location.assign(a.url);
   }

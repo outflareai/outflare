@@ -75,8 +75,8 @@ func init() {
 				reqBody, _ = io.ReadAll(r.Body)
 				r.Body = io.NopCloser(bytes.NewReader(reqBody))
 			}
-			note, ext := &routeAccess{}, new(bool)
-			r = r.WithContext(context.WithValue(context.WithValue(r.Context(), ctxRouteAccessKey{}, note), ctxExtensionKey{}, ext))
+			note, ext, moved := &routeAccess{}, new(bool), new(string)
+			r = r.WithContext(context.WithValue(context.WithValue(context.WithValue(r.Context(), ctxRouteAccessKey{}, note), ctxExtensionKey{}, ext), ctxMovedKey{}, moved))
 			rec := httptest.NewRecorder()
 			next.ServeHTTP(rec, r)
 			for k, vs := range rec.Header() {
@@ -84,7 +84,14 @@ func init() {
 			}
 			w.WriteHeader(rec.Code)
 			w.Write(rec.Body.Bytes()) //nolint:errcheck
-			if !*ext {
+			if *moved != "" {
+				// A retired workspace route the test still calls, served by
+				// its brand route (retired_test.go): checked as that route.
+				r = r.Clone(r.Context())
+				r.URL.Path = *moved
+			}
+			// A retired route's own 410 is not in the document by design.
+			if !*ext && !(rec.Code == http.StatusGone && strings.Contains(rec.Body.String(), `"route_moved"`)) {
 				checkContract(r, reqBody, rec, *note)
 			}
 		})

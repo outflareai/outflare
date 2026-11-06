@@ -87,7 +87,7 @@ func (s *Server) storePartnerPromoCode(ctx context.Context, ws string, actor *pr
 		}
 		var taken bool
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM partner_memberships WHERE workspace_id=$1 AND lower(code)=lower($2) AND id<>$3) OR EXISTS(SELECT 1 FROM partner_promo_codes WHERE workspace_id=$1 AND lower(code)=lower($2)),(SELECT count(*) FROM partner_promo_codes WHERE workspace_id=$1 AND membership_id=$3)`, ws, in.Code, cur.ID).Scan(&taken, &count); err != nil {
+		if err := tx.QueryRow(ctx, `WITH b AS (SELECT brand_id FROM partner_memberships WHERE id=$3 AND workspace_id=$1) SELECT EXISTS(SELECT 1 FROM partner_memberships WHERE workspace_id=$1 AND lower(code)=lower($2) AND id<>$3 AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b)) OR EXISTS(SELECT 1 FROM partner_promo_codes WHERE workspace_id=$1 AND lower(code)=lower($2) AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b)),(SELECT count(*) FROM partner_promo_codes WHERE workspace_id=$1 AND membership_id=$3)`, ws, in.Code, cur.ID).Scan(&taken, &count); err != nil {
 			return err
 		}
 		if taken {

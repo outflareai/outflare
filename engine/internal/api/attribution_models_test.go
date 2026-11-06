@@ -28,16 +28,16 @@ func TestAttributionCustomModels(t *testing.T) {
 		}
 		return id
 	}
-	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	rec := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name) VALUES (outflare_first_brand($1), $1, 'person', 'Ana') RETURNING id::text`, ws)
 	now := time.Now()
 	day := 24 * time.Hour
-	exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, referrer_host) VALUES ($1, $2, 'anon-1', $3, 'www.google.com') RETURNING id::text`,
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, referrer_host) VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'www.google.com') RETURNING id::text`,
 		ws, rec, now.Add(-20*day))
-	exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium) VALUES ($1, $2, 'anon-1', $3, 'google', 'cpc') RETURNING id::text`,
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium) VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'google', 'cpc') RETURNING id::text`,
 		ws, rec, now.Add(-10*day))
-	exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium) VALUES ($1, $2, 'anon-1', $3, 'outflare', 'email') RETURNING id::text`,
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium) VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'outflare', 'email') RETURNING id::text`,
 		ws, rec, now.Add(-2*day))
-	exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`,
+	exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', 'signed_up', $3) RETURNING id::text`,
 		ws, rec, now.Add(-day))
 	run := &attribution.Runner{Pool: e.pool, Log: slog.New(slog.DiscardHandler), Settle: time.Minute}
 	tick := func() {
@@ -131,7 +131,11 @@ func TestAttributionCustomModels(t *testing.T) {
 		t.Fatalf("default: %s %v", ch, v)
 	}
 	// The weekly digest reads the default model's credits too.
-	secs, err := digests.Build(ctx, e.pool, ws, digests.Period{Start: now.AddDate(0, 0, -7), End: now.Add(time.Minute)})
+	var first string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	secs, err := digests.Build(ctx, e.pool, ws, first, digests.Period{Start: now.AddDate(0, 0, -7), End: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

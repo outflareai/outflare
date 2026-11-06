@@ -154,6 +154,15 @@ sync shows why its last run failed, and **Sync now** runs it straight away.
   `"conversion_events": ["signed_up"]`; changing them reads the 90 days
   again. The SEO module shows it by page (see
   [search intelligence](search-intelligence.md#conversions-by-landing-page)).
+- **PostHog can leave out internal and test users.** A PostHog project
+  keeps its own filters for them (Project settings > Filter out internal
+  and test users): a cohort of bots, your team's emails, or an SQL
+  expression for a crawler that fakes a Google referrer. Turn them on for a
+  site with `PATCH .../analytics/$ID/sites/$SITE` and
+  `"filter_test_accounts": true`, and every report, the daily sync and the
+  conversions by landing page apply them. Turning them on or off reads the
+  stored 90 days again, so the history counts the same visitors as the days
+  to come. They are off until you turn them on.
 - **Websites line up by domain.** Each site gets a domain (`example.com`,
   without `www.`), taken from the site's address. Google Analytics
   properties and Vercel projects do not show one, so set it on the Analytics

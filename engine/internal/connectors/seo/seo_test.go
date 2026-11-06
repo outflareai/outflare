@@ -31,7 +31,7 @@ func fake(t *testing.T, routes map[string]any) (*c.Client, *[]string) {
 		json.NewEncoder(w).Encode(v)
 	}))
 	t.Cleanup(srv.Close)
-	return &c.Client{BaseURLs: map[string]string{"dataforseo": srv.URL, "ahrefs": srv.URL}}, &calls
+	return &c.Client{BaseURLs: map[string]string{"dataforseo": srv.URL, "ahrefs": srv.URL, "seranking": srv.URL}}, &calls
 }
 
 var ctx = context.Background()
@@ -274,6 +274,28 @@ func TestLinksReports(t *testing.T) {
 	}
 	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "traffic_domain") {
 		t.Fatalf("ahrefs traffic request: %s", last)
+	}
+	// From keeps only links from one site: Ahrefs filters on the source's
+	// root domain, DataForSEO on domain_from (and its subdomains).
+	fq := q(c.SEOLinks)
+	fq.From = "WWW.Videos.example"
+	if fq, err = c.CheckSEOQuery(fq); err != nil || fq.From != "videos.example" {
+		t.Fatalf("from: %v %+v", err, fq)
+	}
+	if _, err := (Ahrefs{}).SEOReport(ctx, cl, c.Creds{"api_key": "k"}, fq); err != nil {
+		t.Fatal(err)
+	}
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, "where=") || !strings.Contains(last, "root_name_source") || !strings.Contains(last, "videos.example") {
+		t.Fatalf("ahrefs from request: %s", last)
+	}
+	if _, err := (DataForSEO{}).SEOReport(ctx, cl, c.Creds{"login": "jo", "password": "pw"}, fq); err != nil {
+		t.Fatal(err)
+	}
+	if last := (*calls)[len(*calls)-1]; !strings.Contains(last, `["domain_from","=","videos.example"]`) || !strings.Contains(last, `"%.videos.example"`) {
+		t.Fatalf("dfs from request: %s", last)
+	}
+	if _, err := c.CheckSEOQuery(c.SEOQuery{Report: c.SEOKeywords, Target: "example.com", From: "videos.example"}); err == nil {
+		t.Fatal("from on a keywords report")
 	}
 	if est := (Ahrefs{}).Estimate(c.SEOQuery{Report: c.SEOLinks, Limit: 200, Traffic: true}); est.Units != 5200 {
 		t.Fatalf("traffic estimate: %+v", est)

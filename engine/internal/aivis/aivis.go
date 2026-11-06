@@ -11,7 +11,8 @@
 //
 // Everything runs on the workspace's own accounts, because Outflare never
 // supplies its API keys for AI (AGENTS.md, "Bring your own keys"): each
-// model is one of the workspace's own AI connections, and what a run costs
+// model is one of the workspace's own AI connections, or an assistant's own
+// screen read through its own answer reader (DataForSEO), and what a run costs
 // is booked against the workspace's monthly AI limit and the sampling
 // limit in its AI visibility settings. Answers are external content: they
 // are measured, never followed.
@@ -29,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/outflareai/outflare/engine/internal/audit"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/llm"
 	"github.com/outflareai/outflare/engine/internal/retry"
@@ -37,6 +39,10 @@ import (
 
 // JobStep runs one step of a run: a batch of samples.
 const JobStep = "ai_visibility.step"
+
+// JobBenchmark counts a cohort's brand and competitors in the AI answers a
+// demand reader keeps; the engine's API package runs it.
+const JobBenchmark = "ai_visibility.benchmark"
 
 // Task is the AI model task for Outflare's own reading of answers (such as
 // checking them against a brand's facts), as opposed to the sampling,
@@ -49,6 +55,9 @@ const (
 	// costs more.
 	estimateCents          = 2
 	estimateWebSearchCents = 5
+	// A screen answer costs a fraction of a cent; a whole cent keeps the
+	// check simple and safe.
+	estimateScreenCents = 1
 	// An answer is a few paragraphs, as a person would read it.
 	maxAnswerTokens = 2000
 	// One sample gives up after this long.
@@ -56,6 +65,8 @@ const (
 	// A step works this long, then queues the next, so one long run never
 	// holds a worker.
 	stepFor = 90 * time.Second
+	// screensAtOnce is how many screen answers a step asks at once.
+	screensAtOnce = 5
 )
 
 // MaxModels is how many models a workspace may sample at once.
@@ -66,8 +77,13 @@ const MaxModels = 8
 type Target struct {
 	IntegrationID string `json:"integration_id"`
 	// The connection's provider (claude, openai, gemini, mistral,
-	// openrouter), set when the settings are saved.
-	Provider  string `json:"provider"`
+	// openrouter, or dataforseo for a screen), set when the settings are
+	// saved.
+	Provider string `json:"provider"`
+	// Surface is api (the model's API, the default) or screen (the
+	// assistant's own screen, read by an answer reader). For a screen,
+	// Model is the assistant: chatgpt or gemini.
+	Surface   string `json:"surface,omitempty"`
 	Model     string `json:"model"`
 	WebSearch bool   `json:"web_search"`
 	// What the model costs, when Outflare does not know and the provider
@@ -103,6 +119,26 @@ type Models interface {
 	Spent(ctx context.Context, ws string, c Choice, u llm.Usage, ref, note string) (int64, error)
 }
 
+// Surfaces a target asks on.
+const (
+	SurfaceAPI    = "api"
+	SurfaceScreen = "screen"
+)
+
+// IsScreen says whether the target reads the assistant's own screen.
+func (t Target) IsScreen() bool { return t.Surface == SurfaceScreen }
+
+// Screens asks AI assistants on their own screens (ChatGPT, Gemini) as a
+// signed-out person in a country, through one of the workspace's answer
+// reader connections (DataForSEO), paid from that connection's budget. The
+// engine's API server implements it.
+type Screens interface {
+	// Ask asks the target's assistant one question and books what it cost
+	// under ref, as Models.Spent does. It returns Refused when the
+	// connection is gone or its budget would not cover the answer.
+	Ask(ctx context.Context, ws string, t Target, q connectors.AnswerQuery, ref string) (connectors.AnswerResult, error)
+}
+
 // Refused is a reason a model can't be used, with an error code from the
 // API's catalog (ai_budget_reached, ai_model_needed, connector_needed).
 type Refused struct{ Code, Message string }
@@ -115,7 +151,10 @@ type Service struct {
 	// Models is the workspace's AI models; nil leaves runs failing with
 	// ai_model_needed.
 	Models Models
-	Log    *slog.Logger
+	// Screens reads assistants' own screens; nil leaves screen targets
+	// failing with connector_needed.
+	Screens Screens
+	Log     *slog.Logger
 	// Now is the clock, for tests.
 	Now func() time.Time
 }
@@ -174,13 +213,14 @@ func LoadSettings(ctx context.Context, q jobs.Querier, ws, brand string) (Settin
 
 // MonthSpent is what sampling and checking answers against the facts
 // cost the brand (the first brand when brand is empty) this calendar
-// month (UTC).
+// month (UTC), in cents: screen answers, kept in millionths of a dollar,
+// round up.
 func MonthSpent(ctx context.Context, q jobs.Querier, ws, brand string, now time.Time) (int64, error) {
-	var cents int64
+	var cents, micros int64
 	start := time.Date(now.UTC().Year(), now.UTC().Month(), 1, 0, 0, 0, 0, time.UTC)
-	err := q.QueryRow(ctx, `SELECT COALESCE(sum(cost_cents + facts_cost_cents), 0) FROM ai_samples
-		WHERE workspace_id = $1 AND sampled_at >= $2 AND brand_id = `+brandSQL("$1", "$3"), ws, start, brand).Scan(&cents)
-	return cents, err
+	err := q.QueryRow(ctx, `SELECT COALESCE(sum(cost_cents + facts_cost_cents + stance_cost_cents), 0), COALESCE(sum(cost_micros), 0) FROM ai_samples
+		WHERE workspace_id = $1 AND sampled_at >= $2 AND brand_id = `+brandSQL("$1", "$3"), ws, start, brand).Scan(&cents, &micros)
+	return cents + (micros+9_999)/10_000, err
 }
 
 // StartRun queues a run of a cohort: every active prompt, asked to every

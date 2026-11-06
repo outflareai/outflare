@@ -667,13 +667,18 @@ func hasVisualChanges(vs []flags.Variant) bool {
 
 // siteFlagAnswer is the website script's answer. tests says whether the
 // script should keep asking on every page by itself: the site runs tests
-// and a flag that is on has visual changes. hide lists the selectors the
+// and a flag that is on has visual changes. expose lists the no-code tests
+// this page puts the visitor in: the script counts them as shown as soon
+// as the answer arrives, whichever version they got, the control
+// included, since a version that changes nothing (the control) would
+// otherwise never count. hide lists the selectors the
 // visitor's versions change, which the script remembers so the head guard
 // (flickerGuard) can hide just those parts on their next visit.
 type siteFlagAnswer struct {
 	flagAnswer
-	Tests bool     `json:"tests"`
-	Hide  []string `json:"hide"`
+	Tests  bool     `json:"tests"`
+	Expose []string `json:"expose"`
+	Hide   []string `json:"hide"`
 }
 
 // maxHide is how many selectors one answer asks the page to hide.
@@ -752,14 +757,25 @@ func (s *Server) siteFlags(w http.ResponseWriter, r *http.Request) {
 	device, _, _ := parseUA(r.Header.Get("User-Agent"))
 	v := flags.Visitor{Subject: anon, URL: clip(in.URL, 2000), Referrer: clip(in.Referrer, 2000), Language: clip(in.Language, 35), Device: device}
 	visual := false
+	var noCode []string
 	ans := decideFlags(list, v, func(f liveFlag) bool {
 		keep := f.onSite && (k.brandID == nil || f.brandID == nil || *f.brandID == *k.brandID)
 		if keep && f.visual && f.Status == "on" {
 			visual = true
+			noCode = append(noCode, f.Key)
 		}
 		return keep
 	}, in.Preview, false)
-	out := siteFlagAnswer{flagAnswer: ans, Tests: testsOn && visual, Hide: []string{}}
+	out := siteFlagAnswer{flagAnswer: ans, Tests: testsOn && visual, Expose: []string{}, Hide: []string{}}
+	for _, key := range noCode {
+		if _, previewed := in.Preview[key]; previewed {
+			continue
+		}
+		if got, ok := ans.Flags[key].(string); ok && got != "" {
+			out.Expose = append(out.Expose, key)
+		}
+	}
+	slices.Sort(out.Expose)
 	for k := range ans.Payloads {
 		if _, previewed := in.Preview[k]; previewed {
 			continue

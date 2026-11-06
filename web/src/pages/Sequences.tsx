@@ -277,9 +277,12 @@ function Settings({ ws, seq, canManage, onChange, markDirty, go }: { ws: string;
   }, [dirty, markDirty]);
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/mailbox-pools", { params: { path: { ws } } }).then(({ data }) => data && setPools(data.data));
-    api.GET("/v1/workspaces/{ws}/tracking-domains", { params: { path: { ws } } }).then(({ data }) => data && setLinkDomain(data.data.find((d) => d.status === "verified")?.domain ?? null));
+    // The link domain is the sequence's brand's.
+    const brand = seq.brand_id ?? brandId;
+    if (brand) api.GET("/v1/brands/{brand}/tracking-domains", { params: { path: { brand } } }).then(({ data }) => data && setLinkDomain(data.data.find((d) => d.status === "verified")?.domain ?? null));
     api.GET("/v1/workspaces/{ws}/teams", { params: { path: { ws } } }).then(({ data }) => data && setTeams(data.data ?? []));
-    api.GET("/v1/workspaces/{ws}/senders", { params: { path: { ws } } }).then(({ data }) => data && setSenders((data.data ?? []).filter((x) => x.status === "active")));
+    // Preferred senders are the sequence's brand's.
+    if (brand) api.GET("/v1/brands/{brand}/senders", { params: { path: { brand } } }).then(({ data }) => data && setSenders((data.data ?? []).filter((x) => x.status === "active")));
   }, [ws]);
 
   async function save(e: FormEvent) {

@@ -46,7 +46,9 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerSocialPublishJobs(q)
 	s.registerRedditJobs(q)
 	s.registerBrandLinkJobs(q)
+	s.registerBrandKnowledgeJobs(q)
 	s.registerReviewJobs(q)
+	s.registerPricingJobs(q)
 	s.registerABTestJobs(q)
 	s.registerInsightAlertJobs(q)
 	s.registerNewsJobs(q)
@@ -56,6 +58,7 @@ func (s *Server) registerSocialJobs(q *jobs.Queue) {
 	s.registerPresenceJobs(q)
 	s.registerStoryJobs(q)
 	s.registerStoryPitchJobs(q)
+	s.registerAIVisibilityJobs(q)
 }
 
 // enqueueSocialCheck queues a check of a watch; key keeps it to one per
@@ -85,6 +88,9 @@ func (s *Server) RunSocial(ctx context.Context, every time.Duration) {
 		}
 		if _, err := s.QueueDueReviewReads(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "reviews.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if _, err := s.QueueDuePricingReads(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.log, track.Event{Name: "pricing.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		if _, err := s.QueueDueCoverage(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.log, track.Event{Name: "coverage.scheduler_failed", ActorType: "system", Surface: "system"}, "internal", err)

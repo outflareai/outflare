@@ -123,7 +123,7 @@ func (s *Server) listChatWidgets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), supportChatWidgetSelect+` WHERE workspace_id = $1`+sharedBrandSQL(brand, "brand_id", &args)+` ORDER BY created_at`, args...)
+	rows, err := s.pool.Query(r.Context(), supportChatWidgetSelect+` WHERE workspace_id = $1`+brand.sql("brand_id", &args)+` ORDER BY created_at`, args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -211,6 +211,18 @@ func (s *Server) saveChatWidget(w http.ResponseWriter, r *http.Request, a *acces
 				s.internal(w, r, err)
 				return
 			}
+			brand = &b
+		}
+	}
+	// Brands share no widget: one with no brand named is the route's, else
+	// the workspace's first.
+	if brand == nil {
+		b, err := s.rowBrand(ctx, a)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if b != "" {
 			brand = &b
 		}
 	}
@@ -532,12 +544,15 @@ func (s *Server) chatThreadOf(ctx context.Context, cw *chatWidget, token []byte,
 // will reach the visitor on its own (Auto on chat), so the chat can show
 // it is typing.
 func (s *Server) chatTyping(ctx context.Context, cw *chatWidget, conv string) (bool, error) {
-	if conv == "" || !s.autoAvailable(ctx, cw.ws) {
+	if conv == "" || s.supportAuto == nil {
 		return false, nil
 	}
 	var brand *string
 	if err := s.pool.QueryRow(ctx, `SELECT brand_id::text FROM support_conversations WHERE id = $1`, conv).Scan(&brand); err != nil {
 		return false, err
+	}
+	if !s.autoAvailable(ctx, cw.ws, brand) {
+		return false, nil
 	}
 	mode, err := support.AssistantMode(ctx, s.pool, cw.ws, brand, support.ChannelChat)
 	if err != nil || mode != "auto" {

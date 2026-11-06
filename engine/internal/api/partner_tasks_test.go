@@ -106,10 +106,9 @@ func TestPartnerTasksAndWebsiteProposals(t *testing.T) {
 	scoped.must(404, "GET", admin+"/tasks", nil)
 	scoped.must(404, "GET", admin+"/audiences", nil)
 	scoped.must(404, "POST", admin+"/tasks/"+task, map[string]any{"action": "pause"})
-	// Moving the program moves the new brand-owned rows with it.
-	owner.must(200, "PATCH", admin, map[string]any{"brand": "acme"})
-	scoped.must(200, "GET", admin+"/tasks", nil)
-	scoped.must(200, "GET", admin+"/audiences", nil)
+	// Brands are fully separate: a program stays in its brand.
+	owner.must(400, "PATCH", admin, map[string]any{"brand": "acme"})
+	scoped.must(404, "GET", admin+"/tasks", nil)
 	// The agreed task remains submittable if audience reach changes after acceptance.
 	reachTask := newTask(map[string]any{"title": "An agreed placement", "description": "Complete the agreed placement.", "asset_kind": "website", "min_reach": 5000})
 	partner.must(200, "POST", portal+"/tasks/"+reachTask, map[string]any{"action": "apply", "audience_id": asset})

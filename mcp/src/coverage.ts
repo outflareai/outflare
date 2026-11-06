@@ -231,6 +231,52 @@ export function registerCoverageTools(
       ),
   );
   server.registerTool(
+    "list_coverage_found",
+    {
+      title: "List everywhere the brand was found",
+      description:
+        "Every page discovery found that links to or names the brand, grouped by site, with what reading the page showed: links (links to the brand), mentions (names its website), name_only (only its name, which another product may share), absent, unreachable or unchecked. view about (default) is the pages about the brand not yet reviewed, maybe the uncertain ones, not the dismissed or off-topic ones, confirmed the ones made placements.",
+      inputSchema: {
+        brand,
+        view: z.enum(["about", "maybe", "not", "confirmed"]).optional(),
+        q: z.string().max(200).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() =>
+        gtm.GET("/v1/brands/{brand}/coverage/found", {
+          params: { path: { brand }, query },
+        }),
+      ),
+  );
+  if (!readOnly) {
+    server.registerTool(
+      "review_coverage_found",
+      {
+        title: "Say whether found pages are about the brand",
+        description:
+          "about_us makes pages live placements (adding the site's publisher and company record when missing); not_us dismisses them. Give ids (up to 500) or one host for every page of a site. Nobody is contacted.",
+        inputSchema: {
+          brand,
+          decision: z.enum(["about_us", "not_us"]),
+          ids: z.array(z.string().uuid()).max(500).optional(),
+          host: z.string().max(253).optional(),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      ({ brand, ...body }) =>
+        call(() =>
+          gtm.POST("/v1/brands/{brand}/coverage/found/review", {
+            params: { path: { brand } },
+            body,
+          }),
+        ),
+    );
+  }
+  server.registerTool(
     "list_coverage_opportunities",
     {
       title: "List Presence opportunities by leverage",

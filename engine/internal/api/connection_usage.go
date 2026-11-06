@@ -128,7 +128,7 @@ func (s *Server) connectionUsageOf(ctx context.Context, i connectors.Integration
 		units = append(units, l.Unit)
 	}
 	out := connectionUsage{IntegrationID: i.ID, Name: i.Name, Connector: i.Connector, Units: units, Limits: l,
-		Estimated: i.Connector == "ahrefs" || l.Unit == "credit"}
+		Estimated: i.Connector == "ahrefs" || i.Connector == "seranking" || l.Unit == "credit"}
 	if out.Used, err = usagelimits.Spent(ctx, s.pool, i.WorkspaceID, i.ID, l.Unit, time.Now()); err != nil {
 		return out, false, err
 	}

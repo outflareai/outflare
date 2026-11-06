@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Download, FileUp } from "lucide-react";
 import type { KitPlan, Schemas } from "@outflare/sdk";
+import { useBrand } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { track } from "@/lib/analytics";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -153,11 +154,15 @@ export function KitFileSheet({ ws, onClose, onApplied }: { ws: string; onClose: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const { active } = useBrand(ws);
 
   useEffect(() => {
     if (!plan?.inputs.some((i) => i.kind === "sequence")) return;
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws } } }).then(({ data }) => setSequences((data?.data ?? []).map((s) => ({ id: s.id, name: s.name }))));
-  }, [ws, plan]);
+    // Sequences are each brand's: every active brand's, named by brand when there are several.
+    Promise.all(active.map((b) => api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: b.id } } }).then(({ data }) =>
+      (data?.data ?? []).map((s) => ({ id: s.id, name: active.length > 1 ? `${b.name}: ${s.name}` : s.name })),
+    ))).then((lists) => setSequences(lists.flat()));
+  }, [ws, plan, active.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function preview(text: string) {
     setBusy(true);

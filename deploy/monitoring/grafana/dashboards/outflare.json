@@ -3781,7 +3781,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 640
+        "y": 648
       },
       "panels": []
     },
@@ -3798,7 +3798,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 641
+        "y": 649
       },
       "targets": [
         {
@@ -3851,7 +3851,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 641
+        "y": 649
       },
       "targets": [
         {
@@ -3913,7 +3913,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 649
+        "y": 657
       },
       "targets": [
         {
@@ -3975,7 +3975,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 649
+        "y": 657
       },
       "targets": [
         {
@@ -4591,7 +4591,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 657
+        "y": 665
       },
       "panels": []
     },
@@ -4608,7 +4608,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 658
+        "y": 666
       },
       "targets": [
         {
@@ -4661,7 +4661,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 658
+        "y": 666
       },
       "targets": [
         {
@@ -5510,6 +5510,78 @@
     },
     {
       "type": "timeseries",
+      "title": "Pricing page reads by outcome",
+      "description": "Weekly reads of the brand's and its competitors' pricing pages through each workspace's own page reader. Normal: mostly success, a few a day. blocked: a bot check; no_prices_found: the page answered but the price finder found no price (a wrong address, or a layout it misses); page_not_found: a wrong address; save_failed: a bug; connector_error: the page reader failed.",
+      "id": 948,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 351
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_pricing_page_reads_total{job=\"$job\"}[6h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Oldest pricing page read",
+      "description": "Time since a read of the least recently tried pricing page ended. Normal: under a week (pages are read weekly, failures retried the next day). Over nine days alerts: the scheduler or the pricing.read jobs are stuck.",
+      "id": 949,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 351
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_pricing_oldest_read_seconds{job=\"$job\"})",
+          "legendFormat": "oldest",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
       "title": "Review pages stuck failing",
       "description": "Active review pages whose last 3 or more reads failed, same-day retries in a browser included, by platform and error code. Normal: none. blocked means the site shows a bot check even in a browser, not_a_review_page that the site changed its page, save_failed a bug; page_not_found and connector_* are the workspace's to fix and show on its Reviews page.",
       "id": 103,
@@ -5521,7 +5593,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 351
+        "y": 359
       },
       "targets": [
         {
@@ -5567,7 +5639,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 359
+        "y": 367
       },
       "panels": []
     },
@@ -5584,7 +5656,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 360
+        "y": 368
       },
       "targets": [
         {
@@ -5634,7 +5706,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 360
+        "y": 368
       },
       "targets": [
         {
@@ -5680,7 +5752,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 368
+        "y": 376
       },
       "panels": []
     },
@@ -5697,7 +5769,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 369
+        "y": 377
       },
       "targets": [
         {
@@ -5747,7 +5819,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 369
+        "y": 377
       },
       "targets": [
         {
@@ -5797,7 +5869,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 377
+        "y": 385
       },
       "targets": [
         {
@@ -5843,7 +5915,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 385
+        "y": 393
       },
       "panels": []
     },
@@ -5860,7 +5932,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 386
+        "y": 394
       },
       "targets": [
         {
@@ -5910,7 +5982,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 386
+        "y": 394
       },
       "targets": [
         {
@@ -5960,7 +6032,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 394
+        "y": 402
       },
       "targets": [
         {
@@ -6006,7 +6078,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 402
+        "y": 410
       },
       "panels": []
     },
@@ -6023,7 +6095,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 403
+        "y": 411
       },
       "targets": [
         {
@@ -6073,7 +6145,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 403
+        "y": 411
       },
       "targets": [
         {
@@ -6119,7 +6191,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 411
+        "y": 419
       },
       "panels": []
     },
@@ -6136,7 +6208,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 412
+        "y": 420
       },
       "targets": [
         {
@@ -6186,7 +6258,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 420
+        "y": 428
       },
       "targets": [
         {
@@ -6236,7 +6308,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 420
+        "y": 428
       },
       "targets": [
         {
@@ -6286,7 +6358,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 428
+        "y": 436
       },
       "targets": [
         {
@@ -6336,7 +6408,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 428
+        "y": 436
       },
       "targets": [
         {
@@ -6386,7 +6458,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 428
+        "y": 436
       },
       "targets": [
         {
@@ -6436,7 +6508,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 436
+        "y": 444
       },
       "targets": [
         {
@@ -6486,7 +6558,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 436
+        "y": 444
       },
       "targets": [
         {
@@ -6531,7 +6603,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 444
+        "y": 452
       },
       "collapsed": false,
       "panels": []
@@ -6549,7 +6621,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 445
+        "y": 453
       },
       "targets": [
         {
@@ -6599,7 +6671,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 445
+        "y": 453
       },
       "targets": [
         {
@@ -6658,7 +6730,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 453
+        "y": 461
       },
       "targets": [
         {
@@ -6708,7 +6780,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 453
+        "y": 461
       },
       "targets": [
         {
@@ -6767,7 +6839,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 461
+        "y": 469
       },
       "targets": [
         {
@@ -6817,7 +6889,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 461
+        "y": 469
       },
       "targets": [
         {
@@ -6881,7 +6953,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 469
+        "y": 477
       },
       "panels": []
     },
@@ -6898,7 +6970,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 470
+        "y": 478
       },
       "targets": [
         {
@@ -6951,7 +7023,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 470
+        "y": 478
       },
       "targets": [
         {
@@ -7004,7 +7076,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 478
+        "y": 486
       },
       "targets": [
         {
@@ -7057,7 +7129,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 478
+        "y": 486
       },
       "targets": [
         {
@@ -7107,7 +7179,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 486
+        "y": 494
       },
       "targets": [
         {
@@ -7160,7 +7232,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 486
+        "y": 494
       },
       "targets": [
         {
@@ -7213,7 +7285,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 494
+        "y": 502
       },
       "targets": [
         {
@@ -7261,7 +7333,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 502
+        "y": 510
       },
       "collapsed": false,
       "panels": []
@@ -7279,7 +7351,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 503
+        "y": 511
       },
       "targets": [
         {
@@ -7332,7 +7404,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 503
+        "y": 511
       },
       "targets": [
         {
@@ -7373,7 +7445,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 511
+        "y": 519
       },
       "panels": []
     },
@@ -7390,7 +7462,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 512
+        "y": 520
       },
       "targets": [
         {
@@ -7443,7 +7515,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 512
+        "y": 520
       },
       "targets": [
         {
@@ -7492,7 +7564,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 520
+        "y": 528
       },
       "panels": []
     },
@@ -7509,7 +7581,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 521
+        "y": 529
       },
       "targets": [
         {
@@ -7562,7 +7634,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 521
+        "y": 529
       },
       "targets": [
         {
@@ -7611,7 +7683,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 529
+        "y": 537
       },
       "panels": []
     },
@@ -7628,7 +7700,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 530
+        "y": 538
       },
       "targets": [
         {
@@ -7681,7 +7753,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 530
+        "y": 538
       },
       "targets": [
         {
@@ -7738,7 +7810,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 538
+        "y": 546
       },
       "id": 187,
       "panels": []
@@ -7756,7 +7828,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 539
+        "y": 547
       },
       "targets": [
         {
@@ -7805,7 +7877,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 539
+        "y": 547
       },
       "targets": [
         {
@@ -7854,7 +7926,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 547
+        "y": 555
       },
       "targets": [
         {
@@ -7903,7 +7975,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 547
+        "y": 555
       },
       "targets": [
         {
@@ -7952,7 +8024,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 555
+        "y": 563
       },
       "targets": [
         {
@@ -7997,7 +8069,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 563
+        "y": 571
       },
       "panels": []
     },
@@ -8014,7 +8086,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 564
+        "y": 572
       },
       "targets": [
         {
@@ -8059,7 +8131,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 564
+        "y": 572
       },
       "targets": [
         {
@@ -8104,7 +8176,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 572
+        "y": 580
       },
       "targets": [
         {
@@ -8156,7 +8228,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 580,
+        "y": 588,
         "w": 12,
         "h": 8
       },
@@ -8217,7 +8289,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 588
+        "y": 596
       },
       "panels": []
     },
@@ -8234,7 +8306,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 589
+        "y": 597
       },
       "targets": [
         {
@@ -8287,7 +8359,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 589
+        "y": 597
       },
       "targets": [
         {
@@ -8340,7 +8412,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 597
+        "y": 605
       },
       "targets": [
         {
@@ -8402,7 +8474,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 597
+        "y": 605
       },
       "targets": [
         {
@@ -8464,7 +8536,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 666
+        "y": 674
       },
       "targets": [
         {
@@ -8517,7 +8589,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 666
+        "y": 674
       },
       "targets": [
         {
@@ -8570,7 +8642,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 674
+        "y": 682
       },
       "targets": [
         {
@@ -8623,7 +8695,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 674
+        "y": 682
       },
       "targets": [
         {
@@ -8671,7 +8743,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 605
+        "y": 613
       },
       "id": 191,
       "panels": []
@@ -8689,7 +8761,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 606
+        "y": 614
       },
       "targets": [
         {
@@ -8738,7 +8810,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 606
+        "y": 614
       },
       "targets": [
         {
@@ -8787,7 +8859,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 614
+        "y": 622
       },
       "targets": [
         {
@@ -8832,7 +8904,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 622
+        "y": 630
       },
       "panels": []
     },
@@ -8849,7 +8921,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 623
+        "y": 631
       },
       "targets": [
         {
@@ -8902,7 +8974,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 623
+        "y": 631
       },
       "targets": [
         {
@@ -8960,7 +9032,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 631
+        "y": 639
       },
       "panels": []
     },
@@ -8977,7 +9049,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 632
+        "y": 640
       },
       "targets": [
         {
@@ -9026,7 +9098,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 632
+        "y": 640
       },
       "targets": [
         {
@@ -9071,7 +9143,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 682
+        "y": 690
       },
       "panels": []
     },
@@ -9088,7 +9160,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 683
+        "y": 691
       },
       "targets": [
         {
@@ -9150,7 +9222,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 683
+        "y": 691
       },
       "targets": [
         {
@@ -9203,7 +9275,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 691
+        "y": 699
       },
       "targets": [
         {
@@ -9265,7 +9337,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 691
+        "y": 699
       },
       "targets": [
         {
@@ -9327,7 +9399,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 699
+        "y": 707
       },
       "targets": [
         {
@@ -9384,7 +9456,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 707
+        "y": 715
       },
       "id": 195,
       "panels": []
@@ -9402,7 +9474,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 708
+        "y": 716
       },
       "targets": [
         {
@@ -9447,7 +9519,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 716
+        "y": 724
       },
       "panels": []
     },
@@ -9464,7 +9536,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 717
+        "y": 725
       },
       "targets": [
         {
@@ -9518,7 +9590,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 717
+        "y": 725
       },
       "targets": [
         {
@@ -9572,7 +9644,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 725
+        "y": 733
       },
       "targets": [
         {
@@ -9634,7 +9706,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 725
+        "y": 733
       },
       "targets": [
         {
@@ -9722,7 +9794,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 733
+        "y": 741
       },
       "targets": [
         {
@@ -9775,7 +9847,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 733
+        "y": 741
       },
       "targets": [
         {
@@ -9828,7 +9900,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 741
+        "y": 749
       },
       "targets": [
         {
@@ -9887,7 +9959,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 749
+        "y": 757
       }
     },
     {
@@ -9903,7 +9975,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 750
+        "y": 758
       },
       "targets": [
         {
@@ -9942,7 +10014,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 750
+        "y": 758
       },
       "targets": [
         {
@@ -9981,7 +10053,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 750
+        "y": 758
       },
       "targets": [
         {
@@ -10016,7 +10088,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 758
+        "y": 766
       },
       "datasource": {
         "type": "prometheus",
@@ -10039,7 +10111,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 758
+        "y": 766
       },
       "datasource": {
         "type": "prometheus",
@@ -10047,7 +10119,7 @@
       },
       "targets": [
         {
-          "expr": "max(outflare_jobs_oldest_due_seconds{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan)\"})",
+          "expr": "max(outflare_jobs_oldest_due_seconds{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan|opportunities_refresh)\"})",
           "refId": "A",
           "legendFormat": "{{health}}{{outcome}}"
         }
@@ -10062,7 +10134,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 758
+        "y": 766
       },
       "datasource": {
         "type": "prometheus",
@@ -10070,7 +10142,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan)\",outcome=~\"retried|dead\"}[5m]))",
+          "expr": "sum by (outcome) (rate(outflare_jobs_processed_total{kind=~\"coverage[.](check|review|extract|discover|search|competitor_scan|opportunities_refresh)\",outcome=~\"retried|dead\"}[5m]))",
           "refId": "A",
           "legendFormat": "{{health}}{{outcome}}"
         }
@@ -10085,7 +10157,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 766
+        "y": 774
       },
       "datasource": {
         "type": "prometheus",
@@ -10113,7 +10185,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 766
+        "y": 774
       },
       "datasource": {
         "type": "prometheus",
@@ -10151,7 +10223,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 774
+        "y": 782
       },
       "datasource": {
         "type": "prometheus",
@@ -10178,7 +10250,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 782
+        "y": 790
       },
       "targets": [
         {
@@ -10240,7 +10312,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 774
+        "y": 782
       },
       "targets": [
         {
@@ -10296,7 +10368,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 0,
-        "y": 790,
+        "y": 798,
         "w": 12,
         "h": 8
       },
@@ -10319,7 +10391,7 @@
       "type": "timeseries",
       "gridPos": {
         "x": 12,
-        "y": 782,
+        "y": 790,
         "w": 12,
         "h": 8
       },
@@ -10348,7 +10420,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 798
+        "y": 806
       },
       "targets": [
         {
@@ -10410,7 +10482,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 790
+        "y": 798
       },
       "targets": [
         {
@@ -10460,7 +10532,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 806
+        "y": 814
       }
     },
     {
@@ -10476,7 +10548,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 807
+        "y": 815
       },
       "targets": [
         {
@@ -10522,7 +10594,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 815
+        "y": 823
       }
     },
     {
@@ -10538,7 +10610,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 816
+        "y": 824
       },
       "targets": [
         {
@@ -10591,7 +10663,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 816
+        "y": 824
       },
       "targets": [
         {
@@ -10641,7 +10713,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 824
+        "y": 832
       }
     },
     {
@@ -10657,7 +10729,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 825
+        "y": 833
       },
       "targets": [
         {
@@ -10710,7 +10782,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 825
+        "y": 833
       },
       "targets": [
         {
@@ -10759,7 +10831,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 833
+        "y": 841
       },
       "targets": [
         {
@@ -10778,7 +10850,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 841
+        "y": 849
       },
       "panels": []
     },
@@ -10795,7 +10867,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 842
+        "y": 850
       },
       "targets": [
         {
@@ -10848,7 +10920,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 842
+        "y": 850
       },
       "targets": [
         {
@@ -10910,7 +10982,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 850
+        "y": 858
       },
       "targets": [
         {
@@ -10972,7 +11044,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 850
+        "y": 858
       },
       "targets": [
         {
@@ -11021,7 +11093,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 858
+        "y": 866
       },
       "panels": []
     },
@@ -11038,7 +11110,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 859
+        "y": 867
       },
       "targets": [
         {
@@ -11087,7 +11159,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 859
+        "y": 867
       },
       "targets": [
         {
@@ -11136,7 +11208,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 867
+        "y": 875
       },
       "targets": [
         {
@@ -11185,7 +11257,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 867
+        "y": 875
       },
       "targets": [
         {
@@ -11236,7 +11308,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 875
+        "y": 883
       }
     },
     {
@@ -11252,7 +11324,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 876
+        "y": 884
       },
       "targets": [
         {
@@ -11305,7 +11377,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 876
+        "y": 884
       },
       "targets": [
         {
@@ -11358,7 +11430,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 884
+        "y": 892
       },
       "targets": [
         {
@@ -11411,7 +11483,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 884
+        "y": 892
       },
       "targets": [
         {
@@ -11464,7 +11536,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 892
+        "y": 900
       },
       "targets": [
         {
@@ -11517,7 +11589,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 892
+        "y": 900
       },
       "targets": [
         {
@@ -11575,7 +11647,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 900
+        "y": 908
       },
       "panels": []
     },
@@ -11592,7 +11664,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 901
+        "y": 909
       },
       "targets": [
         {
@@ -11641,7 +11713,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 901
+        "y": 909
       },
       "targets": [
         {
@@ -11686,7 +11758,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 909
+        "y": 917
       },
       "panels": []
     },
@@ -11703,7 +11775,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 910
+        "y": 918
       },
       "targets": [
         {
@@ -11749,7 +11821,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 910
+        "y": 918
       },
       "targets": [
         {
@@ -11809,7 +11881,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 918
+        "y": 926
       },
       "panels": []
     },
@@ -11826,7 +11898,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 919
+        "y": 927
       },
       "targets": [
         {
@@ -11879,7 +11951,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 919
+        "y": 927
       },
       "targets": [
         {
@@ -11928,7 +12000,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 927
+        "y": 935
       },
       "panels": []
     },
@@ -11945,7 +12017,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 928
+        "y": 936
       },
       "targets": [
         {
@@ -11998,7 +12070,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 928
+        "y": 936
       },
       "targets": [
         {
@@ -12060,7 +12132,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 936
+        "y": 944
       },
       "targets": [
         {
@@ -12131,7 +12203,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 936
+        "y": 944
       },
       "targets": [
         {
@@ -12189,7 +12261,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 944
+        "y": 952
       },
       "panels": []
     },
@@ -12206,7 +12278,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 945
+        "y": 953
       },
       "targets": [
         {
@@ -12259,7 +12331,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 945
+        "y": 953
       },
       "targets": [
         {
@@ -12312,7 +12384,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 954
+        "y": 962
       },
       "targets": [
         {
@@ -12379,7 +12451,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 953
+        "y": 961
       },
       "panels": []
     },
@@ -12396,7 +12468,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 962
+        "y": 970
       },
       "targets": [
         {
@@ -12449,7 +12521,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 954
+        "y": 962
       },
       "targets": [
         {
@@ -12507,7 +12579,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 970
+        "y": 978
       }
     },
     {
@@ -12523,7 +12595,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 971
+        "y": 979
       },
       "targets": [
         {
@@ -12576,7 +12648,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 971
+        "y": 979
       },
       "targets": [
         {
@@ -12625,7 +12697,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 979
+        "y": 987
       },
       "panels": []
     },
@@ -12642,7 +12714,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 980
+        "y": 988
       },
       "targets": [
         {
@@ -12684,7 +12756,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 980
+        "y": 988
       },
       "targets": [
         {
@@ -12731,7 +12803,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 988
+        "y": 996
       },
       "panels": []
     },
@@ -12748,7 +12820,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 989
+        "y": 997
       },
       "targets": [
         {
@@ -12790,7 +12862,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 989
+        "y": 997
       },
       "targets": [
         {
@@ -12837,7 +12909,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 997
+        "y": 1005
       }
     },
     {
@@ -12853,7 +12925,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 998
+        "y": 1006
       },
       "targets": [
         {
@@ -12906,7 +12978,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 998
+        "y": 1006
       },
       "targets": [
         {
@@ -12959,7 +13031,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1006
+        "y": 1014
       },
       "targets": [
         {
@@ -13021,7 +13093,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1006
+        "y": 1014
       },
       "targets": [
         {
@@ -13070,7 +13142,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1014
+        "y": 1022
       }
     },
     {
@@ -13086,7 +13158,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 1015
+        "y": 1023
       },
       "targets": [
         {
@@ -13139,7 +13211,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 1015
+        "y": 1023
       },
       "targets": [
         {
@@ -13186,7 +13258,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 1015
+        "y": 1023
       },
       "targets": [
         {
@@ -13239,7 +13311,7 @@
         "h": 8,
         "w": 16,
         "x": 0,
-        "y": 1023
+        "y": 1031
       },
       "targets": [
         {
@@ -13292,7 +13364,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 1023
+        "y": 1031
       },
       "targets": [
         {
@@ -13341,7 +13413,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1031
+        "y": 1039
       },
       "panels": []
     },
@@ -13358,7 +13430,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1032
+        "y": 1040
       },
       "targets": [
         {
@@ -13404,7 +13476,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1040
+        "y": 1048
       },
       "panels": []
     },
@@ -13421,7 +13493,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 1041
+        "y": 1049
       },
       "targets": [
         {
@@ -13471,7 +13543,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 1041
+        "y": 1049
       },
       "targets": [
         {
@@ -13521,7 +13593,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 1041
+        "y": 1049
       },
       "targets": [
         {
@@ -13567,7 +13639,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1049
+        "y": 1057
       },
       "panels": []
     },
@@ -13584,7 +13656,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1050
+        "y": 1058
       },
       "targets": [
         {
@@ -13629,7 +13701,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1050
+        "y": 1058
       },
       "targets": [
         {
@@ -13683,7 +13755,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1058
+        "y": 1066
       },
       "targets": [
         {
@@ -13733,7 +13805,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1058
+        "y": 1066
       },
       "targets": [
         {
@@ -13779,7 +13851,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 1066
+        "y": 1074
       },
       "panels": []
     },
@@ -13796,7 +13868,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1067
+        "y": 1075
       },
       "targets": [
         {
@@ -13817,6 +13889,219 @@
             "stacking": {
               "mode": "normal"
             }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "AI visibility (ChatGPT and Gemini screens, on workspaces' own answer readers)",
+      "id": 944,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1083
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "AI screen answers, by engine and outcome",
+      "description": "Answers AI visibility runs read from ChatGPT's and Gemini's own screens through workspaces' own DataForSEO (LLM Scraper), per hour. Normal: mostly done, some budget_reached. connector_unavailable rising means the scraper is failing or changed (alert OutflareAIScreenAnswersFailing): check ai_sample.failed events with provider dataforseo.",
+      "id": 945,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1084
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (engine, outcome) (rate(outflare_ai_visibility_screen_answers_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{engine}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI visibility question drafts, by outcome",
+      "description": "Drafts of AI visibility questions by workspaces' own AI, per hour. Normal: mostly success. ai_failed rising means the AI's answers don't parse or its provider fails: check ai_prompt.draft_failed events by error code.",
+      "id": 939,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1084
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ai_visibility_prompt_drafts_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI visibility demand reads, by kind and outcome",
+      "description": "Reads of what people ask AI assistants (real questions from DataForSEO's LLM Mentions, AI search volume from its AI keyword data) through workspaces' own connections, per hour. Normal: mostly done; budget_reached is a workspace's own limit. Other outcomes rising mean DataForSEO is failing or changed: check ai_prompt.demand_failed events.",
+      "id": 946,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1092
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, outcome) (rate(outflare_ai_visibility_demand_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{kind}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "AI visibility stance reads, by outcome",
+      "description": "AI visibility answers read by workspaces' own AI for whether they recommend, list or warn against each brand, per hour. Normal: mostly judged or skipped. ai_failed rising means the reader's answers don't parse: check ai_stance.failed events.",
+      "id": 947,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1092
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ai_visibility_stance_reads_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "fillOpacity": 10
           }
         },
         "overrides": []

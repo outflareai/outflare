@@ -85,7 +85,7 @@ type Mailbox struct {
 	Email  string
 	Domain string
 	PoolID string
-	// BrandID is the brand that owns the mailbox, or "" when shared.
+	// BrandID is the brand that owns the mailbox, or "" when unassigned.
 	BrandID    string
 	DailyLimit int
 	// NotReady is why the mailbox cannot be given new work, or "".
@@ -460,10 +460,11 @@ func (p *planner) eligible(m *Mailbox, s *Sequence) (bool, string) {
 	return true, ""
 }
 
-// brandAllows reports whether m may serve s: a brand's mailbox serves only
-// that brand's sequences; a shared one serves any.
+// brandAllows reports whether m may serve s: a mailbox serves only its own
+// brand's sequences, and one in no brand (unassigned) serves none (every
+// sequence has a brand).
 func brandAllows(m *Mailbox, s *Sequence) bool {
-	return m.BrandID == "" || m.BrandID == s.BrandID
+	return m.BrandID == s.BrandID
 }
 
 // route is the link m would send in for s, "" for Outflare itself, and

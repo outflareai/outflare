@@ -19,14 +19,15 @@ func (DataForSEO) Definition() c.Definition {
 	d := def("dataforseo", "DataForSEO", "https://dataforseo.com", "https://docs.dataforseo.com/v3/",
 		"https://app.dataforseo.com/api-access",
 		"Keyword rankings, rank tracking, estimated search traffic, competitors and backlinks for any domain, paid per call.",
-		"Uses DataForSEO Labs for rankings, traffic and competitors, the SERP API to track where your pages rank on Google, and the Backlinks API for links (a separate DataForSEO subscription; without it the overview skips links). "+
+		"Uses DataForSEO Labs for rankings, traffic and competitors, the SERP API to track where your pages rank on Google, the LLM Scraper to read what ChatGPT and Gemini answer for AI visibility, and the Backlinks API for links (a separate DataForSEO subscription; without it the overview skips links). "+
 			"Every call's cost comes back from DataForSEO and is recorded in Outcomes; a monthly budget on the connection stops calls before they go over.",
 		"Pay per call, about $0.01 to $0.05 a report", []c.Field{
 			{Name: "login", Label: "API login", Help: "DataForSEO dashboard > API Access. Usually your account email."},
 			{Name: "password", Label: "API password", Secret: true, Help: "DataForSEO dashboard > API Access > API password (not your account password)."},
 		})
-	// The SERP API reads Google's results for rank tracking.
-	d.Capabilities = append(d.Capabilities, c.CapSERP)
+	// The SERP API reads Google's results for rank tracking; the LLM
+	// Scraper reads ChatGPT's and Gemini's answers for AI visibility.
+	d.Capabilities = append(d.Capabilities, c.CapSERP, c.CapAIAnswers, c.CapAIDemand)
 	return d
 }
 
@@ -239,6 +240,14 @@ func (d DataForSEO) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, 
 		if q.Since != "" {
 			task["backlinks_status_type"] = "all"
 			task["filters"] = []any{"last_seen", ">=", q.Since + " 00:00:00 +00:00"}
+		}
+		if q.From != "" {
+			from := []any{[]any{"domain_from", "=", q.From}, "or", []any{"domain_from", "like", "%." + q.From}}
+			if f, ok := task["filters"]; ok {
+				task["filters"] = []any{f, "and", from}
+			} else {
+				task["filters"] = from
+			}
 		}
 		if err := d.call(ctx, cl, creds, "/v3/backlinks/backlinks/live", task, &resp, &rep.Cost); err != nil {
 			return rep, err

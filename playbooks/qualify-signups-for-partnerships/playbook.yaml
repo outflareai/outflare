@@ -42,7 +42,7 @@ steps:
   - say: Read the brand context and confirm the sign-up event and available customer data.
     tools: [getBrandContext, listEventDefinitions]
   - say: Read sign-up events in the requested window and resolve their existing people and companies; deduplicate by record ID.
-    tools: [listCustomerEvents, getRecord]
+    tools: [listBrandCustomerEvents, getBrandRecord]
   - say: Research relevant public business websites and profiles linked to those records; cite source URLs and dates, and record unresolved identity matches as unknown.
     tools: []
   - say: "Evaluate affiliate fit from relevant websites, blogs, newsletters and comparison sites; creator fit from linked social profiles and YouTube channels; SDK and bandwidth supplier fit from owned apps and distribution; integration fit from complementary software; and reseller or agency fit from customer overlap. Score each route separately as high, medium, low or unknown. One signup may fit several routes."

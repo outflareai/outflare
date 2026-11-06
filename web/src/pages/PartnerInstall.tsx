@@ -41,11 +41,12 @@ export function PartnerInstall({ ws, program: p }: { ws: string; program: Partne
   const [way, setWay] = useState<Way>("html");
   const [call, setCall] = useState<Call>("curl");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/site-keys", { params: { path: { ws } } }).then(({ data }) => setKeys(data?.data ?? []));
-  }, [ws]);
-  // The program's brand's site, else the first.
-  const key = keys?.find((k) => p.brand_id && k.brand_id === p.brand_id) ?? keys?.[0];
-  const base = `${location.origin}/v1/workspaces/${ws}/partner-conversions`;
+    if (!p.brand_id) return setKeys([]);
+    api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: p.brand_id } } }).then(({ data }) => setKeys(data?.data ?? []));
+  }, [ws, p.brand_id]);
+  // The program's brand's site.
+  const key = keys?.[0];
+  const base = `${location.origin}/v1/brands/${p.brand_id}/partner-conversions`;
   const calls: Record<Call, string> = {
     curl: `# When someone signs up (a token with the partners.conversions scope)\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "signup", "program": "${p.slug}", "customer_id": "user_123", "email": "ana@example.com", "anonymous_id": "<outflare.anonymousId() from the page>"}'\n\n# When they pay, and again on every renewal; a refund names the sale\ncurl ${base} \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \\\n  -d '{"type": "sale", "program": "${p.slug}", "customer_id": "user_123", "amount_cents": 4900, "currency": "${p.currency}", "external_id": "inv_1001"}'`,
     node: `// When someone signs up, and when they pay (amounts in cents)\nawait fetch("${base}", {\n  method: "POST",\n  headers: { Authorization: \`Bearer \${process.env.OUTFLARE_TOKEN}\`, "Content-Type": "application/json" },\n  body: JSON.stringify({ type: "sale", program: "${p.slug}", customer_id: user.id, amount_cents: 4900, currency: "${p.currency}", external_id: invoice.id }),\n});`,

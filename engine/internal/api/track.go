@@ -375,6 +375,9 @@ func operationFor(method, route string) string {
 			return id
 		}
 	}
+	if op, ok := retiredOps[route]; ok {
+		return op
+	}
 	return route
 }
 
@@ -431,4 +434,60 @@ func accountVia(ctx context.Context) string {
 func emitUser(ctx context.Context, name, userID string, props map[string]any) {
 	track.Emit(ctx, track.Event{Name: name, UserID: userID, ActorType: "human", RequestID: RequestID(ctx), Props: props,
 		AnonymousID: visitorID(ctx)})
+}
+
+// opSummary is one operation of api/openapi.yaml: its method, its path
+// template split into segments, and its summary.
+type opSummary struct {
+	method  string
+	segs    []string
+	summary string
+}
+
+var opSummaries = func() []opSummary {
+	var doc struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	var list []opSummary
+	if yaml.Unmarshal(spec.OpenAPI, &doc) != nil {
+		return list
+	}
+	for path, item := range doc.Paths {
+		for method, op := range item {
+			if op, ok := op.(map[string]any); ok {
+				if s, ok := op["summary"].(string); ok && s != "" {
+					list = append(list, opSummary{strings.ToUpper(method), strings.Split(strings.Trim(path, "/"), "/"), s})
+				}
+			}
+		}
+	}
+	return list
+}()
+
+// specSummary is the summary of the operation a concrete path calls
+// ("POST /v1/workspaces/<id>/memories" is "Remember something"), the one
+// with the most fixed segments when several templates match; "" for none.
+func specSummary(method, path string) string {
+	segs := strings.Split(strings.Trim(path, "/"), "/")
+	best, most := "", -1
+	for _, o := range opSummaries {
+		if o.method != method || len(o.segs) != len(segs) {
+			continue
+		}
+		fixed, ok := 0, true
+		for i, s := range o.segs {
+			if strings.HasPrefix(s, "{") {
+				continue
+			}
+			if s != segs[i] {
+				ok = false
+				break
+			}
+			fixed++
+		}
+		if ok && fixed > most {
+			best, most = o.summary, fixed
+		}
+	}
+	return best
 }

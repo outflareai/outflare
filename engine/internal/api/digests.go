@@ -13,20 +13,22 @@ import (
 	"github.com/outflareai/outflare/engine/internal/digests"
 )
 
-// Digests: a daily or weekly summary of the whole workspace (package
-// digests), kept here, sent as the digest.ready webhook and, when the
-// workspace picks its own email provider, emailed to its members. A digest
-// covers every brand, so brand-limited callers can't reach these routes.
+// Digests: a daily or weekly summary of one brand (package digests), kept
+// here, sent as the digest.ready webhook and, when the brand picks its
+// email provider, emailed to the members who see the brand. Each brand has
+// its own settings and digests under /v1/brands/{brand}/; the workspace
+// routes are deprecated and act on ?brand= or the first brand. Turning the
+// digest email off is the member's, for every brand.
 
 func (s *Server) routesDigests(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeWorkspaceManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/digest-settings", s.inWorkspace(read, s.getDigestSettings))
-	mux.HandleFunc("PUT /v1/workspaces/{ws}/digest-settings", s.inWorkspace(manage, s.putDigestSettings))
+	s.twinRoute(mux, "GET", "digest-settings", s.inWorkspace, read, s.getDigestSettings)
+	s.twinRoute(mux, "PUT", "digest-settings", s.inWorkspace, manage, s.putDigestSettings)
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/digest-settings/me", s.inWorkspace(read, s.putMyDigest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/digests", s.inWorkspace(read, s.listDigests))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/digests", s.inWorkspace(manage, s.requestDigest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/digests/preview", s.inWorkspace(read, s.previewDigest))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/digests/{id}", s.inWorkspace(read, s.getDigest))
+	s.twinRoute(mux, "GET", "digests", s.inWorkspace, read, s.listDigests)
+	s.twinRoute(mux, "POST", "digests", s.inWorkspace, manage, s.requestDigest)
+	s.twinRoute(mux, "GET", "digests/preview", s.inWorkspace, read, s.previewDigest)
+	s.twinRoute(mux, "GET", "digests/{id}", s.inWorkspace, read, s.getDigest)
 }
 
 type digestSettingsView struct {
@@ -54,9 +56,9 @@ func digestUser(a *access) string {
 	return a.TokenOwnerID
 }
 
-func (s *Server) digestSettings(r *http.Request, a *access) (digestSettingsView, error) {
+func (s *Server) digestSettings(r *http.Request, a *access, brand string) (digestSettingsView, error) {
 	ctx := r.Context()
-	set, err := digests.Load(ctx, s.pool, a.WorkspaceID)
+	set, err := digests.Load(ctx, s.pool, a.WorkspaceID, brand)
 	if err != nil {
 		return digestSettingsView{}, err
 	}
@@ -68,7 +70,7 @@ func (s *Server) digestSettings(r *http.Request, a *access) (digestSettingsView,
 	if why != "" {
 		v.EmailProblem = &why
 	}
-	to, err := digests.Recipients(ctx, s.pool, a.WorkspaceID, set.Recipients)
+	to, err := digests.Recipients(ctx, s.pool, a.WorkspaceID, brand, set.Recipients)
 	if err != nil {
 		return v, err
 	}
@@ -89,7 +91,11 @@ func (s *Server) digestSettings(r *http.Request, a *access) (digestSettingsView,
 }
 
 func (s *Server) getDigestSettings(w http.ResponseWriter, r *http.Request) {
-	v, err := s.digestSettings(r, accessFrom(r.Context()))
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.digestSettings(r, accessFrom(r.Context()), brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -112,7 +118,11 @@ func (s *Server) putDigestSettings(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	set, err := digests.Load(ctx, s.pool, a.WorkspaceID)
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	set, err := digests.Load(ctx, s.pool, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -181,24 +191,23 @@ func (s *Server) putDigestSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// Insert without naming a key, then update: the per-workspace key
-		// gives way to one per brand in the next contract step.
+		// One row per brand: insert it if it is new, then update it.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO digest_settings (workspace_id, frequency, weekday, hour, timezone, recipients, provider_id, from_address, updated_by, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+			INSERT INTO digest_settings (workspace_id, brand_id, frequency, weekday, hour, timezone, recipients, provider_id, from_address, updated_by, updated_at)
+			VALUES ($1, NULLIF($10, '')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, now())
 			ON CONFLICT DO NOTHING`,
-			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID); err != nil {
+			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID, brand); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE digest_settings SET frequency = $2, weekday = $3, hour = $4, timezone = $5, recipients = $6,
 				provider_id = $7, from_address = $8, updated_by = $9, updated_at = now()
-			WHERE workspace_id = $1`,
-			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID); err != nil {
+			WHERE workspace_id = $1 AND brand_id = COALESCE(NULLIF($10, '')::uuid, outflare_first_brand($1))`,
+			a.WorkspaceID, set.Frequency, set.Weekday, set.Hour, set.Timezone, set.Recipients, set.ProviderID, set.FromAddress, a.ActorID, brand); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "digest_settings.updated", "workspace", a.WorkspaceID,
-			map[string]any{"frequency": set.Frequency, "weekday": set.Weekday, "hour": set.Hour, "recipients": set.Recipients,
+			map[string]any{"brand_id": brand, "frequency": set.Frequency, "weekday": set.Weekday, "hour": set.Hour, "recipients": set.Recipients,
 				"emailed": set.Recipients != digests.ToNone})
 	})
 	if err != nil {
@@ -247,21 +256,26 @@ func (s *Server) putMyDigest(w http.ResponseWriter, r *http.Request) {
 	s.getDigestSettings(w, r)
 }
 
-const digestCols = `id::text, frequency, trigger, period_start, period_end, sections, emailed, email_error, created_at`
+const digestCols = `id::text, brand_id::text, frequency, trigger, period_start, period_end, sections, emailed, email_error, created_at`
 
 func scanDigest(row pgx.Row) (digests.Digest, error) {
 	var d digests.Digest
-	err := row.Scan(&d.ID, &d.Frequency, &d.Trigger, &d.PeriodStart, &d.PeriodEnd, &d.Sections, &d.Emailed, &d.EmailError, &d.CreatedAt)
+	err := row.Scan(&d.ID, &d.BrandID, &d.Frequency, &d.Trigger, &d.PeriodStart, &d.PeriodEnd, &d.Sections, &d.Emailed, &d.EmailError, &d.CreatedAt)
 	if d.Sections == nil {
 		d.Sections = []digests.Section{}
 	}
 	return d, err
 }
 
-// listDigests lists the newest 50 digests.
+// listDigests lists the brand's newest 50 digests.
 func (s *Server) listDigests(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	rows, err := s.pool.Query(r.Context(), `SELECT `+digestCols+` FROM digests WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 50`, a.WorkspaceID)
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	rows, err := s.pool.Query(r.Context(), `SELECT `+digestCols+` FROM digests WHERE workspace_id = $1
+		AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($2, '')::uuid, outflare_first_brand($1)) ORDER BY created_at DESC LIMIT 50`, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -282,6 +296,11 @@ func (s *Server) getDigest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if validUUID(id) {
 		d, err := scanDigest(s.pool.QueryRow(r.Context(), `SELECT `+digestCols+` FROM digests WHERE id = $1 AND workspace_id = $2`, id, a.WorkspaceID))
+		// On a brand route, and for a brand-limited caller, only the
+		// brand's own digests are found.
+		if err == nil && !a.sees(d.BrandID) {
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			writeJSON(w, http.StatusOK, d)
 			return
@@ -318,7 +337,15 @@ func (s *Server) previewDigest(w http.ResponseWriter, r *http.Request) {
 	if f == digests.Daily {
 		start = end.AddDate(0, 0, -1)
 	}
-	sections, err := digests.Build(r.Context(), s.pool, a.WorkspaceID, digests.Period{Start: start, End: end})
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	sections := []digests.Section{}
+	var err error
+	if brand != "" {
+		sections, err = digests.Build(r.Context(), s.pool, a.WorkspaceID, brand, digests.Period{Start: start, End: end})
+	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -342,11 +369,15 @@ func (s *Server) requestDigest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "frequency is daily or weekly")
 		return
 	}
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := digests.Request(ctx, tx, a.WorkspaceID, f, a.ActorID, time.Now()); err != nil {
+		if _, err := digests.Request(ctx, tx, a.WorkspaceID, brand, f, a.ActorID, time.Now()); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "digest.requested", "workspace", a.WorkspaceID, map[string]any{"frequency": f})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "digest.requested", "workspace", a.WorkspaceID, map[string]any{"brand_id": brand, "frequency": f})
 	})
 	if err != nil {
 		s.internal(w, r, err)

@@ -120,8 +120,8 @@ export function Activities({
     for (const record of new Set(rows.map((r) => r.record_id))) {
       if (names[record]) continue;
       api
-        .GET("/v1/workspaces/{ws}/records/{record}", {
-          params: { path: { ws, record } },
+        .GET("/v1/brands/{brand}/records/{record}", {
+          params: { path: { brand: brandId, record } },
         })
         .then(({ data }) => {
           if (active && data)

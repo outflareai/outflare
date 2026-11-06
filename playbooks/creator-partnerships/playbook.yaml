@@ -41,17 +41,17 @@ steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
     tools: [getBrandContext, listRecordTypes]
   - say: Look at partnerships already on the board, so nobody is pitched twice.
-    tools: [listRecords]
+    tools: [listBrandRecords]
   - say: Find creators who already cover the topics, starting with people in your own records who create, then the web through your AI app. Add each one as a person with their platforms, audience size and topics, and a partnership at Found.
-    tools: [searchWorkspace, lookupRecords, createRecord, updateRecord]
+    tools: [searchWorkspace, lookupRecords, createBrandRecord, updateBrandRecord]
   - say: Vet each one (recent posts, audience fit, past sponsors) and move them to Vetted or Declined with a one-line reason.
-    tools: [updateRecord]
+    tools: [updateBrandRecord]
   - say: Draft a short, personal pitch for each vetted creator as a sequence, held until a person approves the sends.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Watch for replies and move partnerships to Negotiating or Declined. For each agreed deal, make its own tracked link and promo code, save them on the partnership, and record the fee as spend.
-    tools: [listBrandInbox, updateRecord, createBrandTrackingLink, recordSpend]
+    tools: [listBrandInbox, updateBrandRecord, createBrandTrackingLink, recordSpend]
   - say: When a post goes live, save its link and move it to Live; after two weeks, report visits, sign-ups and cost per sign-up for each, and move it to Measured.
-    tools: [updateRecord, getAnalyticsReport, outcomesReport]
+    tools: [updateBrandRecord, getAnalyticsReport, outcomesReport]
 guardrails:
   - Never send a pitch, accept terms or promise money without a person's approval.
   - Only use contact details a creator publishes for business, and never contact anyone who opted out.

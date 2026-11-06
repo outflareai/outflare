@@ -296,6 +296,8 @@ func (s *Server) onBrand(scope string, next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			a.Brand = brand
+			// The call's log row names the brand its route is on.
+			noteBrand(r.Context(), brand)
 			next(w, r)
 		})(w, r)
 	}
@@ -365,6 +367,11 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 			if len(brands) > 0 && auth.BrandLimitable(a.Scopes) {
 				a.Brands = brands
 			}
+		}
+		// The workspace routes that moved under /v1/brands/{brand}/ answer
+		// 410 for whoever may see the workspace (404 for anyone else).
+		if routeMoved(w, r) {
+			return
 		}
 		if a.Brands != nil && !brandAware {
 			writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)

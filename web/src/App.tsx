@@ -101,7 +101,10 @@ import { Ads } from "./pages/Ads";
 import { Partners } from "./pages/Partners";
 import { Visitors } from "./pages/Visitors";
 import { SEOOverview } from "./pages/SEOOverview";
-import { AIVisibility } from "./pages/AIVisibility";
+import { AIVisibility } from "./pages/ai-visibility/overview";
+import { AIQuestions } from "./pages/ai-visibility/questions";
+import { AIAccuracy, AICompetitors, AISources, AITraffic } from "./pages/ai-visibility/more";
+import { AIVisibilitySettings } from "./pages/ai-visibility/settings";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
 import { Competition } from "./pages/Competition";
@@ -116,6 +119,7 @@ import { ConnectAI } from "./pages/ConnectAI";
 import { Authorize } from "./pages/Authorize";
 import { ConnectComputer } from "./pages/ConnectComputer";
 import { SharedDashboard } from "./pages/SharedDashboard";
+import { SharedAIVisibility } from "./pages/SharedAIVisibility";
 import { setBrand, useBrand } from "@/lib/brand";
 
 const CRMWorkspace = lazy(() => import("./pages/crm/Workspace").then((m) => ({ default: m.CRMWorkspace })));
@@ -130,6 +134,7 @@ type State =
   | { kind: "reset"; token: string }
   | { kind: "verify"; token: string }
   | { kind: "shared"; token: string }
+  | { kind: "sharedAI"; token: string }
   | { kind: "confirm"; email: string; resendAfter: number }
   | { kind: "authorize"; me: Me }
   | { kind: "connectComputer"; me: Me }
@@ -153,7 +158,8 @@ export function App() {
     // Links from account emails, which also work signed out.
     if (location.pathname === "/reset-password" && location.hash.length > 1) return setState({ kind: "reset", token: location.hash.slice(1) });
     if (location.pathname === "/verify-email" && location.hash.length > 1) return setState({ kind: "verify", token: location.hash.slice(1) });
-    // A dashboard's share link opens for anyone, signed in or not.
+    // A dashboard's or a brand's AI visibility share link opens for anyone, signed in or not.
+    if (location.pathname.startsWith("/share/ai/")) return setState({ kind: "sharedAI", token: location.pathname.slice("/share/ai/".length) });
     if (location.pathname.startsWith("/share/")) return setState({ kind: "shared", token: location.pathname.slice("/share/".length) });
     const setup = await api.GET("/v1/setup");
     if (setup.data?.needed) return setState({ kind: "setup" });
@@ -205,6 +211,13 @@ export function App() {
       return (
         <>
           <SharedDashboard token={state.token} />
+          <ToastHost />
+        </>
+      );
+    case "sharedAI":
+      return (
+        <>
+          <SharedAIVisibility token={state.token} />
           <ToastHost />
         </>
       );
@@ -662,7 +675,13 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "audits" && <SiteAudits key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(s) => setItem(s || undefined)} go={setTab} />}
         {ready && ws && tab === "search-insights" && <SearchDashboard key={ws.id} ws={ws.id} go={setTab} initialSite={item} canManage={can("seo.manage")} />}
         {ready && ws && tab === "keywords" && <Keywords key={ws.id} ws={ws.id} go={setTab} canManage={can("seo.manage")} />}
-        {ready && ws && tab === "ai-visibility" && <AIVisibility key={ws.id} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-visibility" && <AIVisibility key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
+        {ready && ws && tab === "ai-questions" && <AIQuestions key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
+        {ready && ws && tab === "ai-competitors" && <AICompetitors key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-sources" && <AISources key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-perception" && <AIAccuracy key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-traffic" && <AITraffic key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-visibility-settings" && <AIVisibilitySettings key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "fixes" && <Fixes key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "backlinks" && <Backlinks key={ws.id} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "competition" && <Competition key={ws.id} ws={ws.id} go={setTab} item={item} />}

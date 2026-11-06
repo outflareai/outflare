@@ -541,7 +541,7 @@ Above the map, **What needs a look** lists:
 - **Journeys that never start:** a live journey whose trigger event
   hasn't happened in 30 days.
 
-`GET /v1/workspaces/{ws}/automation-map` (MCP `get_automation_map`)
+`GET /v1/brands/{brand}/automation-map` (MCP `get_automation_map`)
 returns the same graph, so an agent can explain a workspace's automations
 before changing them; `?record=` marks what one person reached. It needs `emails.read` and `customers.read`.
 

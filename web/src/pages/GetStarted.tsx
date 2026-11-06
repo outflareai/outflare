@@ -466,11 +466,6 @@ function BrandStep({ ws, wsName, done, onDone, go }: { ws: string; wsName: strin
       return setError(errorMessage(error));
     }
     if (about.trim()) await api.PATCH("/v1/workspaces/{ws}/brands/{brand}/context", { params: { path: { ws, brand: data.id } }, body: { about: about.trim() } });
-    const ctx = await api.GET("/v1/workspaces/{ws}/context", path);
-    const c = ctx.data?.context;
-    if (c && (!c.company || !c.website)) {
-      await api.PATCH("/v1/workspaces/{ws}/context", { ...path, body: { ...(!c.company ? { company: data.name } : {}), ...(!c.website && data.website ? { website: data.website } : {}) } });
-    }
     setBusy(false);
     toast(`${data.name} added.`);
     onDone();

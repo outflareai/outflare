@@ -15,7 +15,7 @@ Facts in a body come from the brand's context and the knowledge base ([knowledge
 
 ## Delivering to your own site
 
-Outflare doesn't need access to a site's code or CMS. A brand adds a webhook endpoint for `content.*` events (Settings, Webhooks, or `POST /v1/workspaces/{ws}/webhooks`). When a person approves an item, the `content.approved` webhook sends that endpoint the whole item. The receiver can be the site's own code, an automation tool (Zapier, Make, n8n), or a coding agent, and it puts the page in place under the site's own review. Then it reports the live address back with `POST /v1/brands/{brand}/content/{id}/delivered` (MCP: `deliver_content`, scope `content.manage`). The item becomes `published` at that address, and Outflare starts measuring it.
+Outflare doesn't need access to a site's code or CMS. A brand adds a webhook endpoint for `content.*` events (Settings, Webhooks, or `POST /v1/brands/{brand}/webhooks`). When a person approves an item, the `content.approved` webhook sends that endpoint the whole item. The receiver can be the site's own code, an automation tool (Zapier, Make, n8n), or a coding agent, and it puts the page in place under the site's own review. Then it reports the live address back with `POST /v1/brands/{brand}/content/{id}/delivered` (MCP: `deliver_content`, scope `content.manage`). The item becomes `published` at that address, and Outflare starts measuring it.
 
 The webhook's `data` holds:
 

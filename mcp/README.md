@@ -69,11 +69,12 @@ Agents forget everything between chats, and different clients share nothing. Out
 
 | Tool | What |
 | --- | --- |
-| `get_context` | Call first in every conversation. The company context (company, website, what they do, goals, voice, rules, notes, how the brands relate), pinned and recent memories, the brands, the status with blockers, and the getting-started steps. `context.missing` says what to ask for, once. Pass `brand` to add that brand's context and memories on top |
-| `update_context` | Save the company context; send the `version` you read |
+| `get_context` | Call first in every conversation. One brand's context (its name, website, what it does, goals, voice, rules, notes), its pinned and recent memories, the other brands, the status with blockers, and the getting-started steps. Each brand's context is its own; pass `brand`, or it is the workspace's first brand's. `context.missing` says what to ask for, once |
+| `update_context` | Save a brand's context ("About your company"); pass `brand` and send the `version` you read |
 | `list_brands` | The brands the company markets, each with its website, domains, platforms and what it owns. Empty for a one-brand company |
 | `list_brand_link_suggestions` | Links found on a brand's website waiting for a decision, and the common places it has no link for yet |
 | `get_brand_context`, `update_brand_context` | Read or save what is true for one brand: about, audience, goals, voice, rules (added to the company's) and notes |
+| `read_brand_website`, `update_brand_knowledge` | Read the brand's website through your own Geonode connection and have your own AI model write what it offers (products, services, features, integrations, capabilities, who it serves, use cases, each with its page), then edit it |
 | `remember` | Save one lasting fact, preference or decision in a sentence. Never transcripts |
 | `list_memories` | Search memories before asking something the person may have said before |
 | `update_memory`, `forget` | Correct or delete a memory |
@@ -184,7 +185,7 @@ Read (always available):
 | `list_enrollments` | The leads in a sequence and where each one is |
 | `list_messages` | Every send attempt, including ones the policy blocked and why |
 | `list_inbox`, `get_inbox_message` | Replies from every mailbox and connected sequencer, filtered by brand, label, group (hot, later, closed, automatic), source, tag, review or confidence, and the whole conversation with a lead |
-| `list_inbox_tags`, `list_inbox_views` | The workspace's reply tags with counts, and the inbox filters people saved |
+| `list_inbox_tags`, `list_inbox_views` | One brand's reply tags with counts, and the inbox filters people saved for it (each brand has its own) |
 | `list_connectors` | Services that can be connected (verification, sequencers, mailbox suppliers, CRMs, data, DNS), their credential fields and how many are connected |
 | `list_integrations` | Connected accounts with status, credits, last error and the brands that use each; `brand` lists what one brand uses |
 | `list_connections` | Every connected account in one list: connector integrations (Gmail and Outlook mailbox sign-ins among them) |
@@ -212,7 +213,7 @@ Read (always available):
 | `list_platforms` | Connected EmailBison, Instantly and Smartlead accounts: last read, first plan awaiting review, unconfirmed and conflicting mailboxes |
 | `list_allocation_changes` | Mailbox assignment history with reasons |
 | `list_allocation_declines` | Mailboxes kept from a sequence until someone clears it: declined suggestions, undone automatic choices, platform refusals |
-| `list_senders`, `list_teams` | Who mailboxes send as, and the teams that own sequences and senders |
+| `list_senders`, `list_teams` | Who a brand's mailboxes send as (each brand has its own senders), and the teams that own sequences and senders |
 | `list_playbooks`, `get_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing). Needs `agents.read`; `run_playbook` below starts one |
 | `list_playbook_automations`, `create_playbook_automation`, `update_playbook_automation`, `pause_playbook_automation`, `run_playbook_automation`, `list_playbook_automation_runs`, `delete_playbook_automation` | Run a playbook by itself on a schedule or when an event happens. An agent sets one up as a draft; a person approves it in Outflare, then each run is an agent run of Outflare's agent inside the approved mode and spend limits. Needs `agents.read`, and `agents.run` to change |
 | `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
@@ -339,12 +340,12 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `stop_enrollment` | Stop emailing one lead in a sequence |
 | `mark_inbox_read` | Mark a received message read or unread |
 | `triage_inbox_message` | Label a reply, assign it, snooze it, mark it done, tag it or flag it for review |
-| `create_inbox_tag`, `update_inbox_tag`, `delete_inbox_tag` | Add, rename, recolour or delete a reply tag (renaming changes it on every reply) |
+| `create_inbox_tag`, `update_inbox_tag`, `delete_inbox_tag` | Add, rename, recolour or delete a reply tag on a brand (renaming changes it on the brand's replies) |
 | `create_inbox_view`, `update_inbox_view`, `delete_inbox_view` | Save, change or delete a named set of inbox filters |
 | `get_reply_rules`, `set_reply_rules` | What happens when a reply gets a label (snooze or restart a not now, move past an out-of-office, add a referral, open or move a deal in the CRM), for the workspace or a sequence |
 | `add_reply_referral` | Add the person a reply refers you to as a lead, and optionally enrol them |
 | `list_alerts` | What needs someone now in a brand (`brand`): hot replies, hot website visitors and other alerts, with the page that has each |
-| `get_alert_settings`, `set_alert_settings`, `mute_alerts` | Who gets each kind of alert by email and which Slack channel it posts to, for the workspace or a brand, and muting a kind for yourself |
+| `get_alert_settings`, `set_alert_settings`, `mute_alerts` | Who gets each kind of alert by email and which Slack channel it posts to, for the workspace or a brand, and muting a kind for yourself, per brand |
 | `list_alert_channels` | The Slack channels the workspace's own Slack can post alerts to |
 | `list_members` | Workspace members and their user ids, for assigning replies |
 | `list_roles` | The workspace's roles and what each one allows |
@@ -372,7 +373,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `review_platform_plan` | Let allocation change a newly connected sequencer account, once the user agrees with its first plan |
 | `decide_allocation_suggestion`, `undo_allocation_change` | Apply or decline a suggestion; undo a change |
 | `clear_allocation_decline` | Let the allocator give a declined mailbox to that sequence again |
-| `create_sender`, `confirm_mailbox_sender` | Add a sender and confirm which mailboxes send as it |
+| `create_sender`, `confirm_mailbox_sender` | Add a brand's sender and confirm which of its mailboxes send as it |
 | `resolve_orphaned_follow_ups` | Cancel, or hand off, follow-ups whose mailbox is gone |
 | `log_meeting`, `update_meeting` | Record a meeting no calendar saw; mark held, no-show or qualified; fix which sequence it counts for |
 | `log_deal`, `update_deal` | Record a deal without a CRM; re-attribute any deal |
@@ -498,11 +499,20 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_backlinks`, `list_backlink_events`, `get_backlinks_summary` | Links to the SEO sites merged from Ahrefs and DataForSEO (filter by follow, link type, DR, traffic, page type, new or lost since a date; one link per domain), the feed of links gained, lost and regained, and each site's totals and weekly trend |
 | `review_backlink`, `get_disavow_file` | Mark a link ok or to disavow (one link or its whole domain), and get the site's disavow file of what people marked |
 | `list_seo_competitors`, `add_seo_competitor`, `update_seo_competitor`, `remove_seo_competitor`, `check_seo_competitor`, `list_competitor_events` | The sites each SEO site competes with (suggested by the SEO connection, tracked or dismissed), their numbers and OutflareBot's light look, and the feed of what changed at them |
-| `get_competition` | Who is dominating: the brand's and each tracked competitor's share and rank in search, keywords, links, AI answers, placements, social followers and reviews, an overall score and rank, where the brand leads or trails, and when it passes the one ahead |
+| `get_competition` | Who is dominating: the brand's and each tracked competitor's share and rank in search, keywords, links, AI answers, placements, social followers and reviews, an overall score and rank, where the brand leads or trails, and when it passes the one ahead, with each one's Domain Rating, keywords, domain age and pages |
 | `list_competitor_profiles` | A competitor's social profiles and review pages: followed, suggested from its home page, or dismissed, with followers, rating and reviews from the last daily read |
 | `follow_competitor_profile` | Follow one of a competitor's social profiles or review pages, read daily from now on |
 | `answer_competitor_profile` | Say yes (confirmed) or no (dismissed) to a competitor's suggested profile |
+| `get_competitor_pricing`, `get_pricing_history` | The brand's and each tracked competitor's plans and prices from one pricing page each, read weekly, what changed and when, and a page's history of changes |
+| `set_pricing_page`, `refresh_pricing` | Set (or clear) the pricing page read for the brand or a competitor, and read the pricing pages now (once a day) |
+| `refresh_competition` | Read every tracked competitor now (SEO numbers, site, domain age, social profiles and reviews) instead of waiting for the weekly snapshot |
+| `discover_competitors` | Find more competitors: read who ranks for the brand's keyword gaps on its own SERP connection and suggest the sites that rank for several of them (also daily) |
 | `get_seo_competitor_gaps` | Keywords tracked competitors rank for that the site doesn't (or ranks well below), and domains that link to them but not to the site, from stored snapshots |
+| `get_seo_keyword_results` | Who ranks for a keyword (competitor or not), from its stored results page: a keyword gap's read or a tracked keyword's rank check |
+| `get_competitor_search` | A competitor's top keywords beside yours, top pages, linking sites and newest sitemap pages, from what is stored |
+| `read_competitor_search` | Read one competitor's search data now on the brand's own SEO connection (estimate first) |
+| `get_seo_link_gap_pages` | The exact pages on one linking site that link to each competitor, from links already read |
+| `read_seo_link_gap_pages` | Read those pages now on the workspace's own SEO connection (estimate first) |
 | `list_link_prospects`, `add_link_prospects`, `update_link_prospect`, `delete_link_prospect` | One list of pages that could link to an SEO site, from every way of earning links: scored, kept out when the website already links or opted out, and followed from pitched to live, one pitch per website at a time |
 | `list_news_searches`, `create_news_search`, `update_news_search`, `delete_news_search`, `run_news_search` | The news watch: saved searches that run on a schedule through the workspace's own web search connection, following a topic or looking for a brand |
 | `list_journalists` | Journalists: authors of the news watch's articles whose address was found, and the ones people added, as person records on their outlet, with their beats, outlet tiers, what they wrote and the topics they cover |
@@ -534,11 +544,19 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `write_fix_ticket`, `review_fix_ticket` | Have the workspace's AI model write or rewrite a ticket's brief (with feedback), then approve, reject or reopen it, saving the reason as a guideline |
 | `list_fix_guidelines`, `create_fix_guideline`, `delete_fix_guideline` | The team's rules for fix tickets, per workspace, brand or site, which every brief follows |
 | `start_fix`, `get_fix_autonomy`, `update_fix_autonomy` | Take a fix before changing the site, held for a person unless fix autonomy lets it through, and read or change that setting |
-| `get_digest_settings`, `update_digest_settings`, `list_digests`, `preview_digest`, `send_digest` | The daily or weekly digest of the whole workspace: when it is made, who gets it by email through your own provider, and what it says |
-| `get_ai_visibility` | How often AI answers name each brand, its share of voice against competitors, its position, the pages they cite, by model and week |
-| `get_ai_visibility_settings`, `update_ai_visibility_settings` | Which models a brand's AI visibility samples (on the workspace's own AI connections), answers per prompt, and its monthly spending limit |
+| `get_digest_settings`, `update_digest_settings`, `list_digests`, `preview_digest`, `send_digest` | A brand's daily or weekly digest: when it is made, who gets it by email through your own provider, and what it says |
+| `get_ai_visibility` | How often AI answers name and recommend each brand, its score against competitors with weekly real changes, the pages they cite, the daily benchmark, and the visits and revenue AI answers bring, by model and week |
+| `get_ai_visibility_questions` | Each tracked question: whether answers name and recommend the brand, by assistant and week by week, the competitors named, and the change since the period before |
+| `get_ai_visibility_placements` | The pages AI answers cite or read when answering the brand's questions, ranked by how much being on each is worth, with the competitors named there, and the brand's own cited pages |
+| `get_ai_visibility_series` | The brand's AI visibility score and mention rate week by week, split by competitor, assistant, the questions' awareness, type, topic or persona, or market |
+| `get_ai_visibility_claims` | What AI answers say about the brand: the attributes they give it and the objections they raise, by phrase, with the pages they cite; the same for each competitor |
+| `dispute_ai_visibility_claim` | Say a claim AI answers make about the brand isn't true: a fix on the fixes list with the pages to correct |
+| `share_ai_visibility` | A read-only link to the brand's AI visibility (overview, trend, questions) for anyone who has it, with an optional password and expiry |
+| `unshare_ai_visibility` | Take the brand's AI visibility link back |
+| `get_ai_visibility_settings`, `update_ai_visibility_settings` | Which models a brand's AI visibility samples (on the workspace's own AI connections or DataForSEO screens), answers per prompt, and its monthly spending limit |
 | `list_ai_cohorts`, `create_ai_cohort`, `update_ai_cohort`, `delete_ai_cohort` | Prompt cohorts: a brand's set of questions people ask AI, with aliases, competitors, locale and schedule |
-| `list_ai_prompts`, `add_ai_prompts`, `update_ai_prompt`, `delete_ai_prompt` | The prompts in a cohort |
+| `list_ai_prompts`, `add_ai_prompts`, `update_ai_prompt`, `delete_ai_prompt` | The prompts in a cohort, with awareness, question type, persona, topic and demand |
+| `draft_ai_prompts` | Have the workspace's own AI draft questions across every awareness level and question type, from the brand, its competitors and its Search Console queries; they wait as suggested |
 | `run_ai_prompts`, `list_ai_runs`, `get_ai_run`, `stop_ai_run` | Ask every model a cohort's prompts now, follow the run, stop it |
 | `list_ai_samples`, `get_ai_sample` | Each AI answer: model, answer text, brands named, pages cited and what it says about the brand's facts |
 | `list_ai_facts`, `add_ai_fact`, `update_ai_fact`, `delete_ai_fact` | Facts the workspace says are true about a brand, and how often AI answers agree with or contradict each one, with the latest wrong words |
@@ -558,7 +576,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_social_publications`, `create_social_publication`, `update_social_publication`, `draft_social_publication`, `cancel_social_publication` | The brand's own original posts on X and LinkedIn: write one or have the workspace's own AI draft it, with a tracked link and an optional time; a person approves each one in Outflare before it posts (there is no approve tool) |
 | `list_social_series`, `create_social_series`, `update_social_series`, `add_series_post` | Recurring posts such as a daily changelog summary: a person approves the series once, then each post handed in goes out with no other approval, up to its daily limit |
 
-Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account, and `place_reddit_action`, `approve_reddit_action` and `check_reddit_action`, which reach Reddit through Engain. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
+Tools carry MCP annotations: read tools are marked read-only, tools that delete or end something (`delete_lead`, `delete_smart_list`, `archive_flag`, `end_ab_test`, `ship_ab_test`, `delete_webhook`, `delete_inbox_tag`, `delete_inbox_view`, `delete_email_domain`, `delete_email_template`, `delete_spend_entry`, `disconnect_integration`, `stop_enrollment`, `cancel_infra_plan`, `move_mailboxes`, `delete_seo_site`, `stop_crawl`, `delete_ai_cohort`, `delete_ai_prompt`, `stop_ai_run`, `delete_social_watch`, `cancel_social_publication`, `delete_ai_fact`) are marked destructive, and the tools that cause email to go out (`update_sequence`, `enroll_leads`, `reply_to_inbox_message`, `set_warmup`, `resolve_orphaned_follow_ups`, `approve_infra_plan`, `test_webhook`, `redeliver_webhook`, `send_email`) are marked as reaching the outside world, so clients can ask before running them, and so is `add_series_post`, which posts on the brand's account, and `place_reddit_action`, `approve_reddit_action` and `check_reddit_action`, which reach Reddit through Engain. So are the tools that spend data provider credits (`preview_lead_search`, `create_lead_list`, `run_lead_list`) and SEO calls (`get_seo_report`, `sync_seo`), and the tools that ask AI models on the workspace's own key (`run_ai_prompts`, `draft_ai_prompts`, `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`). Crawls and ownership checks (`start_crawl`, `verify_seo_site`) visit the site too.
 
 ### Analytics prompts and resources
 
@@ -634,6 +652,8 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | `update_coverage_competitor_settings`, `update_coverage_competitor` | Change how many competitors count as top and how often top and other competitors are scanned, or give one competitor its own cadence. |
 | `scan_coverage_competitor` | Scan where a competitor appears now, on the workspace's own connections. |
 | `list_coverage_competitor_placements` | Where competitors appear: type, likely paid with evidence, domain rating and traffic, and the sites where the brand has no publisher yet (`gap`). |
+| `list_coverage_found` | Everywhere the brand was found, grouped by site, with whether each page links to it, names its website or only shares its name. |
+| `review_coverage_found` | Say pages (or a whole site) are about the brand, making them placements, or not, dismissing them. |
 | `list_coverage_opportunities` | Places worth the team's effort, highest leverage (SEO and AI answers together) first, with the reason, the next action and the evidence. |
 | `update_coverage_opportunity`, `refresh_coverage_opportunities` | Pick, dismiss or win an opportunity and set its owner; suggest opportunities now. |
 | `confirm_coverage_candidate` | Create or reuse a placement from a discovery. |

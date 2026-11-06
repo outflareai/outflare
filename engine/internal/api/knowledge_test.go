@@ -16,9 +16,10 @@ func TestKnowledge(t *testing.T) {
 	geo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "handle": "geonode"})["id"].(string)
 	rep := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket"})["id"].(string)
 
-	// Folders, shared and a brand's, and one inside the brand's takes it.
+	// Folders are a brand's: with no brand named, the workspace's first;
+	// one inside a brand's takes it.
 	policies := owner.must(201, "POST", kb+"/collections", map[string]any{"name": " Policies "})
-	if policies["name"] != "Policies" || policies["brand_id"] != nil || policies["item_count"] != 0.0 {
+	if policies["name"] != "Policies" || policies["brand_id"] == nil || policies["item_count"] != 0.0 {
 		t.Fatalf("folder = %v", policies)
 	}
 	product := owner.must(201, "POST", kb+"/collections", map[string]any{"name": "Product", "brand_id": "geonode"})
@@ -114,8 +115,8 @@ func TestKnowledge(t *testing.T) {
 		t.Fatalf("snippet moved = %v", s)
 	}
 
-	// A Repocket-only token sees Repocket's and shared knowledge, and can't
-	// change the shared folder.
+	// A Repocket-only token sees only Repocket's knowledge: another brand's
+	// folder isn't there for it.
 	scopes := []string{"workspace.read", "context.manage"}
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Repocket agent", "scopes": scopes, "brand": "repocket"})
 	rp := &client{t: t, h: e.h, bearer: tok["token"].(string)}
@@ -123,7 +124,7 @@ func TestKnowledge(t *testing.T) {
 		t.Fatalf("brand-limited list = %v", l)
 	}
 	rp.must(404, "GET", kb+"/items/"+snip["id"].(string), nil)
-	rp.must(403, "PATCH", kb+"/collections/"+policies["id"].(string), map[string]any{"name": "Mine"})
+	rp.must(404, "PATCH", kb+"/collections/"+policies["id"].(string), map[string]any{"name": "Mine"})
 	made := rp.must(201, "POST", kb+"/items", map[string]any{"kind": "snippet", "title": "When are payouts?", "body": "Monthly."})
 	if made["brand_id"] != rep || made["owner_id"] != nil {
 		t.Fatalf("brand-limited create = %v", made)

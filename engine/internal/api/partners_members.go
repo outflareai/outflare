@@ -337,8 +337,8 @@ func setPayoutChoice(ctx context.Context, tx pgx.Tx, id string, typ, token optio
 }
 
 // newPartnerCode makes a friendly ref code from a name or address: the
-// first word, then digits when that is taken.
-func newPartnerCode(ctx context.Context, tx pgx.Tx, ws, hint string) (string, error) {
+// first word, then digits when the program's brand has it already.
+func newPartnerCode(ctx context.Context, tx pgx.Tx, ws, program, hint string) (string, error) {
 	hint = strings.ToLower(hint)
 	if at := strings.IndexByte(hint, '@'); at > 0 {
 		hint = hint[:at]
@@ -357,8 +357,9 @@ func newPartnerCode(ctx context.Context, tx pgx.Tx, ws, hint string) (string, er
 			code = base + n.Add(n, big.NewInt(1000)).String()
 		}
 		var taken bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_memberships WHERE workspace_id = $1 AND lower(code) = $2)
-			OR EXISTS (SELECT 1 FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = $2)`, ws, code).Scan(&taken); err != nil {
+		if err := tx.QueryRow(ctx, `WITH b AS (SELECT brand_id FROM partner_programs WHERE id = $3 AND workspace_id = $1)
+			SELECT EXISTS (SELECT 1 FROM partner_memberships WHERE workspace_id = $1 AND lower(code) = $2 AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b))
+			OR EXISTS (SELECT 1 FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = $2 AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b))`, ws, code, program).Scan(&taken); err != nil {
 			return "", err
 		}
 		if !taken {
@@ -368,11 +369,13 @@ func newPartnerCode(ctx context.Context, tx pgx.Tx, ws, hint string) (string, er
 	return "", errors.New("partners: no free code for " + base)
 }
 
-// codeFree reports whether no partner or promo code in the workspace uses code.
-func codeFree(ctx context.Context, tx pgx.Tx, ws, code string) (bool, error) {
+// codeFree reports whether no partner or promo code in the program's brand
+// uses code. Another brand of the workspace may use the same code.
+func codeFree(ctx context.Context, tx pgx.Tx, ws, program, code string) (bool, error) {
 	var taken bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_memberships WHERE workspace_id = $1 AND lower(code) = lower($2))
-		OR EXISTS (SELECT 1 FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2))`, ws, code).Scan(&taken)
+	err := tx.QueryRow(ctx, `WITH b AS (SELECT brand_id FROM partner_programs WHERE id = $3 AND workspace_id = $1)
+		SELECT EXISTS (SELECT 1 FROM partner_memberships WHERE workspace_id = $1 AND lower(code) = lower($2) AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b))
+		OR EXISTS (SELECT 1 FROM partner_promo_codes WHERE workspace_id = $1 AND lower(code) = lower($2) AND brand_id IS NOT DISTINCT FROM (SELECT brand_id FROM b))`, ws, code, program).Scan(&taken)
 	return !taken, err
 }
 
@@ -440,10 +443,10 @@ func (s *Server) joinPartner(ctx context.Context, tx pgx.Tx, ws string, p *princ
 			return "", err
 		}
 		var err error
-		if code, err = newPartnerCode(ctx, tx, ws, hint); err != nil {
+		if code, err = newPartnerCode(ctx, tx, ws, prog.ID, hint); err != nil {
 			return "", err
 		}
-	} else if free, err := codeFree(ctx, tx, ws, code); err != nil {
+	} else if free, err := codeFree(ctx, tx, ws, prog.ID, code); err != nil {
 		return "", err
 	} else if !free {
 		return "", errCodeTaken
@@ -497,6 +500,7 @@ func (s *Server) sealPayout(id, method string) []byte {
 var (
 	errPartnerExists = errors.New("partner exists")
 	errCodeTaken     = errors.New("code taken")
+	errProgramClash  = errors.New("program clashes with the brand it moves to")
 )
 
 func (s *Server) createPartner(w http.ResponseWriter, r *http.Request) {
@@ -701,14 +705,16 @@ func (s *Server) removePartnerPromoCode(w http.ResponseWriter, r *http.Request) 
 func (s *Server) partnerLink(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	code, wsRef := r.PathValue("code"), r.PathValue("ws")
-	var ws string
+	// brand is the brand whose domain the link is on: its partners' codes
+	// are the ones it means. A link on this server names no brand.
+	var ws, brand string
 	var err error
 	if wsRef == "" {
 		// A tracking domain, or a portal's subdomain of the partners domain.
 		host := requestHost(r)
-		err = s.pool.QueryRow(ctx, `SELECT workspace_id::text FROM tracking_domains WHERE domain = $1 AND status = 'verified'`, host).Scan(&ws)
+		err = s.pool.QueryRow(ctx, `SELECT workspace_id::text, COALESCE(brand_id::text, '') FROM tracking_domains WHERE domain = $1 AND status = 'verified'`, host).Scan(&ws, &brand)
 		if sub, ok := strings.CutSuffix(host, "."+s.partnersDomain); errors.Is(err, pgx.ErrNoRows) && ok && s.partnersDomain != "" {
-			err = s.pool.QueryRow(ctx, `SELECT workspace_id::text FROM partner_programs WHERE portal_subdomain = $1 AND portal_enabled`, sub).Scan(&ws)
+			err = s.pool.QueryRow(ctx, `SELECT workspace_id::text, COALESCE(brand_id::text, '') FROM partner_programs WHERE portal_subdomain = $1 AND portal_enabled`, sub).Scan(&ws, &brand)
 		}
 	} else {
 		ws, err = s.workspaceIDFor(ctx, wsRef)
@@ -731,7 +737,8 @@ func (s *Server) partnerLink(w http.ResponseWriter, r *http.Request) {
 	)
 	err = s.pool.QueryRow(ctx, `SELECT m.id::text, m.status, p.status, p.landing_url, COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, '')
 		FROM partner_memberships m JOIN partner_programs p ON p.id = m.program_id LEFT JOIN tracking_campaigns c ON c.id = m.campaign_id
-		WHERE m.workspace_id = $1 AND lower(m.code) = lower($2)`, ws, code).Scan(&id, &status, &progStatus, &landing, &slug, &ccode, &src, &medium)
+		WHERE m.workspace_id = $1 AND lower(m.code) = lower($2) AND ($3 = '' OR m.brand_id = $3::uuid)
+		ORDER BY m.created_at LIMIT 1`, ws, code, brand).Scan(&id, &status, &progStatus, &landing, &slug, &ccode, &src, &medium)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && landing == "" {
 		notFound()
 		return

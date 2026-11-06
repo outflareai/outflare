@@ -869,8 +869,8 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
 
   server.registerTool(
     "list_senders",
-    { title: "List senders", description: "Who mailboxes send as (people, personas, shared identities), their teams and mailbox counts.", annotations: read },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/senders", { params: { path } })),
+    { title: "List senders", description: "Who one brand's mailboxes send as (people, personas, shared identities), their teams and mailbox counts. Each brand has its own senders.", inputSchema: { brand: brandRef }, annotations: read },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/senders", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -1560,7 +1560,12 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       mimeType: "application/json",
     },
     async (uri) => {
-      const res = await callCompact(() => gtm.GET("/v1/workspaces/{ws}/analytics/catalog", { params: { path } }));
+      // The default brand's (OUTFLARE_BRAND), else the first brand's.
+      const res = await callCompact(async () => {
+        const brand = defaultBrand ?? (await gtm.GET("/v1/workspaces/{ws}/brands", { params: { path } })).data?.data[0]?.id;
+        if (!brand) return gtm.GET("/v1/workspaces/{ws}/brands", { params: { path } });
+        return onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/analytics/catalog", { params: { path: { brand: b } } }));
+      });
       return { contents: [{ uri: uri.href, mimeType: "application/json", text: (res.content[0] as { text: string }).text }] };
     },
   );
@@ -2523,10 +2528,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Conversion definition presets",
       description: "Starting points by kind of business: SaaS, booked calls, e-commerce, lead generation.",
-      inputSchema: {},
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/conversion-definitions/presets", { params: { path } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/conversion-definitions/presets", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -4085,7 +4090,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         "The workspace's shared list of work, for people and agents. Site audits (source seo_audit) add one fix per rule and URL template of a site " +
         "(like 'pages in /blog/* have no meta description'), with who is on it and how many pages are left; crawls confirm fixes done and reopen ones that come back. " +
         "Search intelligence (source seo_keywords) adds one fix per page whose target keyword is missing from its title, H1 or description, per target page other pages should link to, per search several pages compete for, and per keyword several pages target. " +
-        "AI visibility (source ai_visibility) adds one fix per prompt whose AI answers never name the brand. " +
+        "AI visibility (source ai_visibility) adds one fix per prompt whose AI answers never name the brand (rule ai_brand_absent), per prompt whose answers name it but recommend only competitors (ai_competitor_preferred), and per fact answers get wrong (ai_fact_wrong). " +
         "Social watches (source social) add posts waiting for a reply and drafts waiting for a person's approval. " +
         "Review pages (source reviews) add unhappy reviews waiting for an answer. " +
         "Link opportunities (source seo_links) suggest lost strong links to win back, links to broken pages to redirect, domains that link to competitors but not to you, and toxic links to review; " +
@@ -4137,6 +4142,15 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     schedule: z.enum(["off", "daily", "weekly"]).optional().describe("Run daily or weekly; each run spends on the workspace's own AI keys."),
   };
   const aiIntent = z.enum(["", "discovery", "comparison", "problem", "brand"]).optional();
+  // Where a question sits in the library: what the asker knows, what they ask for, who, about what, and how many ask it a month.
+  const aiPromptFacets = {
+    awareness: z.enum(["", "problem", "solution", "competitor", "brand"]).optional(),
+    question_type: z.enum(["", "how_to", "fix", "best", "alternatives", "versus", "supplier", "about"]).optional(),
+    persona: z.string().max(100).optional(),
+    topic: z.string().max(100).optional(),
+    competitor: z.string().max(100).optional(),
+    demand: z.number().int().min(0).optional(),
+  };
 
   server.registerTool(
     "get_ai_visibility",
@@ -4144,7 +4158,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       title: "Read AI visibility",
       description:
         "For each cohort over the last days: how often AI answers name the brand (mention_rate), its share of voice against competitors, " +
-        "its average position, how often answers cite its pages, each competitor, each model, the sites answers cite most, and week by week.",
+        "its average position, how often answers cite its pages, each competitor, each model, the sites answers cite most, and week by week. " +
+        "score (0 to 100, with score_low and score_high) weighs each question by demand: recommended 1, named or listed 0.6, warned or absent 0; a week with real_change moved beyond the usual wobble. " +
+        "recommended, listed and warned count each answer's stance; suggested_competitors are brands answers recommend that the cohort doesn't track; grid is the score by awareness and question type. " +
+        "benchmark_mentions, benchmark_share and benchmark_change count DataForSEO's stored ChatGPT and AI Overview answers (benchmark_day). " +
+        "traffic is what AI answers brought the brand's site: visits from assistants, credited conversions and revenue, spend, by assistant and landing page.",
       inputSchema: {
         brand: z.string().max(100).optional().describe("A brand's id or handle."),
         days: z.number().int().min(1).max(365).optional().describe("Default 28."),
@@ -4152,6 +4170,123 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/ai-visibility", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_ai_visibility_questions",
+    {
+      title: "Read AI visibility by question",
+      description:
+        "Each of a brand's tracked questions over the last days: answers that named, recommended, listed or warned against the brand, its average position and score (0 to 100), " +
+        "the same by assistant and week by week (weeks, to see whether the brand is shown over time), the competitors those answers named (most recommended first), other brands they named that aren't tracked, " +
+        "and the period before (previous) with change, the score now minus before: a question gained or lost stands out. Most asked first.",
+      inputSchema: {
+        brand: brandRef,
+        days: z.number().int().min(1).max(365).optional().describe("Default 28."),
+        cohort: id.optional().describe("Only this question set."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-visibility/questions", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_ai_visibility_placements",
+    {
+      title: "Read the placements AI answers cite, most valuable first",
+      description:
+        "The pages AI assistants cite, or read before answering, when they answer a brand's questions, ranked by how much being on each is worth (value, top is 100): " +
+        "answers citing it, how many of those named the brand, which competitors they named, and how many questions it answers; own_pages are the brand's own pages the answers cite. " +
+        "A page that answers to high-demand questions cite without naming the brand is the placement to get: it is also a Presence opportunity (reason ai_cited).",
+      inputSchema: {
+        brand: brandRef,
+        days: z.number().int().min(1).max(365).optional().describe("Default 28."),
+        cohort: id.optional().describe("Only this question set."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-visibility/placements", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_ai_visibility_series",
+    {
+      title: "Read a brand's AI visibility week by week, split one way",
+      description:
+        "The brand's AI visibility score (with its range) and how often it is named, week by week, split by competitor (the brand first, then each competitor named on the same questions), " +
+        "assistant, the questions' awareness, question_type, topic or persona, or market (each question set's locale). A week whose range doesn't overlap the week before's moved for real.",
+      inputSchema: {
+        brand: brandRef,
+        by: z.enum(["competitor", "assistant", "awareness", "question_type", "topic", "persona", "market"]).optional().describe("Default competitor."),
+        days: z.number().int().min(1).max(365).optional().describe("Default 84."),
+        cohort: id.optional().describe("Only this question set."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-visibility/series", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_ai_visibility_claims",
+    {
+      title: "Read what AI answers say about a brand",
+      description:
+        "The attributes AI answers give the brand (what they say it is or is known for) and the objections they raise against it, grouped by phrase: how many answers said it this period and the one before, " +
+        "the questions, the assistants, the answer's words and the pages those answers cited. competitors has the same for each competitor named. fix_id marks a claim a person disputed.",
+      inputSchema: {
+        brand: brandRef,
+        days: z.number().int().min(1).max(365).optional().describe("Default 28."),
+        cohort: id.optional().describe("Only this question set."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/ai-visibility/claims", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "dispute_ai_visibility_claim",
+    {
+      title: "Say a claim AI answers make about a brand isn't true",
+      description:
+        "Puts the claim on the fixes list (rule ai_wrong_claim) on the latest answer that made it, with the pages those answers cite, so someone corrects it at the source. " +
+        "Use the claim's key from get_ai_visibility_claims; note says what is true instead.",
+      inputSchema: {
+        brand: brandRef,
+        key: z.string().max(200),
+        kind: z.enum(["attribute", "objection"]).optional().describe("Default objection."),
+        note: z.string().max(2000).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ai-visibility/claims/dispute", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "share_ai_visibility",
+    {
+      title: "Share a brand's AI visibility by link",
+      description:
+        "Makes a read-only link to the brand's AI visibility overview, trend and questions for the last 28 days (replacing one it had), with an optional password and expiry. " +
+        "The token is returned once; send people the url.",
+      inputSchema: {
+        brand: brandRef,
+        password: z.string().min(8).max(200).optional().describe("Asked for before the page opens; leave out for a link that opens on its own."),
+        expires_in_days: z.number().int().min(1).max(365).optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ai-visibility/share", { params: { path: { brand: b } }, body: { password: body.password ?? "", expires_in_days: body.expires_in_days ?? 0 } }))),
+  );
+
+  server.registerTool(
+    "unshare_ai_visibility",
+    {
+      title: "Take a brand's AI visibility link back",
+      description: "The share link stops working at once.",
+      inputSchema: { brand: brandRef },
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/ai-visibility/share", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -4263,7 +4398,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         "('What is the best residential proxy provider?'). Up to 100 at a time; ones the cohort has are skipped.",
       inputSchema: {
         cohort_id: id,
-        prompts: z.array(z.object({ text: z.string().min(3).max(500), intent: aiIntent }).strict()).min(1).max(100),
+        prompts: z.array(z.object({ text: z.string().min(3).max(500), intent: aiIntent, ...aiPromptFacets }).strict()).min(1).max(100),
       },
       annotations: write,
     },
@@ -4271,16 +4406,39 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   );
 
   server.registerTool(
+    "draft_ai_prompts",
+    {
+      title: "Draft questions for a cohort",
+      description:
+        "The workspace's own AI drafts the questions the brand's buyers ask AI, across every awareness level (problem, solution, competitor, brand) " +
+        "and question type (how_to, fix, best, alternatives, versus, supplier, about), from the brand, its competitors and its own Search Console queries. " +
+        "They are added as status suggested, with why and, when taken from a search query, monthly demand. Runs skip them until kept " +
+        "(update_ai_prompt with status active); delete the ones that don't fit. Works in the background: read list_ai_prompts after a minute.",
+      inputSchema: {
+        cohort_id: id,
+        count: z.number().int().min(1).max(60).optional(),
+        personas: z.array(z.string().max(100)).max(10).optional(),
+        topics: z.array(z.string().max(100)).max(10).optional(),
+        brief: z.string().max(1000).optional(),
+      },
+      annotations: { ...write, openWorldHint: true },
+    },
+    ({ cohort_id, ...body }) => call(() => gtm.POST("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/draft", { params: { path: { ws, cohort: cohort_id } }, body })),
+  );
+
+  server.registerTool(
     "update_ai_prompt",
     {
       title: "Change a prompt",
-      description: "Reword, retag or pause a prompt. A paused prompt is left out of runs.",
+      description: "Reword, retag or pause a prompt, or keep a suggested one (status active). A paused or suggested prompt is left out of runs; demand -1 clears it.",
       inputSchema: {
         cohort_id: id,
         prompt_id: id,
         text: z.string().min(3).max(500).optional(),
         intent: aiIntent,
         status: z.enum(["active", "paused"]).optional(),
+        ...aiPromptFacets,
+        demand: z.number().int().min(-1).optional(),
       },
       annotations: { ...write, idempotentHint: true },
     },
@@ -5327,6 +5485,80 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   );
 
   server.registerTool(
+    "get_competitor_pricing",
+    {
+      title: "See your and your competitors' prices",
+      description:
+        "The brand and each tracked competitor with its pricing page: the plans and prices the last weekly read found, what changed at the last change (plan added or removed, price up or down) and when. " +
+        "Pages are read through the workspace's own page reader (needs_reader is true until one is connected). Reads stored data only, so it costs nothing.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/competition/pricing", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "set_pricing_page",
+    {
+      title: "Set the pricing page of the brand or a competitor",
+      description:
+        "Sets the one page read for prices, on the brand's own site (competitor_id left out) or a tracked competitor's: read now, then once a week. An empty url stops reading it and deletes its history.",
+      inputSchema: { brand: brandRef, competitor_id: id.optional(), url: z.string().max(2000) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, competitor_id, url }) =>
+      call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/competition/pricing", { params: { path: { brand: b } }, body: { competitor_id: competitor_id ?? null, url } }))),
+  );
+
+  server.registerTool(
+    "refresh_pricing",
+    {
+      title: "Read the pricing pages now",
+      description: "Reads the brand's and its competitors' pricing pages now instead of at their weekly turn, except the ones read in the last day. Results show in get_competitor_pricing within minutes.",
+      inputSchema: { brand: brandRef },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/competition/pricing/refresh", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "get_pricing_history",
+    {
+      title: "See how a pricing page's prices changed",
+      description: "Every change of one pricing page, newest first: the plans each read found and what changed from the read before.",
+      inputSchema: { brand: brandRef, page_id: id },
+      annotations: read,
+    },
+    ({ brand, page_id }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/competition/pricing/{page}/history", { params: { path: { brand: b, page: page_id } } }))),
+  );
+
+  server.registerTool(
+    "refresh_competition",
+    {
+      title: "Read every tracked competitor now",
+      description:
+        "Instead of waiting for the weekly snapshot, reads every tracked competitor of the brand now: their SEO numbers (Domain Rating, search visits, keywords, linking sites) on the workspace's SEO connection, Ahrefs first and only the ones not read today, within its budget; OutflareBot's look at each home page with its domain's registration date; and their followed social profiles and review pages. Numbers show in get_competition within minutes.",
+      inputSchema: { brand: brandRef },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/competition/refresh", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "discover_competitors",
+    {
+      title: "Find more competitors from the keyword gaps",
+      description:
+        "Reads who ranks (top 20) for up to 25 of the brand's keyword gaps not read in the last week, on the workspace's own SERP connection (DataForSEO or Geonode) within its budget, and suggests up to 25 domains that rank for at least two of them, for the user to say yes or no to (list_seo_competitors, status suggested). " +
+        "It also runs once a day by itself. keywords reads those gap keywords now instead. Results show in get_seo_keyword_results within a minute.",
+      inputSchema: { brand: brandRef, keywords: z.array(z.string().min(1).max(200)).max(25).optional() },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, keywords }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/competition/discover", { params: { path: { brand: b } }, body: keywords ? { keywords } : {} }))),
+  );
+
+  server.registerTool(
     "add_seo_competitor",
     {
       title: "Track a competitor",
@@ -5421,6 +5653,77 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: read,
     },
     (query) => call(() => gtm.GET("/v1/workspaces/{ws}/seo-competitors/gaps", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_seo_keyword_results",
+    {
+      title: "See who ranks for a keyword",
+      description:
+        "The newest stored search results page of one keyword for a site, competitor or not: the top 20 read for a keyword gap, or a tracked keyword's latest rank check (top 10). " +
+        "Each result says whether it is the site itself and its domain's status on the competitor list (tracked, suggested, dismissed or none). Reads only what is stored, so it costs nothing; read_at is null when it hasn't been read (discover_competitors with the keyword reads it).",
+      inputSchema: { site_id: id, keyword: z.string().min(1).max(200) },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/seo-competitors/results", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "get_competitor_search",
+    {
+      title: "See a competitor's keywords, top pages and linking sites",
+      description:
+        "Everything stored about one of the brand's competitors' search: its top keywords (with the brand site's position beside each), its pages with the most search visits, the sites linking to it (and whether each links to the brand too) and the newest pages in its sitemap. " +
+        "read_on is null for anything never read; read_competitor_search reads it. Reads only what is stored, so it costs nothing.",
+      inputSchema: { brand: brandRef, competitor_id: id },
+      annotations: read,
+    },
+    ({ brand, competitor_id }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/competition/{competitor}/search", { params: { path: { brand: b, competitor: competitor_id } } }))),
+  );
+
+  server.registerTool(
+    "read_competitor_search",
+    {
+      title: "Read a competitor's search data now",
+      description:
+        "Reads one tracked competitor's numbers, top 100 keywords, top 100 linking sites and top 25 pages now on the brand's own SEO connection (Ahrefs first) within its budget, skipping what that connection read in the last six days. " +
+        "It costs money or API units on the user's account: call it with estimate_only first and tell the user the estimate before reading. Results show in get_competitor_search within a minute or two.",
+      inputSchema: { brand: brandRef, competitor_id: id, estimate_only: z.boolean().optional() },
+      annotations: write,
+    },
+    ({ brand, competitor_id, estimate_only }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.POST("/v1/brands/{brand}/competition/{competitor}/read", { params: { path: { brand: b, competitor: competitor_id } }, body: { estimate_only } }),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_seo_link_gap_pages",
+    {
+      title: "See the pages on a linking site that link to each competitor",
+      description:
+        "For one link gap (a domain from get_seo_competitor_gaps kind links), each tracked competitor it links to with the exact pages on that domain linking to it: page, title, the competitor page it links to, anchor and nofollow. " +
+        "From links already read, so it costs nothing; read_at is null when a competitor's links from the domain were never read (read_seo_link_gap_pages reads them).",
+      inputSchema: { site_id: id, domain: z.string().min(1).max(253) },
+      annotations: read,
+    },
+    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/seo-competitors/gaps/links", { params: { path: { ws }, query } })),
+  );
+
+  server.registerTool(
+    "read_seo_link_gap_pages",
+    {
+      title: "Read the pages on a linking site that link to each competitor",
+      description:
+        "Reads now, on the workspace's own Ahrefs or DataForSEO connection within its budget, up to 100 links from the domain to each tracked competitor it links to, keeps them and returns them as get_seo_link_gap_pages does. A copy under a day old costs nothing. " +
+        "It costs money or API units on the user's account: call it with estimate_only first and tell the user the estimate.",
+      inputSchema: { site_id: id, domain: z.string().min(1).max(253), estimate_only: z.boolean().optional() },
+      annotations: write,
+    },
+    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/seo-competitors/gaps/links", { params: { path: { ws } }, body })),
   );
 
   const prospectMethod = z.enum(["competitor_gap", "broken_link", "reclaim", "competitor_dead_page", "resource_page", "asset", "unlinked_mention", "partner", "manual", "expired_domain"]);
@@ -6623,11 +6926,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     "get_digest_settings",
     {
       title: "Get the digest settings",
-      description: "When the workspace's daily or weekly digest is made, who gets it by email and why it can't be emailed yet (email_problem).",
-      inputSchema: {},
+      description: "When a brand's daily or weekly digest is made, who gets it by email and why it can't be emailed yet (email_problem).",
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/digest-settings", { params: { path: { ws } } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/digest-settings", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -6637,6 +6940,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       description:
         "Send only what changes. Email goes only through one of the workspace's own email providers (provider_id from list_email_providers), from an address on its verified sending domain.",
       inputSchema: {
+        brand: brandRef,
         frequency: z.enum(["off", "daily", "weekly"]).optional(),
         weekday: z.number().int().min(0).max(6).optional().describe("For weekly digests: 0 is Sunday."),
         hour: z.number().int().min(0).max(23).optional(),
@@ -6647,40 +6951,40 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/digest-settings", { params: { path: { ws } }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/digest-settings", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "list_digests",
     {
       title: "List digests",
-      description: "The workspace's newest 50 digests: fixes, deploys, site health, outreach, lifecycle email, missions and what needs a person, each with the period before to compare.",
-      inputSchema: {},
+      description: "A brand's newest 50 digests: fixes, deploys, site health, outreach, lifecycle email, missions and what needs a person, each with the period before to compare.",
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/digests", { params: { path: { ws } } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/digests", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
     "preview_digest",
     {
       title: "Preview the digest",
-      description: "The digest of the day or week that ends now, worked out but not kept or sent. A quick summary of how the whole workspace is doing.",
-      inputSchema: { frequency: z.enum(["daily", "weekly"]).optional() },
+      description: "A brand's digest of the day or week that ends now, worked out but not kept or sent. A quick summary of how the brand is doing.",
+      inputSchema: { brand: brandRef, frequency: z.enum(["daily", "weekly"]).optional() },
       annotations: read,
     },
-    (query) => call(() => gtm.GET("/v1/workspaces/{ws}/digests/preview", { params: { path: { ws }, query } })),
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/digests/preview", { params: { path: { brand: b }, query } }))),
   );
 
   server.registerTool(
     "send_digest",
     {
       title: "Make a digest now",
-      description: "Make the digest of the day or week that ends now: kept, sent as the digest.ready webhook and emailed like a scheduled one.",
-      inputSchema: { frequency: z.enum(["daily", "weekly"]).optional() },
+      description: "Make a brand's digest of the day or week that ends now: kept, sent as the digest.ready webhook and emailed like a scheduled one.",
+      inputSchema: { brand: brandRef, frequency: z.enum(["daily", "weekly"]).optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/digests", { params: { path: { ws } }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/digests", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -7484,22 +7788,22 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     "create_sender",
     {
       title: "Create a sender",
-      description: "Who mailboxes send as: a person, a persona, or a shared identity. Give team_ids to make it a team's; none makes it shared.",
-      inputSchema: { name: z.string().min(1).max(200), kind: z.enum(["person", "persona", "shared"]), team_ids: z.array(id).optional(), user_id: id.nullable().optional() },
+      description: "Who a brand's mailboxes send as: a person, a persona, or a shared identity. Give team_ids to make it a team's; none makes it shared.",
+      inputSchema: { brand: brandRef, name: z.string().min(1).max(200), kind: z.enum(["person", "persona", "shared"]), team_ids: z.array(id).optional(), user_id: id.nullable().optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/senders", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/senders", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "confirm_mailbox_sender",
     {
       title: "Confirm who mailboxes send as",
-      description: "Sets the sender for mailboxes (null clears it). Never guess: use list_mailboxes display names, or ask the user.",
-      inputSchema: { mailbox_ids: mailboxIds, sender_id: id.nullable() },
+      description: "Sets the sender for a brand's mailboxes, from that brand's senders (null clears it). Never guess: use list_mailboxes display names, or ask the user.",
+      inputSchema: { brand: brandRef, mailbox_ids: mailboxIds, sender_id: id.nullable() },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/mailboxes/sender", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/mailboxes/sender", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -8029,46 +8333,47 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
 
   server.registerTool(
     "list_inbox_tags",
-    { title: "List inbox tags", description: "The workspace's tags for replies, with their colour and how many replies carry each.", annotations: read },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/inbox-tags", { params: { path } })),
+    { title: "List inbox tags", description: "One brand's tags for replies, with their colour and how many of its replies carry each. Each brand has its own.", inputSchema: { brand: brandRef }, annotations: read },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/inbox-tags", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
     "create_inbox_tag",
     {
       title: "Add an inbox tag",
-      description: "Adds a tag people can put on replies. Names are stored in lowercase. Tag a reply with triage_inbox_message.",
-      inputSchema: { name: z.string().min(1).max(40), color: z.enum(tagColors).optional() },
+      description: "Adds a tag people can put on a brand's replies. Names are stored in lowercase. Tag a reply with triage_inbox_message.",
+      inputSchema: { brand: brandRef, name: z.string().min(1).max(40), color: z.enum(tagColors).optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/inbox-tags", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/inbox-tags", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "update_inbox_tag",
     {
       title: "Rename or recolour an inbox tag",
-      description: "A new name changes the tag on every reply that carries it.",
-      inputSchema: { tag_id: id, name: z.string().min(1).max(40).optional(), color: z.enum(tagColors).optional() },
+      description: "A new name changes the tag on every one of the brand's replies that carries it.",
+      inputSchema: { brand: brandRef, tag_id: id, name: z.string().min(1).max(40).optional(), color: z.enum(tagColors).optional() },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ tag_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: tag_id } }, body })),
+    ({ brand, tag_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/inbox-tags/{id}", { params: { path: { brand: b, id: tag_id } }, body }))),
   );
 
   server.registerTool(
     "delete_inbox_tag",
-    { title: "Delete an inbox tag", description: "Deletes the tag and takes it off every reply. The replies stay.", inputSchema: { tag_id: id }, annotations: { ...write, destructiveHint: true, idempotentHint: true } },
-    ({ tag_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: tag_id } } })),
+    { title: "Delete an inbox tag", description: "Deletes the brand's tag and takes it off the brand's replies. The replies stay.", inputSchema: { brand: brandRef, tag_id: id }, annotations: { ...write, destructiveHint: true, idempotentHint: true } },
+    ({ brand, tag_id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/inbox-tags/{id}", { params: { path: { brand: b, id: tag_id } } }))),
   );
 
   server.registerTool(
     "list_inbox_views",
     {
       title: "List saved inbox views",
-      description: "Filters people saved for the inbox (shared ones, and the caller's own). Pass a view's filters to list_inbox to see what it shows.",
+      description: "Filters people saved for one brand's inbox (shared ones, and the caller's own). Pass a view's filters to list_inbox to see what it shows.",
+      inputSchema: { brand: brandRef },
       annotations: read,
     },
-    () => call(() => gtm.GET("/v1/workspaces/{ws}/inbox-views", { params: { path } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/inbox-views", { params: { path: { brand: b } } }))),
   );
 
   const viewFilters = z
@@ -8079,11 +8384,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     "create_inbox_view",
     {
       title: "Save an inbox view",
-      description: "Saves a set of list_inbox filters under a name, for the people in the workspace to open from the inbox. A view an agent saves is shared.",
-      inputSchema: { name: z.string().min(1).max(60), filters: viewFilters, position: z.number().int().optional() },
+      description: "Saves a set of list_inbox filters under a name, for the team to open from the brand's inbox. A view an agent saves is shared.",
+      inputSchema: { brand: brandRef, name: z.string().min(1).max(60), filters: viewFilters, position: z.number().int().optional() },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/inbox-views", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/inbox-views", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
@@ -8091,16 +8396,16 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     {
       title: "Change a saved inbox view",
       description: "Send only what to change; filters replaces all of them.",
-      inputSchema: { view_id: id, name: z.string().min(1).max(60).optional(), filters: viewFilters.optional(), position: z.number().int().optional() },
+      inputSchema: { brand: brandRef, view_id: id, name: z.string().min(1).max(60).optional(), filters: viewFilters.optional(), position: z.number().int().optional() },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ view_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view_id } }, body })),
+    ({ brand, view_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/inbox-views/{id}", { params: { path: { brand: b, id: view_id } }, body }))),
   );
 
   server.registerTool(
     "delete_inbox_view",
-    { title: "Delete a saved inbox view", inputSchema: { view_id: id }, annotations: { ...write, destructiveHint: true, idempotentHint: true } },
-    ({ view_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view_id } } })),
+    { title: "Delete a saved inbox view", inputSchema: { brand: brandRef, view_id: id }, annotations: { ...write, destructiveHint: true, idempotentHint: true } },
+    ({ brand, view_id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/inbox-views/{id}", { params: { path: { brand: b, id: view_id } } }))),
   );
 
   server.registerTool(
@@ -8220,11 +8525,11 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     "mute_alerts",
     {
       title: "Mute or unmute a kind of alert for yourself",
-      description: "Stops (muted true) or restarts alert emails of one kind to you in this workspace. Muted alerts still show in the app.",
-      inputSchema: { kind: z.string(), muted: z.boolean() },
+      description: "Stops (muted true) or restarts alert emails of one kind from one brand to you. Each brand has its own mutes. Muted alerts still show in the app.",
+      inputSchema: { brand: brandRef, kind: z.string(), muted: z.boolean() },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.PUT("/v1/workspaces/{ws}/alerts/mutes", { params: { path }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/alerts/mutes", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(

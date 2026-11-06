@@ -283,8 +283,7 @@ func TestSupportAssistantSourcesAndAuto(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	sb := base + "/support"
 	ctx := context.Background()
-	if _, err := e.pool.Exec(ctx, `INSERT INTO workspace_context (workspace_id, website) VALUES ($1, 'https://northpeak.example')
-		ON CONFLICT (workspace_id) DO UPDATE SET website = EXCLUDED.website`, ws); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE brands SET website = 'https://northpeak.example' WHERE id = outflare_first_brand($1)`, ws); err != nil {
 		t.Fatal(err)
 	}
 	if code, res := owner.raw("POST", base+"/mailboxes/import", "text/csv",

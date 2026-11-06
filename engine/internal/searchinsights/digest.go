@@ -10,19 +10,19 @@ import (
 func init() {
 	digests.Register(digests.Builder{ID: "search_insights", Title: "Search work and collection", Build: buildDigest})
 }
-func buildDigest(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
+func buildDigest(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var s digests.Section
 	var open, done, failed, reports float64
 	err := q.QueryRow(ctx, `SELECT
- (SELECT count(*) FROM search_insight_items WHERE workspace_id=$1 AND status IN ('open','in_progress'))::float8,
- (SELECT count(*) FROM search_insight_items WHERE workspace_id=$1 AND status='done' AND updated_at>=$2 AND updated_at<$3)::float8,
+ (SELECT count(*) FROM search_insight_items WHERE workspace_id=$1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status IN ('open','in_progress'))::float8,
+ (SELECT count(*) FROM search_insight_items WHERE workspace_id=$1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status='done' AND updated_at>=$2 AND updated_at<$3)::float8,
  (SELECT count(*) FROM jobs WHERE workspace_id=$1 AND kind='search_insights.refresh' AND status='dead' AND updated_at>=$2 AND updated_at<$3)::float8,
- (SELECT count(*) FROM search_report_runs WHERE workspace_id=$1 AND status='succeeded' AND created_at>=$2 AND created_at<$3)::float8`, ws, p.Start, p.End).Scan(&open, &done, &failed, &reports)
+ (SELECT count(*) FROM search_report_runs WHERE workspace_id=$1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status='succeeded' AND created_at>=$2 AND created_at<$3)::float8`, ws, p.Start, p.End, brand).Scan(&open, &done, &failed, &reports)
 	if err != nil {
 		return s, err
 	}
 	s.Metrics = []digests.Metric{{Key: "open_work", Label: "Open search actions", Value: open}, {Key: "completed_work", Label: "Search actions completed", Value: done}, {Key: "failed_collections", Label: "Failed search collections", Value: failed}, {Key: "report_snapshots", Label: "Report snapshots generated", Value: reports}}
-	rows, err := q.Query(ctx, `SELECT x.title,s.host FROM search_insight_items x JOIN seo_sites s ON s.id=x.site_id AND s.workspace_id=x.workspace_id WHERE x.workspace_id=$1 AND x.status IN ('open','in_progress') ORDER BY x.updated_at DESC LIMIT 3`, ws)
+	rows, err := q.Query(ctx, `SELECT x.title,s.host FROM search_insight_items x JOIN seo_sites s ON s.id=x.site_id AND s.workspace_id=x.workspace_id WHERE x.workspace_id=$1 AND COALESCE(x.brand_id, outflare_first_brand(x.workspace_id)) = $2 AND x.status IN ('open','in_progress') ORDER BY x.updated_at DESC LIMIT 3`, ws, brand)
 	if err != nil {
 		return s, err
 	}

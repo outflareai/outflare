@@ -602,6 +602,12 @@ var (
 		Namespace: namespace, Subsystem: "reviews", Name: "page_reads_total",
 		Help: "Review page reads, by platform and outcome (success, pending, blocked, slow_page, page_failed, page_not_found, not_a_review_page, save_failed, connector_error).",
 	}, []string{"platform", "outcome"})
+	// Prices: reading the brand's and its competitors' pricing pages
+	// through the workspace's own page reader, once a week.
+	pricingReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "pricing", Name: "page_reads_total",
+		Help: "Pricing page reads, by outcome (success, blocked, slow_page, page_failed, page_not_found, no_prices_found, save_failed, connector_error).",
+	}, []string{"outcome"})
 	// Scheduled syncs of connections (analytics, Search Console, page
 	// conversions, ads, SEO snapshots).
 	syncRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -737,6 +743,22 @@ var (
 		"Checks of agreed and live links, by what they found (live, not_yet, removed, still_live, unreachable).", "outcome")
 	webSearches = linkCounter("web_searches_total",
 		"Searches on workspaces' own SERP connections (search-results), by outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).", "outcome")
+	aiAnswers = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ai_visibility", Name: "screen_answers_total",
+		Help: "Answers read from AI assistants' own screens (ChatGPT, Gemini) through workspaces' own answer readers, by engine and outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).",
+	}, []string{"engine", "outcome"})
+	aiDemandReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ai_visibility", Name: "demand_reads_total",
+		Help: "Reads of what people ask AI assistants (real questions, AI search volume) through workspaces' own demand readers, by kind (questions, volume, benchmark) and outcome (done, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable).",
+	}, []string{"kind", "outcome"})
+	aiStanceReads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ai_visibility", Name: "stance_reads_total",
+		Help: "AI visibility answers read by workspaces' own AI for how they treat the brands they name, by outcome (judged, skipped, ai_failed, refused, ai_model_needed, or the provider's error code).",
+	}, []string{"outcome"})
+	aiPromptDrafts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ai_visibility", Name: "prompt_drafts_total",
+		Help: "Drafts of AI visibility questions by the workspace's own AI, by outcome (success, ai_failed, connector_auth, ai_budget_reached, ai_model_needed, connector_needed).",
+	}, []string{"outcome"})
 
 	automationRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "playbooks", Name: "automation_runs_total",
@@ -947,7 +969,7 @@ var own = []prometheus.Collector{
 	supportMessages, supportReplies, supportReplyDuration, supportAssistantRuns, supportAssistantDuration, knowledgeAnswerSearches, knowledgeAnswerSearchDuration, knowledgeWebsiteImports, knowledgeWebsiteImportDuration, knowledgeWebsitePages, knowledgeWebsiteRechecks, knowledgeReplyLearning, knowledgeReplyLearningDuration, supportAssistantHeld, supportSLABreaches, supportOverdue, supportChatRequests, supportSLAChecks, supportSLACheckDuration,
 	adConversions, adConversionsOldest, adConversionAdjustments,
 	meetingEvents, meetingEventsPending,
-	reviewReads, reviewsFound, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches,
+	reviewReads, reviewsFound, pricingReads, socialReads, syncRuns, adItemRows, linkReads, linkPageChecks, archiveLookups, linkPitches, linkAutoSends, linkReplies, linkLiveChecks, webSearches, aiAnswers, aiDemandReads, aiStanceReads, aiPromptDrafts,
 	socialPublishes,
 	redditSends,
 	redditChecks,
@@ -1565,6 +1587,30 @@ func LinkReplyRead(kind string) { linkReplies.WithLabelValues(kind).Inc() }
 // WebSearch records one search on a workspace's SERP connection.
 func WebSearch(outcome string) { webSearches.WithLabelValues(outcome).Inc() }
 
+// AIPromptDraft records one draft of AI visibility questions.
+func AIPromptDraft(outcome string) { aiPromptDrafts.WithLabelValues(outcome).Inc() }
+
+// AIDemand records one read of AI demand: kind is questions or volume.
+func AIDemand(kind, outcome string) {
+	if kind != "questions" && kind != "volume" && kind != "benchmark" {
+		kind = "other"
+	}
+	aiDemandReads.WithLabelValues(kind, outcome).Inc()
+}
+
+// AIStance records one answer read for its stances; outcome is judged,
+// skipped or an error code.
+func AIStance(outcome string) { aiStanceReads.WithLabelValues(outcome).Inc() }
+
+// AIAnswer records one answer read from an AI assistant's own screen.
+// engine is chatgpt or gemini.
+func AIAnswer(engine, outcome string) {
+	if engine != "chatgpt" && engine != "gemini" {
+		engine = "other"
+	}
+	aiAnswers.WithLabelValues(engine, outcome).Inc()
+}
+
 // LinkLiveCheck records one check of an agreed or live link.
 func LinkLiveCheck(outcome string) { linkLiveChecks.WithLabelValues(outcome).Inc() }
 
@@ -1573,6 +1619,9 @@ func LinkPageCheck(status string) { linkPageChecks.WithLabelValues(status).Inc()
 
 // ArchiveLookup records one Internet Archive lookup.
 func ArchiveLookup(outcome string) { archiveLookups.WithLabelValues(outcome).Inc() }
+
+// PricingPageRead records one read of a pricing page by its outcome.
+func PricingPageRead(outcome string) { pricingReads.WithLabelValues(outcome).Inc() }
 
 // ReviewPageRead records one read of a review page: its outcome and how
 // many reviews it kept for the first time.

@@ -141,7 +141,7 @@ func (s *Server) coverageReviewJob(ctx context.Context, j jobs.Job) error {
 	versions := map[string]int{}
 	for _, p := range passages {
 		var version int
-		err = s.pool.QueryRow(ctx, "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", ws, req.Brand, p.ItemID).Scan(&version)
+		err = s.pool.QueryRow(ctx, "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", ws, req.Brand, p.ItemID).Scan(&version)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
@@ -265,7 +265,7 @@ func (s *Server) queueCoverageAccuracy(ctx context.Context) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE coverage_placements p SET next_accuracy_at=now()+make_interval(hours=>greatest(24,check_every_hours)),accuracy_queued_at=now()
    WHERE id IN (SELECT p.id FROM coverage_placements p WHERE monitor_accuracy AND monitor AND stage NOT IN ('archived','cancelled','declined')
-    AND (next_accuracy_at<=now() OR EXISTS(SELECT 1 FROM knowledge_items k WHERE k.workspace_id=p.workspace_id AND (k.brand_id=p.brand_id OR k.brand_id IS NULL) AND k.visibility IN ('public','customers_ai') AND k.updated_at>coalesce(p.accuracy_queued_at,'-infinity'::timestamptz) AND k.updated_at>now()-interval '30 days') AND coalesce(p.accuracy_queued_at,'-infinity'::timestamptz)<=now()-interval '1 day') AND EXISTS(SELECT 1 FROM coverage_observations o WHERE o.workspace_id=p.workspace_id AND o.brand_id=p.brand_id AND o.placement_id=p.id AND source='page_read' AND health='up' AND evidence->>'url'=p.url) ORDER BY next_accuracy_at LIMIT 50 FOR UPDATE SKIP LOCKED)
+    AND (next_accuracy_at<=now() OR EXISTS(SELECT 1 FROM knowledge_items k WHERE k.workspace_id=p.workspace_id AND k.brand_id=p.brand_id AND k.visibility IN ('public','customers_ai') AND k.updated_at>coalesce(p.accuracy_queued_at,'-infinity'::timestamptz) AND k.updated_at>now()-interval '30 days') AND coalesce(p.accuracy_queued_at,'-infinity'::timestamptz)<=now()-interval '1 day') AND EXISTS(SELECT 1 FROM coverage_observations o WHERE o.workspace_id=p.workspace_id AND o.brand_id=p.brand_id AND o.placement_id=p.id AND source='page_read' AND health='up' AND evidence->>'url'=p.url) ORDER BY next_accuracy_at LIMIT 50 FOR UPDATE SKIP LOCKED)
    RETURNING workspace_id::text,brand_id::text,id::text,next_accuracy_at,(SELECT o.id::text FROM coverage_observations o WHERE o.workspace_id=p.workspace_id AND o.brand_id=p.brand_id AND o.placement_id=p.id AND source='page_read' AND health='up' AND evidence->>'url'=p.url ORDER BY created_at DESC LIMIT 1)`)
 		if err != nil {
 			return err

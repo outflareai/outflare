@@ -42,7 +42,7 @@ steps:
   - say: Read the brand context and confirm the sign-up event and available customer data.
     tools: [getBrandContext, listEventDefinitions]
   - say: Read sign-up events in the requested window and resolve their existing people and companies; deduplicate by record ID.
-    tools: [listCustomerEvents, getRecord]
+    tools: [listBrandCustomerEvents, getBrandRecord]
   - say: Research relevant public business websites and profiles linked to those records; cite source URLs and dates, and record unresolved identity matches as unknown.
     tools: []
   - say: "Look for complementary software products, public API documentation, marketplaces and existing integrations. Identify a concrete shared customer workflow, what each product contributes, integration prerequisites and a small pilot. Separate documented API support from assumptions. Rank opportunities by customer overlap, value of the workflow and likely implementation effort."

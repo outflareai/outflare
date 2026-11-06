@@ -22,13 +22,32 @@ func (s *Server) routesTeams(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/teams/{id}", s.inWorkspace(auth.ScopeMembersManage, s.updateTeam))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/teams/{id}", s.inWorkspace(auth.ScopeMembersManage, s.deleteTeam))
 
+	// Senders are each brand's own (plans/brands/README.md): the brand
+	// routes act on their brand, the workspace routes on ?brand=, else the
+	// first brand.
 	read, manage := auth.ScopeMailboxesRead, auth.ScopeMailboxesManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/senders", s.inBrand(read, s.listSenders))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/senders", s.inWorkspace(manage, s.createSender))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/senders/{id}", s.inWorkspace(manage, s.updateSender))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/senders/{id}", s.inWorkspace(manage, s.deleteSender))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/senders/matches", s.inWorkspace(read, s.senderMatches))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/mailboxes/sender", s.inWorkspace(manage, s.setMailboxSender))
+	for _, b := range []struct {
+		path string
+		on   func(string, http.HandlerFunc) http.HandlerFunc
+	}{{"/v1/brands/{brand}", s.onBrand}, {"/v1/workspaces/{ws}", s.inBrand}} {
+		mux.HandleFunc("GET "+b.path+"/senders", b.on(read, s.listSenders))
+		mux.HandleFunc("POST "+b.path+"/senders", b.on(manage, s.createSender))
+		mux.HandleFunc("PATCH "+b.path+"/senders/{id}", b.on(manage, s.updateSender))
+		mux.HandleFunc("DELETE "+b.path+"/senders/{id}", b.on(manage, s.deleteSender))
+		mux.HandleFunc("GET "+b.path+"/senders/matches", b.on(read, s.senderMatches))
+		mux.HandleFunc("POST "+b.path+"/mailboxes/sender", b.on(manage, s.setMailboxSender))
+	}
+}
+
+// senderBrand is the brand whose senders a route reads or writes. It
+// writes the error and returns false when there is none to act on.
+func (s *Server) senderBrand(w http.ResponseWriter, r *http.Request) (string, bool) {
+	brand, ok := s.settingsBrand(w, r)
+	if ok && brand == "" {
+		writeError(w, r, http.StatusConflict, "conflict", "the workspace has no brand yet: add one first")
+		return "", false
+	}
+	return brand, ok
 }
 
 type teamView struct {
@@ -41,14 +60,17 @@ type teamView struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-func (s *Server) loadTeams(ctx context.Context, ws string, id *string) ([]teamView, error) {
+// loadTeams lists the workspace's teams. Teams are the workspace's; their
+// sender and sequence counts are one brand's when brand is set.
+func (s *Server) loadTeams(ctx context.Context, ws, brand string, id *string) ([]teamView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id, t.name, t.allocation_mode,
 		       COALESCE((SELECT array_agg(user_id::text ORDER BY user_id) FROM team_members WHERE team_id = t.id), '{}'),
-		       (SELECT count(*) FROM sender_teams WHERE team_id = t.id)::int,
-		       (SELECT count(*) FROM sequences WHERE team_id = t.id AND status <> 'archived')::int,
+		       (SELECT count(*) FROM sender_teams x JOIN senders sn ON sn.id = x.sender_id
+		        WHERE x.team_id = t.id AND ($3 = '' OR sn.brand_id::text = $3))::int,
+		       (SELECT count(*) FROM sequences WHERE team_id = t.id AND status <> 'archived' AND ($3 = '' OR brand_id::text = $3))::int,
 		       t.created_at
-		FROM teams t WHERE t.workspace_id = $1 AND ($2::uuid IS NULL OR t.id = $2) ORDER BY lower(t.name)`, ws, id)
+		FROM teams t WHERE t.workspace_id = $1 AND ($2::uuid IS NULL OR t.id = $2) ORDER BY lower(t.name)`, ws, id, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +79,11 @@ func (s *Server) loadTeams(ctx context.Context, ws string, id *string) ([]teamVi
 
 func (s *Server) listTeams(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	list, err := s.loadTeams(r.Context(), a.WorkspaceID, nil)
+	brand, ok := s.settingsBrand(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.loadTeams(r.Context(), a.WorkspaceID, brand, nil)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -147,7 +173,7 @@ func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	list, err := s.loadTeams(ctx, a.WorkspaceID, &id)
+	list, err := s.loadTeams(ctx, a.WorkspaceID, "", &id)
 	if err != nil || len(list) == 0 {
 		s.internal(w, r, err)
 		return
@@ -194,7 +220,7 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) {
 	if s.allocError(w, r, err) {
 		return
 	}
-	list, err := s.loadTeams(ctx, a.WorkspaceID, &id)
+	list, err := s.loadTeams(ctx, a.WorkspaceID, "", &id)
 	if err != nil || len(list) == 0 {
 		s.internal(w, r, err)
 		return
@@ -243,13 +269,13 @@ type senderView struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (s *Server) loadSenders(ctx context.Context, ws string, id *string) ([]senderView, error) {
+func (s *Server) loadSenders(ctx context.Context, ws, brand string, id *string) ([]senderView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT sn.id, sn.name, sn.kind, sn.user_id, sn.status,
 		       COALESCE((SELECT array_agg(team_id::text ORDER BY team_id) FROM sender_teams WHERE sender_id = sn.id), '{}'),
 		       (SELECT count(*) FROM mailboxes WHERE sender_id = sn.id AND sender_confirmed_at IS NOT NULL)::int,
 		       sn.created_at
-		FROM senders sn WHERE sn.workspace_id = $1 AND ($2::uuid IS NULL OR sn.id = $2) ORDER BY lower(sn.name)`, ws, id)
+		FROM senders sn WHERE sn.workspace_id = $1 AND sn.brand_id = $3 AND ($2::uuid IS NULL OR sn.id = $2) ORDER BY lower(sn.name)`, ws, id, brand)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +284,11 @@ func (s *Server) loadSenders(ctx context.Context, ws string, id *string) ([]send
 
 func (s *Server) listSenders(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	list, err := s.loadSenders(r.Context(), a.WorkspaceID, nil)
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
+	list, err := s.loadSenders(r.Context(), a.WorkspaceID, brand, nil)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -301,7 +331,7 @@ func (in *senderInput) validate() error {
 	return nil
 }
 
-func (in *senderInput) save(ctx context.Context, tx pgx.Tx, ws, id string) error {
+func (in *senderInput) save(ctx context.Context, tx pgx.Tx, ws, brand, id string) error {
 	if in.UserID.Value != nil {
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)`, ws, *in.UserID.Value).Scan(&ok); err != nil {
@@ -314,9 +344,9 @@ func (in *senderInput) save(ctx context.Context, tx pgx.Tx, ws, id string) error
 	tag, err := tx.Exec(ctx, `
 		UPDATE senders SET name = COALESCE($3, name), kind = COALESCE($4, kind),
 			user_id = CASE WHEN $5 THEN $6::uuid ELSE user_id END, status = COALESCE($7, status), updated_at = now()
-		WHERE id = $1 AND workspace_id = $2`, id, ws, in.Name, in.Kind, in.UserID.Set, in.UserID.Value, in.Status)
+		WHERE id = $1 AND workspace_id = $2 AND brand_id = $8`, id, ws, in.Name, in.Kind, in.UserID.Set, in.UserID.Value, in.Status, brand)
 	if isUnique(err) {
-		return errInvalid("a sender with that name already exists")
+		return errInvalid("the brand has a sender with that name")
 	}
 	if err != nil {
 		return err
@@ -356,25 +386,29 @@ func (s *Server) createSender(w http.ResponseWriter, r *http.Request) {
 		s.allocError(w, r, err)
 		return
 	}
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var id string
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `INSERT INTO senders (workspace_id, name) VALUES ($1, $2) RETURNING id`, a.WorkspaceID, *req.Name).Scan(&id)
+		err := tx.QueryRow(ctx, `INSERT INTO senders (workspace_id, brand_id, name) VALUES ($1, $2, $3) RETURNING id`, a.WorkspaceID, brand, *req.Name).Scan(&id)
 		if isUnique(err) {
-			return errInvalid("a sender with that name already exists")
+			return errInvalid("the brand has a sender with that name")
 		}
 		if err != nil {
 			return err
 		}
-		if err := req.save(ctx, tx, a.WorkspaceID, id); err != nil {
+		if err := req.save(ctx, tx, a.WorkspaceID, brand, id); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "sender.created", "sender", id, map[string]any{"name": *req.Name})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "sender.created", "sender", id, map[string]any{"name": *req.Name, "brand_id": brand})
 	})
 	if s.allocError(w, r, err) {
 		return
 	}
-	list, err := s.loadSenders(ctx, a.WorkspaceID, &id)
+	list, err := s.loadSenders(ctx, a.WorkspaceID, brand, &id)
 	if err != nil || len(list) == 0 {
 		s.internal(w, r, err)
 		return
@@ -396,9 +430,13 @@ func (s *Server) updateSender(w http.ResponseWriter, r *http.Request) {
 		s.allocError(w, r, err)
 		return
 	}
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if err := req.save(ctx, tx, a.WorkspaceID, id); err != nil {
+		if err := req.save(ctx, tx, a.WorkspaceID, brand, id); err != nil {
 			return err
 		}
 		if err := allocation.Request(ctx, tx, a.WorkspaceID); err != nil {
@@ -408,12 +446,12 @@ func (s *Server) updateSender(w http.ResponseWriter, r *http.Request) {
 		if req.Status != nil && *req.Status == "retired" {
 			action = "sender.retired"
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "sender", id, nil)
+		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "sender", id, map[string]any{"brand_id": brand})
 	})
 	if s.allocError(w, r, err) {
 		return
 	}
-	list, err := s.loadSenders(ctx, a.WorkspaceID, &id)
+	list, err := s.loadSenders(ctx, a.WorkspaceID, brand, &id)
 	if err != nil || len(list) == 0 {
 		s.internal(w, r, err)
 		return
@@ -428,10 +466,14 @@ func (s *Server) deleteSender(w http.ResponseWriter, r *http.Request) {
 		s.allocError(w, r, errNotFound)
 		return
 	}
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var name string
-		err := tx.QueryRow(ctx, `DELETE FROM senders WHERE id = $1 AND workspace_id = $2 RETURNING name`, id, a.WorkspaceID).Scan(&name)
+		err := tx.QueryRow(ctx, `DELETE FROM senders WHERE id = $1 AND workspace_id = $2 AND brand_id = $3 RETURNING name`, id, a.WorkspaceID, brand).Scan(&name)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -444,7 +486,7 @@ func (s *Server) deleteSender(w http.ResponseWriter, r *http.Request) {
 		if err := allocation.Request(ctx, tx, a.WorkspaceID); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "sender.deleted", "sender", id, map[string]any{"name": name})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "sender.deleted", "sender", id, map[string]any{"name": name, "brand_id": brand})
 	})
 	if s.allocError(w, r, err) {
 		return
@@ -460,16 +502,21 @@ type senderMatch struct {
 	SenderName  string `json:"sender_name"`
 }
 
-// senderMatches suggests a sender for mailboxes without a confirmed one,
-// where the mailbox's display name is exactly a sender's name. Nothing is
-// guessed from the address; a person or agent confirms each match.
+// senderMatches suggests a sender for the brand's mailboxes without a
+// confirmed one, where the mailbox's display name is exactly one of the
+// brand's senders' names. Nothing is guessed from the address; a person or
+// agent confirms each match.
 func (s *Server) senderMatches(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT m.id::text, m.email, m.display_name, sn.id::text, sn.name
-		FROM mailboxes m JOIN senders sn ON sn.workspace_id = m.workspace_id AND lower(sn.name) = lower(trim(m.display_name))
-		WHERE m.workspace_id = $1 AND m.sender_confirmed_at IS NULL AND sn.status = 'active'
-		ORDER BY sn.name, m.email`, a.WorkspaceID)
+		FROM mailboxes m JOIN senders sn ON sn.workspace_id = m.workspace_id AND sn.brand_id = m.brand_id AND lower(sn.name) = lower(trim(m.display_name))
+		WHERE m.workspace_id = $1 AND m.brand_id = $2 AND m.sender_confirmed_at IS NULL AND sn.status = 'active'
+		ORDER BY sn.name, m.email`, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -483,15 +530,15 @@ func (s *Server) senderMatches(w http.ResponseWriter, r *http.Request) {
 		list = []senderMatch{}
 	}
 	var unconfirmed int
-	if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND sender_confirmed_at IS NULL`, a.WorkspaceID).Scan(&unconfirmed); err != nil {
+	if err := s.pool.QueryRow(r.Context(), `SELECT count(*) FROM mailboxes WHERE workspace_id = $1 AND brand_id = $2 AND sender_confirmed_at IS NULL`, a.WorkspaceID, brand).Scan(&unconfirmed); err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "unconfirmed": unconfirmed})
 }
 
-// setMailboxSender confirms who mailboxes send as, in bulk. A null
-// sender_id clears it.
+// setMailboxSender confirms who the brand's mailboxes send as, in bulk,
+// from the brand's senders. A null sender_id clears it.
 func (s *Server) setMailboxSender(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req struct {
@@ -509,12 +556,16 @@ func (s *Server) setMailboxSender(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "mailbox_ids must be UUIDs")
 		return
 	}
+	brand, ok := s.senderBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var n int64
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if v := req.SenderID.Value; v != nil {
 			var ok bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM senders WHERE id = $1 AND workspace_id = $2)`, *v, a.WorkspaceID).Scan(&ok); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM senders WHERE id = $1 AND workspace_id = $2 AND brand_id = $3)`, *v, a.WorkspaceID, brand).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {
@@ -525,7 +576,7 @@ func (s *Server) setMailboxSender(w http.ResponseWriter, r *http.Request) {
 			UPDATE mailboxes SET sender_id = $3,
 				sender_confirmed_at = CASE WHEN $3::uuid IS NULL THEN NULL ELSE now() END,
 				sender_confirmed_by = CASE WHEN $3::uuid IS NULL THEN NULL ELSE $4::uuid END, updated_at = now()
-			WHERE workspace_id = $1 AND id = ANY($2::uuid[])`, a.WorkspaceID, req.MailboxIDs, req.SenderID.Value, a.ActorID)
+			WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND brand_id = $5`, a.WorkspaceID, req.MailboxIDs, req.SenderID.Value, a.ActorID, brand)
 		if err != nil {
 			return err
 		}
@@ -534,7 +585,7 @@ func (s *Server) setMailboxSender(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "mailbox.sender_set", "workspace", a.WorkspaceID,
-			map[string]any{"mailboxes": n, "sender_id": req.SenderID.Value})
+			map[string]any{"mailboxes": n, "sender_id": req.SenderID.Value, "brand_id": brand})
 	})
 	if s.allocError(w, r, err) {
 		return

@@ -129,10 +129,10 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
   }, [ws, f, brandId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTags = useCallback(() => {
-    api.GET("/v1/workspaces/{ws}/inbox-tags", { params: { path: { ws } } }).then(({ data }) => setTags(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/inbox-tags", { params: { path: { brand: brandId } } }).then(({ data }) => setTags(data?.data ?? []));
   }, [ws]);
   const loadViews = useCallback(() => {
-    api.GET("/v1/workspaces/{ws}/inbox-views", { params: { path: { ws } } }).then(({ data }) => setViews(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/inbox-views", { params: { path: { brand: brandId } } }).then(({ data }) => setViews(data?.data ?? []));
   }, [ws]);
 
   useEffect(() => {
@@ -169,7 +169,7 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
     });
     if (!r?.value.trim()) return;
     const filters = Object.fromEntries(changed.map((k) => [k, f[k]]));
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/inbox-views", { params: { path: { ws } }, body: { name: r.value.trim(), filters, shared: r.choice === "shared" } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/inbox-views", { params: { path: { brand: brandId } }, body: { name: r.value.trim(), filters, shared: r.choice === "shared" } });
     if (error || !data) return toast(errorMessage(error), "error");
     setView(data);
     loadViews();
@@ -178,7 +178,7 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
   async function updateView() {
     if (!view) return;
     const filters = Object.fromEntries(changed.map((k) => [k, f[k]]));
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view.id } }, body: { filters } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/inbox-views/{id}", { params: { path: { brand: brandId, id: view.id } }, body: { filters } });
     if (error || !data) return toast(errorMessage(error), "error");
     setView(data);
     loadViews();
@@ -186,7 +186,7 @@ function InboxPage({ ws, canManage, open, setOpen, onRead }: Props) {
   }
   async function deleteView() {
     if (!view || !(await confirmAction(`Delete the view "${view.name}"?`, view.shared ? "It's shared, so it goes for everyone in the workspace. The replies stay." : "The replies stay.", "Delete view"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/inbox-views/{id}", { params: { path: { ws, id: view.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/inbox-views/{id}", { params: { path: { brand: brandId, id: view.id } } });
     if (error) return toast(errorMessage(error), "error");
     setView(null);
     loadViews();
@@ -515,13 +515,14 @@ function TagPicker({ names, tags, onChange }: { names: string[]; tags: InboxTag[
 // The workspace's tags: add, rename, recolour or delete them. Renaming or
 // deleting a tag changes every reply that carries it.
 function TagsDialog({ ws, tags, onChange, onClose }: { ws: string; tags: InboxTag[]; onChange: () => void; onClose: () => void }) {
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [name, setName] = useState("");
   const [error, setError] = useState("");
 
   async function create(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/inbox-tags", { params: { path: { ws } }, body: { name: name.trim() } });
+    const { error } = await api.POST("/v1/brands/{brand}/inbox-tags", { params: { path: { brand: brandId } }, body: { name: name.trim() } });
     if (error) return setError(errorMessage(error));
     setError("");
     setName("");
@@ -529,7 +530,7 @@ function TagsDialog({ ws, tags, onChange, onClose }: { ws: string; tags: InboxTa
   }
   async function update(t: InboxTag, body: { name?: string; color?: InboxTag["color"] }) {
     if (body.name !== undefined && (!body.name.trim() || body.name.trim().toLowerCase() === t.name)) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: t.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/inbox-tags/{id}", { params: { path: { brand: brandId, id: t.id } }, body });
     if (error) return setError(errorMessage(error));
     setError("");
     onChange();
@@ -537,7 +538,7 @@ function TagsDialog({ ws, tags, onChange, onClose }: { ws: string; tags: InboxTa
   async function remove(t: InboxTag) {
     const on = t.replies === 1 ? "1 reply" : `${t.replies} replies`;
     if (!(await confirmAction(`Delete the tag "${t.name}"?`, `It comes off ${on}. The replies stay.`, "Delete tag"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/inbox-tags/{id}", { params: { path: { ws, id: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/inbox-tags/{id}", { params: { path: { brand: brandId, id: t.id } } });
     if (error) return setError(errorMessage(error));
     onChange();
   }

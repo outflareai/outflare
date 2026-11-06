@@ -37,8 +37,7 @@ export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolea
 
   const brand = useBrand(ws).brand?.handle;
   const load = useCallback(async () => {
-    const path = { params: { path: { ws } } };
-    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/senders", path), api.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } })]);
+    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/senders", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } })]);
     setMailboxes(m.data?.data ?? []);
     setDomains(d.data?.data ?? []);
     setSenders(s.data?.data ?? []);
@@ -103,7 +102,8 @@ export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolea
   }
 
   async function setSender(m: Mailbox, senderId: string) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/mailboxes/sender", { params: { path: { ws } }, body: { mailbox_ids: [m.id], sender_id: senderId || null } });
+    // A mailbox sends as one of its own brand's senders.
+    const { error } = await api.POST("/v1/workspaces/{ws}/mailboxes/sender", { params: { path: { ws }, query: m.brand_id ? { brand: m.brand_id } : {} }, body: { mailbox_ids: [m.id], sender_id: senderId || null } });
     if (error) return toast(errorMessage(error), "error");
     toast(senderId ? `${m.email} sends as ${senders.find((x) => x.id === senderId)?.name}.` : `Cleared the sender for ${m.email}.`);
     load();

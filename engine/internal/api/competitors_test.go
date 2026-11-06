@@ -24,6 +24,7 @@ func TestCompetitorsSuggestTrackAndNumbers(t *testing.T) {
 		map[string]any{"domain": "Other.Example", "intersections": 40},
 		map[string]any{"domain": "blog.example.com", "intersections": 300},
 		map[string]any{"domain": "example.com", "intersections": 900},
+		map[string]any{"domain": "github.com", "intersections": 500},
 	)
 	res := owner.must(200, "POST", base+"/seo/"+id+"/sync", nil)
 	runs := res["competitors"].([]any)
@@ -66,10 +67,29 @@ func TestCompetitorsSuggestTrackAndNumbers(t *testing.T) {
 		t.Fatalf("glances queued: %d %v", queued, err)
 	}
 
+	// A platform suggested before platforms were left out is withdrawn,
+	// and one tracked from a suggestion is never read on the budget.
+	var brandID *string
+	if err := e.pool.QueryRow(context.Background(), `SELECT brand_id::text FROM seo_sites WHERE id = $1`, siteID).Scan(&brandID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, status, source) VALUES
+		($1, $2, $3, 'gitlab.com', 'suggested', 'dataforseo'), ($1, $2, $3, 'old.reddit.com', 'tracked', 'dataforseo')`, ws, siteID, brandID); err != nil {
+		t.Fatal(err)
+	}
+
 	// Tracked competitors get numbers; the first snapshot is a baseline.
 	run := owner.must(200, "POST", base+"/seo/"+id+"/sync?again=1", nil)["competitors"].([]any)[0].(map[string]any)
 	if run["checked"].(float64) != 2 || run["events"].(float64) != 0 {
 		t.Fatalf("baseline: %v", run)
+	}
+	var platformStates string
+	if err := e.pool.QueryRow(context.Background(), `SELECT string_agg(host || ':' || status, ',' ORDER BY host) FROM seo_competitors
+		WHERE workspace_id = $1 AND (host LIKE '%git%' OR host LIKE '%reddit%')`, ws).Scan(&platformStates); err != nil || platformStates != "gitlab.com:dismissed,old.reddit.com:tracked" {
+		t.Fatalf("platforms: %q %v", platformStates, err)
+	}
+	if _, err := e.pool.Exec(context.Background(), `DELETE FROM seo_competitors WHERE workspace_id = $1 AND host IN ('gitlab.com', 'old.reddit.com')`, ws); err != nil {
+		t.Fatal(err)
 	}
 	// A week later the domain rating moved.
 	if _, err := e.pool.Exec(context.Background(), `UPDATE seo_snapshots SET day = day - 7 WHERE workspace_id = $1`, ws); err != nil {

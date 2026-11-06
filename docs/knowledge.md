@@ -2,11 +2,11 @@
 
 Knowledge is what your business knows, written down once: your products, prices, policies, processes, stock answers and how to talk about them. Your team reads it, and every AI in Outflare uses it: agents over MCP, missions and the built-in agent, the [help centre](help-centre.md), and, as they ship, support replies, the chat widget and drafts.
 
-It sits beside your [company context and memories](agent-memory.md) in the **Knowledge** section of the app. Context says who you are; memories are one-line notes; knowledge holds anything longer.
+It sits beside your [brand context and memories](agent-memory.md) in the **Knowledge** section of the app. Context says who you are; memories are one-line notes; knowledge holds anything longer.
 
 ## In the app
 
-**Knowledge** in the sidebar has three pages: **Library** (your knowledge), **Help centre** (the public site, see [Help centre](help-centre.md)) and **About your company** (company context and memories).
+**Knowledge** in the sidebar has three pages: **Library** (your knowledge), **Help centre** (the public site, see [Help centre](help-centre.md)) and **About your company** (the picked brand's context and memories).
 
 The Library opens on an **Overview**:
 
@@ -39,7 +39,7 @@ Each item has:
   - **AI talking to customers** (`customers_ai`): AI may use it to answer customers, but it isn't published.
   - **Team only** (`team`, the default): your team, and AI working for your team. Never shown or told to a customer.
 - **Draft or published**: a draft is only for the people editing it.
-- **A brand**, or none to share it with every brand. A folder of a brand holds only that brand's knowledge, and an item put in one takes its brand. People and API keys limited to some brands see their brands' knowledge and the shared knowledge, and change only their brands'.
+- **A brand.** Brands share no knowledge: an item or folder saved without one is the workspace's first brand's (or the route's brand). A folder of a brand holds only that brand's knowledge, and an item put in one takes its brand. People and API keys limited to some brands see and change only their brands' knowledge.
 - **An owner** (who keeps it right, by default whoever added it) and an optional **check by** date.
 
 ## Import your website
@@ -63,7 +63,7 @@ Every AI in Outflare reads the knowledge base the same way, so what you write is
 - **Passages.** Each item is split into passages: a quick answer is one, an article one per section (each heading starts a new one), with long sections cut at paragraphs. They are rebuilt whenever the text changes.
 - **Finding them.** A question finds passages by its words (title, section heading and text, any of the question's words) and, when [meaning-based search](workspace-search.md#meaning-based-search) runs, by what it means, so "is it expensive?" finds the section on pricing. With no AI connection that makes embeddings, words alone still work. Passages of knowledge in the bin or in draft are never found.
 - **Who it's for.** Every question is asked for the team (every item) or for customers (only items on the **Help centre** or for **AI talking to customers**). An answer meant for a customer can't see **Team only** knowledge at all: it is left out before the AI model reads anything.
-- **Brands.** A brand's question finds that brand's knowledge and the shared knowledge, never another brand's.
+- **Brands.** A brand's question finds only that brand's knowledge, never another brand's.
 - **Answers.** Asking has the workspace's own AI model (the **Knowledge answers** task under Settings, AI model, on your own key and AI limit) write a short answer from the passages it found and nothing else, citing them. When they don't cover the question, it says so instead of guessing: that is a gap worth writing.
 - **Agents.** `get_context` and a mission's check-in say how much knowledge there is and to check it before stating facts; the built-in agent is told to as well.
 - **Kept for later.** Each question, whether it was answered, and which items the answer used are kept, for use counts and the list of gaps.

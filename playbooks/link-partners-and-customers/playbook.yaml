@@ -26,7 +26,7 @@ inputs:
     example: northpeak.example
 steps:
   - say: List partner and customer companies with a website, and leave out the ones whose sites already link to you.
-    tools: [listSEOSites, listRecords, listBacklinks]
+    tools: [listSEOSites, listBrandRecords, listBacklinks]
   - say: Add each one's partners, integrations or customers page (or home page) as a partner prospect.
     tools: [addLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.

@@ -74,7 +74,11 @@ type payload struct {
 }
 
 // Register adds the job handler.
-func (s *Service) Register(q *jobs.Queue) { q.Handle(JobCheck, s.job) }
+func (s *Service) Register(q *jobs.Queue) {
+	q.Handle(JobCheck, s.job)
+	q.Handle(JobGapSERPs, s.gapJob)
+	q.Handle(JobImport, s.importJob)
+}
 
 // Enqueue asks for a check of a site's keywords. all checks every active
 // keyword not checked today; key de-duplicates (a request's id, or "" for
@@ -93,6 +97,12 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		if _, err := s.QueueDue(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "rank.schedule_failed", ActorType: "system", Surface: "job"}, "internal", fmt.Errorf("ranks: schedule checks: %w", err))
+		}
+		if _, err := s.QueueImports(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "rank.schedule_failed", ActorType: "system", Surface: "job", Props: map[string]any{"kind": "import"}}, "internal", fmt.Errorf("ranks: schedule imports: %w", err))
+		}
+		if _, err := s.QueueGapReads(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "rank.schedule_failed", ActorType: "system", Surface: "job", Props: map[string]any{"kind": "gap_results"}}, "internal", fmt.Errorf("ranks: schedule gap reads: %w", err))
 		}
 		select {
 		case <-ctx.Done():
@@ -113,7 +123,9 @@ func (s *Service) QueueDue(ctx context.Context) (int, error) {
 		JOIN seo_sites ss ON ss.id = t.site_id AND ss.status = 'active'
 		WHERE t.status = 'active' AND `+due+`
 		  AND (t.failures = 0 OR t.last_failed_at IS NULL OR t.last_failed_at <= now() - `+retry.SQL("t.failures")+`)
-		GROUP BY 1, 2`)
+		  -- Imported keywords come in with their connection's daily import.
+		  AND NOT EXISTS (SELECT 1 FROM integrations i WHERE i.id = t.integration_id AND i.connector = ANY($1))
+		GROUP BY 1, 2`, TrackedConnectors(s.Store.Registry))
 	if err != nil {
 		return 0, err
 	}
@@ -312,6 +324,15 @@ func (s *Service) checkWith(ctx context.Context, ws, siteID, host, integrationID
 		return s.fail(ctx, ws, list, err, res)
 	}
 	r, ok := o.Connector.(connectors.SERPReader)
+	if _, imports := o.Connector.(connectors.TrackedRankReader); !ok && imports {
+		// Its keywords are the tracker's own: read them again instead.
+		got, err := s.importLocked(ctx, ws, siteID, integrationID)
+		if err != nil {
+			return s.fail(ctx, ws, list, err, res)
+		}
+		res.Checked += got.Keywords
+		return nil
+	}
 	if !ok {
 		return s.fail(ctx, ws, list, connectors.Errf(connectors.ErrInvalid, "%s cannot check rankings", o.Name), res)
 	}
@@ -426,6 +447,12 @@ func (s *Service) record(ctx context.Context, o *connectors.Opened, unit, host s
 // recordCost puts a SERP call's cost in the Outcomes ledger, counted
 // against the connection's budget.
 func recordCost(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note string, cost connectors.SEOCost) error {
+	return recordCostRef(ctx, pool, o, unit, host, note, "", cost)
+}
+
+// recordCostRef is recordCost with the caller's reference for the entry
+// ("" for none), so the caller can find it again.
+func recordCostRef(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note, ref string, cost connectors.SEOCost) error {
 	units := amount(unit, cost)
 	id := o.ID
 	e := outcomes.Entry{
@@ -435,6 +462,9 @@ func recordCost(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, u
 	}
 	if cost.Estimated {
 		e.Note += ", estimated from the price list"
+	}
+	if ref != "" {
+		e.Ref = &ref
 	}
 	if unit == seosync.UnitUSD {
 		cents := int64(math.Round(cost.USD * 100))

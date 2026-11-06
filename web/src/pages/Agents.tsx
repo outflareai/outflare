@@ -23,6 +23,12 @@ type Status = Action["status"];
 const statusLabel: Record<Status, string> = { held: "Waiting", running: "Running", executed: "Done", failed: "Failed", refused: "Refused", rejected: "Rejected", expired: "Expired", cancelled: "Cancelled" };
 const statusTone: Record<Status, "amber" | "blue" | "green" | "red" | "grey"> = { held: "amber", running: "blue", executed: "green", failed: "red", refused: "red", rejected: "grey", expired: "grey", cancelled: "grey" };
 const ruleLabel: Record<string, string> = { no_grant: "No grant covers it", grant: "By a grant", daily_limit: "Daily limit reached", always_person: "Always needs a person" };
+// Why a change waits, in words, when it is more than "nobody has allowed
+// this kind of change yet" (the usual case, which needs no badge).
+const waitLabel: Record<string, string> = { daily_limit: "Over today's limit", always_person: "Always needs a person" };
+// The fields that say what a change is about, first match wins.
+const targetKeys = ["url", "page_url", "target", "website", "domain", "email", "name", "title"];
+const isID = (k: string) => k === "id" || k.endsWith("_id") || k.endsWith("_ids");
 const modeLabel = { run: "Runs", hold: "Waits for a person", refuse: "Refused" } as const;
 const modeTone = { run: "green", hold: "amber", refuse: "red" } as const;
 
@@ -159,6 +165,28 @@ function HeldAction({ ws, a, canApprove, canManage, picked, onPick, onDone }: { 
   const [limit, setLimit] = useState("");
   const body = a.body && typeof a.body === "object" && !Array.isArray(a.body) ? (a.body as Record<string, unknown>) : null;
   const scalar = body ? Object.entries(body).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v)) : [];
+  const targetKey = body ? targetKeys.find((k) => typeof body[k] === "string" && body[k]) : undefined;
+  const [looked, setLooked] = useState("");
+  const target = targetKey ? String(body![targetKey]) : looked;
+  // A change to one thing (PATCH .../{id}) names it from the thing itself.
+  useEffect(() => {
+    if (targetKey || a.method === "POST" || !/\/[0-9a-f-]{36}$/.test(a.path)) return;
+    let live = true;
+    fetch(a.path, { credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((v: Record<string, unknown> | null) => {
+        const k = v && targetKeys.find((k) => typeof v[k] === "string" && v[k]);
+        if (live && v && k) setLooked(String(v[k]));
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [a.method, a.path, targetKey]);
+  const who = a.actor_name ?? "An agent";
+  // An agent's reason leads with the yes/no question this card asks
+  // ("Take X out of outreach? X is a competitor."); older ones don't.
+  const qi = a.reason ? a.reason.indexOf("? ") : -1;
+  const question = qi >= 0 ? a.reason!.slice(0, qi + 1) : a.reason?.endsWith("?") ? a.reason : "";
+  const why = qi >= 0 ? a.reason!.slice(qi + 2).trim() : question ? "" : a.reason;
 
   async function decide(approve: boolean, remember?: { fields: string[]; daily_limit?: number }) {
     let note = "";
@@ -190,17 +218,24 @@ function HeldAction({ ws, a, canApprove, canManage, picked, onPick, onDone }: { 
       <div className="flex items-start gap-3">
         {canApprove && <input type="checkbox" className="mt-1" checked={picked} onChange={(e) => onPick(e.target.checked)} aria-label={`Select ${a.summary}`} />}
         <div className="min-w-0 flex-1 text-[13px]">
+          <div className="text-[12px] text-muted-foreground">{question ? `${who} asks` : `${who} asks to`}</div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-medium">{a.summary}</span>
-            {a.decided_by_rule && <Badge tone="amber">{ruleLabel[a.decided_by_rule] ?? a.decided_by_rule}</Badge>}
+            <span className="text-[15px] font-medium">{question || a.summary}</span>
+            {a.decided_by_rule && waitLabel[a.decided_by_rule] && <Badge tone="amber">{waitLabel[a.decided_by_rule]}</Badge>}
             <BrandBadge id={a.brand_id} />
           </div>
-          {a.reason && <p className="text-muted-foreground">“{a.reason}”</p>}
-          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
-            {a.method} {shortPath(a.path)} · {a.actor_name ?? "agent"} · {ago(a.created_at)}
-            {a.expires_at && ` · expires in ${plural(daysLeft(a.expires_at), "day")}`}
+          {target && (
+            <p className="mt-1 min-w-0 break-words">
+              <span className="text-muted-foreground">On </span>
+              {/^https?:\/\//.test(target) ? <a href={target} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">{target}</a> : <span className="font-medium">{target}</span>}
+            </p>
+          )}
+          {why && <p className="mt-1"><span className="font-medium">Why: </span>{why}</p>}
+          {a.hold_reason && a.decided_by_rule && waitLabel[a.decided_by_rule] && <p className="mt-1 text-[12px] text-muted-foreground">{a.hold_reason}</p>}
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            {question && `${a.summary} · `}Asked {ago(a.created_at)}
+            {a.expires_at && ` · cancelled in ${plural(daysLeft(a.expires_at), "day")} if nobody answers`}
           </p>
-          {a.hold_reason && <p className="mt-0.5 text-[12px] text-muted-foreground">{a.hold_reason}</p>}
         </div>
         {canApprove && (
           <div className="flex flex-wrap justify-end gap-2">
@@ -211,18 +246,19 @@ function HeldAction({ ws, a, canApprove, canManage, picked, onPick, onDone }: { 
       </div>
       {a.body !== undefined && a.body !== null && (
         <>
-          <ChangePreview body={a.body} />
+          <ChangePreview body={a.body} hide={(k) => isID(k) || k === targetKey} />
           <details className="mt-2">
-            <summary className="cursor-pointer text-[12px] text-muted-foreground">Exact request</summary>
+            <summary className="cursor-pointer text-[12px] text-muted-foreground">Show the exact request</summary>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">{a.method} {shortPath(a.path)}</p>
             <pre className="mt-1 max-h-72 overflow-auto rounded border bg-muted/40 p-2 text-[11px]"><code>{JSON.stringify(a.body, null, 2)}</code></pre>
           </details>
         </>
       )}
       {canManage && a.decided_by_rule !== "always_person" && (
         <details className="mt-2" open={remembering} onToggle={(e) => setRemembering((e.target as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-[12px] text-muted-foreground">Approve changes like this from now on</summary>
+          <summary className="cursor-pointer text-[12px] text-muted-foreground">Always allow this kind of change</summary>
           <form onSubmit={rememberSubmit} className="mt-2 space-y-3 rounded-md border bg-muted/30 p-3 text-[13px]">
-            <p className="text-muted-foreground">This agent may then make <span className="font-mono text-[12px]">{a.method} {shortPath(a.path)}</span> on its own{scalar.length ? ", when these fields match:" : "."}</p>
+            <p className="text-muted-foreground">From now on, {who} may “{a.summary.toLowerCase()}” without asking{scalar.length ? ", when the ticked fields match:" : "."}</p>
             {scalar.length > 0 && (
               <div className="grid gap-1 sm:grid-cols-2">
                 {scalar.map(([k, v]) => (

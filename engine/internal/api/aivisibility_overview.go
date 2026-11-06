@@ -26,6 +26,18 @@ type aiVisEntity struct {
 	// Its answers out of every brand's and competitor's answers.
 	ShareOfVoice *float64 `json:"share_of_voice"`
 	AvgPosition  *float64 `json:"avg_position"`
+	// Answers recommending it, listing it and warning against it.
+	Recommended   int      `json:"recommended"`
+	Listed        int      `json:"listed"`
+	Warned        int      `json:"warned"`
+	RecommendRate *float64 `json:"recommend_rate"`
+	aiVisScore
+	// The benchmark: stored AI answers mentioning it on the latest day
+	// counted, its share of all the cohort's brands', and the change since
+	// the count before.
+	BenchmarkMentions *int     `json:"benchmark_mentions"`
+	BenchmarkShare    *float64 `json:"benchmark_share"`
+	BenchmarkChange   *int     `json:"benchmark_change"`
 }
 
 type aiVisBrand struct {
@@ -46,7 +58,18 @@ type aiVisHost struct {
 	Host       string `json:"host"`
 	Owner      string `json:"owner"`
 	Competitor string `json:"competitor"`
+	SourceType string `json:"source_type"`
 	Answers    int    `json:"answers"`
+}
+
+type aiVisCount struct {
+	Name    string `json:"name,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Answers int    `json:"answers"`
+	// Host is the brand's website, when AI visibility put it on the
+	// Competitors module's list (a suggested competitor), and its id there.
+	Host         string `json:"host,omitempty"`
+	CompetitorID string `json:"competitor_id,omitempty"`
 }
 
 type aiVisWeek struct {
@@ -54,6 +77,9 @@ type aiVisWeek struct {
 	Answers      int      `json:"answers"`
 	MentionRate  *float64 `json:"mention_rate"`
 	ShareOfVoice *float64 `json:"share_of_voice"`
+	aiVisScore
+	// RealChange: the score's range doesn't overlap the week before's.
+	RealChange bool `json:"real_change"`
 }
 
 // aiVisFacts is how accurate the answers naming the brand were about its
@@ -78,11 +104,21 @@ type aiVisCohort struct {
 	Answers     int           `json:"answers"`
 	Brand       aiVisBrand    `json:"brand"`
 	Competitors []aiVisEntity `json:"competitors"`
-	Models      []aiVisModel  `json:"models"`
-	CitedHosts  []aiVisHost   `json:"cited_hosts"`
-	Weeks       []aiVisWeek   `json:"weeks"`
-	Facts       aiVisFacts    `json:"facts"`
-	OpenFixes   int           `json:"open_fixes"`
+	// Brands answers recommend or list that the cohort doesn't track.
+	Suggested   []aiVisCount `json:"suggested_competitors"`
+	SourceTypes []aiVisCount `json:"source_types"`
+	Models      []aiVisModel `json:"models"`
+	CitedHosts  []aiVisHost  `json:"cited_hosts"`
+	Weeks       []aiVisWeek  `json:"weeks"`
+	Facts       aiVisFacts   `json:"facts"`
+	OpenFixes   int          `json:"open_fixes"`
+	// BenchmarkDay is the latest day the benchmark was counted, or null.
+	BenchmarkDay *string `json:"benchmark_day"`
+	// Grid is the brand by awareness level and question type.
+	Grid []aiVisCell `json:"grid"`
+	// Traffic is what AI answers brought the brand's website; null for a
+	// cohort without a brand.
+	Traffic *aiVisTraffic `json:"traffic"`
 }
 
 func rate(n, of int) *float64 {
@@ -120,8 +156,8 @@ func (s *Server) getAIVisibility(w http.ResponseWriter, r *http.Request) {
 func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandSel, from time.Time) ([]aiVisCohort, error) {
 	args := []any{ws}
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id, c.name, c.brand_id::text, COALESCE(b.name, x.company, '')
-		FROM ai_cohorts c LEFT JOIN brands b ON b.id = c.brand_id LEFT JOIN workspace_context x ON x.workspace_id = c.workspace_id
+		SELECT c.id, c.name, c.brand_id::text, COALESCE(b.name, '')
+		FROM ai_cohorts c LEFT JOIN brands b ON b.id = COALESCE(c.brand_id, outflare_first_brand(c.workspace_id))
 		WHERE c.workspace_id = $1`+sel.sql("c.brand_id", &args)+` ORDER BY c.name`, args...)
 	if err != nil {
 		return nil, err
@@ -132,7 +168,7 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	var id, name, brandName string
 	var brand *string
 	if _, err := pgx.ForEachRow(rows, []any{&id, &name, &brand, &brandName}, func() error {
-		c := &aiVisCohort{Competitors: []aiVisEntity{}, Models: []aiVisModel{}, CitedHosts: []aiVisHost{}, Weeks: []aiVisWeek{}}
+		c := &aiVisCohort{Competitors: []aiVisEntity{}, Suggested: []aiVisCount{}, SourceTypes: []aiVisCount{}, Models: []aiVisModel{}, CitedHosts: []aiVisHost{}, Weeks: []aiVisWeek{}}
 		c.Cohort.ID, c.Cohort.Name, c.Cohort.BrandID = id, name, brand
 		c.Brand.Name = brandName
 		list = append(list, c)
@@ -165,7 +201,8 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	}
 	// Each brand and competitor: answers naming it, and where.
 	rows, err = s.pool.Query(ctx, `
-		SELECT m.cohort_id, m.entity, m.name, count(*), avg(m.position)::float8
+		SELECT m.cohort_id, m.entity, m.name, count(*), avg(m.position)::float8,
+		       count(*) FILTER (WHERE m.stance = 'recommended'), count(*) FILTER (WHERE m.stance = 'listed'), count(*) FILTER (WHERE m.stance = 'warned')
 		FROM ai_mentions m JOIN ai_samples s ON s.id = m.sample_id
 		WHERE m.workspace_id = $1 AND m.cohort_id = ANY($2) AND s.status = 'ok' AND m.sampled_at >= $3
 		GROUP BY m.cohort_id, m.entity, m.name`, ws, ids, from)
@@ -175,10 +212,12 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	totals := map[string]int{}
 	var entity string
 	var pos float64
-	if _, err := pgx.ForEachRow(rows, []any{&id, &entity, &name, &n, &pos}, func() error {
+	var rec, listed, warned int
+	if _, err := pgx.ForEachRow(rows, []any{&id, &entity, &name, &n, &pos, &rec, &listed, &warned}, func() error {
 		c := byID[id]
 		p := math.Round(pos*10) / 10
-		e := aiVisEntity{Name: name, Answers: n, MentionRate: rate(n, c.Answers), AvgPosition: &p}
+		e := aiVisEntity{Name: name, Answers: n, MentionRate: rate(n, c.Answers), AvgPosition: &p,
+			Recommended: rec, Listed: listed, Warned: warned, RecommendRate: rate(rec, c.Answers)}
 		totals[id] += n
 		if entity == "brand" {
 			e.Name = c.Brand.Name
@@ -210,8 +249,10 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	}
 	// The sites answers cite most.
 	rows, err = s.pool.Query(ctx, `
-		SELECT cohort_id, host, owner, competitor, answers FROM (
-			SELECT c.cohort_id, c.host, min(c.owner) AS owner, min(c.competitor) AS competitor, count(DISTINCT c.sample_id) AS answers,
+		SELECT cohort_id, host, owner, competitor, source_type, answers FROM (
+			SELECT c.cohort_id, c.host, min(c.owner) AS owner, min(c.competitor) AS competitor,
+			       COALESCE(mode() WITHIN GROUP (ORDER BY c.source_type) FILTER (WHERE c.source_type <> ''), '') AS source_type,
+			       count(DISTINCT c.sample_id) AS answers,
 			       row_number() OVER (PARTITION BY c.cohort_id ORDER BY count(DISTINCT c.sample_id) DESC, c.host) AS rank
 			FROM ai_citations c JOIN ai_samples s ON s.id = c.sample_id
 			WHERE c.workspace_id = $1 AND c.cohort_id = ANY($2) AND s.status = 'ok' AND c.sampled_at >= $3
@@ -221,8 +262,50 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 		return nil, err
 	}
 	var h aiVisHost
-	if _, err := pgx.ForEachRow(rows, []any{&id, &h.Host, &h.Owner, &h.Competitor, &h.Answers}, func() error {
+	if _, err := pgx.ForEachRow(rows, []any{&id, &h.Host, &h.Owner, &h.Competitor, &h.SourceType, &h.Answers}, func() error {
 		byID[id].CitedHosts = append(byID[id].CitedHosts, h)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	// Brands the answers recommend or list that the cohort doesn't track.
+	rows, err = s.pool.Query(ctx, `
+		SELECT t.cohort_id, t.name, t.answers,
+		       COALESCE((SELECT x.host FROM seo_competitors x JOIN ai_cohorts c ON c.id = t.cohort_id
+		                 WHERE x.workspace_id = $1 AND x.brand_id = c.brand_id AND x.status = 'suggested' AND lower(x.name) = lower(t.name)
+		                 ORDER BY x.created_at LIMIT 1), ''),
+		       COALESCE((SELECT x.id::text FROM seo_competitors x JOIN ai_cohorts c ON c.id = t.cohort_id
+		                 WHERE x.workspace_id = $1 AND x.brand_id = c.brand_id AND x.status = 'suggested' AND lower(x.name) = lower(t.name)
+		                 ORDER BY x.created_at LIMIT 1), '')
+		FROM (
+			SELECT s.cohort_id, min(b.name) AS name, count(DISTINCT s.id) AS answers,
+			       row_number() OVER (PARTITION BY s.cohort_id ORDER BY count(DISTINCT s.id) DESC, lower(b.name)) AS rank
+			FROM ai_samples s CROSS JOIN LATERAL unnest(s.other_brands) AS b(name)
+			WHERE s.workspace_id = $1 AND s.cohort_id = ANY($2) AND s.status = 'ok' AND s.sampled_at >= $3
+			GROUP BY s.cohort_id, lower(b.name)) t
+		WHERE rank <= 15 ORDER BY t.cohort_id, t.answers DESC, t.name`, ws, ids, from)
+	if err != nil {
+		return nil, err
+	}
+	var sc aiVisCount
+	if _, err := pgx.ForEachRow(rows, []any{&id, &sc.Name, &sc.Answers, &sc.Host, &sc.CompetitorID}, func() error {
+		byID[id].Suggested = append(byID[id].Suggested, sc)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	// What kind of sites they cite.
+	rows, err = s.pool.Query(ctx, `
+		SELECT c.cohort_id, c.source_type, count(DISTINCT c.sample_id)
+		FROM ai_citations c JOIN ai_samples s ON s.id = c.sample_id
+		WHERE c.workspace_id = $1 AND c.cohort_id = ANY($2) AND s.status = 'ok' AND c.sampled_at >= $3 AND c.source_type <> ''
+		GROUP BY 1, 2 ORDER BY 1, 3 DESC, 2`, ws, ids, from)
+	if err != nil {
+		return nil, err
+	}
+	var st aiVisCount
+	if _, err := pgx.ForEachRow(rows, []any{&id, &st.Type, &st.Answers}, func() error {
+		byID[id].SourceTypes = append(byID[id].SourceTypes, st)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -243,6 +326,15 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 		byID[id].Weeks = append(byID[id].Weeks, aiVisWeek{Week: week, Answers: n, MentionRate: rate(named, n), ShareOfVoice: rate(named, all)})
 		return nil
 	}); err != nil {
+		return nil, err
+	}
+	if err := s.aiVisibilityScores(ctx, ws, ids, byID, from); err != nil {
+		return nil, err
+	}
+	if err := s.aiVisibilityBenchmarks(ctx, ws, ids, byID); err != nil {
+		return nil, err
+	}
+	if err := s.aiVisibilityTraffic(ctx, ws, ids, byID, from); err != nil {
 		return nil, err
 	}
 	// Fact accuracy.
@@ -280,7 +372,7 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	for _, c := range list {
 		c.Brand.ShareOfVoice = rate(c.Brand.Answers, totals[c.Cohort.ID])
 		if c.Brand.Answers == 0 {
-			c.Brand.MentionRate = rate(0, c.Answers)
+			c.Brand.MentionRate, c.Brand.RecommendRate = rate(0, c.Answers), rate(0, c.Answers)
 		}
 		for i := range c.Competitors {
 			c.Competitors[i].ShareOfVoice = rate(c.Competitors[i].Answers, totals[c.Cohort.ID])

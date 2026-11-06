@@ -26,10 +26,10 @@ const (
 	digestTiles      = 12
 )
 
-func dashboardsDigest(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
+func dashboardsDigest(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var out digests.Section
 	rows, err := q.Query(ctx, `SELECT d.id::text, d.brand_id::text, d.name, (SELECT count(*) FROM brands b WHERE b.workspace_id = d.workspace_id) > 1
-		FROM dashboards d WHERE d.workspace_id = $1 AND d.settings->>'digest' = 'true' ORDER BY d.name LIMIT $2`, ws, digestDashboards)
+		FROM dashboards d WHERE d.workspace_id = $1 AND COALESCE(d.brand_id, outflare_first_brand(d.workspace_id)) = $3 AND d.settings->>'digest' = 'true' ORDER BY d.name LIMIT $2`, ws, digestDashboards, brand)
 	if err != nil {
 		return out, err
 	}

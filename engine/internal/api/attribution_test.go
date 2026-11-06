@@ -36,21 +36,21 @@ func TestAttribution(t *testing.T) {
 		}
 		return id
 	}
-	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	rec := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name) VALUES (outflare_first_brand($1), $1, 'person', 'Ana') RETURNING id::text`, ws)
 	now := time.Now()
-	exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, referrer_host) VALUES ($1, $2, 'anon-1', $3, 'www.google.com') RETURNING id::text`,
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, referrer_host) VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'www.google.com') RETURNING id::text`,
 		ws, rec, now.Add(-5*24*time.Hour))
-	exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium, utm_campaign)
-		VALUES ($1, $2, 'anon-1', $3, 'google', 'cpc', 'Spring') RETURNING id::text`, ws, rec, now.Add(-2*24*time.Hour))
-	exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at) VALUES ($1, 'anon-2', $2) RETURNING id::text`, ws, now.Add(-time.Hour))
-	exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`,
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, utm_source, utm_medium, utm_campaign)
+		VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'google', 'cpc', 'Spring') RETURNING id::text`, ws, rec, now.Add(-2*24*time.Hour))
+	exec(`INSERT INTO site_sessions (brand_id, workspace_id, anonymous_id, started_at) VALUES (outflare_first_brand($1), $1, 'anon-2', $2) RETURNING id::text`, ws, now.Add(-time.Hour))
+	exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', 'signed_up', $3) RETURNING id::text`,
 		ws, rec, now.Add(-24*time.Hour))
-	exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, properties, occurred_at)
-		VALUES ($1, $2, 'track', 'payment.succeeded', '{"amount_minor": 4900, "currency": "usd", "payment_id": "ch_test_2"}', $3) RETURNING id::text`,
+	exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, properties, occurred_at)
+		VALUES (outflare_first_brand($1), $1, $2, 'track', 'payment.succeeded', '{"amount_minor": 4900, "currency": "usd", "payment_id": "ch_test_2"}', $3) RETURNING id::text`,
 		ws, rec, now.Add(-time.Hour))
-	exec(`INSERT INTO spend_entries (workspace_id, category, channel, amount_cents, currency, occurred_at) VALUES ($1, 'ads', 'paid_ads', 12000, 'USD', $2) RETURNING id::text`,
+	exec(`INSERT INTO spend_entries (brand_id, workspace_id, category, channel, amount_cents, currency, occurred_at) VALUES (outflare_first_brand($1), $1, 'ads', 'paid_ads', 12000, 'USD', $2) RETURNING id::text`,
 		ws, now.Add(-24*time.Hour))
-	exec(`INSERT INTO spend_entries (workspace_id, category, amount_cents, currency, occurred_at) VALUES ($1, 'software', 3000, 'USD', $2) RETURNING id::text`,
+	exec(`INSERT INTO spend_entries (brand_id, workspace_id, category, amount_cents, currency, occurred_at) VALUES (outflare_first_brand($1), $1, 'software', 3000, 'USD', $2) RETURNING id::text`,
 		ws, now.Add(-24*time.Hour))
 
 	run := &attribution.Runner{Pool: e.pool, Log: slog.New(slog.DiscardHandler), Settle: time.Minute}
@@ -59,7 +59,11 @@ func TestAttribution(t *testing.T) {
 	}
 
 	// The weekly digest has the channels in brief, under the default model.
-	secs, err := digests.Build(ctx, e.pool, ws, digests.Period{Start: now.AddDate(0, 0, -7), End: now.Add(time.Minute)})
+	var first string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	secs, err := digests.Build(ctx, e.pool, ws, first, digests.Period{Start: now.AddDate(0, 0, -7), End: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,19 +176,19 @@ func TestAttributionCampaignsByContent(t *testing.T) {
 		}
 		return id
 	}
-	camp := exec(`INSERT INTO tracking_campaigns (workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
-		VALUES ($1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', 'seq') RETURNING id::text`, ws)
+	camp := exec(`INSERT INTO tracking_campaigns (brand_id, workspace_id, name, slug, code, channel, source, medium, object_kind, object_id)
+		VALUES (outflare_first_brand($1), $1, 'Outbound', 'outbound', 'code000001', 'outbound_email', 'outflare', 'email', 'sequence', 'seq') RETURNING id::text`, ws)
 	now := time.Now()
 	session := func(content string) string {
-		return exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source, campaign, tracking_campaign_id, utm_content)
-			VALUES ($1, 'anon-'||$2, $3, 'outbound_email', 'outflare', 'outbound', $4, $2) RETURNING id::text`, ws, content, now.Add(-time.Hour), camp)
+		return exec(`INSERT INTO site_sessions (brand_id, workspace_id, anonymous_id, started_at, channel, source, campaign, tracking_campaign_id, utm_content)
+			VALUES (outflare_first_brand($1), $1, 'anon-'||$2, $3, 'outbound_email', 'outflare', 'outbound', $4, $2) RETURNING id::text`, ws, content, now.Add(-time.Hour), camp)
 	}
 	s1, s2 := session("step-1"), session("step-2")
 	session("step-2")
-	ev := exec(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'signed_up', $2) RETURNING id::text`, ws, now)
-	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at) VALUES ($1, $2, 'signed_up', $3) RETURNING event_id::text`, ev, ws, now)
-	exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, campaign, tracking_campaign_id, weight)
-		VALUES ($1, $2, 'last_non_direct', 0, $3, 'outbound_email', 'outflare', 'outbound', $4, 1) RETURNING event_id::text`, ev, ws, s2, camp)
+	ev := exec(`INSERT INTO customer_events (brand_id, workspace_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, 'track', 'signed_up', $2) RETURNING id::text`, ws, now)
+	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, name, occurred_at, brand_id) VALUES ($1, $2, 'signed_up', $3, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, now)
+	exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, campaign, tracking_campaign_id, weight, brand_id)
+		VALUES ($1, $2, 'last_non_direct', 0, $3, 'outbound_email', 'outflare', 'outbound', $4, 1, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, s2, camp)
 	_ = s1
 
 	rows := owner.must(200, "GET", base+"/attribution/campaigns?brand=all&split=content&tracking_campaign="+camp, nil)["data"].([]any)
@@ -220,21 +224,21 @@ func TestAttributionIdentifiedOnly(t *testing.T) {
 		}
 		return id
 	}
-	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	rec := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name) VALUES (outflare_first_brand($1), $1, 'person', 'Ana') RETURNING id::text`, ws)
 	now := time.Now()
-	known := exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2, 'anon-1', $3, 'seo', 'google') RETURNING id::text`,
+	known := exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES (outflare_first_brand($1), $1, $2, 'anon-1', $3, 'seo', 'google') RETURNING id::text`,
 		ws, rec, now.Add(-2*time.Hour))
-	cookie := exec(`INSERT INTO site_sessions (workspace_id, anonymous_id, started_at, channel, source) VALUES ($1, 'anon-2', $2, 'paid_ads', 'google') RETURNING id::text`,
+	cookie := exec(`INSERT INTO site_sessions (brand_id, workspace_id, anonymous_id, started_at, channel, source) VALUES (outflare_first_brand($1), $1, 'anon-2', $2, 'paid_ads', 'google') RETURNING id::text`,
 		ws, now.Add(-time.Hour))
 	conv := func(matched string) string {
-		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
-		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by) VALUES ($1, $2, $3, 'signed_up', $4, 1, $5) RETURNING event_id::text`,
+		ev := exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by, brand_id) VALUES ($1, $2, $3, 'signed_up', $4, 1, $5, outflare_first_brand($2)) RETURNING event_id::text`,
 			ev, ws, rec, now, matched)
 		return ev
 	}
 	credit := func(ev string, pos int, session, channel string, weight float64) {
-		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight)
-			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', $6) RETURNING event_id::text`, ev, ws, pos, session, channel, weight)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight, brand_id)
+			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', $6, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, pos, session, channel, weight)
 	}
 	both := conv("record")
 	credit(both, 0, known, "seo", 0.5)
@@ -297,21 +301,21 @@ func TestAttributionCustomersAndCohorts(t *testing.T) {
 	now := time.Now()
 	// Wes was a lead long before his visit from search; Cy first came from an
 	// ad and became a record when he signed up.
-	wes := exec(`INSERT INTO records (workspace_id, record_type, name, created_at) VALUES ($1, 'person', 'Wes', $2) RETURNING id::text`, ws, now.AddDate(0, 0, -10))
-	cy := exec(`INSERT INTO records (workspace_id, record_type, name, created_at) VALUES ($1, 'person', 'Cy', $2) RETURNING id::text`, ws, now.Add(-30*time.Minute))
+	wes := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name, created_at) VALUES (outflare_first_brand($1), $1, 'person', 'Wes', $2) RETURNING id::text`, ws, now.AddDate(0, 0, -10))
+	cy := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name, created_at) VALUES (outflare_first_brand($1), $1, 'person', 'Cy', $2) RETURNING id::text`, ws, now.Add(-30*time.Minute))
 	visit := func(rec, channel string, at time.Time) string {
-		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
+		return exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES (outflare_first_brand($1), $1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
 			ws, rec, at, channel)
 	}
 	wesVisit, cyVisit := visit(wes, "seo", now.Add(-48*time.Hour)), visit(cy, "paid_ads", now.Add(-time.Hour))
 	conv := func(rec, name string, at time.Time, value any, session string, touch time.Time, channel string) {
 		t.Helper()
-		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
-		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by)
-			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record') RETURNING event_id::text`, ev, ws, rec, name, at, value)
+		ev := exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record', outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, rec, name, at, value)
 		for _, m := range []string{"last_non_direct", "first_touch"} {
-			exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight)
-				VALUES ($1, $2, $3, 0, $4, $5, $6, 'google', 1) RETURNING event_id::text`, ev, ws, m, session, touch, channel)
+			exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight, brand_id)
+				VALUES ($1, $2, $3, 0, $4, $5, $6, 'google', 1, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, m, session, touch, channel)
 		}
 	}
 	conv(wes, "payment.succeeded", now.Add(-24*time.Hour), 5000, wesVisit, now.Add(-48*time.Hour), "seo")
@@ -375,22 +379,22 @@ func TestAttributionAccountsAndDeals(t *testing.T) {
 	acme := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Acme"})["id"].(string)
 	northpeak := owner.must(201, "POST", base+"/records", map[string]any{"type": "account", "name": "Northpeak"})["id"].(string)
 	person := func(name string) string {
-		id := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', $2) RETURNING id::text`, ws, name)
+		id := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name) VALUES (outflare_first_brand($1), $1, 'person', $2) RETURNING id::text`, ws, name)
 		owner.must(200, "PATCH", base+"/records/"+id, map[string]any{"attributes": map[string]any{"companies": []string{acme}}})
 		return id
 	}
 	wes, cy := person("Wes"), person("Cy")
 	visit := func(rec, channel string, at time.Time) string {
-		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
+		return exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES (outflare_first_brand($1), $1, $2::uuid, 'anon-'||$2::text, $3, $4, 'google') RETURNING id::text`,
 			ws, rec, at, channel)
 	}
 	conv := func(rec, name string, at time.Time, value any, session, channel string) {
 		t.Helper()
-		ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
-		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by)
-			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record') RETURNING event_id::text`, ev, ws, rec, name, at, value)
-		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight)
-			VALUES ($1, $2, 'last_non_direct', 0, $3, $4, $5, 'google', 1) RETURNING event_id::text`, ev, ws, session, at.Add(-time.Hour), channel)
+		ev := exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', $3, $4) RETURNING id::text`, ws, rec, name, at)
+		exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, value_minor, currency, touches, matched_by, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6::bigint IS NULL THEN '' ELSE 'USD' END, 1, 'record', outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, rec, name, at, value)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, touch_at, channel, source, weight, brand_id)
+			VALUES ($1, $2, 'last_non_direct', 0, $3, $4, $5, 'google', 1, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, session, at.Add(-time.Hour), channel)
 	}
 	wesVisit, cyVisit := visit(wes, "seo", now.Add(-48*time.Hour)), visit(cy, "paid_ads", now.Add(-3*time.Hour))
 	conv(wes, "payment.succeeded", now.Add(-24*time.Hour), 4000, wesVisit, "seo")
@@ -455,16 +459,6 @@ func TestAttributionAccountsAndDeals(t *testing.T) {
 	if a := owner.must(200, "GET", base+"/attribution/accounts?to="+to+"&match=identified", nil)["data"].([]any); len(a) != 2 {
 		t.Fatalf("identified accounts = %v", a)
 	}
-	// The deals are the workspace brand's; the conversions belong to no
-	// brand, so under the deals' brand nothing is credited.
-	brand := exec(`SELECT brand_id::text FROM records WHERE workspace_id = $1 AND name = 'Acme pilot'`, ws)
-	if d := owner.must(200, "GET", base+"/attribution/deals?to="+to+"&brand="+brand, nil); len(d["data"].([]any)) != 0 ||
-		d["unattributed"].(map[string]any)["deals"] != 2.0 {
-		t.Fatalf("deals by brand = %v", d)
-	}
-	if d := owner.must(200, "GET", base+"/attribution/deals?to="+to+"&brand=none", nil); d["unattributed"].(map[string]any)["deals"] != 0.0 {
-		t.Fatalf("deals with no brand = %v", d)
-	}
 	// Outside the period: nothing won.
 	old := now.AddDate(0, 0, -40).Format(time.DateOnly)
 	if d := owner.must(200, "GET", base+"/attribution/deals?from="+old+"&to="+old, nil); len(d["data"].([]any)) != 0 || d["unattributed"].(map[string]any)["deals"] != 0.0 {
@@ -487,23 +481,23 @@ func TestAttributionSignedInOnly(t *testing.T) {
 		}
 		return id
 	}
-	rec := exec(`INSERT INTO records (workspace_id, record_type, name) VALUES ($1, 'person', 'Ana') RETURNING id::text`, ws)
+	rec := exec(`INSERT INTO records (brand_id, workspace_id, record_type, name) VALUES (outflare_first_brand($1), $1, 'person', 'Ana') RETURNING id::text`, ws)
 	now := time.Now()
 	visit := func(anon, channel, by string, at time.Time) string {
 		t.Helper()
-		exec(`INSERT INTO site_visitors (workspace_id, anonymous_id, record_id, identified_by, first_seen_at, last_seen_at) VALUES ($1, $2, $3, $4, $5, $5) RETURNING anonymous_id`,
+		exec(`INSERT INTO site_visitors (brand_id, workspace_id, anonymous_id, record_id, identified_by, first_seen_at, last_seen_at) VALUES (outflare_first_brand($1), $1, $2, $3, $4, $5, $5) RETURNING anonymous_id`,
 			ws, anon, rec, by, at)
-		return exec(`INSERT INTO site_sessions (workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES ($1, $2, $3, $4, $5, 'google') RETURNING id::text`,
+		return exec(`INSERT INTO site_sessions (brand_id, workspace_id, record_id, anonymous_id, started_at, channel, source) VALUES (outflare_first_brand($1), $1, $2, $3, $4, $5, 'google') RETURNING id::text`,
 			ws, rec, anon, at, channel)
 	}
 	laptop := visit("anon-laptop", "seo", "product", now.Add(-3*time.Hour))
 	phone := visit("anon-phone", "lifecycle_email", "email_click", now.Add(-2*time.Hour))
-	ev := exec(`INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at) VALUES ($1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
-	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by) VALUES ($1, $2, $3, 'signed_up', $4, 2, 'record') RETURNING event_id::text`,
+	ev := exec(`INSERT INTO customer_events (brand_id, workspace_id, record_id, kind, name, occurred_at) VALUES (outflare_first_brand($1), $1, $2, 'track', 'signed_up', $3) RETURNING id::text`, ws, rec, now)
+	exec(`INSERT INTO attribution_conversions (event_id, workspace_id, record_id, name, occurred_at, touches, matched_by, brand_id) VALUES ($1, $2, $3, 'signed_up', $4, 2, 'record', outflare_first_brand($2)) RETURNING event_id::text`,
 		ev, ws, rec, now)
 	for i, s := range []struct{ session, channel string }{{laptop, "seo"}, {phone, "lifecycle_email"}} {
-		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight)
-			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', 0.5) RETURNING event_id::text`, ev, ws, i, s.session, s.channel)
+		exec(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight, brand_id)
+			VALUES ($1, $2, 'last_non_direct', $3, $4, $5, 'google', 0.5, outflare_first_brand($2)) RETURNING event_id::text`, ev, ws, i, s.session, s.channel)
 	}
 
 	channels := func(q string) map[string][2]float64 {

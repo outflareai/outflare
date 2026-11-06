@@ -117,10 +117,10 @@ func (s *Server) claimAgentTurn(ctx context.Context) (id, ws string, lease time.
 // AI model, its token gone) pause it with a reason a person can act on;
 // anything else is retried later.
 func (s *Server) runAgentTurn(ctx context.Context, id, ws string, lease time.Time) error {
-	var tokenID *string
+	var tokenID, brand *string
 	var turns int
 	var lastTurn *time.Time
-	if err := s.pool.QueryRow(ctx, `SELECT token_id::text, turns, last_turn_at FROM agent_runs WHERE id = $1`, id).Scan(&tokenID, &turns, &lastTurn); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT token_id::text, turns, last_turn_at, COALESCE(brand_id, outflare_first_brand(workspace_id))::text FROM agent_runs WHERE id = $1`, id).Scan(&tokenID, &turns, &lastTurn, &brand); err != nil {
 		return err
 	}
 	if tokenID == nil {
@@ -153,6 +153,9 @@ func (s *Server) runAgentTurn(ctx context.Context, id, ws string, lease time.Tim
 	}
 
 	caller := agentRunCaller{s: s, token: *tokenID, ws: ws}
+	if brand != nil {
+		caller.brand = *brand
+	}
 	code, checkIn, err := caller.Call(ctx, http.MethodGet, "/agent-runs/"+id, nil, "Check in")
 	if err != nil || code != http.StatusOK {
 		return s.endAgentTurn(ctx, id, ws, lease, agent.Result{}, fmt.Errorf("check-in answered %d: %v", code, err))
@@ -305,11 +308,74 @@ type agentRunCaller struct {
 	s     *Server
 	token string
 	ws    string
+	brand string // the run's brand, whose brand routes it calls
 }
 
+// Call sends a path relative to the workspace or the brand (as the API
+// guide lists them): a brand's data is on its brand route, the rest on
+// the workspace route.
 func (c agentRunCaller) Call(ctx context.Context, method, path string, body json.RawMessage, reason string) (int, []byte, error) {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
+	if c.brand != "" && onBrandRoute(method, path) {
+		return c.s.CallAsAgent(ctx, c.token, method, "/v1/brands/"+c.brand+path, body, reason)
+	}
 	return c.s.CallAsAgent(ctx, c.token, method, "/v1/workspaces/"+c.ws+path, body, reason)
 }
+
+// onBrandRoute is whether a path relative to the workspace or brand is a
+// brand route in the API document and not a workspace one.
+func onBrandRoute(method, path string) bool {
+	rel, _, _ := strings.Cut(path, "?")
+	routes := relativeRoutes()
+	return matchesRoute(routes.brand[method], rel) && !matchesRoute(routes.workspace[method], rel)
+}
+
+func matchesRoute(patterns [][]string, path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for _, p := range patterns {
+		if len(p) != len(parts) {
+			continue
+		}
+		ok := true
+		for i := range p {
+			if !strings.HasPrefix(p[i], "{") && p[i] != parts[i] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+// relativeRoutes are the document's workspace and brand routes by method,
+// as path segments after their prefix.
+var relativeRoutes = sync.OnceValue(func() (out struct{ workspace, brand map[string][][]string }) {
+	out.workspace, out.brand = map[string][][]string{}, map[string][][]string{}
+	var path string
+	for _, line := range strings.Split(string(spec.OpenAPI), "\n") {
+		if strings.HasPrefix(line, "  /") && strings.HasSuffix(line, ":") {
+			path = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			continue
+		}
+		if !strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "     ") {
+			continue
+		}
+		m := strings.ToUpper(strings.TrimSuffix(strings.TrimSpace(line), ":"))
+		switch m {
+		case "GET", "POST", "PATCH", "PUT", "DELETE":
+		default:
+			continue
+		}
+		if rest, ok := strings.CutPrefix(path, "/v1/workspaces/{ws}/"); ok {
+			out.workspace[m] = append(out.workspace[m], strings.Split(rest, "/"))
+		} else if rest, ok := strings.CutPrefix(path, "/v1/brands/{brand}/"); ok {
+			out.brand[m] = append(out.brand[m], strings.Split(rest, "/"))
+		}
+	}
+	return out
+})

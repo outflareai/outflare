@@ -67,6 +67,8 @@ func (s *Server) abChecklist(ctx context.Context, ws string, t abTestView, f fla
 		add("flag", "fail", "The flag has one version: give it at least two, the control and one to try.")
 	case !abtests.HasVariant(variantKeys(f), t.Control):
 		add("flag", "fail", "The control isn't one of the flag's versions any more: pick it again.")
+	case pageTestUnchanged(t, f):
+		add("flag", "fail", pageTestUnchangedMessage)
 	case f.Status == "off":
 		add("flag", "warn", "The flag is off: starting the test turns it on.")
 	default:

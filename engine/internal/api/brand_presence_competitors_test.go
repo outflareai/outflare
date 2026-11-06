@@ -90,6 +90,14 @@ func TestPresenceCompetitors(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind='coverage.competitor_scan' AND workspace_id=$1`, ws).Scan(&queued); err != nil || queued != 2 {
 		t.Fatalf("scans queued again before they're due: %d, %v", queued, err)
 	}
+	// One brand's scans start apart, not all at once; the test runs them now.
+	var spread float64
+	if err := e.pool.QueryRow(ctx, `SELECT extract(epoch FROM max(run_at)-min(run_at)) FROM jobs WHERE kind='coverage.competitor_scan' AND workspace_id=$1`, ws).Scan(&spread); err != nil || spread < 29 {
+		t.Fatalf("scans start %vs apart, %v", spread, err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET run_at=now() WHERE kind='coverage.competitor_scan' AND workspace_id=$1`, ws); err != nil {
+		t.Fatal(err)
+	}
 	e.runServerAndMailJobs(t)
 	wait := func(what string, ok func() bool) {
 		t.Helper()
@@ -105,6 +113,21 @@ func TestPresenceCompetitors(t *testing.T) {
 		scanned = owner.must(200, "GET", root+"/competitors", nil)["data"].([]any)[0].(map[string]any)
 		return scanned["scanned_at"] != nil
 	})
+	// Both scans share one refresh of the brand's opportunities, at the
+	// end of the window, instead of each rewriting them itself.
+	wait("both scans", func() bool {
+		var left int
+		_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind='coverage.competitor_scan' AND workspace_id=$1 AND status NOT IN ('succeeded','dead')`, ws).Scan(&left)
+		return left == 0
+	})
+	var refreshes int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind='coverage.opportunities_refresh' AND workspace_id=$1 AND payload->>'brand_id'=$2 AND run_at>now()`, ws, brand).Scan(&refreshes); err != nil || refreshes != 1 {
+		t.Fatalf("opportunity refreshes queued: %d, %v", refreshes, err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE jobs SET run_at=now() WHERE kind='coverage.opportunities_refresh' AND workspace_id=$1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	wait("opportunities refresh", func() bool { return len(named(events(), "coverage_opportunities.refreshed")) > 0 })
 	outcome := scanned["outcome"].(map[string]any)
 	if outcome["web_search"] != "connector_needed" || outcome["backlinks"] != "connector_needed" || outcome["ai_citations"] != "" {
 		t.Fatalf("outcome without connections: %v", scanned)

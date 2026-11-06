@@ -847,24 +847,27 @@ func (s *Server) stopCrawl(w http.ResponseWriter, r *http.Request) {
 }
 
 type crawlPageView struct {
-	ID          string     `json:"id"`
-	URL         string     `json:"url"`
-	Depth       int        `json:"depth"`
-	Source      string     `json:"source"`
-	FoundOn     *string    `json:"found_on"`
-	Status      string     `json:"status"`
-	Reason      *string    `json:"reason"`
-	HTTPStatus  *int       `json:"http_status"`
-	ContentType *string    `json:"content_type"`
-	Bytes       int        `json:"bytes"`
-	DurationMS  int        `json:"duration_ms"`
-	RedirectTo  *string    `json:"redirect_to"`
-	Noindex     bool       `json:"noindex"`
-	Nofollow    bool       `json:"nofollow"`
-	LinksOut    int        `json:"links_out"`
-	LinksIn     int        `json:"links_in"`
-	FetchedAt   *time.Time `json:"fetched_at"`
-	XRobotsTag  *string    `json:"x_robots_tag"`
+	ID          string  `json:"id"`
+	URL         string  `json:"url"`
+	Depth       int     `json:"depth"`
+	Source      string  `json:"source"`
+	FoundOn     *string `json:"found_on"`
+	Status      string  `json:"status"`
+	Reason      *string `json:"reason"`
+	HTTPStatus  *int    `json:"http_status"`
+	ContentType *string `json:"content_type"`
+	Bytes       int     `json:"bytes"`
+	DurationMS  int     `json:"duration_ms"`
+	RedirectTo  *string `json:"redirect_to"`
+	Noindex     bool    `json:"noindex"`
+	Nofollow    bool    `json:"nofollow"`
+	LinksOut    int     `json:"links_out"`
+	LinksIn     int     `json:"links_in"`
+	// ContentLinksIn counts the pages that link here from their content,
+	// leaving out menus, sidebars and the site's header and footer.
+	ContentLinksIn int        `json:"content_links_in"`
+	FetchedAt      *time.Time `json:"fetched_at"`
+	XRobotsTag     *string    `json:"x_robots_tag"`
 
 	// On-page facts of an HTML page.
 	Title           *string          `json:"title"`
@@ -885,7 +888,7 @@ type crawlPageView struct {
 }
 
 const crawlPageCols = `id::text, url, depth, source, NULLIF(found_on, ''), status, NULLIF(reason, ''), http_status, NULLIF(content_type, ''),
-	bytes, duration_ms, NULLIF(redirect_to, ''), noindex, nofollow, links_out, links_in, fetched_at, NULLIF(x_robots_tag, ''),
+	bytes, duration_ms, NULLIF(redirect_to, ''), noindex, nofollow, links_out, links_in, content_links_in, fetched_at, NULLIF(x_robots_tag, ''),
 	NULLIF(title, ''), title_count, NULLIF(meta_description, ''), NULLIF(canonical, ''), canonical_count, h1, NULLIF(lang, ''),
 	hreflang, schema_types, word_count, images, images_no_alt, NULLIF(content_hash, ''), viewport,
 	NULLIF(fetched_via, '')`
@@ -893,7 +896,7 @@ const crawlPageCols = `id::text, url, depth, source, NULLIF(found_on, ''), statu
 func scanCrawlPage(row pgx.Row) (crawlPageView, error) {
 	var v crawlPageView
 	err := row.Scan(&v.ID, &v.URL, &v.Depth, &v.Source, &v.FoundOn, &v.Status, &v.Reason, &v.HTTPStatus, &v.ContentType,
-		&v.Bytes, &v.DurationMS, &v.RedirectTo, &v.Noindex, &v.Nofollow, &v.LinksOut, &v.LinksIn, &v.FetchedAt, &v.XRobotsTag,
+		&v.Bytes, &v.DurationMS, &v.RedirectTo, &v.Noindex, &v.Nofollow, &v.LinksOut, &v.LinksIn, &v.ContentLinksIn, &v.FetchedAt, &v.XRobotsTag,
 		&v.Title, &v.TitleCount, &v.MetaDescription, &v.Canonical, &v.CanonicalCount, &v.H1, &v.Lang,
 		&v.Hreflang, &v.SchemaTypes, &v.WordCount, &v.Images, &v.ImagesNoAlt, &v.ContentHash, &v.Viewport,
 		&v.FetchedVia)
@@ -964,6 +967,9 @@ type crawlLinkView struct {
 	Anchor   string `json:"anchor"`
 	Internal bool   `json:"internal"`
 	Nofollow bool   `json:"nofollow"`
+	// Boilerplate: the link is in the page's menu, sidebar, or the site's
+	// header or footer.
+	Boilerplate bool `json:"boilerplate"`
 	// The linked page's status in this crawl; null for a page it did not
 	// read (another site, or not reached).
 	HTTPStatus *int `json:"http_status"`
@@ -997,10 +1003,10 @@ func (s *Server) getCrawlPage(w http.ResponseWriter, r *http.Request) {
 	}
 	scan := func(row pgx.CollectableRow) (crawlLinkView, error) {
 		var v crawlLinkView
-		return v, row.Scan(&v.URL, &v.Anchor, &v.Internal, &v.Nofollow, &v.HTTPStatus)
+		return v, row.Scan(&v.URL, &v.Anchor, &v.Internal, &v.Nofollow, &v.Boilerplate, &v.HTTPStatus)
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT l.to_url, l.anchor, l.internal, l.nofollow, p.http_status
+		SELECT l.to_url, l.anchor, l.internal, l.nofollow, l.boilerplate, p.http_status
 		FROM crawl_links l LEFT JOIN crawl_pages p ON p.run_id = l.run_id AND p.url = l.to_url
 		WHERE l.from_page = $1 AND l.run_id = $2 ORDER BY l.id LIMIT $3`, id, run.ID, maxPageLinks)
 	if err != nil {
@@ -1013,7 +1019,7 @@ func (s *Server) getCrawlPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err = s.pool.Query(ctx, `
-		SELECT f.url, l.anchor, true, l.nofollow, f.http_status
+		SELECT f.url, l.anchor, true, l.nofollow, l.boilerplate, f.http_status
 		FROM crawl_links l JOIN crawl_pages f ON f.id = l.from_page
 		WHERE l.run_id = $1 AND l.to_url = $2 ORDER BY l.id LIMIT $3`, run.ID, page.URL, maxPageLinks)
 	if err != nil {

@@ -104,6 +104,7 @@ var (
 	reviewStuck             = desc("reviews", "stuck_pages", "Active review pages whose last 3 or more reads failed, retries included, by platform and the last error code.", "platform", "code")
 	socialStuck             = desc("social", "stuck_accounts", "Active social accounts whose last 3 or more reads failed, retries included, by channel and the last error code.", "channel", "code")
 	syncStuck               = desc("sync", "stuck", "Scheduled reads (connections' syncs, SEO site reads, news searches, competitor looks) whose last 3 or more runs failed, retries included, by module and the last error code.", "module", "code")
+	pricingOldest           = desc("pricing", "oldest_read_seconds", "How long since a read of the least recently tried pricing page ended, read or failed (or since it was added, if never tried); pages without a connected page reader are left out.")
 	reviewOldest            = desc("reviews", "oldest_read_seconds", "How long since a read of the least recently tried active review page ended, read or failed (or since it was added, if never tried), by platform; pages without a connected page reader are left out.", "platform")
 	socialScheduled         = desc("social", "publications_scheduled", "Approved posts waiting to go out, by channel and state (due: its time has come, later: scheduled ahead).", "channel", "state")
 	socialOverdue           = desc("social", "publication_overdue_seconds", "How long past its time the most overdue approved post is, by channel. Posts go out within a minute or two of their time.", "channel")
@@ -111,7 +112,7 @@ var (
 	scrapeDuration          = desc("metrics", "scrape_duration_seconds", "Time the last database scrape took.")
 	newsSearches            = desc("news", "searches", "Active news searches, by state (ok, failing: the last run failed).", "state")
 	newsOverdue             = desc("news", "search_overdue_seconds", "How long past its time the most overdue active news search is. Searches are queued every few minutes, so this stays near 0.")
-	allDescs                = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, recMetricsDue, recMetricsOld, recMetricsBusy, bulkPending, bulkOldest, handDue, handOldest, txUnconverted, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue, accountIncidents, accountTakeoversWaiting, accountTakeoversOldest, browserQueued, browserOldest}
+	allDescs                = []*prometheus.Desc{poolAcquired, poolIdle, poolTotal, poolMax, poolAcquires, poolWaits, poolWaitSeconds, poolAcquireSecs, poolCanceled, queued, scheduled, oldestDue, running, dbBackends, dbMaxConns, dbLongestXact, dbLockWaits, dbSize, dbCommits, dbRollbacks, dbBlocksHit, dbBlocksRead, dbDeadlocks, dbTempBytes, tableBytes, tableDeadRows, tableSeqScans, pipeItems, pipeOldest, pipeRuns, pipeBreakers, inboxPending, inboxOldest, inboxFailed, smartLists, smartOldest, smartFailing, rulesActive, rulesTimersDue, rulesOldestDue, lifecycleDue, lifecycleOldest, recMetricsDue, recMetricsOld, recMetricsBusy, bulkPending, bulkOldest, handDue, handOldest, txUnconverted, journeysWaiting, journeysOverdue, reviewPages, reviewStuck, socialStuck, syncStuck, reviewOldest, pricingOldest, newsSearches, newsOverdue, socialScheduled, socialOverdue, scrapeErrors, scrapeDuration, actionsHeld, actionsOldest, actionsStuck, agentRuns, agentRunsOverdue, accountIncidents, accountTakeoversWaiting, accountTakeoversOldest, browserQueued, browserOldest}
 	gauge, counter          = prometheus.GaugeValue, prometheus.CounterValue
 )
 
@@ -508,6 +509,22 @@ func (p *Postgres) query() []prometheus.Metric {
 		}
 		for platform, age := range oldest {
 			add(reviewOldest, gauge, age, platform)
+		}
+		return nil
+	}, append([]string{}, p.PageReaders...))
+	// Pricing pages are read weekly; a page without a connected page
+	// reader isn't counted, as for review pages.
+	run("pricing_pages", `
+		SELECT coalesce(max(extract(epoch FROM now() - coalesce(greatest(p.last_read_at, p.last_failed_at), p.created_at))), 0)::float8
+		FROM pricing_pages p
+		WHERE cardinality($1::text[]) = 0 OR EXISTS (SELECT 1 FROM integrations i
+			WHERE i.workspace_id = p.workspace_id AND i.connector = ANY($1) AND i.status = 'connected')`, func(r rowser) error {
+		for r.Next() {
+			var age float64
+			if err := r.Scan(&age); err != nil {
+				return err
+			}
+			add(pricingOldest, gauge, age)
 		}
 		return nil
 	}, append([]string{}, p.PageReaders...))

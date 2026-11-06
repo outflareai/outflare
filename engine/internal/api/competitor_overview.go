@@ -59,8 +59,26 @@ type compPoint struct {
 
 type compEntity struct {
 	ID, Kind, Name, Host string
+	Facts                compFacts
 	// Area values over time, oldest first, one point a week at most.
 	Series map[string][]compPoint
+}
+
+// compFacts are one brand's or competitor's latest numbers beside the
+// shares: how strong and how old its site is.
+type compFacts struct {
+	// DomainRating (0-100) and OrganicKeywords from the latest SEO
+	// snapshot, read on SEOReadOn.
+	DomainRating    *float64 `json:"domain_rating"`
+	OrganicKeywords *float64 `json:"organic_keywords"`
+	SEOReadOn       *string  `json:"seo_read_on"`
+	// RegisteredOn is when its domain was first registered, from the
+	// public registration record.
+	RegisteredOn *string `json:"registered_on"`
+	// Pages is how many pages its sitemaps list, and LookedAt when
+	// OutflareBot last looked (competitors only).
+	Pages    *int       `json:"pages"`
+	LookedAt *time.Time `json:"looked_at"`
 }
 
 type compAreaValue struct {
@@ -81,6 +99,7 @@ type compEntry struct {
 	RankBefore  *int                     `json:"rank_before"`
 	Areas       map[string]compAreaValue `json:"areas"`
 	Measured    int                      `json:"measured_areas"`
+	compFacts
 }
 
 type compAreaView struct {
@@ -184,18 +203,23 @@ func (s *Server) compEntities(ctx context.Context, ws, brand string, now time.Ti
 	if err := s.pool.QueryRow(ctx, `SELECT name, domains FROM brands WHERE workspace_id = $1 AND id = $2`, ws, brand).Scan(&name, &domains); err != nil {
 		return nil, false, err
 	}
-	rows, err := s.pool.Query(ctx, `SELECT host FROM seo_sites WHERE workspace_id = $1 AND brand_id = $2 ORDER BY created_at`, ws, brand)
+	rows, err := s.pool.Query(ctx, `SELECT host, to_char(registered_on, 'YYYY-MM-DD') FROM seo_sites WHERE workspace_id = $1 AND brand_id = $2 ORDER BY created_at`, ws, brand)
 	if err != nil {
 		return nil, false, err
 	}
 	var siteHosts []string
+	var registered *string
 	for rows.Next() {
 		var h string
-		if err := rows.Scan(&h); err != nil {
+		var on *string
+		if err := rows.Scan(&h, &on); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
 		siteHosts = append(siteHosts, h)
+		if registered == nil {
+			registered = on
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -208,14 +232,14 @@ func (s *Server) compEntities(ctx context.Context, ws, brand string, now time.Ti
 			hosts = append(hosts, h, "www."+h)
 		}
 	}
-	you := compEntity{ID: "brand", Kind: "brand", Name: name, Series: map[string][]compPoint{}}
+	you := compEntity{ID: "brand", Kind: "brand", Name: name, Series: map[string][]compPoint{}, Facts: compFacts{RegisteredOn: registered}}
 	if len(hosts) > 0 {
 		you.Host = hosts[0]
 	}
 	ents := []compEntity{you}
 	names := map[string]int{strings.ToLower(name): 0}
 
-	rows, err = s.pool.Query(ctx, `SELECT DISTINCT ON (host) id::text, host, name, aliases FROM seo_competitors
+	rows, err = s.pool.Query(ctx, `SELECT DISTINCT ON (host) id::text, host, name, aliases, to_char(registered_on, 'YYYY-MM-DD'), pages, checked_at FROM seo_competitors
 		WHERE workspace_id = $1 AND brand_id = $2 AND status = 'tracked'
 		ORDER BY host, created_at`, ws, brand)
 	if err != nil {
@@ -224,11 +248,15 @@ func (s *Server) compEntities(ctx context.Context, ws, brand string, now time.Ti
 	for rows.Next() {
 		var e compEntity
 		var aliases []string
-		if err := rows.Scan(&e.ID, &e.Host, &e.Name, &aliases); err != nil {
+		var pages int
+		if err := rows.Scan(&e.ID, &e.Host, &e.Name, &aliases, &e.Facts.RegisteredOn, &pages, &e.Facts.LookedAt); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
 		e.Kind, e.Series = "competitor", map[string][]compPoint{}
+		if e.Facts.LookedAt != nil {
+			e.Facts.Pages = &pages
+		}
 		if e.Name == "" {
 			e.Name = e.Host
 		}
@@ -287,9 +315,20 @@ func (s *Server) compEntities(ctx context.Context, ws, brand string, now time.Ti
 				OT *float64 `json:"organic_traffic"`
 				T3 *float64 `json:"top3"`
 				RD *float64 `json:"referring_domains"`
+				DR *float64 `json:"domain_rating"`
+				OK *float64 `json:"organic_keywords"`
 			}
 			_ = json.Unmarshal(raw, &m)
 			i := byHost[host]
+			// The latest read's rating and keyword count (the biggest of
+			// the brand's own hosts on that day).
+			f := &ents[i].Facts
+			if f.SEOReadOn == nil || day > *f.SEOReadOn {
+				d := day
+				f.SEOReadOn, f.DomainRating, f.OrganicKeywords = &d, m.DR, m.OK
+			} else if day == *f.SEOReadOn {
+				f.DomainRating, f.OrganicKeywords = maxOf(f.DomainRating, m.DR), maxOf(f.OrganicKeywords, m.OK)
+			}
 			if perEntity[i] == nil {
 				perEntity[i] = map[string]map[string]float64{}
 			}
@@ -517,7 +556,8 @@ func round1(v float64) float64 { return math.Round(v*10) / 10 }
 // scoreAt works out every entity's area values, shares and overall score
 // at one time. A score is the weighted mean, over the areas an entity is
 // measured in, of its value against the area's leader (100 for the
-// leader), so a brand that leads everywhere scores 100.
+// leader), so a brand that leads everywhere scores 100. One measured in
+// fewer than half the areas anyone is measured in gets no score.
 func scoreAt(ents []compEntity, weights map[string]float64, at time.Time) ([]map[string]compAreaValue, []*float64, []int) {
 	vals := make([]map[string]compAreaValue, len(ents))
 	scores := make([]*float64, len(ents))
@@ -563,8 +603,19 @@ func scoreAt(ents []compEntity, weights map[string]float64, at time.Time) ([]map
 			}
 		}
 	}
+	// A score needs at least half the areas anyone is measured in: leading
+	// the one area a site is measured in says little about the rest.
+	areasAny := 0
+	for _, a := range compAreas {
+		for i := range ents {
+			if _, ok := vals[i][a.Key]; ok {
+				areasAny++
+				break
+			}
+		}
+	}
 	for i := range ents {
-		if wsum[i] > 0 {
+		if wsum[i] > 0 && measured[i]*2 >= areasAny {
 			sc := math.Round(sums[i] / wsum[i])
 			scores[i] = &sc
 		}
@@ -598,7 +649,7 @@ func computeCompetition(ents []compEntity, weights map[string]float64, now time.
 		Entries: []compEntry{}, Standings: []compStanding{}, CatchUps: []compCatchUp{}, Series: map[string][]compSeriesPoint{},
 		Notes: []string{
 			"Search numbers are the SEO connection's estimates, all from one connection so they are on one scale.",
-			"A score compares each brand with the leader of every area it is measured in: 100 means it leads them all.",
+			"A score compares each brand with the leader of every area it is measured in: 100 means it leads them all. One measured in fewer than half the areas gets no score or rank until more is read.",
 		},
 	}
 	nowVals, nowScores, measured := scoreAt(ents, weights, now)
@@ -611,7 +662,7 @@ func computeCompetition(ents []compEntity, weights map[string]float64, now time.
 			areas[k] = v
 		}
 		out.Entries = append(out.Entries, compEntry{ID: e.ID, Kind: e.Kind, Name: e.Name, Host: e.Host,
-			Score: nowScores[i], ScoreBefore: beforeScores[i], Rank: nowRanks[i], RankBefore: beforeRanks[i], Areas: areas, Measured: measured[i]})
+			Score: nowScores[i], ScoreBefore: beforeScores[i], Rank: nowRanks[i], RankBefore: beforeRanks[i], Areas: areas, Measured: measured[i], compFacts: e.Facts})
 	}
 	for _, a := range compAreas {
 		view := compAreaView{Key: a.Key, Label: a.Label, Unit: a.Unit, Weight: weights[a.Key], Needs: a.Needs}
@@ -818,4 +869,12 @@ func catchUps(ents []compEntity, area string, now time.Time) []compCatchUp {
 	pass(ahead, "you_pass")
 	pass(behind, "they_pass")
 	return out
+}
+
+// maxOf is the bigger of two numbers either of which may be missing.
+func maxOf(a, b *float64) *float64 {
+	if a == nil || (b != nil && *b > *a) {
+		return b
+	}
+	return a
 }

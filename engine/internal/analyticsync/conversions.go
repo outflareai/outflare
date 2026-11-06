@@ -44,7 +44,7 @@ func (s *Syncer) syncConversions(ctx context.Context, o *connectors.Opened, r co
 	}
 	res.Calls++
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	rows, runErr := r.PageConversions(cctx, o.Client, o.Creds, connectors.PageConversionQuery{Site: site, From: day(from), To: day(yesterday), Events: events})
+	rows, runErr := r.PageConversions(cctx, o.Client, o.Creds, connectors.PageConversionQuery{Site: site, From: day(from), To: day(yesterday), Events: events, TestAccounts: p.FilterTestAccounts})
 	cancel()
 	if runErr == nil {
 		n, err := s.storeConversions(ctx, ws, id, site, p.Host, from, yesterday, backfill, rows, isOutcomeReader(o.Connector))

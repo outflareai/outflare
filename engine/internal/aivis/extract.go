@@ -47,6 +47,10 @@ type Mention struct {
 	Name     string `json:"name"`
 	Position int    `json:"position"`
 	Count    int    `json:"count"`
+	// Stance is how the answer treats it (recommended, listed or warned)
+	// and StanceQuote the answer's words, once read.
+	Stance      string `json:"stance,omitempty"`
+	StanceQuote string `json:"stance_quote,omitempty"`
 }
 
 // Citation is a page an answer cites.
@@ -57,6 +61,10 @@ type Citation struct {
 	Position   int    `json:"position"`
 	Owner      string `json:"owner"` // brand, competitor or other
 	Competitor string `json:"competitor"`
+	// SourceType is what kind of site the page is on, once read.
+	SourceType string `json:"source_type,omitempty"`
+	// Cited, for a page the assistant read, says the answer cited it too.
+	Cited bool `json:"cited,omitempty"`
 }
 
 // Mentions finds the brand and competitors in an answer: how often each is

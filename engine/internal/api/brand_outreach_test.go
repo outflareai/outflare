@@ -87,9 +87,6 @@ func TestBrandOutreach(t *testing.T) {
 	if l := ids(owner, base+"/leads?brand=alpha"); len(l) != 1 {
 		t.Fatalf("workspace leads of alpha: %v", l)
 	}
-	if l := ids(owner, base+"/leads?brand=all"); len(l) != 2 {
-		t.Fatalf("workspace leads of every brand: %v", l)
-	}
 	if l := owner.must(201, "POST", base+"/leads", map[string]any{"email": "first@acme.example"}); l["brand_id"] != first {
 		t.Fatalf("a workspace lead went to %v, want the first brand", l["brand_id"])
 	}

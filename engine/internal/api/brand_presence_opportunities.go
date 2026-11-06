@@ -3,15 +3,18 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/coverage"
+	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 )
 
@@ -38,6 +41,59 @@ func coverageHostSQL(col string) string {
 func coveragePublisherHere(hostExpr string) string {
 	return `EXISTS (SELECT 1 FROM coverage_publishers pub WHERE pub.workspace_id=$1 AND pub.brand_id=$2
  AND (` + hostExpr + `=regexp_replace(lower(pub.domain),'^www\.','') OR ` + hostExpr + ` LIKE '%.'||regexp_replace(lower(pub.domain),'^www\.','')))`
+}
+
+const (
+	jobOpportunitiesRefresh = "coverage.opportunities_refresh"
+	// opportunitiesRefreshWindow gathers the competitor scans that finish
+	// within it into one refresh of the brand's opportunities.
+	opportunitiesRefreshWindow = 5 * time.Minute
+)
+
+// enqueueOpportunitiesRefresh queues one refresh of the brand's
+// opportunities at the end of the current window; more calls in the same
+// window return the same job.
+func enqueueOpportunitiesRefresh(ctx context.Context, tx pgx.Tx, ws, brand string, now time.Time) error {
+	end := now.UTC().Truncate(opportunitiesRefreshWindow).Add(opportunitiesRefreshWindow)
+	_, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobOpportunitiesRefresh, WorkspaceID: &ws, Payload: map[string]string{"brand_id": brand},
+		IdempotencyKey: jobOpportunitiesRefresh + ":" + brand + ":" + end.Format(time.RFC3339), RunAt: end, MaxAttempts: 5})
+	return err
+}
+
+// coverageOpportunitiesRefreshJob refreshes one brand's opportunities. Only
+// one runs per brand at a time; another waits for it instead of queueing
+// on the same rows.
+func (s *Server) coverageOpportunitiesRefreshJob(ctx context.Context, j jobs.Job) error {
+	var req struct {
+		Brand string `json:"brand_id"`
+	}
+	if err := json.Unmarshal(j.Payload, &req); err != nil || j.WorkspaceID == nil || !validUUID(req.Brand) {
+		return fmt.Errorf("%w: invalid opportunities refresh job", jobs.ErrPermanent)
+	}
+	ws := *j.WorkspaceID
+	busy := false
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var locked bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('coverage.opportunities_refresh:'||$1, 0))`, req.Brand).Scan(&locked); err != nil {
+			return err
+		}
+		if !locked {
+			busy = true
+			return nil
+		}
+		added, won, err := coverageRefreshOpportunities(ctx, tx, ws, req.Brand)
+		if err != nil {
+			return err
+		}
+		return recordWithProps(ctx, tx, nil, ws, "coverage_opportunities.refreshed", "brands", req.Brand, nil, map[string]any{"brand_id": req.Brand, "added": added, "won": won})
+	})
+	if err != nil {
+		return err
+	}
+	if busy {
+		return jobs.RetryLater(errors.New("another refresh of this brand is running"), time.Minute)
+	}
+	return nil
 }
 
 // coverageRefreshOpportunities suggests the brand's opportunities from

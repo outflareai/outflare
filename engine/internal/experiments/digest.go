@@ -14,15 +14,15 @@ func init() {
 	digests.Register(digests.Builder{ID: "experiments", Title: "Experiments", Build: digestSection})
 }
 
-func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
+func digestSection(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var s digests.Section
 	var measuring, waiting float64
 	if err := q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'measuring')::float8, count(*) FILTER (WHERE status = 'waiting')::float8
-		FROM experiments WHERE workspace_id = $1`, ws).Scan(&measuring, &waiting); err != nil {
+		FROM experiments WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2`, ws, brand).Scan(&measuring, &waiting); err != nil {
 		return s, err
 	}
 	rows, err := q.Query(ctx, `SELECT name, result->>'verdict', (result->>'lift')::float8, metric FROM experiments
-		WHERE workspace_id = $1 AND status = 'done' AND concluded_at >= $2 AND concluded_at < $3 ORDER BY concluded_at`, ws, p.Start, p.End)
+		WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND status = 'done' AND concluded_at >= $2 AND concluded_at < $3 ORDER BY concluded_at`, ws, p.Start, p.End, brand)
 	if err != nil {
 		return s, err
 	}

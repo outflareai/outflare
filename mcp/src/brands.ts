@@ -1,8 +1,8 @@
 // Brands: the businesses one company markets, each with its own website,
 // such as Geonode and Repocket. Connectors, members, tokens and leads are
 // the workspace's and shared; a brand owns its context, memories, lists,
-// sequences and sending setup. get_context with a brand layers its context on the
-// company's.
+// sequences and sending setup. get_context with a brand reads its context,
+// which no other brand shares.
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -61,7 +61,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     "get_brand_context",
     {
       title: "Read a brand's own context",
-      description: "What is true for one brand only: about, audience, goals, voice, rules and notes. get_context with brand gives this layered on the company's, which is usually what you want.",
+      description: "What is true for one brand only: about, audience, goals, voice, rules and notes. get_context with brand gives this with the brand's memories and knowledge, which is usually what you want.",
       inputSchema: { brand: brandRef },
       annotations: read,
     },
@@ -145,6 +145,39 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
   );
 
   server.registerTool(
+    "read_brand_website",
+    {
+      title: "Read a brand's website for what it offers",
+      description:
+        "Reads the brand's website through the workspace's own Geonode connection (home page, sitemap, up to 40 pages about the offer) and has the workspace's own AI model write the brand's knowledge: " +
+        "a summary, the industry and bullets for products, services, features, integrations, capabilities, who it serves and use cases, each with its page. " +
+        "Runs in the background; then get_brand_context (knowledge, knowledge_read_at, knowledge_error). Runs on its own when a brand is created with a website. AI visibility drafts questions from it.",
+      inputSchema: { brand: brandRef },
+      annotations: write,
+    },
+    ({ brand }) => call(() => gtm.POST("/v1/workspaces/{ws}/brands/{brand}/knowledge/read", { params: { path: brandPath(brand) } })),
+  );
+
+  server.registerTool(
+    "update_brand_knowledge",
+    {
+      title: "Edit what the brand's website says it offers",
+      description:
+        "Replaces the brand's knowledge (summary, industry, and the lists products, services, features, integrations, capabilities, audiences, use_cases, each bullet with the page it came from or ''). " +
+        "Read it with get_brand_context first and send it back whole with your changes.",
+      inputSchema: {
+        brand: brandRef,
+        summary: z.string().max(2000),
+        industry: z.string().max(200),
+        lists: z.record(z.string(), z.array(z.object({ text: z.string().max(300), url: z.string().max(2048) }))),
+        pages: z.array(z.string()).optional(),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, ...body }) => call(() => gtm.PUT("/v1/workspaces/{ws}/brands/{brand}/knowledge", { params: { path: brandPath(brand) }, body: { ...body, pages: body.pages ?? [] } })),
+  );
+
+  server.registerTool(
     "find_brand_links",
     {
       title: "Find a brand's social links",
@@ -194,8 +227,7 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
     {
       title: "Save what you learned about a brand",
       description:
-        "Saves what is true for one brand, in the person's words where possible. Rules add to the company's rules; the other fields win over the company's where set. " +
-        "What is true for every brand belongs in update_context; how the brands relate goes in update_context's brands field. " +
+        "Saves what is true for one brand, in the person's words where possible. Each brand's context is its own: nothing is shared between brands. " +
         "Pass the version you read (409 context_changed means read again).",
       inputSchema: {
         brand: brandRef,
@@ -203,8 +235,9 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
         audience: z.string().max(4000).optional().describe("Who it is for."),
         goals: z.string().max(4000).optional(),
         voice: z.string().max(4000).optional().describe("How its emails and posts sound."),
-        rules: z.string().max(4000).optional().describe("Things never to do for this brand."),
-        notes: z.string().max(100000).optional().describe("Everything else, in Markdown."),
+        rules: z.string().max(10000).optional().describe("Things never to do for this brand."),
+        notes: z.string().max(210000).optional().describe("Everything else, in Markdown."),
+        onboarding_dismissed: z.boolean().optional().describe("True when the person does not want to be asked for the missing fields."),
         version: z.number().int().optional().describe("version from get_brand_context, or brand.version from get_context."),
       },
       annotations: { ...write, idempotentHint: true },

@@ -47,17 +47,17 @@ steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board and creator fields are there.
     tools: [getBrandContext, listRecordTypes]
   - say: Look at partnerships already on the board, so nobody is pitched twice.
-    tools: [listRecords]
+    tools: [listBrandRecords]
   - say: Find reviews, comparisons and sponsored posts about each competitor from the last twelve months, with the brand's social watches and web search.
     tools: [createSocialWatch, checkSocialWatch, listSocialItems]
   - say: For each creator behind them, find or add a person with their platforms, audience size, topics and past sponsors, and a partnership at Found.
-    tools: [lookupRecords, createRecord, updateRecord]
+    tools: [lookupRecords, createBrandRecord, updateBrandRecord]
   - say: Vet each one (topic fit, recent views, how the review read) and move them to Vetted or Declined with a one-line reason.
-    tools: [updateRecord]
+    tools: [updateBrandRecord]
   - say: Draft a short pitch for each vetted creator that names what they said about the competitor and why your product is worth a look, as a sequence held until a person approves the sends.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Move partnerships to Pitched when the sequence runs, and to Negotiating or Declined as replies come in.
-    tools: [listBrandInbox, updateRecord]
+    tools: [listBrandInbox, updateBrandRecord]
 guardrails:
   - Never send a pitch, accept terms or promise money without a person's approval.
   - Never criticise a competitor in a pitch; say what your product does better.

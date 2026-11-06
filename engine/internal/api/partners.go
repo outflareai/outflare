@@ -702,6 +702,11 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 		if err == nil && brand == nil && cur.BrandID != nil {
 			err = errInvalid("brand: a program belongs to one brand; name the brand to move it to")
 		}
+		// Brands are fully separate: on a brand's route a program stays
+		// in that brand.
+		if err == nil && a.Brand != "" && (brand == nil || *brand != a.Brand) {
+			err = errInvalid("brand: a program stays in its brand; make a new program in the other brand instead")
+		}
 		if err == nil {
 			err = checkPartnerBrandWrite(a, brand)
 		}
@@ -711,6 +716,22 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// Codes and slugs are unique per brand: a program can't move into a
+		// brand that already uses its slug or one of its partners' codes.
+		if in.Brand != nil && brand != nil && (cur.BrandID == nil || *cur.BrandID != *brand) {
+			var clash bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM partner_programs WHERE brand_id = $3 AND id <> $2 AND slug = (SELECT slug FROM partner_programs WHERE id = $2))
+				OR EXISTS (SELECT 1 FROM partner_memberships m JOIN partner_memberships o ON lower(o.code) = lower(m.code) AND o.brand_id = $3 AND o.program_id <> $2
+					WHERE m.workspace_id = $1 AND m.program_id = $2)
+				OR EXISTS (SELECT 1 FROM partner_promo_codes c JOIN partner_memberships m ON m.id = c.membership_id
+					JOIN partner_promo_codes o ON lower(o.code) = lower(c.code) AND o.brand_id = $3 AND o.membership_id NOT IN (SELECT id FROM partner_memberships WHERE program_id = $2)
+					WHERE c.workspace_id = $1 AND m.program_id = $2)`, a.WorkspaceID, cur.ID, *brand).Scan(&clash); err != nil {
+				return err
+			}
+			if clash {
+				return errProgramClash
+			}
+		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE partner_programs SET name = COALESCE($3, name), status = COALESCE($4, status), brand_id = $5,
 				landing_url = COALESCE($6, landing_url), currency = COALESCE($7, currency),
@@ -784,6 +805,10 @@ func (s *Server) updatePartnerProgram(w http.ResponseWriter, r *http.Request) {
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner_program.updated", "partner_program", cur.ID,
 			map[string]any{"kind": cur.Kind, "status": coalesce(in.Status, cur.Status), "changed": changed})
 	})
+	if errors.Is(err, errProgramClash) {
+		writeError(w, r, http.StatusConflict, "conflict", "that brand already uses this program's slug or one of its partner or promo codes; change them first")
+		return
+	}
 	if s.allocError(w, r, err) {
 		return
 	}

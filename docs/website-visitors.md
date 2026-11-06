@@ -63,7 +63,7 @@ What happens to each person the tool sends:
 - Someone whose email address the CRM already has is left as they were. The sighting is in their history (`visitor.person_revealed`).
 - Anyone else becomes a person record: a prospect tagged with the tool (`acquired_via` `rb2b`, `vector` or `warmly`), with their name, job title and LinkedIn profile. People without an email address, and people at a domain you leave out, are skipped.
 - New people are **held for review** (`needs_review`): they are left out of the people list (`GET .../records` lists them only with `review=needs_review`), and the send policy blocks every email to them (reason `needs_review`) until someone approves them.
-- The Visitors page lists them under **People to review**. **Approve** (`POST /v1/workspaces/{ws}/records/{record}/review` with `decision` `approve`, MCP `review_record`) lists them like anyone else. They stay third-party prospects: cold email only, never marketing email without their own consent ([opt-outs](opt-outs.md)). **Reject** archives the record.
+- The Visitors page lists them under **People to review**. **Approve** (`POST /v1/brands/{brand}/records/{record}/review` with `decision` `approve`, MCP `review_record`) lists them like anyone else. They stay third-party prospects: cold email only, never marketing email without their own consent ([opt-outs](opt-outs.md)). **Reject** archives the record.
 - With the setting off, the webhook answers `ignored: off` and keeps nothing.
 
 ## Companies and people
@@ -82,11 +82,11 @@ Set **Leave out these domains** to your own company's domains so your team doesn
 
 ## API and MCP
 
-- `GET /v1/workspaces/{ws}/visitors` (`customers.read`): `view` (`companies` or `people`), `days`, `hot`, `limit`, `brand`.
+- `GET /v1/brands/{brand}/visitors` (`customers.read`): `view` (`companies` or `people`), `days`, `hot`, `limit`, `brand`.
 - `GET` and `PUT /v1/brands/{brand}/visitors/settings` (`customers.read`, `customers.manage`): each brand has its own; the workspace route is deprecated and acts on the first brand. A change is in the audit log as `visitor_settings.updated`.
 - `POST /v1/workspaces/{ws}/visitors/companies` (`customers.manage`): add a looked-up company to the CRM.
 - `POST /v1/visitor-hooks/{id}/{token}` (public, the address is the authority): where RB2B, Vector or Warmly send people. One person or up to 100 per call; field names as the tool sends them.
-- `POST /v1/workspaces/{ws}/records/{record}/review` (`customers.manage`): approve or reject a record held for review.
+- `POST /v1/brands/{brand}/records/{record}/review` (`customers.manage`): approve or reject a record held for review.
 - `GET /v1/brands/{brand}/visitors/browsers` (`customers.read`): every browser, `known` `true` or `false` to keep known or anonymous ones, `days`, `limit`, `cursor`.
 - `GET /v1/brands/{brand}/visitors/browsers/{anonymous_id}` (`customers.read`): one visitor and its visits. `.../events` lists its pages and events, `session` for one visit's.
 - `POST /v1/brands/{brand}/visitors/links` (`customers.manage`): make a visitor link.

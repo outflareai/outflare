@@ -22,7 +22,7 @@ const fields = {
   visibility: visibility.optional(),
   status: z.enum(["draft", "published"]).optional(),
   collection_id: id.nullable().optional().describe("The folder (an id from list_knowledge_folders); null for none."),
-  brand_id: z.string().nullable().optional().describe("The brand it is about (a handle or id); null for every brand."),
+  brand_id: z.string().nullable().optional().describe("The brand it is about (a handle or id); left out, the workspace's first brand. Brands share no knowledge."),
   owner_id: id.nullable().optional().describe("A member's user id who keeps it right; defaults to the person adding it."),
   review_by: z.string().nullable().optional().describe("When to check it is still right, as YYYY-MM-DD."),
 };
@@ -52,7 +52,7 @@ export function registerKnowledgeTools(
         visibility: visibility.optional(),
         status: z.enum(["draft", "published"]).optional(),
         collection_id: z.string().optional().describe("A folder's id, or none for knowledge in no folder."),
-        brand: z.string().optional().describe("A brand's handle or id, or none for knowledge shared by every brand."),
+        brand: z.string().optional().describe("A brand's handle or id."),
         deleted: z.boolean().optional().describe("true lists the bin."),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous answer, for the next page."),
@@ -73,7 +73,7 @@ export function registerKnowledgeTools(
       inputSchema: {
         q: z.string().min(1).max(1000).describe("The question, in plain words."),
         audience: z.enum(["team", "customers"]).optional().describe("team (default): every item. customers: only public and customers_ai items."),
-        brand: z.string().optional().describe("A brand's handle or id: that brand's knowledge and the shared knowledge."),
+        brand: z.string().optional().describe("A brand's handle or id: only that brand's knowledge."),
         limit: z.number().int().min(1).max(20).optional(),
       },
       annotations: read,
@@ -115,7 +115,7 @@ export function registerKnowledgeTools(
     {
       title: "List knowledge folders",
       description: "The folders knowledge is kept in, flat: build the tree from parent_id.",
-      inputSchema: { brand: z.string().optional().describe("A brand's handle or id, or none for shared folders.") },
+      inputSchema: { brand: z.string().optional().describe("A brand's handle or id.") },
       annotations: read,
     },
     (q) => call(() => gtm.GET("/v1/workspaces/{ws}/knowledge/collections", { params: { path: path(), query: withBrand(q) } })),
@@ -360,7 +360,7 @@ export function registerKnowledgeTools(
     name: z.string().min(1).max(100).optional(),
     description: z.string().max(1000).optional(),
     parent_id: id.nullable().optional().describe("The folder to put it in; null for the top level."),
-    brand_id: z.string().nullable().optional().describe("The brand whose knowledge it holds (a handle or id); null for every brand."),
+    brand_id: z.string().nullable().optional().describe("The brand whose knowledge it holds (a handle or id); left out, the workspace's first brand."),
     position: z.number().int().optional().describe("Its order among its siblings."),
   };
 

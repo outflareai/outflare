@@ -196,7 +196,8 @@ func TestSmartLists(t *testing.T) {
 	if ls := agent.must(200, "GET", base+"/smart-lists", nil)["data"].([]any); len(ls) != 0 {
 		t.Fatalf("agent lists = %v", ls)
 	}
-	agent.must(403, "POST", base+"/smart-lists", map[string]any{"name": "Everyone"})
+	// A brand's own token makes lists in its brand.
+	agent.must(201, "POST", base+"/smart-lists", map[string]any{"name": "Everyone"})
 	if p := agent.must(200, "POST", base+"/smart-lists/preview", map[string]any{}); p["members"] != 1.0 {
 		t.Fatalf("agent preview = %v", p)
 	}
@@ -228,7 +229,7 @@ func TestSmartLists(t *testing.T) {
 	for _, ev := range got() {
 		names[ev.Name]++
 	}
-	if names["smart_list.created"] != 4 || names["smart_list.updated"] < 9 || names["smart_list.deleted"] != 1 {
+	if names["smart_list.created"] != 5 || names["smart_list.updated"] < 9 || names["smart_list.deleted"] != 1 {
 		t.Fatalf("events = %v", names)
 	}
 }

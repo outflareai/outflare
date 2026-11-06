@@ -10,18 +10,25 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
-	// A new workspace knows nothing and says what to ask for.
+	// A new workspace knows nothing about its brand and says what to ask
+	// for. The context is the workspace's first brand's: brands are fully
+	// separate, so each has its own.
 	c := owner.must(200, "GET", base+"/context", nil)
 	ctx := c["context"].(map[string]any)
-	if ctx["version"] != 1.0 || ctx["ask_for_missing"] != true || len(ctx["missing"].([]any)) != 4 || c["memory_count"] != 0.0 {
+	if ctx["version"] != 1.0 || ctx["ask_for_missing"] != true || len(ctx["missing"].([]any)) != 3 || c["memory_count"] != 0.0 ||
+		ctx["company"] != "Acme Outbound" || c["brand"].(map[string]any)["handle"] != "acme-outbound" {
 		t.Fatalf("empty context: %v", c)
 	}
-	if !strings.Contains(c["markdown"].(string), "Nothing saved about the company yet") {
+	if !strings.Contains(c["markdown"].(string), "Nothing saved about this brand yet") {
 		t.Fatalf("markdown: %q", c["markdown"])
 	}
 
 	// Filling it bumps the version; an unchanged save does not, and an edit
-	// against an old version is refused.
+	// against an old version is refused. The name and website are the
+	// brand's own, changed on the brand.
+	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"name": "Acme Analytics", "website": "https://acme-com.example/"})
+	owner.must(400, "PATCH", base+"/context", map[string]any{"company": "Someone else"})
+	owner.must(400, "PATCH", base+"/context", map[string]any{"brands": "Shared with the others"})
 	res := owner.must(200, "PATCH", base+"/context", map[string]any{
 		"company": "Acme Analytics", "website": "https://acme-com.example/", "about": "Billing analytics for B2B SaaS.", "version": 1,
 	})
@@ -50,6 +57,18 @@ func TestCompanyContextAndMemories(t *testing.T) {
 
 	// Memories: saved once even when repeated, pinned first, searchable.
 	bid := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Fintech"})["id"].(string)
+
+	// Another brand's context is its own: it starts empty, and editing it
+	// leaves the first brand's as it was.
+	fc := owner.must(200, "GET", base+"/context?brand=fintech", nil)
+	if fc["context"].(map[string]any)["about"] != "" || fc["context"].(map[string]any)["company"] != "Fintech" {
+		t.Fatalf("second brand starts from the first's: %v", fc["context"])
+	}
+	owner.must(200, "PATCH", base+"/context?brand=fintech", map[string]any{"about": "Payments for fintechs."})
+	if got := owner.must(200, "GET", base+"/context", nil)["context"].(map[string]any)["about"]; got != "Billing analytics for B2B SaaS." {
+		t.Fatalf("first brand's about = %v", got)
+	}
+	owner.must(404, "GET", base+"/context?brand=nope", nil)
 	owner.must(400, "POST", base+"/memories", map[string]any{"kind": "fact"})
 	owner.must(400, "POST", base+"/memories", map[string]any{"text": "x", "kind": "secret"})
 	owner.must(400, "POST", base+"/memories", map[string]any{"text": strings.Repeat("x", 501)})
@@ -67,7 +86,8 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	if n := owner.must(200, "GET", base+"/memories?q=series", nil)["total"]; n != 1.0 {
 		t.Fatalf("search: %v", n)
 	}
-	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 1.0 {
+	// Brands share no memories: one saved with no brand is the first brand's.
+	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 0.0 {
 		t.Fatalf("workspace-wide: %v", n)
 	}
 	page := owner.must(200, "GET", base+"/memories?limit=1", nil)
@@ -86,7 +106,7 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	}
 
 	// A token without context.manage reads but cannot write; a brand
-	// token sees workspace-wide memories and its own brand's.
+	// token sees only its own brand's memories.
 	reader := &client{t: t, h: h, bearer: owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "r", "scopes": []string{"workspace.read"}})["token"].(string)}
 	reader.must(200, "GET", base+"/context", nil)
 	reader.must(403, "POST", base+"/memories", map[string]any{"text": "Nope"})
@@ -95,14 +115,14 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Agencies hate long emails", "brand_id": "agencies"})
 	btok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "b", "scopes": []string{"workspace.read", "context.manage"}, "brand": "fintech"})
 	agent := &client{t: t, h: h, bearer: btok["token"].(string)}
-	if n := agent.must(200, "GET", base+"/memories", nil)["total"]; n != 2.0 {
+	if n := agent.must(200, "GET", base+"/memories", nil)["total"]; n != 1.0 {
 		t.Fatalf("brand token sees %v memories", n)
 	}
 	mine := agent.must(201, "POST", base+"/memories", map[string]any{"text": "CFOs reply on Tuesdays"})
 	if mine["brand_id"] != bid {
 		t.Fatalf("brand token saved outside its brand: %v", mine)
 	}
-	agent.must(403, "DELETE", base+"/memories/"+id, nil)
+	agent.must(404, "DELETE", base+"/memories/"+id, nil) // another brand's
 	agent.must(403, "PATCH", base+"/context", map[string]any{"company": "Mine"})
 
 	owner.must(204, "DELETE", base+"/memories/"+id, nil)
@@ -112,7 +132,7 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	for _, ev := range owner.must(200, "GET", base+"/audit-events", nil)["data"].([]any) {
 		actions[ev.(map[string]any)["action"].(string)] = true
 	}
-	for _, a := range []string{"context.updated", "memory.created", "memory.updated", "memory.deleted"} {
+	for _, a := range []string{"brand.context_updated", "memory.created", "memory.updated", "memory.deleted"} {
 		if !actions[a] {
 			t.Errorf("no %s audit event", a)
 		}
@@ -152,7 +172,7 @@ func TestWorkspaceStatus(t *testing.T) {
 	}
 
 	// Filling the context clears its blocker and its step.
-	owner.must(200, "PATCH", base+"/context", map[string]any{"company": "Acme", "about": "x", "goals": "y", "voice": "z"})
+	owner.must(200, "PATCH", base+"/context", map[string]any{"about": "x", "goals": "y", "voice": "z"})
 	st = owner.must(200, "GET", base+"/status", nil)
 	for _, b := range st["blockers"].([]any) {
 		if b.(map[string]any)["code"] == "context_missing" {

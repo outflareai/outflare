@@ -14,10 +14,10 @@ import type { Tab } from "../App";
 import { NotInABrand } from "@/components/unassigned";
 
 // Brands: the businesses one company markets from a single workspace, such
-// as Geonode and Repocket. Connectors, people, tokens and leads stay shared,
-// so nothing is reconnected or re-invited; each brand has its own context,
-// memories, lists, sequences and sending setup, and the sidebar narrows every page
-// to one brand.
+// as Geonode and Repocket. Connectors and the team stay shared, so nothing is
+// reconnected or re-invited; each brand has its own people, leads, context,
+// memories, lists, sequences, mailboxes and sending setup, and the sidebar
+// narrows every page to one brand.
 
 const platformNames: Record<Brand["platforms"][number], string> = {
   web: "Web", ios: "iOS", android: "Android", tv: "TV", desktop: "Desktop", console: "Console", extension: "Browser extension", api: "API",
@@ -80,7 +80,7 @@ export function Brands({ ws, canManage, canEdit, open, setOpen, go }: { ws: stri
     <div className="max-w-4xl space-y-6">
       <PageHeader
         title="Brands"
-        description="The businesses you market from this workspace, each with its own website. Connectors, people and leads are shared by every brand, so nothing needs reconnecting; each brand keeps its own context, sequences and sending."
+        description="The businesses you market from this workspace, each with its own website. Connectors and the team are shared, so nothing needs reconnecting; each brand keeps its own people, leads, tracking, sequences, mailboxes and sending."
         action={canManage && <Button onClick={() => setAdding(true)}>Add a brand</Button>}
       />
       {active.length === 0 ? (
@@ -236,7 +236,7 @@ function ContactRuleCard({ ws, canManage }: { ws: string; canManage: boolean }) 
   return (
     <Card
       title="Contacting the same person"
-      description="Leads and unsubscribes are shared, so an unsubscribe from one brand stops every brand. You can also keep two brands from cold emailing the same person close together."
+      description="Each brand keeps its own leads and unsubscribes. You can also keep two brands from cold emailing the same person close together."
     >
       <form onSubmit={save} className="space-y-4">
         <label className="flex min-h-11 items-center gap-3 text-sm">
@@ -247,7 +247,7 @@ function ContactRuleCard({ ws, canManage }: { ws: string; canManage: boolean }) 
           <div className="max-w-md">
             <Input
               label="Days to wait"
-              hint="Their first email from a second brand is skipped, and they show as blocked in that sequence. Follow-ups already under way carry on. Sequences shared by every brand don't count."
+              hint="Their first email from a second brand is skipped, and they show as blocked in that sequence. Follow-ups already under way carry on."
               type="number"
               min={1}
               max={365}
@@ -292,7 +292,7 @@ function AddBrand({ ws, onClose, onAdded }: { ws: string; onClose: () => void; o
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Add a brand</SheetTitle>
-          <SheetDescription>A business you market with its own website. Connectors and people are shared, so there is nothing to reconnect.</SheetDescription>
+          <SheetDescription>A business you market with its own website. Connectors and the team are shared, so there is nothing to reconnect.</SheetDescription>
         </SheetHeader>
         <form onSubmit={submit} className="space-y-5 px-4 pb-6">
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required autoFocus placeholder="Repocket" />
@@ -356,6 +356,7 @@ function BrandPage({ ws, brand: b, canManage, canEdit, onBack, onChanged, go }: 
         }
       />
       <BrandContextCard ws={ws} brand={b} canEdit={canEdit} />
+      <BrandKnowledgeCard ws={ws} brand={b} canEdit={canEdit} go={go} />
       <Members ws={ws} brand={b} canEdit={canEdit} onChanged={onChanged} />
       <AnalyticsSites ws={ws} brand={b} go={go} />
       <DetailsCard ws={ws} brand={b} canManage={canManage} onSaved={onChanged} go={go} />
@@ -430,6 +431,128 @@ function BrandContextCard({ ws, brand: b, canEdit }: { ws: string; brand: Brand;
   );
 }
 
+const knowledgeLists: { id: string; label: string }[] = [
+  { id: "products", label: "Products" }, { id: "services", label: "Services" }, { id: "features", label: "Features" }, { id: "integrations", label: "Integrations" },
+  { id: "capabilities", label: "Capabilities" }, { id: "audiences", label: "Who it serves" }, { id: "use_cases", label: "Use cases" },
+];
+type Knowledge = BrandContext["knowledge"];
+
+function knowledgeReadFailed(code: string): string {
+  switch (code) {
+    case "connector_needed": return "Connect Geonode under Connectors to read the website.";
+    case "ai_model_needed": return "Choose an AI model under Settings, AI model, to read the website.";
+    case "ai_budget_reached": return "The AI budget for this month is spent.";
+    case "blocked": return "The site showed a bot check instead of its pages.";
+    case "slow_page": return "The site was too slow to read.";
+    case "ai_failed": return "The AI model couldn't write it up this time.";
+    default: return code ? `The last read failed (${code}).` : "";
+  }
+}
+
+// BrandKnowledgeCard shows what the brand's website says it offers, read
+// through the workspace's own Geonode connection and written by its own AI
+// model, as bullets a person edits one per line.
+function BrandKnowledgeCard({ ws, brand: b, canEdit, go }: { ws: string; brand: Brand; canEdit: boolean; go: (t: Tab, item?: string) => void }) {
+  const [c, setC] = useState<BrandContext | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<{ summary: string; industry: string; lists: Record<string, string> } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    api.GET("/v1/workspaces/{ws}/brands/{brand}/context", { params: { path: { ws, brand: b.id } } }).then(({ data }) => data && setC(data));
+  }, [ws, b.id, n]);
+  // A read in progress: look again until it lands.
+  const reading = !!c && !c.knowledge_read_at && !c.knowledge_error && !!b.website && busy;
+  useEffect(() => {
+    if (!reading) return;
+    const t = setTimeout(() => setN((x) => x + 1), 5000);
+    return () => clearTimeout(t);
+  }, [reading, n]);
+  if (!c) return null;
+  const k = c.knowledge;
+  const empty = !k.summary && !k.industry && knowledgeLists.every((l) => (k.lists[l.id] ?? []).length === 0);
+
+  async function read() {
+    setBusy(true);
+    const { error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/knowledge/read", { params: { path: { ws, brand: b.id } } });
+    if (error) {
+      setBusy(false);
+      return toast(errorMessage(error), "error");
+    }
+    toast("Reading the website. This takes a minute or two.");
+    setTimeout(() => { setBusy(false); setN((x) => x + 1); }, 20000);
+  }
+  function startEdit() {
+    setForm({ summary: k.summary, industry: k.industry, lists: Object.fromEntries(knowledgeLists.map((l) => [l.id, (k.lists[l.id] ?? []).map((it) => it.text).join("\n")])) });
+    setEditing(true);
+  }
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    const lists: Knowledge["lists"] = Object.fromEntries(knowledgeLists.map((l) => {
+      const was = k.lists[l.id] ?? [];
+      return [l.id, form.lists[l.id].split("\n").map((t) => t.trim()).filter(Boolean).map((text) => ({ text, url: was.find((it) => it.text === text)?.url ?? "" }))];
+    }));
+    setBusy(true);
+    const { data, error } = await api.PUT("/v1/workspaces/{ws}/brands/{brand}/knowledge", { params: { path: { ws, brand: b.id } }, body: { summary: form.summary, industry: form.industry, lists, pages: k.pages } });
+    setBusy(false);
+    if (error || !data || !("version" in data)) return toast(errorMessage(error), "error");
+    toast("Saved. Agents and AI visibility read this from now on.");
+    setC(data);
+    setEditing(false);
+  }
+
+  return (
+    <Card
+      title="What the website says"
+      description={<>Read from {b.website || "the website"} through your own Geonode connection and written up by your own AI model, for you to correct. AI visibility drafts its questions from it. {c.knowledge_read_at ? <>Read {ago(c.knowledge_read_at)}{c.knowledge_pages ? `, ${plural(c.knowledge_pages, "page")}` : ""}.</> : null}</>}
+    >
+      {c.knowledge_error && <p className="mb-3 text-[13px] text-amber-700 dark:text-amber-400">{knowledgeReadFailed(c.knowledge_error)}</p>}
+      {editing && form ? (
+        <form onSubmit={save} className="space-y-3">
+          <TextArea label="Summary" value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} rows={3} maxLength={2000} />
+          <Input label="Industry" value={form.industry} onChange={(e) => setForm({ ...form, industry: e.target.value })} maxLength={200} />
+          {knowledgeLists.map((l) => (
+            <TextArea key={l.id} label={l.label} hint="One per line." value={form.lists[l.id]} onChange={(e) => setForm({ ...form, lists: { ...form.lists, [l.id]: e.target.value } })} rows={3} />
+          ))}
+          <div className="flex gap-2">
+            <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</Button>
+            <Button type="button" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+          </div>
+        </form>
+      ) : empty ? (
+        <div className="space-y-2 text-[13px]">
+          <p className="text-muted-foreground">{b.website ? "Nothing read yet." : "Give the brand a website first."}</p>
+          {b.website && <ConnectFor connector="geonode" name="Geonode" back="brands" item={b.id} why={geonodeWhy.brands} go={go} variant="ghost" />}
+        </div>
+      ) : (
+        <div className="space-y-3 text-[13px]">
+          {k.summary && <p>{k.summary}</p>}
+          {k.industry && <p className="text-[12px] text-muted-foreground">Industry: {k.industry}</p>}
+          <div className="grid gap-3 md:grid-cols-2">
+            {knowledgeLists.filter((l) => (k.lists[l.id] ?? []).length > 0).map((l) => (
+              <div key={l.id}>
+                <div className="text-[11px] uppercase text-muted-foreground">{l.label}</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {k.lists[l.id].map((it, i) => (
+                    <li key={i}>{it.text}{it.url && <a className="ml-1 text-[11px] text-muted-foreground hover:underline" href={it.url} target="_blank" rel="noreferrer noopener" title={it.url}>source</a>}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {!editing && canEdit && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {!empty && <Button variant="ghost" onClick={startEdit}>Edit</Button>}
+          {b.website && <Button variant="ghost" onClick={read} disabled={busy}>{busy ? "Reading…" : empty ? "Read the website" : "Read the website again"}</Button>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Members moves sending domains in and out of the brand; a domain brings its
 // mailboxes.
 function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Brand; canEdit: boolean; onChanged: () => void }) {
@@ -471,7 +594,7 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
   );
 
   return (
-    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. Everything else is shared by every brand. A brand's mailboxes send for any of its sequences.">
+    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. A mailbox sends only for its own brand's sequences, and one in no brand sends for none.">
       {!domains ? (
         <Loading />
       ) : (
@@ -487,7 +610,7 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
                   return row(
                     `d:${d.domain}`,
                     <span className="font-mono">{d.domain}</span>,
-                    other ? `In ${other}` : d.brand_id ? `${plural(d.mailboxes, "mailbox", "mailboxes")}` : "Shared",
+                    other ? `In ${other}` : d.brand_id ? `${plural(d.mailboxes, "mailbox", "mailboxes")}` : "Not in a brand",
                     d.brand_id === b.id,
                     undefined,
                     (on) => move(`d:${d.domain}`, on, { domains: [d.domain] }),

@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+
+	"github.com/outflareai/outflare/engine/internal/jobs"
 	"time"
 )
 
@@ -99,4 +101,15 @@ func (s *Server) CompetitorNamesFor(ctx context.Context, ws string, brand *strin
 	}
 	defer tx.Rollback(ctx)
 	return competitorNamesFor(ctx, tx, ws, brand, names)
+}
+
+// ResolvePresenceRedirects runs the step of daily discovery that replaces
+// Google redirect links among a brand's finds with their pages.
+func (s *Server) ResolvePresenceRedirects(ctx context.Context, ws, brand string) (int, int, error) {
+	return s.coverageResolveRedirects(ctx, &access{WorkspaceID: ws, Brand: brand})
+}
+
+// RunCoverageVerify runs one read of a brand's unchecked finds.
+func (s *Server) RunCoverageVerify(ctx context.Context, ws, brand string) error {
+	return s.coverageVerifyJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"brand_id":"` + brand + `"}`)})
 }

@@ -30,6 +30,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/jobs"
+	"github.com/outflareai/outflare/engine/internal/rdap"
 	"github.com/outflareai/outflare/engine/internal/retry"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/usagelimits"
@@ -110,6 +111,8 @@ type Service struct {
 	// Fallback reads blocked pages of proved sites through a connector;
 	// nil never does.
 	Fallback Fallback
+	// RDAP reads when competitors' domains were registered; nil skips it.
+	RDAP *rdap.Client
 	// Resolver looks up DNS proofs; nil skips them.
 	Resolver TXTResolver
 	// AllowPrivate lets crawls reach private addresses (development).
@@ -988,14 +991,14 @@ func (s *Service) keepPage(ctx context.Context, r *run, id int64, pg *Page) erro
 		links = links[:maxLinksKept]
 	}
 	urls, anchors := make([]string, len(links)), make([]string, len(links))
-	internal, nofollow := make([]bool, len(links)), make([]bool, len(links))
+	internal, nofollow, boilerplate := make([]bool, len(links)), make([]bool, len(links)), make([]bool, len(links))
 	for i, l := range links {
-		urls[i], anchors[i], internal[i], nofollow[i] = l.URL, l.Anchor, SameSite(hostOfURL(l.URL), r.host), l.Nofollow
+		urls[i], anchors[i], internal[i], nofollow[i], boilerplate[i] = l.URL, l.Anchor, SameSite(hostOfURL(l.URL), r.host), l.Nofollow, l.Boilerplate
 	}
 	_, err = s.Pool.Exec(ctx, `
-		INSERT INTO crawl_links (workspace_id, run_id, from_page, to_url, anchor, internal, nofollow)
-		SELECT $1, $2, $3, u, a, i, n FROM unnest($4::text[], $5::text[], $6::bool[], $7::bool[]) AS t(u, a, i, n)`,
-		r.ws, r.id, id, urls, anchors, internal, nofollow)
+		INSERT INTO crawl_links (workspace_id, run_id, from_page, to_url, anchor, internal, nofollow, boilerplate)
+		SELECT $1, $2, $3, u, a, i, n, b FROM unnest($4::text[], $5::text[], $6::bool[], $7::bool[], $8::bool[]) AS t(u, a, i, n, b)`,
+		r.ws, r.id, id, urls, anchors, internal, nofollow, boilerplate)
 	return err
 }
 
@@ -1044,11 +1047,13 @@ func (s *Service) finish(ctx context.Context, r *run, ev track.Event, status, re
 			Data: map[string]any{"site_id": r.siteID, "status": status, "reason": reason, "pages_fetched": fetched, "pages_failed": failed}}); err != nil {
 			return err
 		}
-		// How many pages link to each page, for orphans and weak pages.
+		// How many pages link to each page, for orphans and weak pages, and
+		// how many of them from their content rather than their menus.
 		_, err = tx.Exec(ctx, `
-			UPDATE crawl_pages p SET links_in = c.n
-			FROM (SELECT to_url, count(DISTINCT from_page)::int AS n FROM crawl_links
-			      WHERE run_id = $1 AND internal GROUP BY to_url) c
+			UPDATE crawl_pages p SET links_in = c.n, content_links_in = c.content
+			FROM (SELECT to_url, count(DISTINCT from_page)::int AS n,
+			             count(DISTINCT from_page) FILTER (WHERE NOT boilerplate)::int AS content
+			      FROM crawl_links WHERE run_id = $1 AND internal GROUP BY to_url) c
 			WHERE p.run_id = $1 AND p.url = c.to_url`, r.id)
 		if err != nil || fetched == 0 {
 			return err

@@ -243,7 +243,7 @@ func (s *Server) helpContent(ctx context.Context, site *helpSite) (*helpContent,
 	brand := site.centre.BrandID
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id::text, c.name, c.description, c.icon, c.parent_id::text FROM knowledge_collections c
-		WHERE c.workspace_id = $1 AND ($2::uuid IS NULL OR c.brand_id IS NULL OR c.brand_id = $2::uuid)
+		WHERE c.workspace_id = $1 AND ($2::uuid IS NULL OR c.brand_id = $2::uuid)
 		ORDER BY c.position, c.name`, site.ws, brand)
 	if err != nil {
 		return nil, err
@@ -266,7 +266,7 @@ func (s *Server) helpContent(ctx context.Context, site *helpSite) (*helpContent,
 		       COALESCE((SELECT sum(d.views) FROM help_article_days d WHERE d.item_id = i.id AND d.day > current_date - 30), 0)::int
 		FROM knowledge_items i LEFT JOIN users u ON u.actor_id = i.owner_id
 		WHERE i.workspace_id = $1 AND i.deleted_at IS NULL AND i.status = 'published' AND i.visibility = 'public'
-		  AND ($2::uuid IS NULL OR i.brand_id IS NULL OR i.brand_id = $2::uuid)
+		  AND ($2::uuid IS NULL OR i.brand_id = $2::uuid)
 		ORDER BY i.title`, site.ws, brand)
 	if err != nil {
 		return nil, err
@@ -500,7 +500,7 @@ func (s *Server) helpSearch(ctx context.Context, site *helpSite, c *helpContent,
 		SELECT DISTINCT ON (i.id) i.id::text, c.text, ts_rank_cd(`+knowledgeVector+`, to_tsquery('simple', $3)) AS rank
 		FROM knowledge_chunks c JOIN knowledge_items i ON i.id = c.item_id
 		WHERE c.workspace_id = $1 AND i.deleted_at IS NULL AND i.status = 'published' AND i.visibility = 'public'
-		  AND ($2::uuid IS NULL OR i.brand_id IS NULL OR i.brand_id = $2::uuid)
+		  AND ($2::uuid IS NULL OR i.brand_id = $2::uuid)
 		  AND `+knowledgeVector+` @@ to_tsquery('simple', $3)
 		ORDER BY i.id, rank DESC`, site.ws, site.centre.BrandID, words)
 	if err != nil {

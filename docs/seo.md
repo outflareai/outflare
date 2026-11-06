@@ -1,9 +1,9 @@
 # SEO
 
-Outflare reads how a domain looks from the outside through **DataForSEO**
-and **Ahrefs**: domain rating, backlinks and referring domains, the
+Outflare reads how a domain looks from the outside through **DataForSEO**,
+**Ahrefs** and **SE Ranking**: domain rating, backlinks and referring domains, the
 keywords a site ranks for and where, competitors in search, and (Ahrefs)
-site audit issues. Both are paid per call, so every live call is capped by a
+site audit issues. All three are paid per call, so every live call is capped by a
 monthly budget, cached for a day and recorded in Outcomes with its cost.
 Outflare only reads, and nothing else in Outflare needs SEO connected.
 
@@ -13,26 +13,28 @@ Outflare only reads, and nothing else in Outflare needs SEO connected.
 | --- | --- | --- |
 | DataForSEO | API login and API password | dataforseo.com, Dashboard → API Access (the API password is not your account password) |
 | Ahrefs | Sign in with Ahrefs (Ahrefs Connect), or an API key | ahrefs.com, Account settings → API keys (needs a plan with API access). Signing in needs an Ahrefs Connect app on the server (`CONNECTOR_AHREFS_CLIENT_ID`); calls then spend the signed-in account's units. |
+| SE Ranking | Data API key | seranking.com, API dashboard → Data API key (needs a Data API plan) |
 
 Connect either on the Connectors page (category SEO), with
 `POST /v1/workspaces/$WS/integrations`, or let an agent ask with
 `request_connection`: you get a one-time link to paste the key into, so the
 key never passes through the chat. The connection test reads your DataForSEO
-balance or your Ahrefs unit limit and usage, and costs nothing.
+balance, your Ahrefs unit limit and usage, or your SE Ranking credits left,
+and costs nothing.
 
 ## Reports
 
 Every tool answers the same reports in the same shape, keyed by domain.
 
-| Report | What it answers | DataForSEO | Ahrefs |
-| --- | --- | --- | --- |
-| `overview` | Domain rating, backlinks, referring domains, ranking keywords, keywords in the top 3, estimated visits and traffic value per month | Yes | Yes |
-| `keywords` | The keywords the domain ranks for: position, searches per month, estimated visits, ranking page | Yes | Yes |
-| `backlinks` | The referring domains linking to it, strongest first | Yes | Yes |
-| `links` | Single links to it, strongest linking domains first; `since=YYYY-MM-DD` adds links lost since then | Yes | Yes |
-| `competitors` | Domains competing for the same keywords, with keywords in common | Yes | Yes |
-| `pages` | The domain's pages that get the most search traffic: estimated visits a month, ranking keywords and (Ahrefs) the top search | Yes | Yes |
-| `audit` | Site audit health score and issues, errors first | No | Yes, for a site already set up as an Ahrefs Site Audit project |
+| Report | What it answers | DataForSEO | Ahrefs | SE Ranking |
+| --- | --- | --- | --- | --- |
+| `overview` | Domain rating, backlinks, referring domains, ranking keywords, keywords in the top 3, estimated visits and traffic value per month | Yes | Yes | Yes, without domain rating, links or the top 3 (it counts positions 1 to 5 together) |
+| `keywords` | The keywords the domain ranks for: position, searches per month, estimated visits, ranking page | Yes | Yes | Yes |
+| `backlinks` | The referring domains linking to it, strongest first | Yes | Yes | No |
+| `links` | Single links to it, strongest linking domains first; `since=YYYY-MM-DD` adds links lost since then | Yes | Yes | No |
+| `competitors` | Domains competing for the same keywords, with keywords in common | Yes | Yes | Yes |
+| `pages` | The domain's pages that get the most search traffic: estimated visits a month, ranking keywords and (Ahrefs) the top search | Yes | Yes | No |
+| `audit` | Site audit health score and issues, errors first | No | Yes, for a site already set up as an Ahrefs Site Audit project | No |
 
 DataForSEO's domain rating is its own 0 to 100 rank, and Ahrefs' is Ahrefs
 DR, so the two are not the same scale. Traffic numbers are each tool's
@@ -57,6 +59,13 @@ the top 100, within a monthly budget you set on the Geonode connection.
   about 21 per keyword row and 11 per backlink or competitor row) and marks
   the ledger entry as estimated. The default budget is **10,000 units a
   month** per connection.
+- **SE Ranking** charges 100 API credits from your Data API plan for every
+  request, whatever the number of rows. Its API does not return the cost of
+  a call, so Outflare records 100 units a call and marks the entry as
+  estimated. The default budget is **10,000 credits a month** per
+  connection, counted as API units. The keywords your SE Ranking projects
+  track come into rank tracking each day with the same key, at no Data API
+  cost; see [Keywords tracked in SE Ranking](search-intelligence.md#keywords-tracked-in-se-ranking).
 - The budget runs per calendar month (UTC). Before each live call Outflare
   estimates its cost and refuses with `402 budget_reached` if it would go
   over; raise the budget in the connection's SEO settings to carry on.
@@ -93,7 +102,9 @@ again, so the domains that worked cost nothing more.
   providers count subdomains with their domain.
 - **Cost:** about $0.05 a domain a week on DataForSEO (about $0.20 a
   month). About 1,200 units a domain a week on Ahrefs, so the default
-  10,000-unit budget covers about two domains; raise it for more. A
+  10,000-unit budget covers about two domains; raise it for more. On SE
+  Ranking 200 credits a domain a week (one overview and one keyword list),
+  so the default budget covers about twelve domains. A
   snapshot stops when the budget runs out.
 - Turn it off with `"sync": "off"`, or take one now with
   `POST /seo/$ID/sync` or "Snapshot now" on the SEO page.
@@ -257,11 +268,16 @@ never contacts a site, asks for a link or disavows anything on its own.
 ## Competitors
 
 Every day each SEO connection is asked which domains compete with each active
-SEO site in search (the 10 sharing the most keywords, one read a site a day
+SEO site in search (the 50 sharing the most keywords, one read a site a day
 within the connection's budget), and the domains ranking in the top results
 beside the site for at least two of its tracked keywords in the last week are
-added at no cost (source `rankings`; platforms such as YouTube or Reddit
-never). They are kept as **suggested** competitors (`GET /seo-competitors`, MCP
+added at no cost (source `rankings`). Platforms that rank for nearly
+everything without competing with anyone (GitHub, YouTube, Reddit,
+Wikipedia, Medium, app and review sites and the like) are never suggested
+from either, and a platform suggested before this is withdrawn. Unless
+someone added it by hand, a platform is never read on the connection's
+budget: no weekly numbers, keyword or link gaps, or dead-page reads. They are
+kept as **suggested** competitors (`GET /seo-competitors`, MCP
 `list_seo_competitors`). Track the ones that matter, dismiss the rest (a
 dismissed suggestion stays away), or add your own (`POST /seo-competitors`,
 as many as you like). Each competitor is linked to the customer record
@@ -274,7 +290,7 @@ cohort is tracked on it (source `ai_visibility`), and Reddit actions write
 the competitors they name as it names them.
 
 - **Their numbers come from your connection.** Each week the snapshot takes
-  an overview of up to 10 tracked competitors a site (domain rating, organic
+  an overview of up to 50 tracked competitors a site (domain rating, organic
   traffic and keywords, referring domains), priced like one of your own
   domains and within the connection's budget. `numbers` on a competitor is
   the latest one.
@@ -315,6 +331,26 @@ keyword or link outside that read. Reading the gaps costs nothing; the weekly
 read is priced like the keywords and links reports and counts against the
 connection's budget. Gaps are ideas for content and links: Outflare never
 contacts a site for you.
+
+Click a keyword gap to see **who ranks for it**: the top 20 results, competitor
+or not, marked as you, tracked, suggested or not a competitor, with Yes and No
+for suggestions and Track for the rest (`GET /seo-competitors/results`, MCP
+`get_seo_keyword_results`). Once a day, Outflare reads the results pages of up
+to 25 of a site's keyword gaps (the ones most competitors rank for first, each
+at most once a week) on the workspace's own SERP connection (DataForSEO or
+Geonode), within its budget, and keeps them. A keyword not read yet can be read
+from its page. A tracked keyword's latest rank check (top 10) shows the same way.
+
+### More competitors from the keyword gaps
+
+The domains that rank for at least two of the keyword gaps read in the last 30
+days are suggested as competitors (source `keyword_gaps`, up to 25 a day), so a
+competitor that ranks beside the ones you track but that no connection named
+shows up to say Yes or No to. It never suggests your own site, a platform anyone
+uses (GitHub, Reddit, YouTube and the like) or a domain already on the list,
+dismissed ones included. **Find more competitors** on the Competitors page
+(`POST /v1/brands/{brand}/competition/discover`, MCP `discover_competitors`)
+reads the next batch now. Without a SERP connection it says to connect one.
 
 ## Link prospects
 

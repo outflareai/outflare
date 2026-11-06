@@ -113,6 +113,24 @@ func parseDocument(raw []byte) (*document, error) {
 			d.byCommand[op.Command] = op
 		}
 	}
+	// A brand route's command drops "brand" from its name (upsertBrandLead
+	// is upsert-lead) when no other command has that name: every brand's
+	// data is on its brand route, and --brand says which.
+	for _, op := range d.ops {
+		if !strings.HasPrefix(op.Path, "/v1/brands/{brand}/") {
+			continue
+		}
+		short := strings.Replace(op.Command, "-brand-", "-", 1)
+		if short == op.Command {
+			continue
+		}
+		if _, taken := d.byCommand[short]; taken {
+			continue
+		}
+		delete(d.byCommand, op.Command)
+		op.Command = short
+		d.byCommand[short] = op
+	}
 	sort.Slice(d.ops, func(i, j int) bool { return d.ops[i].Command < d.ops[j].Command })
 	return d, nil
 }

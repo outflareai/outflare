@@ -13,10 +13,10 @@ func init() {
 	digests.Register(digests.Builder{ID: "alerts", Title: "Alerts", Build: digestSection})
 }
 
-func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
+func digestSection(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var s digests.Section
-	rows, err := q.Query(ctx, `SELECT kind, count(*)::float8 FROM alerts WHERE workspace_id = $1 AND created_at >= $2 AND created_at < $3 GROUP BY kind`,
-		ws, p.Start, p.End)
+	rows, err := q.Query(ctx, `SELECT kind, count(*)::float8 FROM alerts WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND created_at >= $2 AND created_at < $3 GROUP BY kind`,
+		ws, p.Start, p.End, brand)
 	if err != nil {
 		return s, err
 	}
@@ -38,8 +38,8 @@ func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.
 		s.Metrics = append(s.Metrics, digests.Metric{Key: k.ID, Label: k.Title, Value: counts[k.ID]})
 	}
 	var capped int
-	if err := q.QueryRow(ctx, `SELECT count(*) FROM alert_deliveries WHERE workspace_id = $1 AND reason = 'daily_cap' AND created_at >= $2 AND created_at < $3`,
-		ws, p.Start, p.End).Scan(&capped); err != nil {
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM alert_deliveries WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND reason = 'daily_cap' AND created_at >= $2 AND created_at < $3`,
+		ws, p.Start, p.End, brand).Scan(&capped); err != nil {
 		return s, err
 	}
 	if capped > 0 {

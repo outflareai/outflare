@@ -21,7 +21,7 @@ Behind the scenes Outflare makes a flag for the test (`POST .../ab-tests` with `
 ## Setting one up from a flag
 
 1. Make a flag with two or more versions, such as `control` 50 and `faster` 50, and read it on the page (below).
-2. Add a test of it (**Analytics → A/B tests**, `POST /v1/workspaces/{ws}/ab-tests`, or MCP `create_ab_test`):
+2. Add a test of it (**Analytics → A/B tests**, `POST /v1/brands/{brand}/ab-tests`, or MCP `create_ab_test`):
 
    ```json
    {
@@ -80,7 +80,7 @@ Open each version, then mark it **Looks right** or **Broken**, with a note if so
 
 ## How long it will take
 
-Before starting, the planner (in the new-test form and a draft test, `POST /v1/workspaces/{ws}/ab-tests/plan`, MCP `plan_ab_test`) reads the last 28 days of page views, on the page the test changes if you give one, and the goal's rate among those visitors (or, for a count or value goal, the mean per visitor and how much it varies). With the flag's rollout and split, it shows how many visitors each version needs, and how many weeks that is, if the change truly moves the goal by +5%, +10%, +25% or +50%. It also gives the smallest change findable in 4 and in 8 weeks, and warns when the smallest change worth finding won't be safe to stop within 8 weeks. Small sites can only find big changes: at 2,000 visitors a week per version and a 4% sign-up rate, +25% takes about four weeks and +10% over half a year. Revenue varies more from visitor to visitor than a yes or no, so a revenue goal usually needs more visitors than the conversion behind it. With more than one version against the control, each version needs more visitors, since the results are corrected for the extra chances of a false winner (below).
+Before starting, the planner (in the new-test form and a draft test, `POST /v1/brands/{brand}/ab-tests/plan`, MCP `plan_ab_test`) reads the last 28 days of page views, on the page the test changes if you give one, and the goal's rate among those visitors (or, for a count or value goal, the mean per visitor and how much it varies). With the flag's rollout and split, it shows how many visitors each version needs, and how many weeks that is, if the change truly moves the goal by +5%, +10%, +25% or +50%. It also gives the smallest change findable in 4 and in 8 weeks, and warns when the smallest change worth finding won't be safe to stop within 8 weeks. Small sites can only find big changes: at 2,000 visitors a week per version and a 4% sign-up rate, +25% takes about four weeks and +10% over half a year. Revenue varies more from visitor to visitor than a yes or no, so a revenue goal usually needs more visitors than the conversion behind it. With more than one version against the control, each version needs more visitors, since the results are corrected for the extra chances of a false winner (below).
 
 These are typical stopping points from the same test the results use: half of tests finish sooner, half later. Nothing is stored.
 
@@ -89,6 +89,7 @@ These are typical stopping points from the same test the results use: half of te
 A visitor joins a test the first time a page **shows them** the flag's version, not when the flag is decided. Pages that never show the change don't dilute the results. The website script sends a track event, Experiment Viewed (stored as `experiment_viewed`, with properties `flag` and `variant`, plus `source` and `wait_ms`: where the first version the visitor saw came from, `bootstrap` from your server, `kept` from the last page or `fetched`, and how long after the script started it showed), once per visit for each flag:
 
 - when the page reads the flag with `outflare.flag("key")` or `outflare.flagPayload("key")`, or reads it from what `outflare.onFlags(fn)` gives;
+- for a no-code test (a flag with changes from the visual editor), as soon as a page the test runs on loads, whichever version the visitor got, the control included;
 - with `data-flags` on the script's tag, for every flag whose class (`of-flag-<flag>-<version>`) goes on `<html>`, since a CSS-only test shows its version that way. Leave `data-flags` off pages that don't show a test if you want those visitors left out.
 
 Previews (`?of_flag=key:version`) send nothing: that is you looking, not a visitor.

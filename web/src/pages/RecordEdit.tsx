@@ -831,11 +831,11 @@ export function RecordDialog({ ws, brand: specifiedBrand, type, rec, cat, names,
       ? String(values.associated_people[0])
       : "";
   useEffect(() => {
-    if (!personRef || values.associated_company) return;
+    if (!brand || !personRef || values.associated_company) return;
     const controller = new AbortController();
     api
-      .GET("/v1/workspaces/{ws}/records/{record}", {
-        params: { path: { ws, record: personRef } },
+      .GET("/v1/brands/{brand}/records/{record}", {
+        params: { path: { brand, record: personRef } },
         signal: controller.signal,
       })
       .then(({ data }) => {
@@ -852,18 +852,18 @@ export function RecordDialog({ ws, brand: specifiedBrand, type, rec, cat, names,
         if (!controller.signal.aborted) setError(errorMessage(error));
       });
     return () => controller.abort();
-  }, [ws, personRef, values.associated_company]);
+  }, [ws, brand, personRef, values.associated_company]);
 
   const parentRecord =
     listEntry && typeof values.outflare_parent_record === "string"
       ? values.outflare_parent_record
       : "";
   useEffect(() => {
-    if (!parentRecord || rec) return;
+    if (!brand || !parentRecord || rec) return;
     const controller = new AbortController();
     api
-      .GET("/v1/workspaces/{ws}/records/{record}", {
-        params: { path: { ws, record: parentRecord } },
+      .GET("/v1/brands/{brand}/records/{record}", {
+        params: { path: { brand, record: parentRecord } },
         signal: controller.signal,
       })
       .then(({ data }) => {
@@ -873,7 +873,7 @@ export function RecordDialog({ ws, brand: specifiedBrand, type, rec, cat, names,
         if (!controller.signal.aborted) setError(errorMessage(error));
       });
     return () => controller.abort();
-  }, [ws, parentRecord, rec]);
+  }, [ws, brand, parentRecord, rec]);
 
   function close() {
     if (changed.length || (!rec && (name || ident)))

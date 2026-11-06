@@ -490,10 +490,11 @@ func (s *Server) updateInbound(w http.ResponseWriter, r *http.Request) {
 			t := arg(tags)
 			set = append(set, "tags = "+t)
 			changed["tags"] = tags
-			// A new tag joins the workspace's list, so it can be picked
-			// and coloured later.
-			if _, err := tx.Exec(ctx, `INSERT INTO inbox_tags (workspace_id, name) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
-				a.WorkspaceID, tags); err != nil {
+			// A new tag joins the reply's brand's list, so it can be
+			// picked and coloured later.
+			if _, err := tx.Exec(ctx, `INSERT INTO brand_inbox_tags (workspace_id, brand_id, name)
+				SELECT $1, COALESCE(i.brand_id, outflare_first_brand($1)), unnest($2::text[]) FROM inbound_messages i WHERE i.id = $3
+				ON CONFLICT DO NOTHING`, a.WorkspaceID, tags, v.ID); err != nil {
 				return err
 			}
 		}

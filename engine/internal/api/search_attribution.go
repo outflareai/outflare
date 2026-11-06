@@ -3,9 +3,12 @@ package api
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
+	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/seointel"
+	"github.com/outflareai/outflare/engine/internal/track"
 	"math"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -14,6 +17,9 @@ func (s *Server) insightAttribution(ctx context.Context, ws, brand string, site 
 	// Pick one source to avoid adding the same visits from two GA4 properties.
 	var id, property string
 	e := s.pool.QueryRow(ctx, `SELECT integration_id::text,site FROM search_ga4_outcomes o WHERE workspace_id=$1 AND brand_id=$2 AND EXISTS(SELECT 1 FROM integrations i WHERE i.workspace_id=$1 AND i.id=o.integration_id AND integration_serves(i,$2::uuid)) AND lower(host)=ANY($3) AND day BETWEEN $4 AND $5 AND ($6='' OR integration_id::text=$6) GROUP BY integration_id,site ORDER BY sum(sessions) DESC,integration_id LIMIT 1`, ws, brand, seointel.PageHosts(site.Host), win.from, win.to, integration).Scan(&id, &property)
+	if e == pgx.ErrNoRows && report == "ai-referrals" {
+		return s.aiReferralsFromAnalytics(ctx, ws, brand, win, integration, out)
+	}
 	if e == pgx.ErrNoRows {
 		out.Status = "not_connected"
 		out.Notes = append(out.Notes, "Connect GA4, assign its property to this brand, and sync landing-page outcomes.")
@@ -146,4 +152,94 @@ func assistantSource(source string) bool {
 		}
 	}
 	return false
+}
+
+// aiReferralsFromAnalytics answers the AI referrals report from the brand's
+// analytics connection (PostHog, Plausible, Matomo and others with a sources
+// report) when no GA4 landing-page outcomes are synced. The sources report is
+// site-wide, so rows are referrers, not pages. The first connection that
+// answers wins, so the same visits are never added from two tools.
+func (s *Server) aiReferralsFromAnalytics(ctx context.Context, ws, brand string, win searchWindow, integration string, out *seointel.InsightReport) error {
+	sel := brandSel{id: brand}
+	sources, err := s.analyticsSources(ctx, ws, sel)
+	if err != nil {
+		return err
+	}
+	var failed error
+	tried := false
+	for _, src := range sources {
+		if integration != "" && src.ID != integration {
+			continue
+		}
+		if !slices.Contains(src.Reports, connectors.ReportSources) {
+			continue
+		}
+		if in, err := s.siteInBrand(ctx, ws, src.ID, src.Site, sel); err != nil {
+			return err
+		} else if !in {
+			continue
+		}
+		o, err := s.integrations.Open(ctx, s.pool, ws, src.ID)
+		if err != nil {
+			failed = err
+			continue
+		}
+		reader := o.Connector.(connectors.AnalyticsReader)
+		tried = true
+		ans, err := s.analyticsFetch(ctx, o, reader, connectors.AnalyticsQuery{Report: connectors.ReportSources, From: win.from, To: win.to, Limit: 1000}, false)
+		if err != nil {
+			if connectors.KindOf(err) == connectors.ErrAuth {
+				_ = s.integrations.Checked(ctx, s.pool, ws, o.ID, nil, err)
+			}
+			track.Fail(ctx, s.log, track.Event{Name: "search_insights.ai_referrals_failed", WorkspaceID: ws,
+				Props: map[string]any{"brand_id": brand, "integration_id": o.ID, "connector": o.Connector.Definition().ID}}, "connector_"+connectors.KindOf(err), err)
+			failed = err
+			continue
+		}
+		total := 0.0
+		for _, row := range ans.Rows {
+			total += visits(row.Metrics)
+		}
+		out.Summary["all_sessions"] = total
+		for _, row := range ans.Rows {
+			if !assistantSource(row.Key) {
+				continue
+			}
+			x := seointel.InsightRow{Key: row.Key, Source: row.Key, Sessions: visits(row.Metrics), Status: "measured"}
+			if total > 0 {
+				x.Share = x.Sessions / total
+			}
+			out.Data = append(out.Data, x)
+			out.Summary["ai_sessions"] += x.Sessions
+		}
+		if total > 0 {
+			out.Summary["ai_share"] = out.Summary["ai_sessions"] / total
+		}
+		name := o.Connector.Definition().Name
+		out.Notes = append(out.Notes, "Measured "+name+" referring domains from known assistants, for the whole site rather than by landing page. Visits without a referrer are not identifiable as AI traffic.")
+		if len(ans.Rows) >= 1000 {
+			out.Notes = append(out.Notes, "Only the top 1,000 referrers were read, so the share of AI traffic is of those visits.")
+		}
+		return nil
+	}
+	if tried && failed != nil {
+		out.Status = "provider_error"
+		out.Notes = append(out.Notes, "The analytics connection could not answer: check it on the Connectors page.")
+		return nil
+	}
+	out.Status = "not_connected"
+	out.Notes = append(out.Notes, "Connect GA4 and sync landing-page outcomes, or connect an analytics tool with referrers (PostHog, Plausible, Matomo) for this brand.")
+	return nil
+}
+
+// visits is a sources row's visits, or its visitors when a tool counts no
+// visits.
+func visits(m connectors.Metrics) float64 {
+	switch {
+	case m.Sessions != nil:
+		return *m.Sessions
+	case m.Visitors != nil:
+		return *m.Visitors
+	}
+	return 0
 }

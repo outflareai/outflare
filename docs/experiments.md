@@ -33,11 +33,11 @@ The day the change went live is left out, since it is half one and half the othe
 
 | Endpoint | MCP tool |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/experiments` | `list_experiments` |
-| `POST /v1/workspaces/{ws}/experiments` | `create_experiment` |
-| `GET`, `PATCH`, `DELETE /v1/workspaces/{ws}/experiments/{id}` | `get_experiment`, `delete_experiment` |
-| `GET /v1/workspaces/{ws}/experiments/{id}/pages` | `list_experiment_pages` |
-| `POST /v1/workspaces/{ws}/experiments/{id}/start` | `start_experiment` |
-| `POST /v1/workspaces/{ws}/experiments/{id}/stop` | `stop_experiment` |
+| `GET /v1/brands/{brand}/experiments` | `list_experiments` |
+| `POST /v1/brands/{brand}/experiments` | `create_experiment` |
+| `GET`, `PATCH`, `DELETE /v1/brands/{brand}/experiments/{id}` | `get_experiment`, `delete_experiment` |
+| `GET /v1/brands/{brand}/experiments/{id}/pages` | `list_experiment_pages` |
+| `POST /v1/brands/{brand}/experiments/{id}/start` | `start_experiment` |
+| `POST /v1/brands/{brand}/experiments/{id}/stop` | `stop_experiment` |
 
 Scopes are `seo.read` and `seo.manage`, and an experiment belongs to its site's brand. `experiment.started` and `experiment.concluded` are webhooks, and the [digest](digests.md) lists what is measuring and what ended.

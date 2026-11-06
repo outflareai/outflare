@@ -18,7 +18,7 @@ curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/query" \
 
 `$BRAND` is the brand's id. Agents use the MCP tools `list_query_tables` and `run_query`, which take the brand's handle or id.
 
-A query belongs to one brand (`plans/brands/README.md`): different brands are different businesses, so their data is never queried together. The workspace routes `GET /v1/workspaces/{ws}/query/tables` and `POST /v1/workspaces/{ws}/query` are deprecated and stay until the brands contract step: they query the brand `?brand=` picks (a handle or id), else the workspace's first brand (a member or token kept to some brands gets its own), and `?brand=all` queries every brand you can see, as before.
+A query belongs to one brand (`plans/brands/README.md`): different brands are different businesses, so their data is never queried together. The workspace routes `GET /v1/brands/{brand}/query/tables` and `POST /v1/brands/{brand}/query` are deprecated and stay until the brands contract step: they query the brand `?brand=` picks (a handle or id), else the workspace's first brand (a member or token kept to some brands gets its own), and `?brand=all` queries every brand you can see, as before.
 
 ## Tables
 

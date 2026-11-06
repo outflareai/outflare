@@ -33,28 +33,28 @@ type channelTotals struct {
 	revByCh     map[string]map[string]float64
 }
 
-func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.Period) (digests.Section, error) {
+func digestSection(ctx context.Context, q digests.Querier, ws, brand string, p digests.Period) (digests.Section, error) {
 	var s digests.Section
 	model := LastNonDirect
-	err := q.QueryRow(ctx, `SELECT model FROM attribution_settings WHERE workspace_id = $1 ORDER BY brand_id IS NOT DISTINCT FROM outflare_first_brand(workspace_id) DESC LIMIT 1`, ws).Scan(&model)
+	err := q.QueryRow(ctx, `SELECT model FROM attribution_settings WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $2`, ws, brand).Scan(&model)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
 	// A workspace's own default model is stored as its key; its credits
 	// are under its latest version's id.
-	if id, _, err := Resolve(ctx, q, ws, "", model); err == nil {
+	if id, _, err := Resolve(ctx, q, ws, brand, model); err == nil {
 		model = id
 	} else if errors.Is(err, ErrUnknownModel) || errors.Is(err, ErrNotCredited) {
 		model = LastNonDirect
 	} else {
 		return s, err
 	}
-	now, err := periodTotals(ctx, q, ws, model, p.Start, p.End)
+	now, err := periodTotals(ctx, q, ws, brand, model, p.Start, p.End)
 	if err != nil {
 		return s, err
 	}
 	length := p.End.Sub(p.Start)
-	prev, err := periodTotals(ctx, q, ws, model, p.Start.Add(-length), p.Start)
+	prev, err := periodTotals(ctx, q, ws, brand, model, p.Start.Add(-length), p.Start)
 	if err != nil {
 		return s, err
 	}
@@ -103,18 +103,18 @@ func digestSection(ctx context.Context, q digests.Querier, ws string, p digests.
 	return s, nil
 }
 
-func periodTotals(ctx context.Context, q digests.Querier, ws, model string, start, end any) (channelTotals, error) {
+func periodTotals(ctx context.Context, q digests.Querier, ws, brand, model string, start, end any) (channelTotals, error) {
 	t := channelTotals{revenue: map[string]float64{}, cost: map[string]float64{}, byChannel: map[string]float64{}, revByCh: map[string]map[string]float64{}}
 	if err := q.QueryRow(ctx, `SELECT count(*)::float8 FROM site_sessions
-		WHERE workspace_id = $1 AND channel <> '' AND started_at >= $2 AND started_at < $3`, ws, start, end).Scan(&t.visits); err != nil {
+		WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND channel <> '' AND started_at >= $2 AND started_at < $3`, ws, start, end, brand).Scan(&t.visits); err != nil {
 		return t, err
 	}
 	rows, err := q.Query(ctx, `SELECT cr.channel, c.currency,
 			coalesce(sum(cr.weight) FILTER (WHERE c.name <> 'payment.refunded'), 0)::float8,
 			coalesce(sum(cr.weight * c.value_minor), 0)::float8
 		FROM attribution_credits cr JOIN attribution_conversions c ON c.event_id = cr.event_id
-		WHERE cr.workspace_id = $1 AND cr.model = $2 AND c.occurred_at >= $3 AND c.occurred_at < $4
-		GROUP BY cr.channel, c.currency`, ws, model, start, end)
+		WHERE cr.workspace_id = $1 AND COALESCE(cr.brand_id, outflare_first_brand(cr.workspace_id)) = $5 AND cr.model = $2 AND c.occurred_at >= $3 AND c.occurred_at < $4
+		GROUP BY cr.channel, c.currency`, ws, model, start, end, brand)
 	if err != nil {
 		return t, err
 	}
@@ -140,8 +140,8 @@ func periodTotals(ctx context.Context, q digests.Querier, ws, model string, star
 		return t, err
 	}
 	rows, err = q.Query(ctx, `SELECT currency, sum(amount_cents)::float8 FROM spend_entries
-		WHERE workspace_id = $1 AND amount_cents IS NOT NULL AND occurred_at >= $2 AND occurred_at < $3
-		GROUP BY currency`, ws, start, end)
+		WHERE workspace_id = $1 AND COALESCE(brand_id, outflare_first_brand(workspace_id)) = $4 AND amount_cents IS NOT NULL AND occurred_at >= $2 AND occurred_at < $3
+		GROUP BY currency`, ws, start, end, brand)
 	if err != nil {
 		return t, err
 	}

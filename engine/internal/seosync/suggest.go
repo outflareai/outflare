@@ -27,19 +27,26 @@ import (
 // suggested a day, and rankingMinKeywords how many of its tracked keywords
 // a domain must rank for in the last week to count.
 const (
-	rankingSuggestions = 10
+	rankingSuggestions = 25
 	rankingMinKeywords = 2
 )
 
 // platforms rank for nearly everything without competing with anyone, so
-// they are never suggested from rankings.
+// they are never suggested, and unless someone added one by hand, no SEO
+// connection's budget is spent reading one (numbers, gaps, dead pages).
 var platforms = map[string]bool{
 	"wikipedia.org": true, "youtube.com": true, "reddit.com": true, "quora.com": true, "medium.com": true,
 	"linkedin.com": true, "facebook.com": true, "instagram.com": true, "x.com": true, "twitter.com": true,
 	"tiktok.com": true, "pinterest.com": true, "github.com": true, "amazon.com": true, "google.com": true,
 	"apple.com": true, "microsoft.com": true, "stackoverflow.com": true, "g2.com": true, "capterra.com": true,
-	"trustpilot.com": true,
+	"trustpilot.com": true, "gitlab.com": true, "bitbucket.org": true, "npmjs.com": true, "pypi.org": true,
+	"wordpress.com": true, "wordpress.org": true, "substack.com": true, "producthunt.com": true,
+	"crunchbase.com": true, "yelp.com": true, "ebay.com": true, "etsy.com": true, "bing.com": true,
+	"yahoo.com": true, "stackexchange.com": true, "discord.com": true, "threads.net": true, "github.io": true,
 }
+
+// Platform reports whether host is one of the platforms or under one.
+func Platform(host string) bool { return platform(host) }
 
 func platform(host string) bool {
 	for h := host; h != ""; {
@@ -53,6 +60,21 @@ func platform(host string) bool {
 		h = rest
 	}
 	return false
+}
+
+// platformList is the platforms for SQL: notPlatform below.
+func platformList() []string {
+	out := make([]string, 0, len(platforms))
+	for h := range platforms {
+		out = append(out, h)
+	}
+	return out
+}
+
+// notPlatform is a SQL condition on seo_competitors c that leaves out
+// platforms nobody added by hand; its parameter is platformList().
+func notPlatform(param string) string {
+	return `(c.source = 'manual' OR NOT EXISTS (SELECT 1 FROM unnest(` + param + `::text[]) pd WHERE c.host = pd OR c.host LIKE '%.' || pd))`
 }
 
 // queueSuggest queues today's competitor suggestions for each connected
@@ -168,32 +190,42 @@ func suggestSiteFromRankings(ctx context.Context, pool *pgxpool.Pool, ws string,
 	if err != nil {
 		return 0, err
 	}
-	type hit struct {
-		host string
-		n    int
-	}
-	hits, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (hit, error) {
-		var h hit
-		return h, row.Scan(&h.host, &h.n)
+	hits, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (HostHit, error) {
+		var h HostHit
+		return h, row.Scan(&h.Host, &h.Keywords)
 	})
 	if err != nil {
 		return 0, err
 	}
+	return SuggestHosts(ctx, pool, ws, site, "rankings", hits, rankingSuggestions)
+}
+
+// HostHit is a domain seen in results pages, and for how many keywords.
+type HostHit struct {
+	Host     string
+	Keywords int
+}
+
+// SuggestHosts suggests up to max of hits (best first) as competitors of
+// the site, from source: never the site itself, a platform anyone uses
+// (Platform) or a domain already on its list, whatever its status. It
+// says how many it added.
+func SuggestHosts(ctx context.Context, pool *pgxpool.Pool, ws string, site LinkSite, source string, hits []HostHit, max int) (int, error) {
 	target := LinkTarget(site.Host)
 	added, seen := 0, map[string]bool{}
 	for _, h := range hits {
-		host := CompetitorHost(h.host)
+		host := CompetitorHost(h.Host)
 		if host == "" || seen[host] || host == target || strings.HasSuffix(host, "."+target) || platform(host) {
 			continue
 		}
 		seen[host] = true
 		tag, err := pool.Exec(ctx, `INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, status, source, common_keywords)
-			VALUES ($1, $2, $3, $4, 'suggested', 'rankings', $5) ON CONFLICT (site_id, host) DO NOTHING`, ws, site.ID, site.BrandID, host, float64(h.n))
+			VALUES ($1, $2, $3, $4, 'suggested', $5, $6) ON CONFLICT (site_id, host) DO NOTHING`, ws, site.ID, site.BrandID, host, source, float64(h.Keywords))
 		if err != nil {
 			return added, err
 		}
 		added += int(tag.RowsAffected())
-		if added >= rankingSuggestions {
+		if added >= max {
 			break
 		}
 	}

@@ -69,7 +69,7 @@ Every lead in a searched list gets a 0 to 100 fit score, with the reasons. It is
 
 ## Where a lead came from
 
-`GET /v1/workspaces/{ws}/leads/{id}/sources` shows each provider that supplied or filled in a lead, its id there and when. Useful for data requests and for knowing which provider's data replies best.
+`GET /v1/brands/{brand}/leads/{id}/sources` shows each provider that supplied or filled in a lead, its id there and when. Useful for data requests and for knowing which provider's data replies best.
 
 ## Clay, spreadsheets and other tools
 

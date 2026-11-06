@@ -355,7 +355,8 @@ function DailyChart({ days }: { days: EmailOverview["daily"] }) {
 }
 
 function TestSend({ ws, myEmail, domain, onSent, go }: { ws: string; myEmail: string; domain: string; onSent: () => void; go: Go }) {
-  const brandId = useBrand(ws).brand?.id ?? "";
+  const { brand, active } = useBrand(ws);
+  const brandId = brand?.id ?? active[0]?.id ?? "";
   const [to, setTo] = useState(myEmail);
   const [from, setFrom] = useState(`hello@${domain}`);
   const [error, setError] = useState("");
@@ -364,14 +365,12 @@ function TestSend({ ws, myEmail, domain, onSent, go }: { ws: string; myEmail: st
     e.preventDefault();
     setBusy(true);
     // The picked brand's test email; with all brands picked, the first
-    // brand's (the workspace route's default).
+    // brand's.
     const body = {
       to: to.trim(), from: from.trim(), test: true, subject: "Your first email from Outflare",
       html: `<p>It works. This email went through your own provider, signed for ${domain}.</p><p>Next: create a template and send it from your app.</p>`,
     };
-    const { data, error } = brandId
-      ? await api.POST("/v1/brands/{brand}/emails", { params: { path: { brand: brandId } }, body })
-      : await api.POST("/v1/workspaces/{ws}/emails", { params: { path: { ws } }, body });
+    const { data, error } = await api.POST("/v1/brands/{brand}/emails", { params: { path: { brand: brandId } }, body });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -396,9 +395,9 @@ export function SendSnippet({ go, domain, template = "password-reset", data = { 
   const body = JSON.stringify({ to: "ana@customer.example", from: `Acme <billing@${domain}>`, template, data }, null, 2);
   return (
     <div className="space-y-2">
-      <p>From your backend, with an API token that has the <span className="font-mono text-[12px]">emails.send</span> scope (<button className="underline" onClick={() => go("tokens")}>create one</button>). Send an Idempotency-Key so a retry never sends twice.</p>
-      <Snippet title="curl" code={`curl ${origin}/v1/workspaces/$OUTFLARE_WORKSPACE/emails \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -H "Idempotency-Key: $(uuidgen)" \\\n  -d '${body.replace(/'/g, "'\\''")}'`} />
-      <Snippet title="TypeScript (@outflare/sdk)" code={`import { createClient } from "@outflare/sdk";\n\nconst outflare = createClient({ baseUrl: "${origin}", token: process.env.OUTFLARE_TOKEN });\n\nawait outflare.POST("/v1/workspaces/{ws}/emails", {\n  params: { path: { ws: process.env.OUTFLARE_WORKSPACE! }, header: { "Idempotency-Key": crypto.randomUUID() } },\n  body: ${body.split("\n").join("\n  ")},\n});`} />
+      <p>From your backend, with an API token that has the <span className="font-mono text-[12px]">emails.send</span> scope (<button className="underline" onClick={() => go("tokens")}>create one</button>). Send an Idempotency-Key so a retry never sends twice. <span className="font-mono text-[12px]">OUTFLARE_BRAND</span> is the brand's id: each brand sends its own email.</p>
+      <Snippet title="curl" code={`curl ${origin}/v1/brands/$OUTFLARE_BRAND/emails \\\n  -H "Authorization: Bearer $OUTFLARE_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -H "Idempotency-Key: $(uuidgen)" \\\n  -d '${body.replace(/'/g, "'\\''")}'`} />
+      <Snippet title="TypeScript (@outflare/sdk)" code={`import { createClient } from "@outflare/sdk";\n\nconst outflare = createClient({ baseUrl: "${origin}", token: process.env.OUTFLARE_TOKEN });\n\nawait outflare.POST("/v1/brands/{brand}/emails", {\n  params: { path: { brand: process.env.OUTFLARE_BRAND! }, header: { "Idempotency-Key": crypto.randomUUID() } },\n  body: ${body.split("\n").join("\n  ")},\n});`} />
     </div>
   );
 }

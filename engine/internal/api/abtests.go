@@ -419,6 +419,23 @@ func (s *Server) createABTest(w http.ResponseWriter, r *http.Request) {
 	s.writeABTest(w, r, id, http.StatusCreated)
 }
 
+// pageTestUnchanged says a no-code test of a page has no new version
+// that changes the page yet (no edits, CSS or redirect), so every visitor
+// would see the same page and the test could never find a difference.
+func pageTestUnchanged(t abTestView, f flagView) bool {
+	if t.Page == "" {
+		return false
+	}
+	for _, v := range f.Variants {
+		if v.Key != t.Control && flags.Visual(v.Payload) {
+			return false
+		}
+	}
+	return true
+}
+
+const pageTestUnchangedMessage = "No new version changes the page yet: edit a version on your page (Edit visually) or describe it to AI, then start the test."
+
 // maxPageVersions is how many new versions a no-code test can start with.
 const maxPageVersions = 4
 
@@ -612,6 +629,8 @@ func (s *Server) startABTest(w http.ResponseWriter, r *http.Request) {
 			return errABConflict("the flag has one version: give it at least two (the control and one to try) before starting")
 		case !abtests.HasVariant(variantKeys(f), t.Control):
 			return errABConflict("the control is no longer one of the flag's variants (" + strings.Join(variantKeys(f), ", ") + "): change the control first")
+		case pageTestUnchanged(*t, f):
+			return errABConflict(pageTestUnchangedMessage)
 		}
 		if !a.writes(f.BrandID) {
 			return errDenied(brandLimitedMessage)

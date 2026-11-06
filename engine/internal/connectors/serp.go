@@ -48,3 +48,49 @@ type SERPReader interface {
 	EstimateSERP(q SERPQuery) SEOCost
 	SERP(ctx context.Context, c *Client, creds Creds, engine string, q SERPQuery) (SERPResult, error)
 }
+
+// CapTrackedRanks marks a connector that implements TrackedRankReader.
+const CapTrackedRanks = "ranks.tracked"
+
+// TrackedRankQuery asks for the positions an account already tracks in its
+// own rank tracker for one site.
+type TrackedRankQuery struct {
+	// Hosts are the site's hosts (www and bare); the tracker's project for
+	// any of them answers.
+	Hosts    []string
+	From, To string // YYYY-MM-DD, both included
+}
+
+// TrackedDay is one day's check: the site's position (nil when the tracker
+// did not find it) and the page that ranked.
+type TrackedDay struct {
+	Day      string
+	Position *int
+	URL      string
+}
+
+// TrackedRank is one tracked keyword on one engine, region and device.
+type TrackedRank struct {
+	Keyword string
+	// Country is a two-letter code; Device desktop or mobile; Engine
+	// google, bing, ...
+	Country, Device, Engine string
+	Days                    []TrackedDay
+}
+
+// TrackedRanks is what the tracker holds for a site.
+type TrackedRanks struct {
+	// Project names the tracker's project that matched, "" when none did.
+	Project string
+	Ranks   []TrackedRank
+	// Skipped says what could not be mapped, such as an engine whose
+	// country is unknown.
+	Skipped []string
+}
+
+// TrackedRankReader reads positions an account already checks in its own
+// rank tracker, so Outflare keeps them without paying for its own checks.
+type TrackedRankReader interface {
+	Connector
+	TrackedRanks(ctx context.Context, c *Client, creds Creds, q TrackedRankQuery) (TrackedRanks, error)
+}

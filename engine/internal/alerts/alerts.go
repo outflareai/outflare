@@ -206,23 +206,23 @@ func Raise(ctx context.Context, q jobs.Querier, a Alert) (string, error) {
 }
 
 // EmailSetting is who gets a kind by email: the brand's choice, else the
-// workspace's, else the person it is for.
+// person it is for. Brands share no settings.
 func EmailSetting(ctx context.Context, q jobs.Querier, ws string, brand *string, kind string) (string, error) {
 	var to string
 	err := q.QueryRow(ctx, `SELECT email FROM alert_settings WHERE workspace_id = $1 AND kind = $3 AND email IS NOT NULL
-		AND (brand_id IS NULL OR brand_id = $2) ORDER BY brand_id IS NULL LIMIT 1`, ws, brand, kind).Scan(&to)
+		AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand, kind).Scan(&to)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ToOwner, nil
 	}
 	return to, err
 }
 
-// SlackSetting is the Slack channel a kind posts to: the brand's, else
-// the workspace's, or "" for none.
+// SlackSetting is the Slack channel a kind posts to: the brand's, or ""
+// for none.
 func SlackSetting(ctx context.Context, q jobs.Querier, ws string, brand *string, kind string) (integration, channel string, err error) {
 	err = q.QueryRow(ctx, `SELECT slack_integration_id::text, slack_channel FROM alert_settings
 		WHERE workspace_id = $1 AND kind = $3 AND slack_integration_id IS NOT NULL AND slack_channel IS NOT NULL
-		AND (brand_id IS NULL OR brand_id = $2) ORDER BY brand_id IS NULL LIMIT 1`, ws, brand, kind).Scan(&integration, &channel)
+		AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand, kind).Scan(&integration, &channel)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", nil
 	}
@@ -230,7 +230,8 @@ func SlackSetting(ctx context.Context, q jobs.Querier, ws string, brand *string,
 }
 
 // recipients are the people to email: members with a confirmed address
-// who haven't muted the kind, leaving out who already knows.
+// who haven't muted the kind for the alert's brand, leaving out who
+// already knows.
 func recipients(ctx context.Context, q jobs.Querier, a Alert, to string) ([]string, error) {
 	if to == ToOff {
 		return nil, nil
@@ -245,8 +246,8 @@ func recipients(ctx context.Context, q jobs.Querier, a Alert, to string) ([]stri
 		WHERE m.workspace_id = $1 AND u.email_verified_at IS NOT NULL AND u.disabled_at IS NULL
 		  AND CASE WHEN $2 <> '' THEN u.id::text = $2 ELSE m.role IN ('owner', 'admin') END
 		  AND u.actor_id::text <> $3
-		  AND NOT EXISTS (SELECT 1 FROM alert_mutes x WHERE x.workspace_id = $1 AND x.user_id = u.id AND x.kind = $4)`,
-		a.WorkspaceID, owner, a.SkipActorID, a.Kind).Scan(&users)
+		  AND NOT EXISTS (SELECT 1 FROM brand_alert_mutes x WHERE x.workspace_id = $1 AND x.brand_id = $5 AND x.user_id = u.id AND x.kind = $4)`,
+		a.WorkspaceID, owner, a.SkipActorID, a.Kind, a.BrandID).Scan(&users)
 	if err != nil {
 		return nil, err
 	}

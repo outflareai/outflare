@@ -59,6 +59,11 @@ type Link struct {
 	Anchor   string   `json:"anchor"`
 	Nofollow bool     `json:"nofollow"`
 	Rel      []string `json:"rel"`
+	// Boilerplate: every place the page links there is its navigation,
+	// sidebar, or a header or footer outside the main content, the parts
+	// most pages of a site repeat. A link in the text says more about
+	// which pages matter than one every page carries.
+	Boilerplate bool `json:"boilerplate"`
 }
 
 // Hreflang is one <link rel="alternate" hreflang> of a page.
@@ -81,16 +86,20 @@ const (
 func ParsePage(base *url.URL, body []byte) Page {
 	p := Page{Meta: map[string]string{}, ViewportMissing: true}
 	type rawLink struct {
-		href, rel string
-		anchor    strings.Builder
+		href, rel   string
+		anchor      strings.Builder
+		boilerplate bool
 	}
 	var (
 		links    []*rawLink
 		open     *rawLink // the <a> whose text is being read
 		inTitle  bool
 		inH1     *strings.Builder
-		skip     int // depth inside <script>, <style>, <noscript>, <template>
-		svg      int // depth inside <svg>
+		skip     int   // depth inside <script>, <style>, <noscript>, <template>
+		svg      int   // depth inside <svg>
+		chrome   int   // depth inside <nav>, <aside>, or a <header> or <footer> outside the content
+		content  int   // depth inside <main> or <article>
+		chromeAt []int // content depth each open <header> or <footer> started at
 		jsonLD   *strings.Builder
 		text     strings.Builder
 		canons   []string
@@ -158,6 +167,17 @@ func ParsePage(base *url.URL, body []byte) Page {
 				inH1 = nil
 			case "a", "area":
 				open = nil
+			case "nav", "aside":
+				chrome = max(chrome-1, 0)
+			case "header", "footer":
+				if n := len(chromeAt); n > 0 {
+					if chromeAt[n-1] == 0 {
+						chrome = max(chrome-1, 0)
+					}
+					chromeAt = chromeAt[:n-1]
+				}
+			case "main", "article":
+				content = max(content-1, 0)
 			}
 			continue
 		case html.StartTagToken, html.SelfClosingTagToken:
@@ -190,6 +210,22 @@ func ParsePage(base *url.URL, body []byte) Page {
 			}
 		}
 		switch string(name) {
+		case "nav", "aside":
+			if !selfClosing {
+				chrome++
+			}
+		case "header", "footer":
+			// An article's own header or footer is part of its content.
+			if !selfClosing {
+				chromeAt = append(chromeAt, content)
+				if content == 0 {
+					chrome++
+				}
+			}
+		case "main", "article":
+			if !selfClosing {
+				content++
+			}
 		case "svg":
 			if !selfClosing {
 				svg++
@@ -272,7 +308,7 @@ func ParsePage(base *url.URL, body []byte) Page {
 			}
 		case "a", "area":
 			if h, ok := attrs["href"]; ok {
-				l := &rawLink{href: h, rel: strings.ToLower(attrs["rel"])}
+				l := &rawLink{href: h, rel: strings.ToLower(attrs["rel"]), boilerplate: chrome > 0}
 				links = append(links, l)
 				if string(name) == "a" && !selfClosing {
 					open = l
@@ -305,21 +341,26 @@ func ParsePage(base *url.URL, body []byte) Page {
 		u, _ := Normalize(base, h[1])
 		p.Hreflang = append(p.Hreflang, Hreflang{Lang: strings.ToLower(clip(h[0], 35)), URL: u})
 	}
-	// Links resolve against the final <base>, wherever it sits.
-	seen := map[string]bool{}
+	// Links resolve against the final <base>, wherever it sits. A URL
+	// linked from the text and from the menu counts as linked from the text.
+	seen := map[string]int{}
 	for _, l := range links {
 		u, ok := Normalize(base, l.href)
-		if !ok || seen[u] {
+		if !ok {
 			continue
 		}
-		seen[u] = true
+		if i, dup := seen[u]; dup {
+			p.Links[i].Boilerplate = p.Links[i].Boilerplate && l.boilerplate
+			continue
+		}
+		seen[u] = len(p.Links)
 		nf := false
 		for _, r := range strings.Fields(l.rel) {
 			if r == "nofollow" || r == "ugc" || r == "sponsored" {
 				nf = true
 			}
 		}
-		p.Links = append(p.Links, Link{URL: u, Anchor: clip(squash(l.anchor.String()), maxAnchor), Nofollow: nf, Rel: strings.Fields(l.rel)})
+		p.Links = append(p.Links, Link{URL: u, Anchor: clip(squash(l.anchor.String()), maxAnchor), Nofollow: nf, Rel: strings.Fields(l.rel), Boilerplate: l.boilerplate})
 	}
 	words := strings.FieldsFunc(text.String(), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
 	p.WordCount = len(words)

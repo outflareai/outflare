@@ -184,6 +184,35 @@ func TestPostHogQueriesOnlyCheckedValues(t *testing.T) {
 	}
 }
 
+// With TestAccounts, PostHog applies the project's internal and test user
+// filters where the query says {filters}; without it neither is sent.
+func TestPostHogLeavesOutTestAccounts(t *testing.T) {
+	cl, bodies := fake(t, map[string]any{
+		"POST /api/projects/42/query/": map[string]any{"results": [][]any{{"chatgpt.com", 5, 4}}},
+	})
+	q := query(c.ReportSources)
+	q.Site = "42"
+	if _, err := (PostHog{}).Report(ctx, cl, c.Creds{"api_key": "phx"}, q); err != nil {
+		t.Fatal(err)
+	}
+	if b := (*bodies)[0]; strings.Contains(b, "{filters}") || strings.Contains(b, "filterTestAccounts") {
+		t.Fatalf("filters off: %s", b)
+	}
+	q.TestAccounts = true
+	if _, err := (PostHog{}).Report(ctx, cl, c.Creds{"api_key": "phx"}, q); err != nil {
+		t.Fatal(err)
+	}
+	if b := (*bodies)[1]; !strings.Contains(b, "AND {filters}") || !strings.Contains(b, `"filterTestAccounts":true`) {
+		t.Fatalf("filters on: %s", b)
+	}
+	if _, err := (PostHog{}).PageConversions(ctx, cl, c.Creds{"api_key": "phx"}, c.PageConversionQuery{Site: "42", From: "2026-10-01", To: "2026-10-03", TestAccounts: true}); err != nil {
+		t.Fatal(err)
+	}
+	if b := (*bodies)[2]; !strings.Contains(b, "AND {filters}") || !strings.Contains(b, `"filterTestAccounts":true`) {
+		t.Fatalf("conversions: %s", b)
+	}
+}
+
 func TestMatomoErrorsAndDays(t *testing.T) {
 	cl, _ := fake(t, map[string]any{
 		"POST /index.php": func(r *http.Request) any {

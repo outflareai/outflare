@@ -44,9 +44,9 @@ export function RecordBoard({
     setBusy(true);
     try {
       const { data, error } = await api.PATCH(
-        "/v1/workspaces/{ws}/records/{record}",
+        "/v1/brands/{brand}/records/{record}",
         {
-          params: { path: { ws, record: record.id } },
+          params: { path: { brand: record.brand_id ?? "", record: record.id } },
           body: {
             version: record.version,
             attributes: { [group.key]: value || null },
@@ -127,7 +127,7 @@ function Lane({
   dragging: Rec | null;
   onDrag: (r: Rec | null) => void;
 }) {
-  const { query } = useBrand(ws);
+  const brandId = useBrand(ws).brand?.id ?? "";
   const [rows, setRows] = useState<Rec[]>([]);
   const [cursor, setCursor] = useState<string>();
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -148,8 +148,9 @@ function Lane({
       try {
         // A chosen stage filter can hide whole lanes without reading the wrong subset.
         if (
-          config.filters[group.key] &&
-          config.filters[group.key] !== option.key
+          !brandId ||
+          (config.filters[group.key] &&
+          config.filters[group.key] !== option.key)
         ) {
           setRows([]);
           setTotal(0);
@@ -159,9 +160,9 @@ function Lane({
           .filter(([k, v]) => k !== group.key && v)
           .map(([k, v]) => `${k}:${v}`);
         if (option.key) attribute.push(`${group.key}:${option.key}`);
-        const { data, error } = await api.GET("/v1/workspaces/{ws}/records", {
+        const { data, error } = await api.GET("/v1/brands/{brand}/records", {
           params: {
-            path: { ws },
+            path: { brand: brandId },
             query: {
               type,
               q: config.q,
@@ -171,7 +172,6 @@ function Lane({
               limit: 50,
               attribute,
               ...(!option.key ? { empty_attribute: group.key } : {}),
-              ...query,
             },
           },
           signal: controller.signal,
@@ -201,7 +201,7 @@ function Lane({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [ws, type, group.key, option.key, key, cursor, tick, query.brand]);
+  }, [ws, type, group.key, option.key, key, cursor, tick, brandId]);
   return (
     <section
       className={`w-72 shrink-0 rounded-xl border bg-muted/20 ${dragging ? "border-dashed" : ""}`}

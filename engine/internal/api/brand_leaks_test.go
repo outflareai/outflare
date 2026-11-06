@@ -29,7 +29,7 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/invites":         "invites and the brands they give",
 	"/v1/workspaces/{ws}/api-tokens":      "tokens and the brand each is kept to",
 	"/v1/workspaces/{ws}/agent-apps":      "connected AI apps and the brand each is kept to",
-	"/v1/workspaces/{ws}/senders":         "senders are the team's people and personas; their mailboxes carry the brand",
+	"/v1/workspaces/{ws}/teams":           "teams are the workspace's; their counts are the picked brand's",
 	"/v1/workspaces/{ws}/connectors":      "the connector catalog with every connection",
 	"/v1/workspaces/{ws}/spend":           "spend is the workspace's bill",
 	"/v1/workspaces/{ws}/spend-recurring": "spend is the workspace's bill",
@@ -37,12 +37,11 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/jobs":            "background work of the whole server",
 	"/v1/workspaces/{ws}/export":          "a full export of the workspace",
 	"/v1/workspaces/{ws}/query/tables":    "the table list, not rows",
-	"/v1/workspaces/{ws}/context":         "the company context names every brand, so agents know how they relate",
 	"/v1/workspaces/{ws}/sending-servers": "sending servers are shared by every brand",
 	"/v1/workspaces/{ws}/imports":         "imports bring in the workspace's records",
 	"/v1/workspaces/{ws}/verifications":   "an address checked once is known for every brand",
-	"/v1/workspaces/{ws}/digests/preview": "digests report on the whole workspace",
-	"/v1/workspaces/{ws}/digests":         "digests report on the whole workspace",
+	"/v1/workspaces/{ws}/digests/preview": "deprecated: acts on the first brand; the brand route is swept",
+	"/v1/workspaces/{ws}/digests":         "deprecated: acts on the first brand; the brand route is swept",
 }
 
 // sweepQuery is the rest of the query string the sweep sends, for

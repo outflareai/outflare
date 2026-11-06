@@ -183,8 +183,8 @@ func (s *Service) Import(ctx context.Context, tx pgx.Tx, workspaceID, source str
 // workspace already has it.
 func EnsureDomain(ctx context.Context, q jobs.Querier, workspaceID, domain, source string) error {
 	_, err := q.Exec(ctx, `
-		INSERT INTO sending_domains (workspace_id, domain, spf, dkim, dmarc, checked_at, source)
-		VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, $3)
+		INSERT INTO sending_domains (workspace_id, domain, spf, dkim, dmarc, checked_at, source, brand_id)
+		VALUES ($1, $2, 'pending', 'pending', 'pending', NULL, $3, outflare_only_brand($1))
 		ON CONFLICT (workspace_id, domain) DO NOTHING`, workspaceID, domain, source)
 	return err
 }
@@ -244,8 +244,9 @@ func (s *Service) upsert(ctx context.Context, tx pgx.Tx, ws, source string, r *R
 		_, err = tx.Exec(ctx, `
 			INSERT INTO mailboxes (id, workspace_id, pool_id, email, display_name, provider,
 				smtp_host, smtp_port, smtp_username, imap_host, imap_port, imap_username,
-				credentials, daily_limit, source, auth_method, integration_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+				credentials, daily_limit, source, auth_method, integration_id, brand_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+				outflare_mailbox_brand($2, $4, $17))`,
 			id, ws, poolID, r.Email, r.DisplayName, r.Provider,
 			r.SMTPHost, r.SMTPPort, r.SMTPUsername, r.IMAPHost, r.IMAPPort, r.IMAPUsername,
 			sealed, limit, source, authMethod(r), r.IntegrationID)

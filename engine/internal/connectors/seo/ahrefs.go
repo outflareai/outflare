@@ -2,6 +2,7 @@ package seo
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"net/url"
@@ -242,6 +243,10 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 		}
 		if q.Since != "" {
 			v.Set("history", "since:"+q.Since)
+		}
+		if q.From != "" {
+			where, _ := json.Marshal(map[string]any{"field": "root_name_source", "is": []any{"eq", q.From}})
+			v.Set("where", string(where))
 		}
 		var resp struct {
 			Backlinks []struct {

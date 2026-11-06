@@ -52,6 +52,17 @@ type AnalyticsQuery struct {
 	To     string `json:"to"`
 	// Limit caps the rows of a breakdown report.
 	Limit int `json:"limit"`
+	// TestAccounts leaves out the visitors the tool's own project settings
+	// mark as internal or test users. Only tools that are TestAccountFilterers
+	// read it.
+	TestAccounts bool `json:"test_accounts,omitempty"`
+}
+
+// TestAccountFilterer is a tool whose projects keep their own filters for
+// internal and test users (bots, staff, a fake crawler), which reports can
+// apply.
+type TestAccountFilterer interface {
+	FiltersTestAccounts() bool
 }
 
 // Days returns the query's dates, From first.

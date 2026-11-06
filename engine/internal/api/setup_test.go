@@ -109,7 +109,7 @@ func TestBrandSetupChecklist(t *testing.T) {
 	if setupSteps(again)["site_script"]["install"].(map[string]any)["site_key_id"] != in["site_key_id"] {
 		t.Fatal("preparing twice made a second key")
 	}
-	if keys := owner.must(200, "GET", base+"/site-keys?brand=all", nil)["data"].([]any); len(keys) != 1 || keys[0].(map[string]any)["brand_id"] != b["id"] {
+	if keys := owner.must(200, "GET", base+"/site-keys?brand="+b["id"].(string), nil)["data"].([]any); len(keys) != 1 || keys[0].(map[string]any)["brand_id"] != b["id"] {
 		t.Fatalf("site keys: %v", keys)
 	}
 
@@ -373,13 +373,14 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// An old MCP server and a deprecated route in the request logs.
+	// An old MCP server, a deprecated route and a retired one in the request logs.
 	t.Cleanup(api.DeprecateOperation("getOldThing", "GET /v1/workspaces/{ws}/new-thing"))
 	if _, err := e.pool.Exec(ctx, `
 		INSERT INTO request_logs (workspace_id, request_id, method, route, operation, path, status, duration_ms, surface, client)
 		VALUES ($1, 'r1', 'GET', 'x', 'listMailboxes', '/x', 200, 1, 'mcp', 'mcp/0.0.9'),
 		       ($1, 'r2', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', ''),
-		       ($1, 'r3', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', 'mcp/0.0.9')`, ws); err != nil {
+		       ($1, 'r3', 'GET', 'x', 'getOldThing', '/x', 200, 1, 'api', 'mcp/0.0.9'),
+		       ($1, 'r4', 'GET', 'GET /v1/workspaces/{ws}/leads', 'listLeads', '/x', 410, 1, 'api', '')`, ws); err != nil {
 		t.Fatal(err)
 	}
 
@@ -389,15 +390,15 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 		c := c.(map[string]any)
 		kinds[c["kind"].(string)] = c["severity"].(string)
 	}
-	want := map[string]string{"site_script_missing": "warning", "site_script_silent": "critical", "site_script_outdated": "warning", "client_outdated": "critical", "api_deprecated": "warning"}
+	want := map[string]string{"site_script_missing": "warning", "site_script_silent": "critical", "site_script_outdated": "warning", "client_outdated": "critical", "api_deprecated": "warning", "api_retired": "critical"}
 	for k, sev := range want {
 		if kinds[k] != sev {
 			t.Errorf("%s: %q, want %q (%v)", k, kinds[k], sev, h["checks"])
 		}
 	}
 	// The same deprecated route from two clients is one check, not two.
-	if n := len(h["checks"].([]any)); n != 5 {
-		t.Errorf("%d checks, want 5: %v", n, h["checks"])
+	if n := len(h["checks"].([]any)); n != 6 {
+		t.Errorf("%d checks, want 6: %v", n, h["checks"])
 	}
 	if h["checks"].([]any)[0].(map[string]any)["severity"] != "critical" || h["checks"].([]any)[4].(map[string]any)["severity"] != "warning" {
 		t.Errorf("worst first: %v", h["checks"])
@@ -407,7 +408,7 @@ func TestInstallHealthFindsProblems(t *testing.T) {
 	got := track.Capture(t)
 	e.srv.CheckInstalls(ctx)
 	e.srv.CheckInstalls(ctx)
-	if n := len(named(got(), "install.issue_opened")); n != 5 {
+	if n := len(named(got(), "install.issue_opened")); n != 6 {
 		t.Fatalf("opened %d issues", n)
 	}
 	codes := map[string]bool{}

@@ -26,6 +26,8 @@ import { createClient, ok } from "@outflare/sdk";
 
 const gtm = createClient({ baseUrl: "https://outflare.example.com", token: process.env.OUTFLARE_TOKEN });
 const ws = process.env.OUTFLARE_WORKSPACE!;
+// A brand's data is under /v1/brands/{brand}/: its id, from GET /v1/workspaces/{ws}/brands.
+const brand = process.env.OUTFLARE_BRAND!;
 
 // How is outreach going?
 const stats = ok(await gtm.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws } } }));
@@ -33,8 +35,8 @@ console.log(`${stats.mailboxes.active} mailboxes, ${stats.sent_24h} sent today, 
 
 // Import leads from a CSV into a list.
 const imported = ok(
-  await gtm.POST("/v1/workspaces/{ws}/leads/import", {
-    params: { path: { ws }, query: { list: "Q4 founders" } },
+  await gtm.POST("/v1/brands/{brand}/leads/import", {
+    params: { path: { brand }, query: { list: "Q4 founders" } },
     body: csvText,
     bodySerializer: (b: string) => b,
     headers: { "Content-Type": "text/csv" },
@@ -44,14 +46,14 @@ const imported = ok(
 // Enroll the list in a sequence. Every send still goes through suppression
 // and the policy check.
 ok(
-  await gtm.POST("/v1/workspaces/{ws}/sequences/{id}/enrollments", {
-    params: { path: { ws, id: sequenceId } },
+  await gtm.POST("/v1/brands/{brand}/sequences/{id}/enrollments", {
+    params: { path: { brand, id: sequenceId } },
     body: { list_id: imported.list_id! }, // set because the import named a list
   }),
 );
 
 // Read replies.
-const { data: replies } = ok(await gtm.GET("/v1/workspaces/{ws}/inbox", { params: { path: { ws }, query: { unread: true } } }));
+const { data: replies } = ok(await gtm.GET("/v1/brands/{brand}/inbox", { params: { path: { brand }, query: { unread: true } } }));
 ```
 
 Every call sends `Outflare-Client: sdk-ts/<version>`, so the server's product analytics can tell your integration's calls apart. Pass `clientName: "my-app/1.0"` to name it yourself (letters, digits and `._/@+-`, up to 64 characters).
@@ -80,7 +82,7 @@ The client retries a call that failed on the network or was answered `429`, `502
 ```ts
 import { paginate } from "@outflare/sdk";
 
-for await (const lead of paginate((cursor) => gtm.GET("/v1/workspaces/{ws}/leads", { params: { path: { ws }, query: { q: "acme", cursor, fields: ["email"] } } }))) {
+for await (const lead of paginate((cursor) => gtm.GET("/v1/brands/{brand}/leads", { params: { path: { brand }, query: { q: "acme", cursor, fields: ["email"] } } }))) {
   console.log(lead.email);
 }
 ```
@@ -95,7 +97,7 @@ An agent acting toward a goal works inside a mission. Pass `mission`, and every 
 import { createClient, isHeld, ok } from "@outflare/sdk";
 
 const gtm = createClient({ baseUrl, token, mission: missionId });
-const lead = ok(await gtm.POST("/v1/workspaces/{ws}/leads", { params: { path: { ws } }, body: { email } }));
+const lead = ok(await gtm.POST("/v1/brands/{brand}/leads", { params: { path: { brand } }, body: { email } }));
 if (isHeld(lead)) console.log(lead.message, lead.mission_action.id); // follow it with GET .../missions/{id}/actions/{action}
 else console.log("created", lead.id);
 ```
@@ -110,7 +112,7 @@ A client made without `mission` is typed without those answers, since it never g
 import { flagsBootstrapTag } from "@outflare/sdk";
 
 const anonymousId = cookies.get("of_aid") ?? crypto.randomUUID();
-const { data } = await gtm.POST("/v1/workspaces/{ws}/flags/evaluate", { params: { path: { ws } }, body: { anonymous_id: anonymousId, url } });
+const { data } = await gtm.POST("/v1/brands/{brand}/flags/evaluate", { params: { path: { brand } }, body: { anonymous_id: anonymousId, url } });
 html = html.replace("</head>", flagsBootstrapTag(data!, anonymousId) + "</head>");
 ```
 

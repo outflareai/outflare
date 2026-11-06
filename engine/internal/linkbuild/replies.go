@@ -156,8 +156,10 @@ func applyReply(ctx context.Context, tx pgx.Tx, ws, pitchID, prospectID, inbound
 		return err
 	}
 	if tag, ok := replyTags[kind]; ok {
-		if _, err := tx.Exec(ctx, `INSERT INTO inbox_tags (workspace_id, name, color) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			ws, tag, map[bool]string{true: "amber", false: "gray"}[kind == "wants_payment" || kind == "wants_content"]); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO brand_inbox_tags (workspace_id, brand_id, name, color)
+			SELECT $1, COALESCE(i.brand_id, outflare_first_brand($1)), $2, $3 FROM inbound_messages i WHERE i.id = $4 AND i.workspace_id = $1
+			ON CONFLICT DO NOTHING`,
+			ws, tag, map[bool]string{true: "amber", false: "gray"}[kind == "wants_payment" || kind == "wants_content"], inboundID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = CASE WHEN $3 = ANY(tags) THEN tags ELSE array_append(tags, $3) END,

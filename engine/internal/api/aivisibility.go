@@ -34,6 +34,9 @@ func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	// first brand.
 	s.twinRoute(mux, "GET", "ai-visibility/settings", s.inWorkspace, read, s.getAIVisibilitySettings)
 	s.twinRoute(mux, "PUT", "ai-visibility/settings", s.inWorkspace, manage, s.putAIVisibilitySettings)
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/questions", s.onBrand(read, s.getAIVisibilityQuestions))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/placements", s.onBrand(read, s.getAIVisibilityPlacements))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/series", s.onBrand(read, s.getAIVisibilitySeries))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts", s.inBrand(read, s.listAICohorts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts", s.inBrand(manage, s.createAICohort))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(read, s.getAICohort))
@@ -41,6 +44,7 @@ func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(manage, s.deleteAICohort))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", s.inBrand(read, s.listAIPrompts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", s.inBrand(manage, s.addAIPrompts))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/draft", s.inBrand(manage, s.draftAIPrompts))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", s.inBrand(manage, s.updateAIPrompt))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", s.inBrand(manage, s.deleteAIPrompt))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/runs", s.inBrand(manage, s.startAIRun))
@@ -162,6 +166,10 @@ func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws, brand string)
 	if err != nil {
 		return nil, err
 	}
+	readers, err := s.answerConnections(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
 	spent, err := aivis.MonthSpent(ctx, s.pool, ws, brand, time.Now())
 	if err != nil {
 		return nil, err
@@ -169,14 +177,31 @@ func (s *Server) aiVisibilitySettingsView(ctx context.Context, ws, brand string)
 	list := []aiVisModelView{}
 	for _, t := range set.Models {
 		v := aiVisModelView{Target: t}
-		if p, ok := llm.ProviderFor(t.Provider); ok {
-			v.ProviderName = p.Name
+		if t.Surface == "" {
+			v.Surface = aivis.SurfaceAPI
 		}
-		v.Connected = slices.ContainsFunc(conns, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
+		if t.IsScreen() {
+			v.ProviderName = s.connectorName(t.Provider)
+			v.Connected = slices.ContainsFunc(readers, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
+		} else {
+			if p, ok := llm.ProviderFor(t.Provider); ok {
+				v.ProviderName = p.Name
+			}
+			v.Connected = slices.ContainsFunc(conns, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
+		}
 		list = append(list, v)
 	}
+	// The assistants the workspace's answer readers can ask on their own
+	// screens, to pick from.
+	screens := []map[string]any{}
+	for _, i := range readers {
+		for _, e := range s.answerEngines(i.Connector) {
+			screens = append(screens, map[string]any{"integration_id": i.ID, "provider": i.Connector, "provider_name": s.connectorName(i.Connector),
+				"connection_name": i.Name, "model": e.ID, "name": e.Name})
+		}
+	}
 	return map[string]any{
-		"models": list, "samples_per_prompt": set.SamplesPerPrompt, "monthly_limit_cents": set.MonthlyLimit,
+		"models": list, "screens": screens, "samples_per_prompt": set.SamplesPerPrompt, "monthly_limit_cents": set.MonthlyLimit,
 		"spent_this_month_cents": spent, "max_models": aivis.MaxModels, "updated_at": set.UpdatedAt,
 	}, nil
 }
@@ -227,12 +252,47 @@ func (s *Server) putAIVisibilitySettings(w http.ResponseWriter, r *http.Request)
 			s.internal(w, r, err)
 			return
 		}
+		readers, err := s.answerConnections(ctx, a.WorkspaceID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
 		list := *req.Models
 		seen := map[string]bool{}
 		price := func(v *float64) bool { return v == nil || (*v > 0 && *v <= 1e7) }
 		for i := range list {
 			t := &list[i]
 			at := fmt.Sprintf("models[%d]: ", i)
+			switch t.Surface {
+			case aivis.SurfaceScreen:
+				j := slices.IndexFunc(readers, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
+				if !validUUID(t.IntegrationID) || j < 0 {
+					bad(at + "integration_id is not a connected answer reader in this workspace (DataForSEO) for surface screen")
+					return
+				}
+				engines := s.answerEngines(readers[j].Connector)
+				if !slices.ContainsFunc(engines, func(e connectors.AnswerEngine) bool { return e.ID == t.Model }) {
+					ids := []string{}
+					for _, e := range engines {
+						ids = append(ids, e.ID)
+					}
+					bad(at + "model is the assistant to ask on its screen: " + strings.Join(ids, " or "))
+					return
+				}
+				t.Provider, t.InputCents, t.OutputCents = readers[j].Connector, nil, nil
+				key := fmt.Sprint("screen|", t.Provider, "|", t.Model, "|", t.WebSearch)
+				if seen[key] {
+					bad(at + "this assistant is listed twice")
+					return
+				}
+				seen[key] = true
+				continue
+			case "", aivis.SurfaceAPI:
+				t.Surface = ""
+			default:
+				bad(at + "surface is api (the model's API) or screen (the assistant's own screen)")
+				return
+			}
 			j := slices.IndexFunc(conns, func(c connectors.Integration) bool { return c.ID == t.IntegrationID })
 			if !validUUID(t.IntegrationID) || j < 0 {
 				bad(at + "integration_id is not a connected AI model in this workspace (Claude, OpenAI, Gemini, Mistral, xAI, DeepSeek, OpenRouter, Vercel AI Gateway or Requesty)")
@@ -704,27 +764,94 @@ func (s *Server) deleteAICohort(w http.ResponseWriter, r *http.Request) {
 // ---- Prompts ----
 
 type aiPromptView struct {
-	ID        string    `json:"id"`
-	CohortID  string    `json:"cohort_id"`
-	Text      string    `json:"text"`
-	Intent    string    `json:"intent"`
+	ID       string `json:"id"`
+	CohortID string `json:"cohort_id"`
+	Text     string `json:"text"`
+	Intent   string `json:"intent"`
+	aiPromptFacets
 	Status    string    `json:"status"`
+	Source    string    `json:"source"`
+	Why       string    `json:"why"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-var promptIntents = []string{"", "discovery", "comparison", "problem", "brand"}
+// aiPromptFacets place a question in the library: how much the asker
+// knows, what they ask for, who they are, the topic, the competitor it
+// names, and how many people ask it a month.
+type aiPromptFacets struct {
+	Awareness    string `json:"awareness"`
+	QuestionType string `json:"question_type"`
+	Persona      string `json:"persona"`
+	Topic        string `json:"topic"`
+	Competitor   string `json:"competitor"`
+	Demand       *int   `json:"demand"`
+	DemandSource string `json:"demand_source"`
+}
+
+var (
+	promptIntents   = []string{"", "discovery", "comparison", "problem", "brand"}
+	promptAwareness = []string{"", "problem", "solution", "competitor", "brand"}
+	promptTypes     = []string{"", "how_to", "fix", "best", "alternatives", "versus", "supplier", "about"}
+	promptStatuses  = []string{"active", "paused", "suggested"}
+)
+
+// aiPromptFacetsIn is how a request sets facets; nil leaves one as it is.
+type aiPromptFacetsIn struct {
+	Awareness    *string `json:"awareness"`
+	QuestionType *string `json:"question_type"`
+	Persona      *string `json:"persona"`
+	Topic        *string `json:"topic"`
+	Competitor   *string `json:"competitor"`
+	// Demand is about how many people ask it a month; a person's number
+	// counts as manual. -1 clears it.
+	Demand *int `json:"demand"`
+}
+
+// check says what is wrong with the facets, or "".
+func (f aiPromptFacetsIn) check(at string) string {
+	short := func(v *string) bool { return v == nil || len([]rune(strings.TrimSpace(*v))) <= 100 }
+	switch {
+	case f.Awareness != nil && !slices.Contains(promptAwareness, *f.Awareness):
+		return at + "awareness is problem, solution, competitor, brand or empty"
+	case f.QuestionType != nil && !slices.Contains(promptTypes, *f.QuestionType):
+		return at + "question_type is how_to, fix, best, alternatives, versus, supplier, about or empty"
+	case !short(f.Persona) || !short(f.Topic) || !short(f.Competitor):
+		return at + "persona, topic and competitor are at most 100 characters"
+	case f.Demand != nil && (*f.Demand < -1 || *f.Demand > 100_000_000):
+		return at + "demand is how many people ask it a month, 0 to 100000000 (-1 clears it)"
+	}
+	return ""
+}
+
+// intentFor is the old intent a question type and awareness imply, so
+// views and fixes that read intent keep working.
+func intentFor(awareness, qtype string) string {
+	switch {
+	case qtype == "alternatives" || qtype == "versus":
+		return "comparison"
+	case qtype == "about" || awareness == "brand":
+		return "brand"
+	case qtype == "how_to" || qtype == "fix" || awareness == "problem":
+		return "problem"
+	case qtype == "best" || qtype == "supplier":
+		return "discovery"
+	}
+	return ""
+}
 
 func (s *Server) loadAIPrompts(ctx context.Context, ws, cohort string, id *string) ([]aiPromptView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, cohort_id, text, intent, status, created_at, updated_at FROM ai_prompts
+		SELECT id, cohort_id, text, intent, awareness, question_type, persona, topic, competitor, demand, demand_source,
+		       status, source, why, created_at, updated_at FROM ai_prompts
 		WHERE workspace_id = $1 AND cohort_id = $2 AND ($3::uuid IS NULL OR id = $3) ORDER BY created_at, id`, ws, cohort, id)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (aiPromptView, error) {
 		var v aiPromptView
-		return v, row.Scan(&v.ID, &v.CohortID, &v.Text, &v.Intent, &v.Status, &v.CreatedAt, &v.UpdatedAt)
+		return v, row.Scan(&v.ID, &v.CohortID, &v.Text, &v.Intent, &v.Awareness, &v.QuestionType, &v.Persona, &v.Topic, &v.Competitor,
+			&v.Demand, &v.DemandSource, &v.Status, &v.Source, &v.Why, &v.CreatedAt, &v.UpdatedAt)
 	})
 }
 
@@ -751,6 +878,7 @@ func (s *Server) addAIPrompts(w http.ResponseWriter, r *http.Request) {
 		Prompts []struct {
 			Text   string `json:"text"`
 			Intent string `json:"intent"`
+			aiPromptFacetsIn
 		} `json:"prompts"`
 	}
 	if !decode(w, r, &req) {
@@ -777,6 +905,10 @@ func (s *Server) addAIPrompts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", fmt.Sprintf("prompts[%d].intent is discovery, comparison, problem, brand or empty", i))
 			return
 		}
+		if msg := p.check(fmt.Sprintf("prompts[%d].", i)); msg != "" {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
+			return
+		}
 	}
 	ctx := r.Context()
 	var added []string
@@ -791,10 +923,28 @@ func (s *Server) addAIPrompts(w http.ResponseWriter, r *http.Request) {
 				return errInvalid(fmt.Sprintf("a cohort holds at most %d prompts; split them into cohorts", maxPrompts))
 			}
 			var id string
+			str := func(v *string) string {
+				if v == nil {
+					return ""
+				}
+				return strings.TrimSpace(*v)
+			}
+			awareness, qtype := str(p.Awareness), str(p.QuestionType)
+			intent := p.Intent
+			if intent == "" {
+				intent = intentFor(awareness, qtype)
+			}
+			var demand *int
+			demandSource := ""
+			if p.Demand != nil && *p.Demand >= 0 {
+				demand, demandSource = p.Demand, "manual"
+			}
 			err := tx.QueryRow(ctx, `
-				INSERT INTO ai_prompts (workspace_id, cohort_id, text, intent, created_by) VALUES ($1, $2, $3, $4, $5)
+				INSERT INTO ai_prompts (workspace_id, cohort_id, text, intent, created_by, awareness, question_type, persona, topic, competitor, demand, demand_source)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 				ON CONFLICT (cohort_id, lower(text)) DO NOTHING RETURNING id`,
-				a.WorkspaceID, c.ID, strings.TrimSpace(p.Text), p.Intent, a.ActorID).Scan(&id)
+				a.WorkspaceID, c.ID, strings.TrimSpace(p.Text), intent, a.ActorID, awareness, qtype, str(p.Persona), str(p.Topic), str(p.Competitor),
+				demand, demandSource).Scan(&id)
 			if errors.Is(err, pgx.ErrNoRows) {
 				skipped++
 				continue
@@ -860,6 +1010,7 @@ func (s *Server) updateAIPrompt(w http.ResponseWriter, r *http.Request) {
 		Text   *string `json:"text"`
 		Intent *string `json:"intent"`
 		Status *string `json:"status"`
+		aiPromptFacetsIn
 	}
 	if !decode(w, r, &req) {
 		return
@@ -875,8 +1026,12 @@ func (s *Server) updateAIPrompt(w http.ResponseWriter, r *http.Request) {
 	case req.Intent != nil && !slices.Contains(promptIntents, *req.Intent):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "intent is discovery, comparison, problem, brand or empty")
 		return
-	case req.Status != nil && !slices.Contains(siteStatuses, *req.Status):
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is active or paused")
+	case req.Status != nil && (!slices.Contains(promptStatuses, *req.Status) || (*req.Status == "suggested" && p.Status != "suggested")):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is active or paused (a suggested question becomes active when kept)")
+		return
+	}
+	if msg := req.check(""); msg != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", msg)
 		return
 	}
 	ctx := r.Context()
@@ -886,8 +1041,21 @@ func (s *Server) updateAIPrompt(w http.ResponseWriter, r *http.Request) {
 			t := strings.TrimSpace(*req.Text)
 			text = &t
 		}
-		_, err := tx.Exec(ctx, `UPDATE ai_prompts SET text = COALESCE($3, text), intent = COALESCE($4, intent), status = COALESCE($5, status), updated_at = now()
-			WHERE id = $1 AND workspace_id = $2`, p.ID, a.WorkspaceID, text, req.Intent, req.Status)
+		// A person's demand number replaces any other; -1 clears it.
+		var demand *int
+		if req.Demand != nil && *req.Demand >= 0 {
+			demand = req.Demand
+		}
+		clearDemand := req.Demand != nil && *req.Demand < 0
+		_, err := tx.Exec(ctx, `UPDATE ai_prompts SET text = COALESCE($3, text), intent = COALESCE($4, intent), status = COALESCE($5, status),
+				awareness = COALESCE($6, awareness), question_type = COALESCE($7, question_type), persona = COALESCE($8, persona),
+				topic = COALESCE($9, topic), competitor = COALESCE($10, competitor),
+				demand = CASE WHEN $12 THEN NULL WHEN $11::int IS NOT NULL THEN $11 ELSE demand END,
+				demand_source = CASE WHEN $12 THEN '' WHEN $11::int IS NOT NULL THEN 'manual' ELSE demand_source END,
+				updated_at = now()
+			WHERE id = $1 AND workspace_id = $2`, p.ID, a.WorkspaceID, text, req.Intent, req.Status,
+			trimmed(req.Awareness), trimmed(req.QuestionType), trimmed(req.Persona), trimmed(req.Topic), trimmed(req.Competitor),
+			demand, clearDemand)
 		if isUnique(err) {
 			return errInvalid("the cohort already has this prompt")
 		}
@@ -900,6 +1068,15 @@ func (s *Server) updateAIPrompt(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Intent != nil {
 			data["intent"] = *req.Intent
+		}
+		if req.Awareness != nil {
+			data["awareness"] = *req.Awareness
+		}
+		if req.QuestionType != nil {
+			data["question_type"] = *req.QuestionType
+		}
+		if p.Status == "suggested" && req.Status != nil && *req.Status != "suggested" {
+			data["kept"] = true
 		}
 		data["text_changed"] = req.Text != nil
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "ai_prompt.updated", "ai_prompt", p.ID, data)
@@ -950,6 +1127,7 @@ type aiRunView struct {
 	SamplesDone    int            `json:"samples_done"`
 	SamplesFailed  int            `json:"samples_failed"`
 	CostCents      int64          `json:"cost_cents"`
+	CostMicros     int64          `json:"cost_micros"`
 	CreatedAt      time.Time      `json:"created_at"`
 	StartedAt      *time.Time     `json:"started_at"`
 	FinishedAt     *time.Time     `json:"finished_at"`
@@ -959,7 +1137,7 @@ func (s *Server) loadAIRuns(ctx context.Context, ws string, id, cohort *string, 
 	args := []any{ws, id, cohort, limit, offset}
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.cohort_id, c.brand_id::text, r.trigger, r.status, NULLIF(r.reason, ''), NULLIF(r.error_code, ''), r.models, r.attempts,
-		       r.samples_planned, r.samples_done, r.samples_failed, r.cost_cents, r.created_at, r.started_at, r.finished_at
+		       r.samples_planned, r.samples_done, r.samples_failed, r.cost_cents, r.cost_micros, r.created_at, r.started_at, r.finished_at
 		FROM ai_runs r JOIN ai_cohorts c ON c.id = r.cohort_id
 		WHERE r.workspace_id = $1 AND ($2::uuid IS NULL OR r.id = $2) AND ($3::uuid IS NULL OR r.cohort_id = $3)`+sel.sql("c.brand_id", &args)+`
 		ORDER BY r.created_at DESC, r.id LIMIT $4 OFFSET $5`, args...)
@@ -970,7 +1148,7 @@ func (s *Server) loadAIRuns(ctx context.Context, ws string, id, cohort *string, 
 		var v aiRunView
 		var models []byte
 		err := row.Scan(&v.ID, &v.CohortID, &v.BrandID, &v.Trigger, &v.Status, &v.Reason, &v.ErrorCode, &models, &v.Attempts,
-			&v.SamplesPlanned, &v.SamplesDone, &v.SamplesFailed, &v.CostCents, &v.CreatedAt, &v.StartedAt, &v.FinishedAt)
+			&v.SamplesPlanned, &v.SamplesDone, &v.SamplesFailed, &v.CostCents, &v.CostMicros, &v.CreatedAt, &v.StartedAt, &v.FinishedAt)
 		if err == nil {
 			err = json.Unmarshal(models, &v.Models)
 		}
@@ -1133,6 +1311,22 @@ type aiSampleView struct {
 	BrandNamed   bool             `json:"brand_named"`
 	Mentions     []aivis.Mention  `json:"mentions"`
 	Citations    []aivis.Citation `json:"citations"`
+	// Surface is api (the model's API) or screen (the assistant's own
+	// screen, as a signed-out person in the cohort's country sees it).
+	Surface string `json:"surface"`
+	// For a screen answer: what it cost in millionths of a dollar, the
+	// model the screen named, the web searches it ran, every brand it
+	// named, a link to ask it again, and every page its searches found.
+	CostMicros  int64            `json:"cost_micros"`
+	AnswerModel string           `json:"answer_model"`
+	Searches    []string         `json:"searches"`
+	BrandsNamed []string         `json:"brands_named"`
+	CheckURL    string           `json:"check_url"`
+	PagesRead   []aivis.Citation `json:"pages_read"`
+	// Whether the workspace's model read how the answer treats the brands
+	// it names, and the brands it named that the cohort doesn't track.
+	StanceStatus string   `json:"stance_status"`
+	OtherBrands  []string `json:"other_brands"`
 	// Whether the answer was checked against the brand's facts, what that
 	// cost, and what it says about each fact it touches.
 	FactsStatus    string            `json:"facts_status"`
@@ -1153,7 +1347,9 @@ func (s *Server) loadAISamples(ctx context.Context, ws string, where string, arg
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.id, s.run_id, s.cohort_id, s.prompt_id, p.text, s.brand_id::text, s.provider, s.model, s.web_search, s.attempt, s.status,
 		       NULLIF(s.error_code, ''), s.answer, s.input_tokens, s.output_tokens, s.cost_cents, s.duration_ms,
-		       NULLIF(s.facts_status, ''), s.facts_cost_cents, s.sampled_at
+		       NULLIF(s.facts_status, ''), s.facts_cost_cents, s.sampled_at,
+		       s.surface, s.cost_micros, s.answer_model, s.searches, s.brands_named, s.check_url,
+		       COALESCE(NULLIF(s.stance_status, ''), 'unread'), s.other_brands
 		FROM ai_samples s JOIN ai_prompts p ON p.id = s.prompt_id
 		WHERE s.workspace_id = $1`+where+fmt.Sprintf(` ORDER BY s.sampled_at DESC, s.id LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
 	if err != nil {
@@ -1163,7 +1359,8 @@ func (s *Server) loadAISamples(ctx context.Context, ws string, where string, arg
 		var v aiSampleView
 		var fs *string
 		err := row.Scan(&v.ID, &v.RunID, &v.CohortID, &v.PromptID, &v.Prompt, &v.BrandID, &v.Provider, &v.Model, &v.WebSearch, &v.Attempt,
-			&v.Status, &v.ErrorCode, &v.Answer, &v.InputTokens, &v.OutputTokens, &v.CostCents, &v.DurationMS, &fs, &v.FactsCostCents, &v.SampledAt)
+			&v.Status, &v.ErrorCode, &v.Answer, &v.InputTokens, &v.OutputTokens, &v.CostCents, &v.DurationMS, &fs, &v.FactsCostCents, &v.SampledAt,
+			&v.Surface, &v.CostMicros, &v.AnswerModel, &v.Searches, &v.BrandsNamed, &v.CheckURL, &v.StanceStatus, &v.OtherBrands)
 		v.FactsStatus = "unchecked"
 		if fs != nil {
 			v.FactsStatus = *fs
@@ -1182,6 +1379,7 @@ func (s *Server) loadAISamples(ctx context.Context, ws string, where string, arg
 		ids[i] = list[i].ID
 		at[list[i].ID] = i
 		list[i].Mentions, list[i].Citations, list[i].FactChecks = []aivis.Mention{}, []aivis.Citation{}, []aiFactCheckView{}
+		list[i].PagesRead = []aivis.Citation{}
 	}
 	krows, err := s.pool.Query(ctx, `SELECT k.sample_id, k.fact_id, f.statement, k.verdict, k.quote
 		FROM ai_fact_checks k JOIN ai_brand_facts f ON f.id = k.fact_id WHERE k.sample_id = ANY($1) ORDER BY f.created_at, f.id`, ids)
@@ -1196,13 +1394,13 @@ func (s *Server) loadAISamples(ctx context.Context, ws string, where string, arg
 	}); err != nil {
 		return nil, err
 	}
-	mrows, err := s.pool.Query(ctx, `SELECT sample_id, entity, name, position, count FROM ai_mentions WHERE sample_id = ANY($1) ORDER BY position`, ids)
+	mrows, err := s.pool.Query(ctx, `SELECT sample_id, entity, name, position, count, stance, stance_quote FROM ai_mentions WHERE sample_id = ANY($1) ORDER BY position`, ids)
 	if err != nil {
 		return nil, err
 	}
 	var sid string
 	var m aivis.Mention
-	if _, err := pgx.ForEachRow(mrows, []any{&sid, &m.Entity, &m.Name, &m.Position, &m.Count}, func() error {
+	if _, err := pgx.ForEachRow(mrows, []any{&sid, &m.Entity, &m.Name, &m.Position, &m.Count, &m.Stance, &m.StanceQuote}, func() error {
 		list[at[sid]].Mentions = append(list[at[sid]].Mentions, m)
 		if m.Entity == "brand" {
 			list[at[sid]].BrandNamed = true
@@ -1211,13 +1409,25 @@ func (s *Server) loadAISamples(ctx context.Context, ws string, where string, arg
 	}); err != nil {
 		return nil, err
 	}
-	crows, err := s.pool.Query(ctx, `SELECT sample_id, url, host, title, position, owner, competitor FROM ai_citations WHERE sample_id = ANY($1) ORDER BY position`, ids)
+	crows, err := s.pool.Query(ctx, `SELECT sample_id, url, host, title, position, owner, competitor, source_type FROM ai_citations WHERE sample_id = ANY($1) ORDER BY position`, ids)
 	if err != nil {
 		return nil, err
 	}
 	var c aivis.Citation
-	if _, err := pgx.ForEachRow(crows, []any{&sid, &c.URL, &c.Host, &c.Title, &c.Position, &c.Owner, &c.Competitor}, func() error {
+	if _, err := pgx.ForEachRow(crows, []any{&sid, &c.URL, &c.Host, &c.Title, &c.Position, &c.Owner, &c.Competitor, &c.SourceType}, func() error {
 		list[at[sid]].Citations = append(list[at[sid]].Citations, c)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	prows, err := s.pool.Query(ctx, `SELECT sample_id, url, host, title, position, owner, competitor, cited FROM ai_pages_read
+		WHERE workspace_id = $1 AND sample_id = ANY($2) ORDER BY position`, ws, ids)
+	if err != nil {
+		return nil, err
+	}
+	var pg aivis.Citation
+	if _, err := pgx.ForEachRow(prows, []any{&sid, &pg.URL, &pg.Host, &pg.Title, &pg.Position, &pg.Owner, &pg.Competitor, &pg.Cited}, func() error {
+		list[at[sid]].PagesRead = append(list[at[sid]].PagesRead, pg)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -1317,9 +1527,9 @@ func (s *Server) buildAIFixPrompt(ctx context.Context, ws string, fix *fixView, 
 	}
 	var text, cohort, brand string
 	err := s.pool.QueryRow(ctx, `
-		SELECT p.text, p.cohort_id, COALESCE(b.name, x.company, '')
+		SELECT p.text, p.cohort_id, COALESCE(b.name, '')
 		FROM ai_prompts p JOIN ai_cohorts c ON c.id = p.cohort_id
-		LEFT JOIN brands b ON b.id = c.brand_id LEFT JOIN workspace_context x ON x.workspace_id = c.workspace_id
+		LEFT JOIN brands b ON b.id = COALESCE(c.brand_id, outflare_first_brand(c.workspace_id))
 		WHERE p.id = $1 AND p.workspace_id = $2`, fix.Subject.ID, ws).Scan(&text, &cohort, &brand)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
@@ -1389,8 +1599,8 @@ func (s *Server) buildAIFixPrompt(ctx context.Context, ws string, fix *fixView, 
 func (s *Server) buildAIFactFixPrompt(ctx context.Context, ws string, fix *fixView, out fixPrompt) (fixPrompt, error) {
 	var statement, brand string
 	err := s.pool.QueryRow(ctx, `
-		SELECT f.statement, COALESCE(b.name, x.company, '')
-		FROM ai_brand_facts f LEFT JOIN brands b ON b.id = f.brand_id LEFT JOIN workspace_context x ON x.workspace_id = f.workspace_id
+		SELECT f.statement, COALESCE(b.name, '')
+		FROM ai_brand_facts f LEFT JOIN brands b ON b.id = COALESCE(f.brand_id, outflare_first_brand(f.workspace_id))
 		WHERE f.id = $1 AND f.workspace_id = $2`, fix.Subject.ID, ws).Scan(&statement, &brand)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return out, err

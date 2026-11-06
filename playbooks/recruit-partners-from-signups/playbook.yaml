@@ -51,15 +51,15 @@ steps:
   - say: Read the brand's context, and check its setup kit is applied so the Partnerships board is there.
     tools: [getBrandContext, listRecordTypes]
   - say: List people who signed up in the period, with their companies and websites, and skip anyone already on the board or who opted out of marketing email.
-    tools: [listCustomerEvents, listRecords, getRecord]
+    tools: [listBrandCustomerEvents, listBrandRecords, getBrandRecord]
   - say: Look at the website behind each one and note what it is (review or comparison site, blog, newsletter, channel, agency, or a normal business), its topics and any sign of an audience.
     tools: []
   - say: For each one with an audience in the space, save their creator fields and add a partnership at Found with a suggested deal type, and a one-line reason.
-    tools: [updateRecord, createRecord]
+    tools: [updateBrandRecord, createBrandRecord]
   - say: Draft a short, personal invite for each, from a real person at the brand, that says why them and what they'd get. Hold every send until a person approves it.
     tools: [previewBrandEmailTemplate, sendBrandEmail]
   - say: Move partnerships to Pitched when the invite goes out, and to Negotiating or Declined as replies come in.
-    tools: [listBrandInbox, updateRecord]
+    tools: [listBrandInbox, updateBrandRecord]
 guardrails:
   - Never send an invite or agree terms without a person's approval.
   - Only write to people who allow marketing email from the brand; the opt-out list always wins.

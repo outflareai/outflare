@@ -1102,7 +1102,7 @@ func (r *partnerImportRun) promoCode(ctx context.Context, tx pgx.Tx, c connector
 	// The code exists in the billing account already: it is kept here as is.
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO partner_promo_codes (workspace_id, membership_id, code) VALUES ($1, $2, $3)
-		ON CONFLICT (workspace_id, lower(code)) DO NOTHING RETURNING id::text`, r.ws, member, c.Code).Scan(&id)
+		ON CONFLICT DO NOTHING RETURNING id::text`, r.ws, member, c.Code).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", importSkip("promo_code_taken")
 	}
@@ -1291,7 +1291,7 @@ func (r *partnerImportRun) click(ctx context.Context, tx pgx.Tx, c connectors.Im
 		at = &c.Created
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO partner_clicks (workspace_id, membership_id, referrer_host, created_at, external_id)
-		VALUES ($1, $2, $3, COALESCE($4, now()), $5) ON CONFLICT (workspace_id, external_id) WHERE external_id IS NOT NULL DO NOTHING`,
+		VALUES ($1, $2, $3, COALESCE($4, now()), $5) ON CONFLICT DO NOTHING`,
 		r.ws, member, c.ReferrerHost, at, r.connector+":"+cutUTF8(c.ID, 180))
 	if err != nil {
 		return "", err

@@ -158,7 +158,7 @@ func (s *Server) dismissKnowledgeGap(w http.ResponseWriter, r *http.Request) {
 		tag, err := tx.Exec(ctx, `
 			UPDATE knowledge_questions SET dismissed_at = now()
 			WHERE workspace_id = $1 AND NOT answered AND dismissed_at IS NULL AND lower(btrim(question)) = lower($2)
-			  AND ($3::uuid[] IS NULL OR brand_id IS NULL OR brand_id = ANY($3::uuid[]))`, a.WorkspaceID, in.Question, a.Brands)
+			  AND ($3::uuid[] IS NULL OR brand_id = ANY($3::uuid[]))`, a.WorkspaceID, in.Question, a.Brands)
 		if err != nil {
 			return err
 		}

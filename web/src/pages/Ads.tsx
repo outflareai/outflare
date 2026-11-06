@@ -127,6 +127,7 @@ export function Ads({ ws, canManage, go, item }: Props) {
   const [openId, openGroup] = tab === "overview" && item ? item.split("/") : [];
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
+  const brandId = brand.brand?.id ?? "";
   const [days, setDays] = useState<(typeof ranges)[number]>(28);
   const [scope, setScopeState] = useState<AdScope>(() => readScope(ws));
   const setScope = (next: AdScope) => {
@@ -166,7 +167,8 @@ export function Ads({ ws, canManage, go, item }: Props) {
       api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...narrow, ...range, limit: 200 } } }),
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "connector" } } }),
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "day" } } }),
-      api.GET("/v1/workspaces/{ws}/attribution/ads", { params: { path, query: { ...query, ...range } } }),
+      // What Outflare credits is a brand's, so only with one picked.
+      brandId ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: brandId }, query: range } }) : null,
       api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "account" } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
@@ -179,7 +181,7 @@ export function Ads({ ws, canManage, go, item }: Props) {
     setTotals(s.data?.totals ?? []);
     setByDay(d.data?.data ?? []);
     setByAccount(ba.data?.data ?? []);
-    setCredited(Object.fromEntries((at.data?.data ?? []).map((r) => [r.id, r])));
+    setCredited(Object.fromEntries((at?.data?.data ?? []).map((r) => [r.id, r])));
   }, [ws, brandKey, days, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
@@ -486,7 +488,7 @@ export function Ads({ ws, canManage, go, item }: Props) {
         />
       </Card>
 
-      <AdResults ws={ws} from={range.from} to={range.to} brand={brandKey} go={go} />
+      <AdResults ws={ws} from={range.from} to={range.to} brand={brandId} go={go} />
 
         </>
       )}

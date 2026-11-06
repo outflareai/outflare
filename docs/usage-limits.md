@@ -1,6 +1,6 @@
 # Usage limits for paid connections
 
-Some connections cost money every time Outflare calls them: SEO data (Ahrefs, DataForSEO), lead data (Apollo and the other data providers), email verifiers, and page reads and web searches (Geonode). Those calls run on the workspace's own account with each provider, with its own key, and the provider bills the workspace (AGENTS.md, "Bring your own keys"). Usage limits stop Outflare from making more of them once a workspace has used what it chose. AI models are not here: their spend and limits are under Settings → AI usage ([ai-usage.md](ai-usage.md)).
+Some connections cost money every time Outflare calls them: SEO data (Ahrefs, DataForSEO, SE Ranking), lead data (Apollo and the other data providers), email verifiers, and page reads and web searches (Geonode). Those calls run on the workspace's own account with each provider, with its own key, and the provider bills the workspace (AGENTS.md, "Bring your own keys"). Usage limits stop Outflare from making more of them once a workspace has used what it chose. AI models are not here: their spend and limits are under Settings → AI usage ([ai-usage.md](ai-usage.md)).
 
 ## What counts
 
@@ -8,7 +8,7 @@ Usage is summed from the spend ledger (`spend_entries`), by connection (`integra
 
 | Feature | Unit it books |
 | --- | --- |
-| SEO reports, weekly snapshots, links and competitors (`seosync`), rank checks (`ranks`) | US dollars for DataForSEO; API units for Ahrefs, estimated from its price list |
+| SEO reports, weekly snapshots, links and competitors (`seosync`), rank checks (`ranks`) | US dollars for DataForSEO; API units for Ahrefs and SE Ranking credits, estimated from their price lists |
 | Lead list builds, refreshes and enrichment (`lists`) | the provider's credits |
 | Email verification (`verify`) | one credit per address checked by a paid verifier, estimated |
 | Site crawl page reads through Geonode (`crawl`) | Geonode tokens |
@@ -18,7 +18,7 @@ A limit counts one unit: `USD` (the ledger's dollar amounts) or one of the provi
 
 ## Limits
 
-Each connection can have a **daily** and a **monthly** limit (`connection_limits`, migration 0205), and **stop calls at the limit** (on by default) or only warn. A limit left empty is no limit; 0 stops every call. Ahrefs (10,000 API units) and DataForSEO (US$10) start with a monthly limit so a new connection can't run away; that monthly limit is the same thing as the budget in their SEO settings. Other connections start with none.
+Each connection can have a **daily** and a **monthly** limit (`connection_limits`, migration 0205), and **stop calls at the limit** (on by default) or only warn. A limit left empty is no limit; 0 stops every call. Ahrefs (10,000 API units), SE Ranking (10,000 credits) and DataForSEO (US$10) start with a monthly limit so a new connection can't run away; that monthly limit is the same thing as the budget in their SEO settings. Other connections start with none.
 
 In the app the limits are on the connection's page under Connectors (**Usage and limits**), with today's and this month's usage, the last 30 days and the warnings sent; the Connectors list shows a line of usage for each paid connection. Over the API: `GET /v1/workspaces/{ws}/connection-usage`, `GET` and `PUT .../integrations/{id}/usage/limits` (`DELETE` goes back to the starting limits); over MCP: `list_connection_usage`, `get_connection_usage` and `update_connection_limits`.
 

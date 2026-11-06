@@ -37,7 +37,7 @@ steps:
   - say: Read the brand's context so the emails sound like the brand.
     tools: [getBrandContext]
   - say: Look at the events new users send in their first week and pick the one that best marks a first win, unless one was given.
-    tools: [listCustomerEvents, listRecords]
+    tools: [listBrandCustomerEvents, listBrandRecords]
   - say: Write three short emails (welcome, a nudge with one concrete next step, and a last helpful tip) as templates.
     tools: [listBrandEmailTopics, createBrandEmailTemplate, previewBrandEmailTemplate]
   - say: Build a journey that starts on sign-up, sends the emails, and exits as soon as the first-win event arrives.

@@ -201,7 +201,7 @@ export function Overview({ ws, name, isAdmin, go, limited = false, agent }: { ws
       </section>
 
       {brand && <HomeTiles brand={brand.id} go={go} />}
-      <ChannelTiles ws={ws} brand={handle} go={go} />
+      {brand && <ChannelTiles brand={brand.id} go={go} />}
       <PRTiles ws={ws} brand={handle} go={go} />
 
       <CommunityLinks />
@@ -246,14 +246,14 @@ function Rows({ rows }: { rows: [string, number, boolean?][] }) {
 // ChannelTiles is the CMO view's headline on Home: the last 28 days across
 // every channel, under the workspace's default model. It stays hidden until
 // the site has visits or conversions, and for anyone who can't see Channels.
-function ChannelTiles({ ws, brand, go }: { ws: string; brand?: string; go: Go }) {
+function ChannelTiles({ brand, go }: { brand: string; go: Go }) {
   const [report, setReport] = useState<AttributionChannels | null>(null);
   useEffect(() => {
     const to = new Date();
     const day = (d: Date) => d.toISOString().slice(0, 10);
-    const query = { from: day(new Date(to.getTime() - 27 * 86_400_000)), to: day(to), ...(brand ? { brand } : {}) };
-    api.GET("/v1/workspaces/{ws}/attribution/channels", { params: { path: { ws }, query } }).then(({ data }) => setReport(data ?? null));
-  }, [ws, brand]);
+    const query = { from: day(new Date(to.getTime() - 27 * 86_400_000)), to: day(to) };
+    api.GET("/v1/brands/{brand}/attribution/channels", { params: { path: { brand }, query } }).then(({ data }) => setReport(data ?? null));
+  }, [brand]);
   if (!report) return null;
   const t = totals(report);
   if (t.visits === 0 && t.conversions === 0) return null;

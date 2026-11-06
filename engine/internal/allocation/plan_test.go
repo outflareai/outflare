@@ -238,3 +238,12 @@ func TestPlanIsStable(t *testing.T) {
 		t.Fatalf("a covered sequence should not change: %s", got)
 	}
 }
+
+func TestMailboxServesOnlyItsBrand(t *testing.T) {
+	own, other, none := box("a1"), box("b1"), box("c1")
+	own.BrandID, other.BrandID = "acme", "bravo"
+	s := seq("A", "", PriorityNormal, 30)
+	s.BrandID = "acme"
+	p := Make(Input{Sequences: []Sequence{s}, Mailboxes: []Mailbox{own, other, none}})
+	expect(t, p, "assign a1 >A\n")
+}

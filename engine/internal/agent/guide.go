@@ -11,7 +11,11 @@ import (
 // It reads the document's layout (paths at two spaces, methods at four,
 // summary at six) rather than parsing YAML, which is all it needs.
 func Guide(spec []byte) string {
-	const prefix = "/v1/workspaces/{ws}"
+	// A brand's data is on its brand route (/v1/brands/{brand}/...), the
+	// rest on the workspace route: both are listed by the path after
+	// their prefix, which the caller sends on the route that has it.
+	prefixes := []string{"/v1/workspaces/{ws}", "/v1/brands/{brand}"}
+	seen := map[string]bool{}
 	var b strings.Builder
 	var path, method string
 	sc := bufio.NewScanner(bytes.NewReader(spec))
@@ -36,8 +40,11 @@ func Guide(spec []byte) string {
 				method = ""
 			}
 		case method != "" && strings.HasPrefix(line, "      summary:"):
-			if p, ok := strings.CutPrefix(path, prefix); ok && p != "" {
-				b.WriteString(method + " " + p + ": " + strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "      summary:")), `"`) + "\n")
+			for _, prefix := range prefixes {
+				if p, ok := strings.CutPrefix(path, prefix); ok && p != "" && !seen[method+" "+p] {
+					seen[method+" "+p] = true
+					b.WriteString(method + " " + p + ": " + strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "      summary:")), `"`) + "\n")
+				}
 			}
 			method = ""
 		}
@@ -48,11 +55,10 @@ func Guide(spec []byte) string {
 // Docs returns the OpenAPI text for one workspace path (all its methods)
 // and the schemas it references, so the agent can see request bodies.
 func Docs(spec []byte, path string) string {
-	full := "/v1/workspaces/{ws}" + path
 	lines := strings.Split(string(spec), "\n")
 	var out []string
 	for i := 0; i < len(lines); i++ {
-		if lines[i] == "  "+full+":" {
+		if lines[i] == "  /v1/workspaces/{ws}"+path+":" || lines[i] == "  /v1/brands/{brand}"+path+":" {
 			out = append(out, lines[i])
 			for j := i + 1; j < len(lines) && (strings.HasPrefix(lines[j], "   ") || lines[j] == ""); j++ {
 				out = append(out, lines[j])

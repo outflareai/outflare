@@ -38,9 +38,10 @@ type Integration = { id: string; connector: string; status: string; name: string
 type TestResult = { action: string; reason: string; reply: string; cited: SupportAssistantRun["cited"]; duration_ms: number };
 
 export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; canManage: boolean; go: (tab: Tab, item?: string) => void }) {
-  const { brands } = useBrand(ws);
+  // The settings are the picked brand's own: brands share none.
+  const { brand } = useBrand(ws);
   const [all, setAll] = useState<SupportAssistantSetting[] | undefined>(undefined);
-  const [scope, setScope] = useState("default");
+  const scope = brand?.id ?? "default";
   const [chat, setChat] = useState<Mode>("off");
   const [email, setEmail] = useState<Mode>("off");
   const [name, setName] = useState("");
@@ -60,10 +61,8 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const brandID = scope === "default" ? null : scope;
-  const own = all?.find((x) => x.brand_id === brandID) ?? null;
-  const inherited = all?.find((x) => x.brand_id === null) ?? null;
-  const shown = own ?? (brandID ? inherited : null);
+  const brandID = brand?.id ?? null;
+  const shown = all?.find((x) => x.brand_id === brandID) ?? null;
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/support/assistant-settings", { params: { path: { ws } } }).then(({ data, error }) => {
@@ -79,7 +78,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
     });
   }, [ws]);
 
-  // The form shows the scope's own setting, or what it inherits.
+  // The form shows the brand's own setting.
   useEffect(() => {
     if (all === undefined) return;
     setChat(shown?.chat_mode ?? "off");
@@ -117,15 +116,6 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
     const saved = data as SupportAssistantSetting;
     setAll((l) => [...(l ?? []).filter((x) => x.brand_id !== saved.brand_id), saved]);
     toast(chat === "off" && email === "off" ? "The assistant is off" : chat === "auto" || email === "auto" ? "Saved: it answers on its own where it can" : "Saved: it drafts replies for your team to send");
-  }
-
-  async function removeBrand() {
-    setBusy(true);
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/support/assistant-settings/{scope}", { params: { path: { ws, scope } } });
-    setBusy(false);
-    if (error) return toast(errorMessage(error), "error");
-    setAll((l) => (l ?? []).filter((x) => x.brand_id !== brandID));
-    toast("This brand uses the workspace's settings again");
   }
 
   if (all === undefined && !error) return <Loading />;
@@ -174,17 +164,6 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
         </div>
         <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", on ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-muted text-muted-foreground")}>{on ? "On" : "Off"}</span>
       </div>
-      {brands.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <select aria-label="Settings for" className={cn(field, "w-auto")} value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="default">All brands</option>
-            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          {brandID && (own
-            ? canManage && <button type="button" className="text-muted-foreground underline" disabled={busy} onClick={removeBrand}>Use the workspace's settings</button>
-            : <span className="text-muted-foreground">Uses the workspace's settings until you save its own.</span>)}
-        </div>
-      )}
       <div className="divide-y">
         {modeRow("Email", "Up to about 140 words, the answer first", email, setEmail)}
         {modeRow("Website chat", "One to three short sentences", chat, setChat)}

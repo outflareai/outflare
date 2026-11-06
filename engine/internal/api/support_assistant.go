@@ -411,8 +411,8 @@ func (s *Server) assistantAnswer(ctx context.Context, in assistantInput) (assist
 // workspace>'s assistant". business is the name it speaks for.
 func (s *Server) assistantName(ctx context.Context, q jobs.Querier, ws string, brand *string) (name, business string, err error) {
 	if err = q.QueryRow(ctx, `SELECT COALESCE((SELECT name FROM brands WHERE id = $2), (SELECT name FROM workspaces WHERE id = $1)),
-		COALESCE((SELECT NULLIF(name, '') FROM support_assistant_settings WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid)
-		          ORDER BY brand_id IS NULL LIMIT 1), '')`, ws, brand).Scan(&business, &name); err != nil {
+		COALESCE((SELECT NULLIF(name, '') FROM support_assistant_settings WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid
+		          LIMIT 1), '')`, ws, brand).Scan(&business, &name); err != nil {
 		return "", "", err
 	}
 	if name == "" {
@@ -568,7 +568,7 @@ func (s *Server) runAssistant(ctx context.Context, ws, conv, message, trigger st
 		}
 		// Auto: a checked answer or question goes out on its own, saying it
 		// is from the assistant. A failed send leaves it as a draft.
-		if mode == "auto" && trigger == "message" && s.autoAvailable(ctx, ws) {
+		if mode == "auto" && trigger == "message" && s.autoAvailable(ctx, ws, brand) {
 			// By email an answer waits the brand's hold first, so a teammate
 			// can stop or edit it; it stays a draft until it goes.
 			hold := 0

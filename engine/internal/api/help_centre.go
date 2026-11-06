@@ -315,7 +315,7 @@ const helpCentreSelect = `
 	       CASE WHEN d.status = 'verified' AND (d.https_status IS NULL OR d.https_status = 'active') THEN d.domain END, d.domain,
 	       h.settings, h.created_at, h.updated_at,
 	       (SELECT count(*) FROM knowledge_items i WHERE i.workspace_id = h.workspace_id AND i.deleted_at IS NULL
-	          AND i.status = 'published' AND i.visibility = 'public' AND (h.brand_id IS NULL OR i.brand_id IS NULL OR i.brand_id = h.brand_id))::int
+	          AND i.status = 'published' AND i.visibility = 'public' AND i.brand_id IS NOT DISTINCT FROM h.brand_id)::int
 	FROM help_centres h LEFT JOIN tracking_domains d ON d.id = h.domain_id`
 
 func (s *Server) scanHelpCentre(row pgx.Row) (helpCentreView, error) {
@@ -424,7 +424,7 @@ func (s *Server) createHelpCentre(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
+		if brand, err = ownBrand(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		// It starts from the brand's look, or the company's.
@@ -432,11 +432,10 @@ func (s *Server) createHelpCentre(w http.ResponseWriter, r *http.Request) {
 		var colors lookColors
 		var rawColors []byte
 		if brand != nil {
-			err = tx.QueryRow(ctx, `SELECT b.name, COALESCE(NULLIF(b.logo_url, ''), c.logo_url, ''), b.colors FROM brands b
-				LEFT JOIN workspace_context c ON c.workspace_id = b.workspace_id WHERE b.id = $1`, *brand).Scan(&name, &logo, &rawColors)
+			err = tx.QueryRow(ctx, `SELECT b.name, b.logo_url, b.colors FROM brands b WHERE b.id = $1`, *brand).Scan(&name, &logo, &rawColors)
 		} else {
-			err = tx.QueryRow(ctx, `SELECT COALESCE(NULLIF(c.company, ''), w.name), COALESCE(c.logo_url, ''), COALESCE(c.colors, '{}')
-				FROM workspaces w LEFT JOIN workspace_context c ON c.workspace_id = w.id WHERE w.id = $1`, a.WorkspaceID).Scan(&name, &logo, &rawColors)
+			err = tx.QueryRow(ctx, `SELECT COALESCE(b.name, w.name), COALESCE(b.logo_url, ''), COALESCE(b.colors, '{}')
+				FROM workspaces w LEFT JOIN brands b ON b.id = outflare_first_brand(w.id) WHERE w.id = $1`, a.WorkspaceID).Scan(&name, &logo, &rawColors)
 		}
 		if err != nil {
 			return err
@@ -765,7 +764,7 @@ func (s *Server) helpCentreStats(w http.ResponseWriter, r *http.Request) {
 		SELECT i.id::text, i.title, sum(d.views)::int, sum(d.helpful)::int, sum(d.unhelpful)::int
 		FROM help_article_days d JOIN knowledge_items i ON i.id = d.item_id
 		WHERE d.workspace_id = $1 AND d.day > current_date - $2::int AND i.deleted_at IS NULL
-		  AND ($3::uuid IS NULL OR i.brand_id IS NULL OR i.brand_id = $3::uuid)
+		  AND ($3::uuid IS NULL OR i.brand_id = $3::uuid)
 		GROUP BY i.id, i.title ORDER BY sum(d.views) DESC, i.title LIMIT 20`, a.WorkspaceID, days, v.BrandID)
 	if err != nil {
 		s.internal(w, r, err)

@@ -615,9 +615,10 @@ func (s *Server) assignOne(ctx context.Context, tx pgx.Tx, a *access, id, seq, s
 	err := tx.QueryRow(ctx, `
 		SELECT l.kind, l.sequence_id::text, l.team_id::text, x.sequence_id::text, x.state, x.version,
 		       CASE WHEN m.status <> 'active' THEN 'the mailbox is ' || m.status END,
-		       -- A brand's mailbox serves only that brand's sequences.
-		       (SELECT b.name FROM brands b WHERE b.id = m.brand_id
-		        AND m.brand_id IS DISTINCT FROM (SELECT brand_id FROM sequences WHERE id = $3))
+		       -- A mailbox serves only its brand's sequences; one in no brand serves none.
+		       CASE WHEN m.brand_id IS NULL THEN ''
+		       ELSE (SELECT b.name FROM brands b WHERE b.id = m.brand_id
+		        AND m.brand_id IS DISTINCT FROM (SELECT brand_id FROM sequences WHERE id = $3)) END
 		FROM mailboxes m
 		LEFT JOIN mailbox_locks l ON l.mailbox_id = m.id AND (l.until IS NULL OR l.until > now())
 		LEFT JOIN mailbox_assignments x ON x.mailbox_id = m.id
@@ -631,8 +632,11 @@ func (s *Server) assignOne(ctx context.Context, tx pgx.Tx, a *access, id, seq, s
 		return res, err
 	}
 	switch {
+	case otherBrand != nil && *otherBrand == "":
+		res.Result, res.Message = "refused", "It isn't in a brand yet. Add it to this sequence's brand first."
+		return res, nil
 	case otherBrand != nil:
-		res.Result, res.Message = "refused", "It belongs to the brand "+*otherBrand+". Move it to this sequence's brand, or make it shared, first."
+		res.Result, res.Message = "refused", "It belongs to the brand "+*otherBrand+". Move it to this sequence's brand first."
 		return res, nil
 	case lockKind != nil && *lockKind == allocation.LockSequence && *lockSeq != seq:
 		res.Result, res.Message = "refused", "It is pinned to another sequence. Remove the lock first."

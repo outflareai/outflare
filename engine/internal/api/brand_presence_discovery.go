@@ -40,6 +40,8 @@ func (s *Server) registerPresenceJobs(q *jobs.Queue) {
 	q.Handle(jobCoverageDiscover, s.coverageDiscoverJob)
 	q.Handle(jobCoverageSearch, s.coverageSearchJob)
 	q.Handle(jobCompetitorScan, s.coverageCompetitorScanJob)
+	q.Handle(jobOpportunitiesRefresh, s.coverageOpportunitiesRefreshJob)
+	q.Handle(jobCoverageVerify, s.coverageVerifyJob)
 }
 
 func (s *Server) routesPresenceDiscovery(mux *http.ServeMux) {
@@ -140,6 +142,9 @@ func (s *Server) coverageDiscoverJob(ctx context.Context, j jobs.Job) error {
 			return err
 		}
 	}
+	if _, _, err := s.coverageResolveRedirects(ctx, a); err != nil {
+		track.Fail(ctx, s.log, track.Event{Name: "coverage_discovery.failed", WorkspaceID: a.WorkspaceID, ActorType: "system", Surface: "job", Props: map[string]any{"brand_id": a.Brand, "step": "redirects"}}, "internal", err)
+	}
 	for range coverageDiscoverRounds {
 		var found map[string]int
 		var processed int
@@ -165,6 +170,9 @@ func (s *Server) coverageDiscoverJob(ctx context.Context, j jobs.Job) error {
 			return err
 		}
 		if _, err := coverageRefreshTraction(ctx, tx, a.WorkspaceID, a.Brand); err != nil {
+			return err
+		}
+		if err := enqueueCoverageVerify(ctx, tx, a.WorkspaceID, a.Brand, fmt.Sprint("discover:", j.ID)); err != nil {
 			return err
 		}
 		return recordWithProps(ctx, tx, nil, a.WorkspaceID, "coverage_opportunities.refreshed", "brands", a.Brand, nil, map[string]any{"brand_id": a.Brand, "added": added, "won": won})
@@ -308,7 +316,9 @@ func (s *Server) coverageSearchJob(ctx context.Context, j jobs.Job) error {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, item := range res.Items {
 			u, e := url.Parse(item.URL)
-			if e != nil || u.Hostname() == "" || ownHost(u.Hostname()) {
+			// A Google redirect link the reader couldn't resolve is not a
+			// page anyone can open: it is left out rather than listed.
+			if e != nil || u.Hostname() == "" || ownHost(u.Hostname()) || ownHost(item.Domain) || connectors.IsGoogleRedirect(item.URL) {
 				continue
 			}
 			sum := md5.Sum([]byte(item.URL))
@@ -318,6 +328,11 @@ func (s *Server) coverageSearchJob(ctx context.Context, j jobs.Job) error {
 			}
 			if created {
 				added++
+			}
+		}
+		if added > 0 {
+			if err := enqueueCoverageVerify(ctx, tx, ws, req.Brand, fmt.Sprint("search:", j.ID)); err != nil {
+				return err
 			}
 		}
 		return recordWithProps(ctx, tx, nil, ws, "coverage_search.ran", "coverage_searches", req.Search, nil,

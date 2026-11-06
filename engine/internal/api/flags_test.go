@@ -77,16 +77,10 @@ func TestFlags(t *testing.T) {
 	// One for the other brand.
 	owner.must(201, "POST", base+"/flags", map[string]any{"key": "repocket-banner", "status": "on", "brand_id": rp})
 
-	if list := owner.must(200, "GET", base+"/flags?brand=all", nil)["data"].([]any); len(list) != 4 {
-		t.Fatalf("%d flags", len(list))
-	}
 	// A flag is one brand's: one made without a brand is the first
 	// brand's, and none is shared.
 	if list := owner.must(200, "GET", base+"/flags?brand="+geo, nil)["data"].([]any); len(list) != 1 {
 		t.Fatalf("geonode's flags: %v", list)
-	}
-	if list := owner.must(200, "GET", base+"/flags?brand=none", nil)["data"].([]any); len(list) != 0 {
-		t.Fatalf("shared flags: %v", list)
 	}
 	if one := owner.must(200, "GET", base+"/flags/pricing-headline", nil); one["id"] != splitID {
 		t.Fatalf("by key: %v", one)
@@ -154,12 +148,13 @@ func TestFlags(t *testing.T) {
 	secret := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Server", "scopes": []string{"analytics.read"}})["token"].(string)
 	bot := &client{t: t, h: e.h, bearer: secret}
 	owner.must(400, "POST", base+"/flags/evaluate", map[string]any{})
-	ev := bot.must(200, "POST", base+"/flags/evaluate", map[string]any{"anonymous_id": "visitor-0001", "url": "https://geonode.com/pricing"})
-	if ev["flags"].(map[string]any)["pricing-headline"] != variant || ev["flags"].(map[string]any)["billing-v2"] != "on" || ev["reasons"].(map[string]any)["pricing-headline"] != "match" {
+	// Each brand's flags are decided on its own route.
+	ev := bot.must(200, "POST", base+"/flags/evaluate?brand="+geo, map[string]any{"anonymous_id": "visitor-0001", "url": "https://geonode.com/pricing"})
+	if ev["flags"].(map[string]any)["pricing-headline"] != variant || ev["flags"].(map[string]any)["billing-v2"] != nil || ev["reasons"].(map[string]any)["pricing-headline"] != "match" {
 		t.Fatalf("evaluate: %v", ev)
 	}
 	ev = bot.must(200, "POST", base+"/flags/evaluate", map[string]any{"user_id": "u-1", "keys": []string{"billing-v2"}})
-	if len(ev["flags"].(map[string]any)) != 1 {
+	if len(ev["flags"].(map[string]any)) != 1 || ev["flags"].(map[string]any)["billing-v2"] != "on" {
 		t.Fatalf("keys: %v", ev)
 	}
 	// The read token can't change flags.
@@ -177,7 +172,7 @@ func TestFlags(t *testing.T) {
 	owner.must(409, "PATCH", base+"/flags/"+splitID, map[string]any{"status": "on"})
 	owner.must(404, "GET", base+"/flags/pricing-headline", nil)
 	owner.must(201, "POST", base+"/flags", map[string]any{"key": "pricing-headline"})
-	if list := owner.must(200, "GET", base+"/flags?status=archived", nil)["data"].([]any); len(list) != 1 {
+	if list := owner.must(200, "GET", base+"/flags?status=archived&brand="+geo, nil)["data"].([]any); len(list) != 1 {
 		t.Fatalf("archived: %v", list)
 	}
 

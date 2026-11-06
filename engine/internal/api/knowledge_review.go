@@ -94,6 +94,8 @@ type knowledgeSuggestion struct {
 // one waiting already, or one a person rejected, is left alone. ok says
 // whether it was added.
 func fileKnowledgeSuggestion(ctx context.Context, tx pgx.Tx, s knowledgeSuggestion) (string, bool, error) {
+	// Brands share no suggestions: one with no brand is the workspace's
+	// first brand's.
 	key := s.Kind + ":" + strings.ToLower(strings.Join(strings.Fields(s.Question), " "))
 	if s.Kind == "conflict" {
 		ids := slices.Clone(s.ItemIDs)
@@ -117,7 +119,7 @@ func fileKnowledgeSuggestion(ctx context.Context, tx pgx.Tx, s knowledgeSuggesti
 	err := tx.QueryRow(ctx, `
 		INSERT INTO knowledge_suggestions (workspace_id, brand_id, kind, question, title, body, visibility, source, source_ref, source_quote,
 			item_ids, sensitive, dedupe_key, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid[], $12, $13, $14)
+		VALUES ($1, COALESCE($2::uuid, outflare_first_brand($1)), $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid[], $12, $13, $14)
 		ON CONFLICT (workspace_id, dedupe_key) WHERE status = 'pending' DO NOTHING RETURNING id::text`,
 		s.WorkspaceID, s.BrandID, s.Kind, truncate(s.Question, 1000), truncate(s.Title, 300), truncate(s.Body, 20000), s.Visibility, s.Source,
 		truncate(s.SourceRef, 1000), truncate(s.SourceQuote, 4000), s.ItemIDs, s.Sensitive, key, nullIfEmpty(s.CreatedBy)).Scan(&id)
@@ -174,7 +176,7 @@ func (s *Server) listKnowledgeSuggestions(w http.ResponseWriter, r *http.Request
 		return
 	}
 	args := []any{a.WorkspaceID}
-	where := ` WHERE workspace_id = $1` + sharedBrandSQL(brand, "brand_id", &args)
+	where := ` WHERE workspace_id = $1` + brand.sql("brand_id", &args)
 	countArgs := []any{a.WorkspaceID}
 	if status != "all" {
 		args = append(args, status)
@@ -201,7 +203,7 @@ func (s *Server) listKnowledgeSuggestions(w http.ResponseWriter, r *http.Request
 	}
 	var answers, conflicts int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE kind = 'answer'), count(*) FILTER (WHERE kind = 'conflict')
-		FROM knowledge_suggestions WHERE workspace_id = $1 AND status = 'pending'`+sharedBrandSQL(brand, "brand_id", &countArgs), countArgs...).
+		FROM knowledge_suggestions WHERE workspace_id = $1 AND status = 'pending'`+brand.sql("brand_id", &countArgs), countArgs...).
 		Scan(&answers, &conflicts); err != nil {
 		s.internal(w, r, err)
 		return

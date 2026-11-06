@@ -253,9 +253,6 @@ func TestBuildListFromSearchWithWaterfall(t *testing.T) {
 
 	// Lists are filtered by brand (made without one, they are the first
 	// brand's), and audit events record runs.
-	if out := owner.must(200, "GET", base+"/lead-lists?brand=none", nil); len(out["data"].([]any)) != 0 {
-		t.Fatalf("lists of no brand: %v", out)
-	}
 	if out := owner.must(200, "GET", base+"/lead-lists", nil); len(out["data"].([]any)) != 2 {
 		t.Fatalf("brand filter: %v", out)
 	}

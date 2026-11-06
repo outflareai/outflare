@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CoverageExtraction, CoverageOutcomes } from "./brand-coverage/enrichment";
 import { PlacementParties } from "./brand-coverage/parties";
 import { PresenceMomentum } from "./brand-coverage/momentum";
+import { PresenceFound } from "./brand-coverage/found";
 import { WebSearches } from "./brand-coverage/web-searches";
 import { CompetitorPresence } from "./brand-coverage/competitors";
 import { Opportunities } from "./brand-coverage/opportunities";
@@ -80,18 +81,18 @@ type Section =
   | "delivery_reports";
 const sections: [Section, string][] = [
   ["overview", "Overview"],
+  ["candidates", "Found"],
   ["tasks", "Work queue"],
   ["placements", "Placements"],
   ["publishers", "Publishers"],
   ["commercial", "Commercial"],
-  ["candidates", "Discovery"],
   ["opportunities", "Opportunities"],
   ["competitors", "Competitors"],
   ["reports", "Reports"],
 ];
 const titles: Partial<Record<Resource, string>> = {
   tasks: "Work queue",
-  candidates: "Discovery",
+  candidates: "Found",
   rules: "Maintenance automations",
   finance_tasks: "Commercial work",
   delivery_reports: "Reported delivery",
@@ -104,7 +105,7 @@ const hints: Partial<Record<Resource, string>> = {
   tasks:
     "Evidence, ownership and follow-up in one place. Snoozing a task does not pause monitoring.",
   candidates:
-    "Review discoveries before adding them to your coverage. Finding a link does not make it an earned placement.",
+    "Everywhere your brand was found: pages that link to you or mention you, from your links, news, social, web searches and AI answers. Each page is read once to check it's about you. Say About us to make it a placement, or Not us to hide it.",
   agreements:
     "One agreement can fund many placements. Its commitment is counted once.",
   rules:
@@ -343,6 +344,7 @@ function CoverageBrand({
           finance={can("coverage.finance.read")}
           analytics={can("analytics.read")}
           onWork={() => navigate("tasks")}
+          onFound={() => navigate("candidates")}
           onPlacements={(basic, advanced) => {
             setPlacementView({ basic, advanced });
             navigate("placements");
@@ -414,6 +416,9 @@ function CoverageBrand({
             </div>
           </div>
           {section === "candidates" && (
+            <PresenceFound key={reload} brand={brand} manage={manage} />
+          )}
+          {section === "candidates" && (
             <WebSearches ws={ws} brand={brand} manage={manage} />
           )}
           {section === "candidates" && can("seo.read") && (
@@ -464,7 +469,7 @@ function CoverageBrand({
               </Button>
             </div>
           )}
-          {def && (
+          {def && section !== "candidates" && (
             <CoverageList
               myId={myId}
               ws={ws}
@@ -1518,8 +1523,8 @@ function ReferencePicker({
               name: r.name || r.user_id || "Member",
             }));
         } else if (f.reference === "deals") {
-          const { data, error } = await api.GET("/v1/workspaces/{ws}/deals", {
-            params: { path: { ws }, query: { brand } },
+          const { data, error } = await api.GET("/v1/brands/{brand}/deals", {
+            params: { path: { brand } },
           });
           if (error) throw new Error(errorMessage(error));
           options = (data?.data ?? []).map((r) => ({
@@ -2301,8 +2306,10 @@ function CoverageOverview({
   finance,
   analytics,
   onWork,
+  onFound,
   onPlacements,
 }: {
+  onFound?: () => void;
   brand: string;
   definition?: Definition;
   manage: boolean;
@@ -2409,6 +2416,26 @@ function CoverageOverview({
           </button>
         ))}
       </div>
+      {(() => {
+        const f = data.found as
+          | { pages: number; sites: number; new_28d: number; unreviewed: number; by_source: { source: string; pages: number }[] }
+          | undefined;
+        if (!f) return null;
+        return (
+          <button className="flex w-full flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border bg-card p-5 text-left" onClick={onFound}>
+            <span>
+              <span className="block text-sm text-muted-foreground">Found everywhere</span>
+              <span className="text-2xl font-semibold tabular-nums">{f.pages.toLocaleString()}</span>
+              <span className="ml-2 text-sm text-muted-foreground">pages on {f.sites.toLocaleString()} sites link to or mention you</span>
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {f.new_28d.toLocaleString()} new in 28 days · {f.unreviewed.toLocaleString()} to review
+              {f.by_source.length > 0 && " · " + f.by_source.slice(0, 4).map((b) => `${label(b.source)} ${b.pages.toLocaleString()}`).join(", ")}
+            </span>
+            <span className="ml-auto text-sm font-medium">Review found pages</span>
+          </button>
+        );
+      })()}
       <PresenceMomentum
         momentum={data.momentum as Parameters<typeof PresenceMomentum>[0]["momentum"]}
         voice={data.share_of_voice as Parameters<typeof PresenceMomentum>[0]["voice"]}
@@ -3687,12 +3714,11 @@ function CoverageCreateReference({
           await save(brand, "publishers", { domain: name, record_id: company }),
         );
       } else {
-        const r = await api.POST("/v1/workspaces/{ws}/records", {
-          params: { path: { ws } },
+        const r = await api.POST("/v1/brands/{brand}/records", {
+          params: { path: { brand } },
           body: {
             type: f.name === "record_id" ? "account" : "person",
             name,
-            brand_id: brand,
           },
         });
         if (r.error) throw new Error(errorMessage(r.error));

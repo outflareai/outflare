@@ -75,7 +75,7 @@ func TestCampaignLinks(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/tracking-campaigns/"+code+"/links", nil)["data"].([]any)); n != 2 {
 		t.Fatalf("links = %d", n)
 	}
-	if list := owner.must(200, "GET", base+"/tracking-campaigns?channel=paid_ads", nil)["data"].([]any); len(list) != 1 || list[0].(map[string]any)["links"] != float64(2) {
+	if list := owner.must(200, "GET", base+"/tracking-campaigns?channel=paid_ads&brand=northpeak", nil)["data"].([]any); len(list) != 1 || list[0].(map[string]any)["links"] != float64(2) {
 		t.Fatalf("list = %v", list)
 	}
 

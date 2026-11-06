@@ -444,13 +444,32 @@ func (g Geonode) SERP(ctx context.Context, cl *c.Client, creds c.Creds, engine s
 	out.Partial = resp.PagesStopped != "" && resp.PagesStopped != "no_results"
 	// Positions count down the pages in order, so they do not depend on
 	// how Geonode numbers a page after the first.
+	// Google sometimes answers with its own redirect links
+	// (google.com/goto?url=<token>) instead of the page: the page is
+	// resolved from the link, and its site is the host Geonode reports.
+	var urls []string
 	for _, p := range resp.Pages {
 		for _, r := range p.Results {
-			d := c.ResultDomain(r.URL)
+			urls = append(urls, r.URL)
+		}
+	}
+	resolved := c.ResolveGoogleRedirects(ctx, cl, urls)
+	i := 0
+	for _, p := range resp.Pages {
+		for _, r := range p.Results {
+			link := r.URL
+			if resolved[i] != "" {
+				link = resolved[i]
+			}
+			i++
+			d := c.ResultDomain(link)
+			if c.IsGoogleRedirect(link) {
+				d = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(r.SourceHost)), "www.")
+			}
 			if d == "" {
 				continue
 			}
-			out.Items = append(out.Items, c.SERPItem{Position: len(out.Items) + 1, URL: r.URL, Domain: d, Title: strings.TrimSpace(r.Title)})
+			out.Items = append(out.Items, c.SERPItem{Position: len(out.Items) + 1, URL: link, Domain: d, Title: strings.TrimSpace(r.Title)})
 		}
 	}
 	return out, nil

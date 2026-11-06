@@ -418,7 +418,7 @@ func (s *Server) checkPool(ctx context.Context, tx pgx.Tx, ws string, poolID *st
 // applies the limits of the API token making the request: a token cannot
 // raise a sequence above its max_priority, and a new sequence without a
 // team goes to the token's default team.
-func (s *Server) checkAllocation(ctx context.Context, tx pgx.Tx, a *access, q *sequenceSettings, creating bool) error {
+func (s *Server) checkAllocation(ctx context.Context, tx pgx.Tx, a *access, q *sequenceSettings, brand string, creating bool) error {
 	if q.TeamID.Value != nil {
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM teams WHERE id = $1 AND workspace_id = $2)`, *q.TeamID.Value, a.WorkspaceID).Scan(&ok); err != nil {
@@ -430,7 +430,9 @@ func (s *Server) checkAllocation(ctx context.Context, tx pgx.Tx, a *access, q *s
 	}
 	if len(q.PreferredSenderIDs) > 0 {
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM senders WHERE id = ANY($1::uuid[]) AND workspace_id = $2`, q.PreferredSenderIDs, a.WorkspaceID).Scan(&n); err != nil {
+		// Only the sequence's brand's senders: each brand has its own.
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM senders WHERE id = ANY($1::uuid[]) AND workspace_id = $2 AND brand_id::text = $3`,
+			q.PreferredSenderIDs, a.WorkspaceID, brand).Scan(&n); err != nil {
 			return err
 		}
 		if n != len(q.PreferredSenderIDs) {
@@ -520,13 +522,13 @@ func (s *Server) insertSequence(ctx context.Context, tx pgx.Tx, a *access, q *se
 	if err := s.checkPool(ctx, tx, a.WorkspaceID, q.PoolID.Value); err != nil {
 		return "", err
 	}
-	if err := s.checkAllocation(ctx, tx, a, q, true); err != nil {
-		return "", err
-	}
 	// A sequence belongs to one brand: the route's, the one named, or the
 	// workspace's first.
 	brand, err := s.activationBrand(ctx, a, q.BrandID)
 	if err != nil {
+		return "", err
+	}
+	if err := s.checkAllocation(ctx, tx, a, q, brand, true); err != nil {
 		return "", err
 	}
 	days := q.SendDays
@@ -634,8 +636,8 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		var old string
-		err := tx.QueryRow(ctx, `SELECT status FROM sequences WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&old)
+		var old, brand string
+		err := tx.QueryRow(ctx, `SELECT status, COALESCE(brand_id::text, '') FROM sequences WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, id, a.WorkspaceID).Scan(&old, &brand)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -652,7 +654,7 @@ func (s *Server) updateSequence(w http.ResponseWriter, r *http.Request) {
 		if err := s.checkPool(ctx, tx, a.WorkspaceID, req.PoolID.Value); err != nil {
 			return err
 		}
-		if err := s.checkAllocation(ctx, tx, a, &req.sequenceSettings, false); err != nil {
+		if err := s.checkAllocation(ctx, tx, a, &req.sequenceSettings, brand, false); err != nil {
 			return err
 		}
 		var days []int

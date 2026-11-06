@@ -102,6 +102,11 @@ func TestFlagVisualEditor(t *testing.T) {
 			t.Fatalf("tests not on: %v", out)
 		}
 		hide := out["hide"].([]any)
+		// Every visitor the page puts in the test counts as shown, the
+		// control included.
+		if ex := out["expose"].([]any); len(ex) != 1 || ex[0] != "hero" {
+			t.Fatalf("expose: %v", out)
+		}
 		if out["flags"].(map[string]any)["hero"] == "faster" {
 			if cs := out["payloads"].(map[string]any)["hero"].(map[string]any)["changes"]; cs == nil {
 				t.Fatalf("no changes served: %v", out)

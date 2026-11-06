@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/connectors"
+	"github.com/outflareai/outflare/engine/internal/features"
 	"github.com/outflareai/outflare/engine/internal/support/assistant"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -37,11 +38,23 @@ type assistantSettingView struct {
 const assistantSettingSelect = `SELECT id::text, brand_id::text, chat_mode, email_mode, name, find_on_website, slack_integration_id::text, slack_channels,
 	email_hold_minutes, updated_at FROM support_assistant_settings`
 
-// autoAvailable says whether the assistant may send on its own in a
-// workspace: only when an extension decides so (SetSupportAuto). The
-// engine on its own only drafts.
-func (s *Server) autoAvailable(ctx context.Context, ws string) bool {
-	return s.supportAuto != nil && s.supportAuto(ctx, ws)
+// autoAvailable says whether the assistant may send on its own for a
+// brand of a workspace: only when an extension decides so (SetSupportAuto),
+// and not where the operator blocked it for the brand (the brand feature
+// support_auto_blocked; for no brand, any of the workspace's). The engine
+// on its own only drafts.
+func (s *Server) autoAvailable(ctx context.Context, ws string, brand *string) bool {
+	if s.supportAuto == nil || !s.supportAuto(ctx, ws) {
+		return false
+	}
+	var blocked bool
+	var err error
+	if brand != nil && *brand != "" {
+		blocked, err = features.BrandEnabled(ctx, s.pool, *brand, features.SupportAutoBlocked)
+	} else {
+		blocked, err = features.Enabled(ctx, s.pool, ws, features.SupportAutoBlocked)
+	}
+	return err == nil && !blocked
 }
 
 // SetSupportAuto lets an extension decide which workspaces the support
@@ -57,7 +70,7 @@ func (s *Server) listAssistantSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), assistantSettingSelect+` WHERE workspace_id = $1`+sharedBrandSQL(brand, "brand_id", &args)+
+	rows, err := s.pool.Query(r.Context(), assistantSettingSelect+` WHERE workspace_id = $1`+brand.sql("brand_id", &args)+
 		` ORDER BY brand_id IS NOT NULL, created_at`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -68,7 +81,11 @@ func (s *Server) listAssistantSettings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "auto_available": s.autoAvailable(r.Context(), a.WorkspaceID)})
+	var picked *string
+	if brand.id != "" && brand.id != "none" {
+		picked = &brand.id
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "auto_available": s.autoAvailable(r.Context(), a.WorkspaceID, picked)})
 }
 
 func (s *Server) putAssistantSetting(w http.ResponseWriter, r *http.Request) {
@@ -102,10 +119,6 @@ func (s *Server) putAssistantSetting(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "a mode is off, draft or auto")
 			return
 		}
-		if *m == "auto" && !s.autoAvailable(r.Context(), a.WorkspaceID) {
-			writeError(w, r, http.StatusForbidden, "feature_locked", "sending without a person is part of Outflare Cloud; draft mode drafts every answer for your team to send")
-			return
-		}
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if utf8.RuneCountInString(req.Name) > 60 {
@@ -119,6 +132,10 @@ func (s *Server) putAssistantSetting(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.internal(w, r, err)
+		return
+	}
+	if (req.ChatMode == "auto" || req.EmailMode == "auto") && !s.autoAvailable(r.Context(), a.WorkspaceID, brand) {
+		writeError(w, r, http.StatusForbidden, "feature_locked", "sending without a person is part of Outflare Cloud; draft mode drafts every answer for your team to send")
 		return
 	}
 	ctx := r.Context()
@@ -386,7 +403,7 @@ func (s *Server) assistantPeriod(ctx context.Context, ws string, brand brandSel,
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.action, r.outcome, r.reason, COALESCE(r.feedback, ''), count(*)::int FROM support_assistant_runs r
 		WHERE r.workspace_id = $1 AND r.created_at > now() - make_interval(days => $2) AND r.created_at <= now() - make_interval(days => $3)`+
-		sharedBrandSQL(brand, "r.brand_id", &args)+`
+		brand.sql("r.brand_id", &args)+`
 		GROUP BY 1, 2, 3, 4`, args...)
 	if err != nil {
 		return p, err
@@ -468,7 +485,7 @@ func (s *Server) assistantStats(w http.ResponseWriter, r *http.Request) {
 			count(r.id) FILTER (WHERE r.action IN ('answer', 'clarify'))::int, count(r.id) FILTER (WHERE r.action = 'handoff')::int
 		FROM generate_series((now() AT TIME ZONE 'UTC')::date - ($2 - 1), (now() AT TIME ZONE 'UTC')::date, interval '1 day') d
 		LEFT JOIN support_assistant_runs r ON r.workspace_id = $1 AND (r.created_at AT TIME ZONE 'UTC')::date = d::date`+
-		sharedBrandSQL(brand, "r.brand_id", &args)+`
+		brand.sql("r.brand_id", &args)+`
 		GROUP BY d ORDER BY d`, args...)
 	if err != nil {
 		s.internal(w, r, err)

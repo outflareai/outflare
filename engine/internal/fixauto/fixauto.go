@@ -46,9 +46,10 @@ var alwaysPerson = []string{
 	"canonical_broken", "canonical_multiple", "canonical_elsewhere", "canonical_missing", "canonical_to_noindex",
 	"noindex", "noindex_in_sitemap", "nofollow_page", "blocked_in_sitemap", "sitemap_non_canonical",
 	"http_page", "url_uppercase", "url_underscores", "url_parameters",
-	// Unblocking AI crawlers means editing robots.txt; a wrong fact in AI
-	// answers often means asking another site to correct a page.
-	"ai_search_blocked", "ai_fact_wrong",
+	// Unblocking AI crawlers means editing robots.txt; a wrong fact or a
+	// disputed claim in AI answers often means asking another site to
+	// correct a page.
+	"ai_search_blocked", "ai_fact_wrong", "ai_wrong_claim",
 }
 
 // AlwaysPerson reports whether a rule's fixes always wait for a person.
@@ -67,7 +68,7 @@ func AlwaysPerson(rule string) bool {
 
 // AlwaysPersonRules lists the catalog's rules that always wait.
 func AlwaysPersonRules() []string {
-	out := []string{"ai_fact_wrong"}
+	out := []string{"ai_fact_wrong", "ai_wrong_claim"}
 	for _, r := range crawl.Rules {
 		if AlwaysPerson(r.ID) {
 			out = append(out, r.ID)

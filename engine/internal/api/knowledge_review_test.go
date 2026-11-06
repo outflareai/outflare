@@ -125,9 +125,10 @@ func TestKnowledgeReview(t *testing.T) {
 	}
 	owner.must(404, "POST", sb+"/00000000-0000-0000-0000-000000000000/approve", map[string]any{})
 	owner.must(400, "GET", sb+"?status=maybe", nil)
-	// With a brand picked, what is for every brand still shows.
+	// With another brand picked, none shows: brands share no suggestions,
+	// and these are the first brand's.
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket", "website": "https://repocket.com"})
-	if l := owner.must(200, "GET", sb+"?status=all&brand=repocket", nil); len(l["data"].([]any)) != 3 {
+	if l := owner.must(200, "GET", sb+"?status=all&brand=repocket", nil); len(l["data"].([]any)) != 0 {
 		t.Fatalf("brand picked: %v", l)
 	}
 	for _, name := range []string{"knowledge.suggestion_created", "knowledge.suggestion_approved", "knowledge.suggestion_rejected"} {

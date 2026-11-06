@@ -29,7 +29,7 @@ const statusTone: Record<Status, Tone> = { open: "grey", in_progress: "blue", do
 const views = { todo: "To do", open: "Open", in_progress: "In progress", done: "Done", ignored: "Ignored", all: "Everything" } as const;
 type View = keyof typeof views;
 const severityRank: Record<string, number> = { error: 0, warning: 1, notice: 2 };
-const subjectName = (f: Pick<Fix, "source" | "subject">, hosts: Record<string, string>) => (f.source === "social" ? "A social watch" : hosts[f.subject.id] ?? "A site");
+const subjectName = (f: Pick<Fix, "source" | "subject">, hosts: Record<string, string>) => (f.source === "social" ? "A social watch" : f.source === "ai_visibility" ? "AI answers" : hosts[f.subject.id] ?? "A site");
 
 export function Fixes({ ws, canManage, go }: Props) {
   const [tickets, setTickets] = useState<FixTicket[] | null>(null);

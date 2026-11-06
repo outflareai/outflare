@@ -134,3 +134,11 @@ export function useBrand(ws?: string) {
 export function pickedBrandId(): string {
   return state.brands.find((b) => b.handle === state.brand)?.id ?? "";
 }
+
+// everyBrand runs one brand's list for every active brand and puts the
+// rows together, for a page showing all brands: brand data is only under
+// /v1/brands/{brand}/, so there is no list across brands.
+export async function everyBrand<T>(list: (brand: string) => Promise<{ data?: { data: T[] } }>): Promise<T[]> {
+  const lists = await Promise.all(state.brands.filter((b) => b.status === "active").map((b) => list(b.id)));
+  return lists.flatMap((l) => l.data?.data ?? []);
+}

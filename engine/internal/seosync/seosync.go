@@ -247,6 +247,9 @@ func Fetch(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r conn
 	if q.Page {
 		key += "|page"
 	}
+	if q.From != "" {
+		key += "|from:" + q.From
+	}
 	if !opt.Fresh {
 		var raw []byte
 		var at time.Time
@@ -336,6 +339,12 @@ type payload struct {
 	// Suggest only asks which domains compete with each SEO site, the
 	// daily look for new competitors (suggest.go).
 	Suggest bool `json:"suggest,omitempty"`
+	// RefreshBrand only reads now the numbers of one brand's tracked
+	// competitors that weren't read today (Competition → Refresh).
+	RefreshBrand string `json:"refresh_brand,omitempty"`
+	// ReadCompetitor reads one tracked competitor's search data now
+	// (competitor_read.go).
+	ReadCompetitor string `json:"read_competitor,omitempty"`
 }
 
 // Register adds the job handler.
@@ -515,6 +524,56 @@ func Enqueue(ctx context.Context, q jobs.Querier, ws, integrationID, key string)
 	return enqueue(ctx, q, ws, payload{Integration: integrationID}, key)
 }
 
+// EnqueueRefresh asks for a read now of the numbers of one brand's tracked
+// competitors that the connection hasn't read today.
+func EnqueueRefresh(ctx context.Context, q jobs.Querier, ws, integrationID, brandID string) (int64, error) {
+	return enqueue(ctx, q, ws, payload{Integration: integrationID, RefreshBrand: brandID},
+		fmt.Sprintf("%s:refresh:%s:%d", integrationID, brandID, time.Now().Unix()/60))
+}
+
+// refreshBrand is the RefreshBrand job: each of the brand's SEO sites'
+// tracked competitors, while the budget lasts.
+func (s *Syncer) refreshBrand(ctx context.Context, ws, integrationID, brandID string) error {
+	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
+	if err != nil {
+		if connectors.KindOf(err) == connectors.ErrUnavailable && !errors.Is(err, connectors.ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	r, ok := o.Connector.(connectors.SEOReader)
+	if !ok {
+		return nil
+	}
+	sites, err := LinkSites(ctx, s.Pool, ws)
+	if err != nil {
+		return err
+	}
+	set := SettingsOf(o.Config)
+	for _, site := range sites {
+		if site.BrandID == nil || *site.BrandID != brandID {
+			continue
+		}
+		run, err := s.RefreshSiteCompetitors(ctx, o, r, site, set.Country, time.Now())
+		props := map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "checked": run.Checked, "gaps": run.Gaps, "events": run.Events, "refresh": true}
+		if err != nil {
+			code := "provider_error"
+			var be *BudgetError
+			if errors.As(err, &be) {
+				code = "budget_reached"
+			}
+			props["kind"] = connectors.KindOf(err)
+			track.Fail(ctx, s.Log, track.Event{Name: "seo_competitors.sync_failed", WorkspaceID: ws, Surface: "job", Props: props}, code, err)
+			if errors.As(err, &be) || connectors.KindOf(err) == connectors.ErrAuth {
+				return nil
+			}
+			continue
+		}
+		track.Emit(ctx, track.Event{Name: "seo_competitors.synced", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Success, Props: props})
+	}
+	return nil
+}
+
 // EnqueueRetry asks for a read of the domains a connection has never read
 // or failed to read last time, such as after its budget was raised. It
 // costs nothing for domains that read fine.
@@ -555,6 +614,12 @@ func (s *Syncer) job(ctx context.Context, job jobs.Job) error {
 	}
 	if p.Suggest {
 		return s.suggestDaily(ctx, *job.WorkspaceID, p.Integration)
+	}
+	if p.ReadCompetitor != "" {
+		return s.readCompetitor(ctx, *job.WorkspaceID, p.Integration, p.ReadCompetitor)
+	}
+	if p.RefreshBrand != "" {
+		return s.refreshBrand(ctx, *job.WorkspaceID, p.Integration, p.RefreshBrand)
 	}
 	res, err := s.sync(ctx, *job.WorkspaceID, p.Integration, p.NewOnly, p.Retry)
 	s.report(ctx, *job.WorkspaceID, p.Integration, res, err)

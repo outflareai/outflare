@@ -34,6 +34,9 @@ import (
 
 const (
 	jobCompetitorScan = "coverage.competitor_scan"
+	// competitorScanSpacing is the gap between the daily scans of one
+	// brand's competitors.
+	competitorScanSpacing = 30 * time.Second
 	// competitorLinkRows is how many linking pages one scan reads.
 	competitorLinkRows = 100
 	// competitorSearchDepth is how many search results one scan reads.
@@ -77,9 +80,15 @@ func (s *Server) queueCompetitorScans(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		day := time.Now().UTC().Format("2006-01-02")
+		now := time.Now()
+		day := now.UTC().Format("2006-01-02")
+		// Scans of one brand's competitors are spread out rather than all
+		// started at once, so a long list never takes every worker.
+		perBrand := map[string]int{}
 		for _, d := range list {
-			if err := enqueueCompetitorScan(ctx, tx, d.ws, d.brand, d.id, day); err != nil {
+			at := now.Add(time.Duration(perBrand[d.brand]) * competitorScanSpacing)
+			perBrand[d.brand]++
+			if err := enqueueCompetitorScanAt(ctx, tx, d.ws, d.brand, d.id, day, at); err != nil {
 				return err
 			}
 		}
@@ -88,8 +97,12 @@ func (s *Server) queueCompetitorScans(ctx context.Context) error {
 }
 
 func enqueueCompetitorScan(ctx context.Context, tx pgx.Tx, ws, brand, id, key string) error {
+	return enqueueCompetitorScanAt(ctx, tx, ws, brand, id, key, time.Time{})
+}
+
+func enqueueCompetitorScanAt(ctx context.Context, tx pgx.Tx, ws, brand, id, key string, at time.Time) error {
 	_, err := jobs.Enqueue(ctx, tx, jobs.NewJob{Kind: jobCompetitorScan, WorkspaceID: &ws, Payload: map[string]string{"brand_id": brand, "competitor_id": id},
-		IdempotencyKey: "coverage.competitor_scan:" + id + ":" + key, MaxAttempts: 3})
+		IdempotencyKey: "coverage.competitor_scan:" + id + ":" + key, RunAt: at, MaxAttempts: 3})
 	return err
 }
 
@@ -325,11 +338,11 @@ func (s *Server) coverageCompetitorScanJob(ctx context.Context, j jobs.Job) erro
 		if err := recordWithProps(ctx, tx, nil, ws, "coverage_competitor.scanned", "seo_competitors", req.Competitor, nil, props); err != nil {
 			return err
 		}
-		suggested, won, err := coverageRefreshOpportunities(ctx, tx, ws, req.Brand)
-		if err != nil {
-			return err
-		}
-		return recordWithProps(ctx, tx, nil, ws, "coverage_opportunities.refreshed", "brands", req.Brand, nil, map[string]any{"brand_id": req.Brand, "added": suggested, "won": won})
+		// The brand's opportunities are refreshed once for all the scans
+		// that finish close together, not inside each one: a refresh
+		// rewrites every opportunity the brand has, so dozens of scans
+		// doing it at once queue on the same rows and hold the database.
+		return enqueueOpportunitiesRefresh(ctx, tx, ws, req.Brand, time.Now())
 	})
 	if err != nil {
 		return err

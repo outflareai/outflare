@@ -38,7 +38,7 @@ func TestPartnersBrandLimited(t *testing.T) {
 	geo.must(404, "GET", base+"/partner-programs/rp", nil)
 	geo.must(200, "PATCH", base+"/partner-programs/geo", map[string]any{"hold_days": 10})
 	geo.must(404, "PATCH", base+"/partner-programs/rp", map[string]any{"hold_days": 10})
-	geo.must(403, "PATCH", base+"/partner-programs/geo", map[string]any{"brand": "repocket"})
+	geo.must(400, "PATCH", base+"/partner-programs/geo", map[string]any{"brand": "repocket"})
 	geo.must(403, "POST", base+"/partner-programs", map[string]any{"name": "Theirs", "kind": "affiliate", "brand": "repocket"})
 	geo.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Geonode referrals", "kind": "referral", "brand": "geonode"})
 
@@ -68,14 +68,12 @@ func TestPartnersBrandLimited(t *testing.T) {
 	if len(made) != 1 || made[0].(map[string]any)["partner_id"] != partner["geo"] {
 		t.Fatalf("payouts made: %v", made)
 	}
-	rp := owner.must(200, "POST", base+"/partner-payouts", map[string]any{"program": "rp"})["data"].([]any)[0].(map[string]any)["id"].(string)
+	rp := owner.must(200, "POST", base+"/partner-payouts?brand=repocket", map[string]any{"program": "rp"})["data"].([]any)[0].(map[string]any)["id"].(string)
 	geo.must(404, "POST", base+"/partner-payouts/"+rp+"/paid", map[string]any{"reference": "x"})
 	if n := count("/partner-payouts"); n != 1 {
 		t.Fatalf("payouts: %d", n)
 	}
 
-	// Conversions are reported for the whole workspace, or on a brand's route.
-	geo.must(403, "POST", base+"/partner-conversions", map[string]any{"type": "signup", "email": "c@example.com", "code": "x"})
 }
 
 // Brands own their partners (plans/brands/README.md, step 3): a brand's
@@ -128,8 +126,8 @@ func TestPartnersOnBrandRoutes(t *testing.T) {
 		t.Fatalf("alpha referrals: %d", n)
 	}
 
-	// Every row under the program carries its brand, and moving the
-	// program moves them.
+	// Every row under the program carries its brand, and the program
+	// stays in its brand.
 	owner.must(201, "POST", inBravo+"/partner-programs/bravo-partners/groups", map[string]any{"name": "Gold"})
 	var off int
 	if err := e.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM partner_memberships WHERE workspace_id = $1 AND brand_id IS DISTINCT FROM $2::uuid)
@@ -138,10 +136,33 @@ func TestPartnersOnBrandRoutes(t *testing.T) {
 		+ (SELECT count(*) FROM partner_groups WHERE workspace_id = $1 AND brand_id IS DISTINCT FROM $2::uuid)`, ws, bravo).Scan(&off); err != nil || off != 0 {
 		t.Fatalf("rows outside bravo: %d %v", off, err)
 	}
-	owner.must(200, "PATCH", base+"/partner-programs/bravo-partners", map[string]any{"brand": "alpha"})
-	if err := e.pool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM partner_memberships WHERE workspace_id = $1 AND brand_id IS DISTINCT FROM $2::uuid)
-		+ (SELECT count(*) FROM partner_rewards WHERE workspace_id = $1 AND brand_id IS DISTINCT FROM $2::uuid)
-		+ (SELECT count(*) FROM partner_groups WHERE workspace_id = $1 AND brand_id IS DISTINCT FROM $2::uuid)`, ws, alpha).Scan(&off); err != nil || off != 0 {
-		t.Fatalf("rows left behind: %d %v", off, err)
+	owner.must(400, "PATCH", base+"/partner-programs/bravo-partners", map[string]any{"brand": "alpha"})
+}
+
+// Partner and promo codes are unique per brand: two brands can each give a
+// partner the same code, and each brand's conversions credit its own.
+func TestPartnerCodesPerBrand(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	alpha := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Alpha", "handle": "alpha"})["id"].(string)
+	bravo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Bravo", "handle": "bravo"})["id"].(string)
+	inAlpha, inBravo := "/v1/brands/"+alpha, "/v1/brands/"+bravo
+
+	owner.must(201, "POST", inAlpha+"/partner-programs", map[string]any{"name": "Alpha partners", "slug": "partners", "kind": "affiliate"})
+	owner.must(201, "POST", inBravo+"/partner-programs", map[string]any{"name": "Bravo partners", "slug": "partners", "kind": "affiliate"})
+	a := owner.must(201, "POST", inAlpha+"/partners", map[string]any{"program": "partners", "email": "ana@alpha.example", "code": "ana"})
+	b := owner.must(201, "POST", inBravo+"/partners", map[string]any{"program": "partners", "email": "ana@bravo.example", "code": "ana"})
+	// Within a brand the code is still taken.
+	owner.must(409, "POST", inBravo+"/partners", map[string]any{"program": "partners", "email": "bo@bravo.example", "code": "ana"})
+
+	for _, c := range []struct{ route, partner string }{{inAlpha, a["id"].(string)}, {inBravo, b["id"].(string)}} {
+		got := owner.must(201, "POST", c.route+"/partner-conversions", map[string]any{"type": "signup", "customer_id": "u-" + c.partner, "email": "c-" + c.partner[:8] + "@example.com", "ref": "ana"})
+		if got["credited"] != true || got["partner_id"] != c.partner {
+			t.Fatalf("%s conversion = %v, want partner %s", c.route, got, c.partner)
+		}
 	}
+
+	// A program stays in its brand.
+	owner.must(400, "PATCH", base+"/partner-programs/"+owner.must(200, "GET", inBravo+"/partner-programs/partners", nil)["id"].(string), map[string]any{"brand": "alpha"})
 }

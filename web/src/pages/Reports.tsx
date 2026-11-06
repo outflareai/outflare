@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { ErrorText, field, Loading, PageHeader, Stat, Stats } from "../ui";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useBrand } from "@/lib/brand";
+import { everyBrand, useBrand } from "@/lib/brand";
 
 type Group = "day" | "week" | "sequence" | "step" | "mailbox" | "domain" | "brand";
 const groups: { id: Group; label: string }[] = [
@@ -35,8 +35,10 @@ export function Reports({ ws }: { ws: string }) {
   const brandKey = brandQuery.brand ?? "";
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/sequences", { params: { path: { ws }, query: { brand: brandKey || "all" } } }).then(({ data }) => setSequences(data?.data ?? []));
-  }, [ws, brandKey]);
+    const list = (brand: string) => api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand } } });
+    const picked = brands.find((b) => b.handle === brandKey)?.id;
+    (picked ? list(picked).then(({ data }) => data?.data ?? []) : everyBrand(list)).then(setSequences);
+  }, [ws, brandKey, brands.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const from = new Date(Date.now() - days * 86400000).toISOString();

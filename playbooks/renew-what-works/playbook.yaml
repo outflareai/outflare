@@ -31,15 +31,15 @@ inputs:
     example: 80 USD
 steps:
   - say: Read the brand's context, and list partnerships at Live or Measured.
-    tools: [getBrandContext, listRecords]
+    tools: [getBrandContext, listBrandRecords]
   - say: For each one, add up its recorded spend and its visits, sign-ups and paying customers from its link and code.
     tools: [listSpend, getAnalyticsReport, outcomesReport]
   - say: Rank them by cost per paying customer, mark each as renew, renegotiate or stop against the target, and move them to Measured.
-    tools: [updateRecord]
+    tools: [updateBrandRecord]
   - say: Draft a renewal for each one to renew, a new rate for each to renegotiate, and a short thank-you for the rest, held until a person approves them.
     tools: [createBrandSequence, replaceBrandSequenceSteps, previewBrandSequence]
   - say: Once the person decides, move each partnership to Renewed or Declined.
-    tools: [updateRecord]
+    tools: [updateBrandRecord]
 guardrails:
   - Never agree a renewal, a new rate or a payment without a person's approval.
   - Keep the numbers you share with a creator to their own deal.

@@ -288,7 +288,11 @@ test("projects were removed: no project tools", async () => {
 
 test("analytics for agents: changes, catalog resource, prompts and compact answers", async () => {
   const BRAND = "33333333-3333-4333-8333-333333333333";
-  const { client, calls } = await connect(() => [200, { websites: [{ host: "example.com", tools: [{ metrics: [{ metric: "ctr", now: 0.0345678, before: null }] }] }], units: {} }]);
+  const { client, calls } = await connect((req) =>
+    new URL(req.url).pathname.endsWith("/brands")
+      ? [200, { data: [{ id: BRAND, handle: "acme" }] }]
+      : [200, { websites: [{ host: "example.com", tools: [{ metrics: [{ metric: "ctr", now: 0.0345678, before: null }] }] }], units: {} }],
+  );
   const res = await client.callTool({ name: "get_analytics_changes", arguments: { brand: BRAND, host: "example.com", days: 28 } });
   assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/analytics/changes`);
   assert.equal(calls[0].url.searchParams.get("days"), "28");
@@ -298,7 +302,9 @@ test("analytics for agents: changes, catalog resource, prompts and compact answe
   const resources = (await client.listResources()).resources;
   assert.ok(resources.some((r) => r.uri === "outflare://analytics/catalog"));
   const read = await client.readResource({ uri: "outflare://analytics/catalog" });
-  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/analytics/catalog`);
+  // Each brand has its own catalog: the first brand's without OUTFLARE_BRAND.
+  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/brands`);
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/analytics/catalog`);
   assert.equal(read.contents[0].mimeType, "application/json");
 
   const prompts = (await client.listPrompts()).prompts.map((p) => p.name);

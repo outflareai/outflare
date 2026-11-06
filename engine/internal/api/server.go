@@ -587,7 +587,11 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSearchInsights(mux)
 	s.routesCompetitors(mux)
 	s.routesCompetition(mux)
+	s.routesCompetitionRefresh(mux)
+	s.routesCompetitionDiscover(mux)
+	s.routesCompetitionCompetitor(mux)
 	s.routesCompetitorProfiles(mux)
+	s.routesCompetitorPricing(mux)
 	s.routesLinkProspects(mux)
 	s.routesNews(mux)
 	s.routesBrandCoverage(mux)
@@ -605,11 +609,14 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesSEOConversions(mux)
 	s.routesSEORegressions(mux)
 	s.routesAIVisibility(mux)
+	s.routesAIVisibilityClaims(mux)
+	s.routesAIVisibilityShares(mux)
 	s.routesSocial(mux)
 	s.routesSocialAccounts(mux)
 	s.routesSocialPublish(mux)
 	s.routesRedditCampaigns(mux)
 	s.routesBrandLinks(mux)
+	s.routesBrandKnowledge(mux)
 	s.routesReviews(mux)
 	s.routesReviewRequests(mux)
 	s.routesAIFacts(mux)
@@ -689,7 +696,7 @@ func (s *Server) buildHandler() http.Handler {
 	if s.webDir != "" {
 		mux.Handle("/", spaHandler(s.webDir))
 	}
-	var h http.Handler = mux
+	var h http.Handler = s.retiredGate(mux)
 	for i := len(s.middleware) - 1; i >= 0; i-- {
 		h = s.middleware[i](h)
 	}

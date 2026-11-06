@@ -131,7 +131,7 @@ func (s *Server) assistantSources(ctx context.Context, ws string, brand *string)
 	out := assistantSources{Website: true}
 	var raw []byte
 	err := s.pool.QueryRow(ctx, `SELECT find_on_website, slack_integration_id::text, slack_channels FROM support_assistant_settings
-		WHERE workspace_id = $1 AND (brand_id IS NULL OR brand_id = $2::uuid) ORDER BY brand_id IS NULL LIMIT 1`, ws, brand).
+		WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM $2::uuid LIMIT 1`, ws, brand).
 		Scan(&out.Website, &out.Slack, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
@@ -270,8 +270,7 @@ func (s *Server) findAnswer(ctx context.Context, ws string, brand *string, test 
 func (s *Server) websiteSources(ctx context.Context, ws string, brand *string, test bool, ts []string) ([]answerSource, error) {
 	var site string
 	err := s.pool.QueryRow(ctx, `SELECT COALESCE(
-			(SELECT COALESCE(NULLIF(website, ''), CASE WHEN cardinality(domains) > 0 THEN 'https://' || domains[1] END) FROM brands WHERE id = $2::uuid AND workspace_id = $1),
-			(SELECT NULLIF(website, '') FROM workspace_context WHERE workspace_id = $1), '')`, ws, brand).Scan(&site)
+			(SELECT COALESCE(NULLIF(website, ''), CASE WHEN cardinality(domains) > 0 THEN 'https://' || domains[1] END) FROM brands WHERE id = COALESCE($2::uuid, outflare_first_brand($1)) AND workspace_id = $1), '')`, ws, brand).Scan(&site)
 	if err != nil {
 		return nil, err
 	}

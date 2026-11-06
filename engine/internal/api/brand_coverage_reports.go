@@ -56,7 +56,31 @@ func (s *Server) coverageReport(ctx context.Context, a *access, from, to, filter
 	if err != nil {
 		return nil, err
 	}
-	return s.coverageMomentum(ctx, a, where, args, data)
+	if data, err = s.coverageMomentum(ctx, a, where, args, data); err != nil {
+		return nil, err
+	}
+	return coverageFound(ctx, s.pool, a, data)
+}
+
+// coverageFound adds what discovery has found to a report: every page that
+// links to or mentions the brand, from its links, news, social, web
+// searches and AI answers, whether or not anyone has reviewed it, so the
+// overview shows the brand's whole footprint and not only the placements
+// someone tracks.
+func coverageFound(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, a *access, data json.RawMessage) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := q.QueryRow(ctx, `WITH c AS (SELECT source,kind,status,created_at,lower(regexp_replace(split_part(split_part(url,'://',2),'/',1),'^www\.','')) AS host
+ FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND status<>'dismissed')
+ SELECT $3::jsonb || jsonb_build_object('found',jsonb_build_object(
+ 'pages',(SELECT count(*) FROM c),'sites',(SELECT count(DISTINCT host) FROM c),
+ 'new_28d',(SELECT count(*) FROM c WHERE created_at>now()-interval '28 days'),
+ 'unreviewed',(SELECT count(*) FROM c WHERE status='new'),
+ 'by_source',coalesce((SELECT jsonb_agg(x) FROM (SELECT source,count(*) AS pages,count(DISTINCT host) AS sites FROM c GROUP BY source ORDER BY count(*) DESC)x),'[]'),
+ 'top_sites',coalesce((SELECT jsonb_agg(x) FROM (SELECT host,count(*) AS pages FROM c GROUP BY host ORDER BY count(*) DESC,host LIMIT 20)x),'[]')))`,
+		a.WorkspaceID, a.Brand, data).Scan(&out)
+	return out, err
 }
 
 // coverageMomentum adds the CMO view to a report: are placements growing,

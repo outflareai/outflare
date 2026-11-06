@@ -38,6 +38,11 @@ func (PostHog) Definition() c.Definition {
 	return d
 }
 
+// FiltersTestAccounts: a PostHog project keeps filters for internal and
+// test users (Project settings > Filter out internal and test users), such
+// as a bot cohort or a fake crawler's referrer, which reports can apply.
+func (PostHog) FiltersTestAccounts() bool { return true }
+
 func (PostHog) Reports() []string {
 	return []string{c.ReportTraffic, c.ReportPages, c.ReportSources, c.ReportEvents}
 }
@@ -91,8 +96,10 @@ func (p PostHog) Sites(ctx context.Context, cl *c.Client, creds c.Creds) ([]c.An
 }
 
 // hogql runs one query. Every value placed in SQL is a checked date or a
-// number, never text from the caller.
-func (p PostHog) hogql(ctx context.Context, cl *c.Client, creds c.Creds, project, sql string) ([][]any, error) {
+// number, never text from the caller. With testAccounts, PostHog puts the
+// project's internal and test user filters where the query says
+// {filters}.
+func (p PostHog) hogql(ctx context.Context, cl *c.Client, creds c.Creds, project, sql string, testAccounts bool) ([][]any, error) {
 	k, base, err := p.open(cl, creds)
 	if err != nil {
 		return nil, err
@@ -100,7 +107,11 @@ func (p PostHog) hogql(ctx context.Context, cl *c.Client, creds c.Creds, project
 	var resp struct {
 		Results [][]any `json:"results"`
 	}
-	body := map[string]any{"query": map[string]any{"kind": "HogQLQuery", "query": sql}, "name": "outflare analytics"}
+	query := map[string]any{"kind": "HogQLQuery", "query": sql}
+	if testAccounts {
+		query["filters"] = map[string]any{"filterTestAccounts": true}
+	}
+	body := map[string]any{"query": query, "name": "outflare analytics"}
 	err = k.post(ctx, base+"/api/projects/"+project+"/query/", body, &resp)
 	return resp.Results, err
 }
@@ -110,9 +121,9 @@ func (p PostHog) Report(ctx context.Context, cl *c.Client, creds c.Creds, q c.An
 		return c.AnalyticsReport{}, err
 	}
 	rep := c.AnalyticsReport{Report: q.Report, Site: q.Site, From: q.From, To: q.To}
-	when := fmt.Sprintf("timestamp >= toDateTime('%s 00:00:00') AND timestamp < toDateTime('%s 00:00:00')", q.From, dayAfter(q.To))
+	when := fmt.Sprintf("timestamp >= toDateTime('%s 00:00:00') AND timestamp < toDateTime('%s 00:00:00')", q.From, dayAfter(q.To)) + testFilters(q.TestAccounts)
 	pageviews := "event = '$pageview' AND " + when
-	run := func(sql string) ([][]any, error) { return p.hogql(ctx, cl, creds, q.Site, sql) }
+	run := func(sql string) ([][]any, error) { return p.hogql(ctx, cl, creds, q.Site, sql, q.TestAccounts) }
 	rows := func(res [][]any, m func([]any) c.Metrics) []c.AnalyticsRow {
 		out := []c.AnalyticsRow{}
 		for _, r := range res {
@@ -183,6 +194,15 @@ func (p PostHog) Report(ctx context.Context, cl *c.Client, creds c.Creds, q c.An
 	return rep, nil
 }
 
+// testFilters is where PostHog applies the project's internal and test
+// user filters; without it, filterTestAccounts is accepted and ignored.
+func testFilters(on bool) string {
+	if on {
+		return " AND {filters}"
+	}
+	return ""
+}
+
 // searchReferrer matches the referring domain of a search engine's
 // results page.
 const searchReferrer = `(^|[.])(google|bing|duckduckgo|yahoo|yandex|baidu|ecosia|naver|search[.]brave)[.]`
@@ -210,7 +230,7 @@ func (p PostHog) PageConversions(ctx context.Context, cl *c.Client, creds c.Cred
 	if limit <= 0 || limit > 50000 {
 		limit = 50000
 	}
-	when := fmt.Sprintf("timestamp >= toDateTime('%s 00:00:00') AND timestamp < toDateTime('%s 00:00:00')", q.From, dayAfter(q.To))
+	when := fmt.Sprintf("timestamp >= toDateTime('%s 00:00:00') AND timestamp < toDateTime('%s 00:00:00')", q.From, dayAfter(q.To)) + testFilters(q.TestAccounts)
 	sql := fmt.Sprintf(`SELECT toDate(start) AS day, host, path, count() AS sessions, count(DISTINCT person) AS visitors,
 	countIf(converted) AS conversions, countIf(search) AS search_sessions, countIf(search AND converted) AS search_conversions
 FROM (
@@ -225,7 +245,7 @@ FROM (
 	HAVING countIf(event = '$pageview') > 0
 )
 GROUP BY day, host, path ORDER BY sessions DESC LIMIT %d`, searchReferrer, converted, when, filter, limit)
-	res, err := p.hogql(ctx, cl, creds, q.Site, sql)
+	res, err := p.hogql(ctx, cl, creds, q.Site, sql, q.TestAccounts)
 	if err != nil {
 		return nil, err
 	}

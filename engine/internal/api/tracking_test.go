@@ -44,6 +44,10 @@ func TestTrackingDomainAndClicks(t *testing.T) {
 	// Links to the brand's own site carry the sequence's campaign
 	// (outbound_email); the tracking domain is under it but its links don't.
 	// The leads and the sequence are Acme's (brands step 5).
+	// A mailbox sends only for its own brand's sequences (brands step 6).
+	for _, m := range mailboxIDs(t, owner, base) {
+		owner.must(200, "POST", base+"/brands/acme/add", map[string]any{"mailbox_ids": []string{m}})
+	}
 	_, imp := owner.raw("POST", base+"/leads/import?list=L&brand=acme", "text/csv", "email,first_name\nli@one-io.example,Li\n")
 	seq := owner.must(201, "POST", base+"/sequences", map[string]any{
 		"name": "Links", "brand_id": "acme", "daily_new_limit": 10, "send_days": []int{1, 2, 3, 4, 5, 6, 7}, "send_start": "00:00", "send_end": "23:59", "track_clicks": true, "unsubscribe_header": false,

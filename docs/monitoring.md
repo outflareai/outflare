@@ -39,7 +39,7 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `outflare_http_requests_total` | `route`, `code` (`2xx`...`5xx`) | Requests served. `route` is the route pattern (`GET /v1/workspaces/{ws}/leads`), `unmatched` when none matched. |
+| `outflare_http_requests_total` | `route`, `code` (`2xx`...`5xx`) | Requests served. `route` is the route pattern (`GET /v1/brands/{brand}/leads`), `unmatched` when none matched. |
 | `outflare_http_request_duration_seconds` | `route` | Request time histogram. `GET /mcp` is the hosted MCP server's event stream and stays open, so leave it out of latency. |
 | `outflare_http_requests_in_flight` | | Requests being served now. |
 | `outflare_http_rate_limited_total` | `limit` (`api`, `register`, `site_ip`, `site_key`, `site_visitor`, `site_flags`, `site_consent`) | Requests a rate limit refused with 429. |
@@ -149,6 +149,8 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_social_stuck_accounts` | `channel`, `code` | Active social accounts whose last 3 or more reads failed, retries included, by the last error code. |
 | `outflare_reviews_stuck_pages` | `platform`, `code` | Active review pages whose last 3 or more reads failed, retries included, by the last error code. |
 | `outflare_reviews_oldest_read_seconds` | `platform` | Time since a read of the least recently tried active review page ended, read or failed. Pages without a connected page reader are left out. |
+| `outflare_pricing_page_reads_total` | `outcome` (`success`, `blocked`, `slow_page`, `page_failed`, `page_not_found`, `no_prices_found`, `save_failed`, `connector_error`) | Weekly reads of the brand's and its competitors' [pricing pages](competitors.md#prices). |
+| `outflare_pricing_oldest_read_seconds` | | Time since a read of the least recently tried pricing page ended, read or failed. Pages without a connected page reader are left out. |
 | `outflare_news_search_runs_total` | `purpose` (`topic`, `coverage`), `outcome` (`success`, `connector_needed`, `usage_limit_reached`, `connector_error`, `internal`) | Runs of saved [news searches](news-watch.md). |
 | `outflare_news_found_total` | `kind` (`article`, `coverage`) | Articles and coverage items news searches kept for the first time. |
 | `outflare_inbound_email_received_total` | `purpose` (`support`, `ai_receipts`, `none`), `outcome` (`accepted`, `duplicate`, `unknown_address`, `bad_signature`, `too_large`, `error`) | Messages the operator's mail receiver delivered to [inbound email](inbound-email.md). |
@@ -184,6 +186,10 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_seo_link_replies_read_total` | `kind` (`agreed`, `declined`, `wants_payment`, `wants_content`, `other`, `no_ai`, `ai_unavailable`, `ai_failed`) | Replies to link pitches the workspace's AI read. |
 | `outflare_seo_link_live_checks_total` | `outcome` (`live`, `not_yet`, `removed`, `still_live`, `unreachable`) | Checks of agreed and live links. |
 | `outflare_seo_web_searches_total` | `outcome` (`done`, `budget_reached`, `connector_invalid`, `connector_auth`, `connector_quota`, `connector_unavailable`) | Searches on workspaces' own SERP connections (`POST /search-results`). |
+| `outflare_ai_visibility_screen_answers_total` | `engine` (`chatgpt`, `gemini`, `other`), `outcome` (as web searches) | AI visibility answers read from ChatGPT's and Gemini's own screens through workspaces' own answer readers (DataForSEO's LLM Scraper). |
+| `outflare_ai_visibility_demand_reads_total` | `kind` (`questions`, `volume`, `benchmark`, `other`), `outcome` (as web searches) | Reads of what people ask AI assistants through workspaces' own demand readers: real questions (DataForSEO's LLM Mentions) and AI search volume (its AI keyword data). |
+| `outflare_ai_visibility_stance_reads_total` | `outcome` (`judged`, `skipped`, `ai_failed`, `refused`, `ai_model_needed`, provider codes) | AI visibility answers read by workspaces' own AI for whether they recommend, list or warn against each brand. |
+| `outflare_ai_visibility_prompt_drafts_total` | `outcome` (`success`, `ai_failed`, `connector_auth`, `ai_budget_reached`, `ai_model_needed`, `connector_needed`) | Drafts of AI visibility questions by workspaces' own AI. |
 | `outflare_playbooks_automation_runs_total` | `kind` (`schedule`, `event`), `outcome` (`started`, `held`, `failed`, `capped`) | Playbook automations firing: runs started, held for a person (a limit, a connection, the approver), failed (retried in 15 minutes), or left for tomorrow by the daily cap. |
 | `outflare_playbooks_automation_lag_seconds` | | How long the most overdue active playbook automation has waited past its run time, at the last pass. |
 | `outflare_build_info` | `version`, `role` | The running version and role (`OUTFLARE_ROLE`); the dashboard marks each change of version as a deploy. |
@@ -217,6 +223,7 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareJobKindTakesWorkers`: one job kind has held over half the job workers for 10 minutes, so other jobs and, through the shared database connections, page loads wait.
 - `OutflareJobsReaped`: jobs ran past their lease (their worker died mid-job) and were put back in the queue, so they may run twice.
 - `OutflareJobsReleasedAtShutdown`: jobs of one kind were still running when a shutdown's grace ended, so their handler ignores cancellation; make it return when its context ends.
 - `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
@@ -316,6 +323,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 - over 5 A/B test results failing to count in 30 minutes
 - a review page not read for two days
 - over half of review page reads failing
+- a pricing page not read for nine days
+- over half of pricing page reads failing (bot checks aside)
 - a news search over an hour past its time
 - over half of news search runs failing with a provider or internal error
 - over half of news article reads failing to reach the page
@@ -376,6 +385,10 @@ An extension registers its own Prometheus collectors with `Host.Metrics()`, so t
 
 - **OutflareReviewRequestsBehind**: review invitation dispatch is over five minutes behind.
 - **OutflareReviewRequestsFailing**: review invitation batches repeatedly retry or die.
+- **OutflareAIScreenAnswersFailing**: over half of AI visibility answers from ChatGPT's and Gemini's screens fail for reasons other than a budget.
+- **OutflareAIDemandReadsFailing**: over half of reads of real AI questions and AI search volume fail for reasons other than a budget.
+- **OutflareAIStanceReadsFailing**: over half of AI visibility answers can't be read for their stances.
+- **OutflareAIPromptDraftsFailing**: over half of AI visibility question drafts fail.
 
 The Review invitations dashboard row shows dispatch results, due-job delay and batch duration, using the common job metrics.
 

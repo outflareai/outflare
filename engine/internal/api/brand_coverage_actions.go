@@ -151,7 +151,7 @@ func (s *Server) coverageObservations(w http.ResponseWriter, r *http.Request) {
 		if versions, ok := ev["knowledge_versions"].(map[string]any); ok {
 			for id, used := range versions {
 				var version int
-				e := s.pool.QueryRow(r.Context(), "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", a.WorkspaceID, a.Brand, id).Scan(&version)
+				e := s.pool.QueryRow(r.Context(), "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", a.WorkspaceID, a.Brand, id).Scan(&version)
 				if errors.Is(e, pgx.ErrNoRows) {
 					delete(ev, "assessment")
 					ev["status"] = "source_unavailable"
@@ -170,7 +170,7 @@ func (s *Server) coverageObservations(w http.ResponseWriter, r *http.Request) {
 		for _, f := range findings {
 			finding, _ := f.(map[string]any)
 			var version int
-			err = s.pool.QueryRow(r.Context(), "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", a.WorkspaceID, a.Brand, finding["item_id"]).Scan(&version)
+			err = s.pool.QueryRow(r.Context(), "SELECT version FROM knowledge_items WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND deleted_at IS NULL AND status='published' AND visibility IN ('public','customers_ai')", a.WorkspaceID, a.Brand, finding["item_id"]).Scan(&version)
 			if errors.Is(err, pgx.ErrNoRows) {
 				delete(ev, "assessment")
 				ev["status"] = "source_unavailable"
@@ -284,8 +284,11 @@ func (s *Server) coverageReconcile(w http.ResponseWriter, r *http.Request) {
 	var processed int
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		var err error
-		found, processed, err = coverageDiscover(r.Context(), tx, a)
-		return err
+		if found, processed, err = coverageDiscover(r.Context(), tx, a); err != nil {
+			return err
+		}
+		// The new finds are read to see whether they're about the brand.
+		return enqueueCoverageVerify(r.Context(), tx, a.WorkspaceID, a.Brand, "now:"+time.Now().UTC().Format(time.RFC3339Nano))
 	})
 	if s.coverageError(w, r, err) {
 		return

@@ -59,8 +59,10 @@ const (
 // LinkReadRequest asks who links to Target: a page URL when Page, else a
 // domain.
 type LinkReadRequest struct {
-	Target       string
-	Page         bool
+	Target string
+	Page   bool
+	// From keeps only links from pages on this domain.
+	From         string
 	Limit        int
 	SiteID       *string
 	BrandID      *string
@@ -90,7 +92,7 @@ func LinkQuery(req LinkReadRequest) (connectors.SEOQuery, error) {
 	if limit <= 0 {
 		limit = LinkReadRows
 	}
-	return connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOLinks, Target: req.Target, Page: req.Page, Limit: min(limit, MaxLinkReadRows)})
+	return connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOLinks, Target: req.Target, Page: req.Page, From: req.From, Limit: min(limit, MaxLinkReadRows)})
 }
 
 // EstimateLinkRead is about what a read would cost on the connection, in
@@ -226,9 +228,9 @@ func ReadDeadPages(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened
 	}
 	rows, err := pool.Query(ctx, `
 		SELECT p.url, c.id::text FROM competitor_pages p JOIN seo_competitors c ON c.id = p.competitor_id
-		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'tracked' AND p.gone_at > now() - interval '8 days'
+		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'tracked' AND p.gone_at > now() - interval '8 days' AND `+notPlatform("$4")+`
 		  AND NOT EXISTS (SELECT 1 FROM link_reads x WHERE x.workspace_id = $1 AND x.target = p.url AND x.scope = 'page' AND x.status = 'done')
-		ORDER BY p.gone_at DESC, p.url LIMIT $3`, o.WorkspaceID, site.ID, WeeklyReadPages)
+		ORDER BY p.gone_at DESC, p.url LIMIT $3`, o.WorkspaceID, site.ID, WeeklyReadPages, platformList())
 	if err != nil {
 		return run, err
 	}

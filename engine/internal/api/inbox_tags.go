@@ -16,17 +16,44 @@ import (
 
 // Inbox tags and saved views. Tags are the names on a reply (stored in the
 // inbound_messages.tags column), kept in a list with colours; a view is a
-// saved set of inbox filters, for one person or shared with the workspace.
+// saved set of inbox filters, for one person or shared with the team. Both
+// are each brand's own (plans/brands/README.md): the brand routes act on
+// their brand, the workspace routes on ?brand=, else the first brand.
 func (s *Server) routesInboxTags(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
-	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox-tags", s.inWorkspace(read, s.listInboxTags))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox-tags", s.inWorkspace(manage, s.createInboxTag))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/inbox-tags/{id}", s.inWorkspace(manage, s.updateInboxTag))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/inbox-tags/{id}", s.inWorkspace(manage, s.deleteInboxTag))
-	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox-views", s.inWorkspace(read, s.listInboxViews))
-	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox-views", s.inWorkspace(read, s.createInboxView))
-	mux.HandleFunc("PATCH /v1/workspaces/{ws}/inbox-views/{id}", s.inWorkspace(read, s.updateInboxView))
-	mux.HandleFunc("DELETE /v1/workspaces/{ws}/inbox-views/{id}", s.inWorkspace(read, s.deleteInboxView))
+	mux.HandleFunc("GET /v1/brands/{brand}/inbox-tags", s.onBrand(read, s.listInboxTags))
+	mux.HandleFunc("POST /v1/brands/{brand}/inbox-tags", s.onBrand(manage, s.createInboxTag))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/inbox-tags/{id}", s.onBrand(manage, s.updateInboxTag))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/inbox-tags/{id}", s.onBrand(manage, s.deleteInboxTag))
+	mux.HandleFunc("GET /v1/brands/{brand}/inbox-views", s.onBrand(read, s.listInboxViews))
+	mux.HandleFunc("POST /v1/brands/{brand}/inbox-views", s.onBrand(read, s.createInboxView))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/inbox-views/{id}", s.onBrand(read, s.updateInboxView))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/inbox-views/{id}", s.onBrand(read, s.deleteInboxView))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox-tags", s.inBrand(read, s.listInboxTags))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox-tags", s.inBrand(manage, s.createInboxTag))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/inbox-tags/{id}", s.inBrand(manage, s.updateInboxTag))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/inbox-tags/{id}", s.inBrand(manage, s.deleteInboxTag))
+	mux.HandleFunc("GET /v1/workspaces/{ws}/inbox-views", s.inBrand(read, s.listInboxViews))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/inbox-views", s.inBrand(read, s.createInboxView))
+	mux.HandleFunc("PATCH /v1/workspaces/{ws}/inbox-views/{id}", s.inBrand(read, s.updateInboxView))
+	mux.HandleFunc("DELETE /v1/workspaces/{ws}/inbox-views/{id}", s.inBrand(read, s.deleteInboxView))
+}
+
+// inboxBrand is the brand whose tags or views a route reads or writes. It
+// writes the error and returns false when there is none to act on.
+func (s *Server) inboxBrand(w http.ResponseWriter, r *http.Request) (string, bool) {
+	brand, ok := s.settingsBrand(w, r)
+	if ok && brand == "" {
+		writeError(w, r, http.StatusConflict, "conflict", "the workspace has no brand yet: add one first")
+		return "", false
+	}
+	return brand, ok
+}
+
+// replyInBrand is the condition for a reply of the brand $n: its own
+// brand, or the workspace's first for a reply that has none.
+func replyInBrand(alias, n string) string {
+	return `COALESCE(` + alias + `brand_id, outflare_first_brand(` + alias + `workspace_id)) = ` + n + `::uuid`
 }
 
 // tagColors are the colours a tag can have; the web app maps each to a
@@ -43,11 +70,15 @@ type inboxTag struct {
 
 func (s *Server) listInboxTags(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
 	rows, err := s.pool.Query(r.Context(), `
 		SELECT t.id, t.name, t.color,
-		       (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = t.workspace_id AND t.name = ANY(i.tags))::int,
+		       (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = t.workspace_id AND t.name = ANY(i.tags) AND `+replyInBrand("i.", "$2")+`)::int,
 		       t.created_at
-		FROM inbox_tags t WHERE t.workspace_id = $1 ORDER BY t.name`, a.WorkspaceID)
+		FROM brand_inbox_tags t WHERE t.workspace_id = $1 AND t.brand_id = $2 ORDER BY t.name`, a.WorkspaceID, brand)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -78,7 +109,7 @@ func tagColor(c *string) (string, error) {
 	return *c, nil
 }
 
-func (s *Server) oneInboxTag(w http.ResponseWriter, r *http.Request) (*inboxTag, bool) {
+func (s *Server) oneInboxTag(w http.ResponseWriter, r *http.Request, brand string) (*inboxTag, bool) {
 	a := accessFrom(r.Context())
 	id := r.PathValue("id")
 	if !validUUID(id) {
@@ -86,8 +117,8 @@ func (s *Server) oneInboxTag(w http.ResponseWriter, r *http.Request) (*inboxTag,
 		return nil, false
 	}
 	var t inboxTag
-	err := s.pool.QueryRow(r.Context(), `SELECT id, name, color, 0, created_at FROM inbox_tags WHERE id = $1 AND workspace_id = $2`,
-		id, a.WorkspaceID).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
+	err := s.pool.QueryRow(r.Context(), `SELECT id, name, color, 0, created_at FROM brand_inbox_tags WHERE id = $1 AND workspace_id = $2 AND brand_id = $3`,
+		id, a.WorkspaceID, brand).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "tag not found")
 		return nil, false
@@ -118,28 +149,33 @@ func (s *Server) createInboxTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", string(inv))
 		return
 	}
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var t inboxTag
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM inbox_tags WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM brand_inbox_tags WHERE brand_id = $1`, brand).Scan(&n); err != nil {
 			return err
 		}
 		if n >= 200 {
-			return errInvalid("a workspace can have at most 200 tags")
+			return errInvalid("a brand can have at most 200 tags")
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO inbox_tags (workspace_id, name, color) VALUES ($1, $2, $3)
-			ON CONFLICT (workspace_id, name) DO NOTHING
+			INSERT INTO brand_inbox_tags (workspace_id, brand_id, name, color) VALUES ($1, $4, $2, $3)
+			ON CONFLICT (brand_id, name) DO NOTHING
 			RETURNING id, name, color,
-			          (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = $1 AND $2 = ANY(i.tags))::int, created_at`, a.WorkspaceID, name, color).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
+			          (SELECT count(*) FROM inbound_messages i WHERE i.workspace_id = $1 AND $2 = ANY(i.tags) AND `+replyInBrand("i.", "$4")+`)::int, created_at`,
+			a.WorkspaceID, name, color, brand).Scan(&t.ID, &t.Name, &t.Color, &t.Replies, &t.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
 		if err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_tag.created", "inbox_tag", t.ID, map[string]any{"name": name, "color": color})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_tag.created", "inbox_tag", t.ID, map[string]any{"name": name, "color": color, "brand_id": brand})
 	})
 	switch {
 	case errors.As(err, &inv):
@@ -168,7 +204,11 @@ func (s *Server) updateInboxTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send name or color")
 		return
 	}
-	cur, ok := s.oneInboxTag(w, r)
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
+	cur, ok := s.oneInboxTag(w, r, brand)
 	if !ok {
 		return
 	}
@@ -189,24 +229,26 @@ func (s *Server) updateInboxTag(w http.ResponseWriter, r *http.Request) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if name != cur.Name {
 			var taken bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM inbox_tags WHERE workspace_id = $1 AND name = $2)`, a.WorkspaceID, name).Scan(&taken); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM brand_inbox_tags WHERE brand_id = $1 AND name = $2)`, brand, name).Scan(&taken); err != nil {
 				return err
 			}
 			if taken {
 				return errConflict
 			}
+			// Only the brand's replies: another brand's tag of the same
+			// name is its own.
 			if _, err := tx.Exec(ctx, `
 				UPDATE inbound_messages SET tags = array_replace(tags, $2, $3)
-				WHERE workspace_id = $1 AND $2 = ANY(tags)`, a.WorkspaceID, cur.Name, name); err != nil {
+				WHERE workspace_id = $1 AND $2 = ANY(tags) AND `+replyInBrand("", "$4"), a.WorkspaceID, cur.Name, name, brand); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE inbox_tags SET name = $3, color = $4 WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, name, color); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE brand_inbox_tags SET name = $3, color = $4 WHERE id = $1 AND brand_id = $2`,
+			cur.ID, brand, name, color); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_tag.updated", "inbox_tag", cur.ID,
-			map[string]any{"name": name, "previous_name": cur.Name, "color": color})
+			map[string]any{"name": name, "previous_name": cur.Name, "color": color, "brand_id": brand})
 	})
 	switch {
 	case errors.Is(err, errConflict):
@@ -222,22 +264,26 @@ func (s *Server) updateInboxTag(w http.ResponseWriter, r *http.Request) {
 // deleteInboxTag removes a tag from the list and from every reply.
 func (s *Server) deleteInboxTag(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	cur, ok := s.oneInboxTag(w, r)
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
+	cur, ok := s.oneInboxTag(w, r, brand)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = array_remove(tags, $2) WHERE workspace_id = $1 AND $2 = ANY(tags)`,
-			a.WorkspaceID, cur.Name)
+		tag, err := tx.Exec(ctx, `UPDATE inbound_messages SET tags = array_remove(tags, $2) WHERE workspace_id = $1 AND $2 = ANY(tags) AND `+replyInBrand("", "$3"),
+			a.WorkspaceID, cur.Name, brand)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM inbox_tags WHERE id = $1 AND workspace_id = $2`, cur.ID, a.WorkspaceID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM brand_inbox_tags WHERE id = $1 AND brand_id = $2`, cur.ID, brand); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_tag.deleted", "inbox_tag", cur.ID,
-			map[string]any{"name": cur.Name, "replies": tag.RowsAffected()})
+			map[string]any{"name": cur.Name, "replies": tag.RowsAffected(), "brand_id": brand})
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -319,8 +365,12 @@ func visibleViews(userID string, args *[]any) string {
 
 func (s *Server) listInboxViews(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), `SELECT `+inboxViewColumns+` FROM inbox_views WHERE workspace_id = $1`+
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
+	args := []any{a.WorkspaceID, brand}
+	rows, err := s.pool.Query(r.Context(), `SELECT `+inboxViewColumns+` FROM brand_inbox_views WHERE workspace_id = $1 AND brand_id = $2`+
 		visibleViews(a.UserID, &args)+` ORDER BY position, created_at`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -334,15 +384,15 @@ func (s *Server) listInboxViews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": list})
 }
 
-func (s *Server) oneInboxView(w http.ResponseWriter, r *http.Request) (*inboxView, bool) {
+func (s *Server) oneInboxView(w http.ResponseWriter, r *http.Request, brand string) (*inboxView, bool) {
 	a := accessFrom(r.Context())
 	id := r.PathValue("id")
 	if !validUUID(id) {
 		writeError(w, r, http.StatusNotFound, "not_found", "view not found")
 		return nil, false
 	}
-	args := []any{a.WorkspaceID, id}
-	rows, err := s.pool.Query(r.Context(), `SELECT `+inboxViewColumns+` FROM inbox_views WHERE workspace_id = $1 AND id = $2`+
+	args := []any{a.WorkspaceID, id, brand}
+	rows, err := s.pool.Query(r.Context(), `SELECT `+inboxViewColumns+` FROM brand_inbox_views WHERE workspace_id = $1 AND id = $2 AND brand_id = $3`+
 		visibleViews(a.UserID, &args), args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -395,24 +445,28 @@ func (s *Server) createInboxView(w http.ResponseWriter, r *http.Request) {
 	if a.UserID != "" && (req.Shared == nil || !*req.Shared) {
 		owner = &a.UserID
 	}
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
 	ctx := r.Context()
 	var v inboxView
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM inbox_views WHERE workspace_id = $1`, a.WorkspaceID).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM brand_inbox_views WHERE brand_id = $1`, brand).Scan(&n); err != nil {
 			return err
 		}
 		if n >= 100 {
-			return errInvalid("a workspace can have at most 100 saved views")
+			return errInvalid("a brand can have at most 100 saved views")
 		}
 		pos := n
 		if req.Position != nil {
 			pos = *req.Position
 		}
 		rows, err := tx.Query(ctx, `
-			INSERT INTO inbox_views (workspace_id, user_id, name, filters, position, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+inboxViewColumns,
-			a.WorkspaceID, owner, name, filters, pos, nilIfEmpty(a.ActorID))
+			INSERT INTO brand_inbox_views (workspace_id, brand_id, user_id, name, filters, position, created_by)
+			VALUES ($1, $7, $2, $3, $4, $5, $6) RETURNING `+inboxViewColumns,
+			a.WorkspaceID, owner, name, filters, pos, nilIfEmpty(a.ActorID), brand)
 		if err != nil {
 			return err
 		}
@@ -420,7 +474,7 @@ func (s *Server) createInboxView(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_view.created", "inbox_view", v.ID,
-			map[string]any{"name": name, "shared": v.Shared, "filters": filterKeys(filters)})
+			map[string]any{"name": name, "shared": v.Shared, "filters": filterKeys(filters), "brand_id": brand})
 	})
 	switch {
 	case errors.As(err, &inv):
@@ -446,7 +500,11 @@ func (s *Server) updateInboxView(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "nothing to change: send name, filters or position")
 		return
 	}
-	cur, ok := s.oneInboxView(w, r)
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
+	cur, ok := s.oneInboxView(w, r, brand)
 	if !ok {
 		return
 	}
@@ -468,12 +526,12 @@ func (s *Server) updateInboxView(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE inbox_views SET name = $3, filters = $4, position = $5, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
-			cur.ID, a.WorkspaceID, name, filters, pos); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE brand_inbox_views SET name = $3, filters = $4, position = $5, updated_at = now() WHERE id = $1 AND brand_id = $2`,
+			cur.ID, brand, name, filters, pos); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_view.updated", "inbox_view", cur.ID,
-			map[string]any{"name": name, "filters": filterKeys(filters)})
+			map[string]any{"name": name, "filters": filterKeys(filters), "brand_id": brand})
 	})
 	if err != nil {
 		s.internal(w, r, err)
@@ -485,16 +543,20 @@ func (s *Server) updateInboxView(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteInboxView(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	cur, ok := s.oneInboxView(w, r)
+	brand, ok := s.inboxBrand(w, r)
+	if !ok {
+		return
+	}
+	cur, ok := s.oneInboxView(w, r, brand)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `DELETE FROM inbox_views WHERE id = $1 AND workspace_id = $2`, cur.ID, a.WorkspaceID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM brand_inbox_views WHERE id = $1 AND brand_id = $2`, cur.ID, brand); err != nil {
 			return err
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_view.deleted", "inbox_view", cur.ID, map[string]any{"name": cur.Name})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, "inbox_view.deleted", "inbox_view", cur.ID, map[string]any{"name": cur.Name, "brand_id": brand})
 	})
 	if err != nil {
 		s.internal(w, r, err)

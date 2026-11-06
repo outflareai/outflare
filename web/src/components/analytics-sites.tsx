@@ -22,7 +22,7 @@ type Source = { id: string; name: string; connector: string };
 // A row as the person is setting it: brand is a brand's handle, "none" for
 // shared by every brand, or "" for not chosen yet. why says where a guess
 // came from, shown beside it until the person picks.
-type Draft = { sync: boolean; brand: string; domain: string; why: string };
+type Draft = { sync: boolean; brand: string; domain: string; why: string; filters: boolean };
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const hostOf = (url?: string) => (url ?? "").replace(/^[a-z-]+:(\/\/)?/i, "").replace(/^www\./, "").split(/[/?#:]/)[0].toLowerCase();
@@ -107,7 +107,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
       const fresh = !now && !s.host;
       // A brand found by the site's domain says so too.
       const byDomain = now && now !== "none" && mapped[s.id]?.source !== "set" && s.host ? `Matches ${s.host}` : "";
-      return [s.id, { sync: fresh && testCopy.test(s.name) ? false : s.sync, brand: now || g?.brand.handle || "", domain: "", why: g?.why ?? byDomain }];
+      return [s.id, { sync: fresh && testCopy.test(s.name) ? false : s.sync, brand: now || g?.brand.handle || "", domain: "", why: g?.why ?? byDomain, filters: s.filter_test_accounts }];
     })));
   }, [sites, mapped, brandKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -123,7 +123,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
   };
   const changed = sites.filter((s) => {
     const d = drafts[s.id];
-    return d && (d.sync !== s.sync || (d.sync && (d.brand !== current(s) || hostFor(s, d) !== s.host)));
+    return d && (d.sync !== s.sync || (d.sync && (d.brand !== current(s) || hostFor(s, d) !== s.host || d.filters !== s.filter_test_accounts)));
   });
   const missing = sites.filter((s) => drafts[s.id]?.sync && (brands.length ? !drafts[s.id].brand : !s.host && !drafts[s.id].domain)).length;
   const set = (id: string, patch: Partial<Draft>) => setDrafts((all) => ({ ...all, [id]: { ...all[id], ...patch, why: patch.brand !== undefined ? "" : all[id].why } }));
@@ -146,7 +146,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
     let failed = "";
     for (const s of changed) {
       const d = drafts[s.id];
-      const patch = (body: { sync?: boolean; domain?: string }) => api.PATCH("/v1/workspaces/{ws}/analytics/{id}/sites/{site}", { params: { path: { ws, id: source.id, site: s.id } }, body });
+      const patch = (body: { sync?: boolean; domain?: string; filter_test_accounts?: boolean }) => api.PATCH("/v1/workspaces/{ws}/analytics/{id}/sites/{site}", { params: { path: { ws, id: source.id, site: s.id } }, body });
       const pick = (brand: string) => api.PUT("/v1/workspaces/{ws}/analytics/{id}/site-brand", { params: { path: { ws, id: source.id } }, body: { site: s.id, brand } });
       let res: { error?: unknown } = {};
       if (!d.sync) {
@@ -155,6 +155,7 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
         const b = byHandle.get(d.brand);
         const host = hostFor(s, d);
         if (host !== s.host || d.sync !== s.sync) res = await patch({ sync: true, ...(host !== s.host ? { domain: host } : {}) });
+        if (!res.error && d.filters !== s.filter_test_accounts) res = await patch({ filter_test_accounts: d.filters });
         if (!res.error && d.brand && d.brand !== current(s)) {
           // A brand that owns the domain needs nothing more; otherwise the
           // choice is kept for this site.
@@ -196,6 +197,12 @@ export function SiteSetup({ ws, source, canManage, onSaved, onCancel, compact = 
                   <td className="px-3 py-2 align-top">
                     <div className="font-medium">{s.name}</div>
                     <div className="font-mono text-[11px] text-muted-foreground">{s.id}</div>
+                    {d.sync && source.connector === "posthog" && (
+                      <label className="mt-1 flex items-center gap-1.5 text-[12px] text-muted-foreground" title="Uses the project's Filter out internal and test users settings in PostHog: a bot cohort, your team, a crawler with a fake referrer. Changing it reads the last 90 days again.">
+                        <Checkbox aria-label={`Leave out internal and test users in ${s.name}`} checked={d.filters} disabled={!canManage || busy} onCheckedChange={(v) => set(s.id, { filters: v === true })} />
+                        Leave out PostHog's internal and test users
+                      </label>
+                    )}
                   </td>
                   <td className="px-3 py-2 align-top">
                     {!d.sync ? (

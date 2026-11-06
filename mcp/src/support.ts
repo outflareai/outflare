@@ -57,7 +57,7 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Support SLAs",
       description:
-        "How fast the team promises to reply and resolve: the workspace's SLA (brand_id null) and any brand's own, with targets in minutes " +
+        "How fast the team promises to reply and resolve, for each brand (brands share none), with targets in minutes " +
         "and the working hours they count in. Each conversation's sla says when its reply and resolution are due and whether they were missed.",
       inputSchema: {},
       annotations: read,
@@ -84,7 +84,7 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Support assistant settings and report",
       description:
-        "Whether the support assistant drafts replies for chat and email (per brand or the whole workspace), and in the last days how often " +
+        "Whether the support assistant drafts replies for chat and email (each brand's own), and in the last days how often " +
         "it answered, asked back or handed off, and how many drafts the team sent as they were.",
       inputSchema: { days: z.number().int().min(1).max(365).optional() },
       annotations: read,
@@ -250,11 +250,11 @@ export function registerSupportTools(server: McpServer, gtm: MissionClient, work
     {
       title: "Set a support SLA",
       description:
-        "Sets the reply and resolution targets for the workspace (scope default) or one brand (its id or handle). Minutes, null for none. " +
+        "Sets the reply and resolution targets for one brand (its id or handle; default is the workspace's first brand). Minutes, null for none. " +
         "hours is 7 lists (Sunday first) of [start, end] minutes after midnight in timezone; leave it out to count around the clock. " +
         "Confirm the targets with the person first: every open conversation is recomputed.",
       inputSchema: {
-        scope: z.string().describe("default, or a brand's id or handle."),
+        scope: z.string().describe("A brand's id or handle, or default for the workspace's first brand."),
         enabled: z.boolean().optional(),
         first_reply_minutes: z.number().int().min(1).max(525600).nullable().optional(),
         next_reply_minutes: z.number().int().min(1).max(525600).nullable().optional(),

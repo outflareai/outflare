@@ -100,58 +100,55 @@ func (v *contextView) field(key string) *string {
 	return nil
 }
 
-// loadContext reads the workspace's company context. A workspace that never
-// saved one has an empty context at version 1, the version its first row
-// starts at, so a first edit made against it still matches.
-func (s *Server) loadContext(ctx context.Context, ws string) (contextView, error) {
-	v := contextView{Version: 1}
-	var dismissed *time.Time
-	err := s.pool.QueryRow(ctx, `
-		SELECT c.company, c.website, c.about, c.goals, c.voice, c.rules, c.notes, c.brands, c.logo_url, c.colors, c.version,
-		       c.updated_at, ac.display_name, c.onboarding_dismissed_at
-		FROM workspace_context c LEFT JOIN actors ac ON ac.id = c.updated_by
-		WHERE c.workspace_id = $1`, ws,
-	).Scan(&v.Company, &v.Website, &v.About, &v.Goals, &v.Voice, &v.Rules, &v.Notes, &v.Brands, &v.LogoURL, &v.Colors, &v.Version,
-		&v.UpdatedAt, &v.UpdatedBy, &dismissed)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+// loadContext reads "About your company" for a brand: each brand's own
+// (brands are fully separate), in the shape the company context had, so
+// clients that read it keep working. An empty brand reads the
+// workspace's first brand; a workspace with no brand has an empty context
+// at version 1.
+func (s *Server) loadContext(ctx context.Context, ws, brand string) (contextView, error) {
+	v := contextView{Version: 1, Missing: []string{}}
+	if brand == "" {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, ws).Scan(&brand); err != nil {
+			return v, err
+		}
+	}
+	if brand == "" {
+		v.Missing = append(v.Missing, onboardingFields...)
+		v.AskForMissing = true
+		return v, nil
+	}
+	b, err := s.loadBrandContext(ctx, ws, brand)
+	if err != nil {
 		return v, err
 	}
-	v.Missing = []string{}
-	for _, k := range onboardingFields {
-		if *v.field(k) == "" {
-			v.Missing = append(v.Missing, k)
-		}
-	}
-	v.AskForMissing = len(v.Missing) > 0 && dismissed == nil
-	return v, nil
+	return companyView(b), nil
 }
 
-// contextMarkdown is the company context as one document an agent can keep
-// in its prompt.
-func contextMarkdown(v contextView, memories []memoryView) string {
-	var b strings.Builder
-	name := v.Company
-	if name == "" {
-		name = "Company context"
-	}
-	fmt.Fprintf(&b, "# %s\n", name)
-	empty := true
-	for _, f := range contextFields[1:] {
-		if body := *v.field(f.key); body != "" {
-			fmt.Fprintf(&b, "\n## %s\n\n%s\n", f.label, body)
-			empty = false
-		}
-	}
-	if empty {
-		b.WriteString("\nNothing saved about the company yet.\n")
+// companyView is a brand's context in the company context's shape.
+func companyView(b brandContextView) contextView {
+	v := contextView{Company: b.Name, Website: b.Website, About: b.About, Goals: b.Goals, Voice: b.Voice, Rules: b.Rules,
+		Notes: b.Notes, LogoURL: b.LogoURL, Colors: b.Colors, Version: b.Version, UpdatedAt: b.UpdatedAt, UpdatedBy: b.UpdatedBy,
+		Missing: b.Missing, AskForMissing: b.AskForMissing}
+	return v
+}
+
+// contextMarkdown is a brand's context and the memories read with it as
+// one document an agent can keep in its prompt. A nil brand is a workspace
+// with no brand yet.
+func contextMarkdown(b *brandContextView, memories []memoryView) string {
+	var sb strings.Builder
+	if b == nil {
+		sb.WriteString("# About your company\n\nNo brand yet: make one with create_brand, and save what it does in its context.\n")
+	} else {
+		sb.WriteString(brandMarkdown(b))
 	}
 	if len(memories) > 0 {
-		b.WriteString("\n## Remembered\n\n")
+		sb.WriteString("\n## Remembered\n\n")
 		for _, m := range memories {
-			fmt.Fprintf(&b, "- (%s) %s\n", m.Kind, m.Text)
+			fmt.Fprintf(&sb, "- (%s) %s\n", m.Kind, m.Text)
 		}
 	}
-	return b.String()
+	return sb.String()
 }
 
 // contextBrand is one line about a brand, so an agent knows which brands
@@ -166,11 +163,11 @@ type contextBrand struct {
 	Summary string `json:"summary"`
 }
 
-// brandMarkdown is a brand's context as the part of the document an agent
-// reads after the company's.
+// brandMarkdown is a brand's context: everything Outflare knows about it,
+// its own and shared with no other brand.
 func brandMarkdown(b *brandContextView) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n# Brand: %s\n", b.Name)
+	fmt.Fprintf(&sb, "# %s\n", b.Name)
 	if b.Website != "" || len(b.Platforms) > 0 {
 		fmt.Fprintf(&sb, "\n%s", b.Website)
 		if len(b.Platforms) > 0 {
@@ -191,7 +188,6 @@ func brandMarkdown(b *brandContextView) string {
 			fmt.Fprintf(&sb, "- %s: %s\n", name, l.URL)
 		}
 	}
-	sb.WriteString("\nThe company context above applies to this brand. Where the brand sets a field below, the brand's wins; its rules add to the company's rules.\n")
 	empty := true
 	for _, f := range brandContextFields {
 		if body := *b.field(f.key); body != "" {
@@ -206,9 +202,9 @@ func brandMarkdown(b *brandContextView) string {
 }
 
 // getContext is what an agent reads at the start of every conversation:
-// the company context, pinned and recent memories, and the brands. With
-// ?brand= it adds that brand's context and keeps memories to the company's
-// and the brand's.
+// one brand's context (brands share none), its memories with the ones no
+// brand has, and the brands. The brand is ?brand=, else the one brand the
+// caller is kept to, else the workspace's first.
 func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
@@ -229,15 +225,19 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		}
 		brandID = id
 	}
-	// Someone kept to one brand reads that brand's context.
+	// Someone kept to one brand reads that brand's context, and anyone
+	// else the workspace's first brand's.
 	if brandID == "" && len(a.Brands) == 1 {
 		brandID = a.Brands[0]
 	}
-	v, err := s.loadContext(ctx, a.WorkspaceID)
-	if err != nil {
-		s.internal(w, r, err)
-		return
+	named := brandID != ""
+	if brandID == "" {
+		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, a.WorkspaceID).Scan(&brandID); err != nil {
+			s.internal(w, r, err)
+			return
+		}
 	}
+	v := contextView{Version: 1, Missing: append([]string{}, onboardingFields...), AskForMissing: true}
 	var brand *brandContextView
 	if brandID != "" {
 		b, err := s.loadBrandContext(ctx, a.WorkspaceID, brandID)
@@ -245,10 +245,8 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, r, err)
 			return
 		}
-		brand = &b
+		brand, v = &b, companyView(b)
 	}
-	// Without a brand, the company's memories; with one, the company's and
-	// the brand's.
 	f := memoryFilter{limit: 30, brand: brandSel{id: "none"}}
 	if brandID != "" {
 		f = memoryFilter{limit: 30, layer: brandID}
@@ -262,8 +260,8 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		SELECT b.id, b.handle, b.name, b.website, b.platforms, COALESCE(split_part(trim(c.about), E'\n', 1), '')
 		FROM brands b LEFT JOIN brand_context c ON c.brand_id = b.id
 		WHERE b.workspace_id = $1 AND b.status = 'active'
-		  AND ($2::uuid[] IS NULL OR b.id = ANY($2))
-		ORDER BY lower(b.name)`, a.WorkspaceID, a.Brands)
+		  AND ($2::uuid[] IS NULL OR b.id = ANY($2)) AND (NOT $3 OR b.id::text = $4)
+		ORDER BY lower(b.name)`, a.WorkspaceID, a.Brands, named, brandID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -281,13 +279,14 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	md := contextMarkdown(v, mems)
-	if brand != nil {
-		md += brandMarkdown(brand)
-	} else if len(brands) > 0 {
+	md := contextMarkdown(brand, mems)
+	if !named && len(brands) > 1 {
 		var sb strings.Builder
-		sb.WriteString("\n## Brands\n\nThis company markets several brands. Ask which one the work is for, or read get_context with its brand.\n\n")
+		sb.WriteString("\n## Other brands\n\nThis is one brand's context, and each brand's is its own. This company markets several brands: ask which one the work is for, and read get_context with its brand.\n\n")
 		for _, b := range brands {
+			if b.ID == brandID {
+				continue
+			}
 			fmt.Fprintf(&sb, "- %s (brand %s", b.Name, b.Handle)
 			if b.Website != "" {
 				fmt.Fprintf(&sb, ", %s", b.Website)
@@ -346,6 +345,9 @@ func (in *contextInput) field(key string) *string {
 	}[key]
 }
 
+// updateContext edits "About your company" for a brand (?brand=, else
+// the one the caller is kept to, else the workspace's first): each brand's
+// is its own. The brand's name and website change on the brand itself.
 func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	var req contextInput
@@ -375,69 +377,62 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 		*req.Website = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(*req.Website, "https://"), "http://"), "/")
 	}
 	ctx := r.Context()
-	var changed []string
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		// The row may not exist yet; create it so it can be locked.
-		if _, err := tx.Exec(ctx, `INSERT INTO workspace_context (workspace_id) VALUES ($1) ON CONFLICT DO NOTHING`, a.WorkspaceID); err != nil {
-			return err
+	brandID := ""
+	if ref := strings.TrimSpace(r.URL.Query().Get("brand")); ref != "" {
+		id, err := s.brandIDFor(ctx, a.WorkspaceID, ref)
+		if errors.Is(err, errNotFound) || (err == nil && !a.sees(&id)) {
+			writeError(w, r, http.StatusNotFound, "not_found", "brand not found: brand is a brand's id or handle")
+			return
 		}
-		var cur contextView
-		err := tx.QueryRow(ctx, `
-			SELECT company, website, about, goals, voice, rules, notes, brands, logo_url, colors, version
-			FROM workspace_context WHERE workspace_id = $1 FOR UPDATE`, a.WorkspaceID,
-		).Scan(&cur.Company, &cur.Website, &cur.About, &cur.Goals, &cur.Voice, &cur.Rules, &cur.Notes, &cur.Brands, &cur.LogoURL, &cur.Colors, &cur.Version)
 		if err != nil {
-			return err
+			s.internal(w, r, err)
+			return
 		}
-		for _, f := range contextFields {
-			if p := req.field(f.key); p != nil && *p != *cur.field(f.key) {
-				changed = append(changed, f.key)
+		brandID = id
+	} else if len(a.Brands) == 1 {
+		brandID = a.Brands[0]
+	} else if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, a.WorkspaceID).Scan(&brandID); err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if brandID == "" {
+		writeError(w, r, http.StatusConflict, "conflict", "each brand has its own context: make a brand first (POST /v1/workspaces/{ws}/brands)")
+		return
+	}
+	cur, err := s.loadBrandContext(ctx, a.WorkspaceID, brandID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	if req.Brands != nil && *req.Brands != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "brands: each brand's context is its own now; say how the brands relate in each brand's notes")
+		return
+	}
+	if (req.Company != nil && *req.Company != "" && *req.Company != cur.Name) || (req.Website != nil && *req.Website != cur.Website) {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "company and website are the brand's name and website: change them with PATCH /v1/workspaces/{ws}/brands/{brand}")
+		return
+	}
+	in := brandContextInput{About: req.About, Goals: req.Goals, Voice: req.Voice, Rules: req.Rules, Notes: req.Notes,
+		Version: req.Version, OnboardingDismissed: req.OnboardingDismissed}
+	err = s.writeBrandContext(ctx, a, brandID, in)
+	if err == nil && (req.LogoURL != nil && *req.LogoURL != cur.LogoURL || req.Colors != nil && *req.Colors != cur.Colors) {
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `UPDATE brands SET logo_url = COALESCE($3, logo_url), colors = COALESCE($4, colors), updated_at = now()
+				WHERE id = $1 AND workspace_id = $2`, brandID, a.WorkspaceID, req.LogoURL, req.Colors); err != nil {
+				return err
 			}
-		}
-		if req.LogoURL != nil && *req.LogoURL != cur.LogoURL {
-			changed = append(changed, "logo_url")
-		}
-		if req.Colors != nil && *req.Colors != cur.Colors {
-			changed = append(changed, "colors")
-		}
-		if req.Version != nil && *req.Version != cur.Version && len(changed) > 0 {
-			return errStaleBrief
-		}
-		bump := len(changed) > 0
-		_, err = tx.Exec(ctx, `
-			UPDATE workspace_context SET
-				company = COALESCE($2, company), website = COALESCE($3, website), about = COALESCE($4, about),
-				goals = COALESCE($5, goals), voice = COALESCE($6, voice), rules = COALESCE($7, rules), notes = COALESCE($8, notes),
-				brands = COALESCE($12, brands), logo_url = COALESCE($13, logo_url), colors = COALESCE($14, colors),
-				version = version + CASE WHEN $9 THEN 1 ELSE 0 END,
-				onboarding_dismissed_at = CASE WHEN $10::boolean IS NULL THEN onboarding_dismissed_at
-				                               WHEN $10 THEN COALESCE(onboarding_dismissed_at, now()) END,
-				updated_at = CASE WHEN $9 THEN now() ELSE updated_at END,
-				updated_by = CASE WHEN $9 THEN $11::uuid ELSE updated_by END
-			WHERE workspace_id = $1`,
-			a.WorkspaceID, req.Company, req.Website, req.About, req.Goals, req.Voice, req.Rules, req.Notes,
-			bump, req.OnboardingDismissed, a.ActorID, req.Brands, req.LogoURL, req.Colors)
-		if err != nil || (!bump && req.OnboardingDismissed == nil) {
-			return err
-		}
-		data := map[string]any{"fields": changed, "version": cur.Version}
-		if bump {
-			data["version"] = cur.Version + 1
-		}
-		if req.OnboardingDismissed != nil {
-			data["onboarding_dismissed"] = *req.OnboardingDismissed
-		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, "context.updated", "workspace", a.WorkspaceID, data)
-	})
+			return record(ctx, tx, &a.principal, a.WorkspaceID, "brand.updated", "brand", brandID, map[string]any{"fields": []string{"logo_url", "colors"}})
+		})
+	}
 	if errors.Is(err, errStaleBrief) {
-		writeError(w, r, http.StatusConflict, "context_changed", "the company context changed since you loaded it; reload it and apply your edit again")
+		writeError(w, r, http.StatusConflict, "context_changed", "the brand's context changed since you loaded it; reload it and apply your edit again")
 		return
 	}
 	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	v, err := s.loadContext(ctx, a.WorkspaceID)
+	v, err := s.loadContext(ctx, a.WorkspaceID, brandID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -496,8 +491,8 @@ func (s *Server) loadMemories(ctx context.Context, a *access, f memoryFilter) ([
 		  AND ($4::boolean IS NULL OR m.pinned = $4)
 		  AND ($5::uuid IS NULL OR m.id = $5)
 		  AND ($8 = '' OR ($8 = 'none' AND m.brand_id IS NULL) OR m.brand_id::text = $8)
-		  AND ($9 = '' OR m.brand_id IS NULL OR m.brand_id::text = $9)
-		  AND ($10::uuid[] IS NULL OR m.brand_id IS NULL OR m.brand_id = ANY($10))
+		  AND ($9 = '' OR m.brand_id::text = $9)
+		  AND ($10::uuid[] IS NULL OR m.brand_id = ANY($10))
 		ORDER BY m.pinned DESC, m.updated_at DESC, m.id
 		LIMIT $6 OFFSET $7`,
 		a.WorkspaceID, likeEscape(q), f.kind, f.pinned, id, f.limit, f.offset, f.brand.id, f.layer, a.Brands)
@@ -632,7 +627,7 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		if brand, err = brandWrite(ctx, tx, a, brand); err != nil {
+		if brand, err = ownBrand(ctx, tx, a, brand); err != nil {
 			return err
 		}
 		var n int
@@ -730,6 +725,11 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 				return errInvalid("you can only keep memories in your brands")
 			}
 			if _, err := brandWrite(ctx, tx, a, brand); err != nil {
+				return err
+			}
+		}
+		if req.BrandID.Set {
+			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, brand); err != nil {
 				return err
 			}
 		}

@@ -55,13 +55,14 @@ func TestAIFacts(t *testing.T) {
 	}
 	rid := runOnce()
 	run := owner.must(200, "GET", base+"/ai-runs/"+rid, nil)
-	// Two answers at 2 cents, and one check (only one answer names Acme).
-	if run["status"] != "done" || run["cost_cents"] != 6.0 {
+	// Two answers at 2 cents, two stance reads at 2 cents, and one check
+	// (only one answer names Acme).
+	if run["status"] != "done" || run["cost_cents"] != 10.0 {
 		t.Fatalf("run: %v", run)
 	}
 	var checks int
 	for _, b := range bodies {
-		if b["response_format"] != nil {
+		if b["response_format"] != nil && strings.Contains(b["messages"].([]any)[0].(map[string]any)["content"].(string), "facts the company says") {
 			checks++
 			sys := b["messages"].([]any)[0].(map[string]any)["content"].(string)
 			user := b["messages"].([]any)[1].(map[string]any)["content"].(string)

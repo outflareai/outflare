@@ -70,7 +70,7 @@ func TestSupportSLA(t *testing.T) {
 	// resolve, around the clock. Saving it sets the open conversation's
 	// clock too.
 	p := owner.must(200, "PUT", sp, map[string]any{"first_reply_minutes": 60, "next_reply_minutes": 30, "resolution_minutes": 1440})
-	if p["enabled"] != true || p["brand_id"] != nil || p["timezone"] != "UTC" || p["hours"] != nil || p["first_reply_minutes"] != 60.0 {
+	if p["enabled"] != true || p["brand_id"] == nil || p["timezone"] != "UTC" || p["hours"] != nil || p["first_reply_minutes"] != 60.0 {
 		t.Fatalf("policy: %v", p)
 	}
 	if s := sla(before); s["reply_due_at"] == nil || s["resolve_due_at"] == nil {

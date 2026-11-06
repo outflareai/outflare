@@ -198,6 +198,29 @@ func TestDigests(t *testing.T) {
 	bot.must(403, "POST", base+"/digests", map[string]any{})
 
 	owner.must(200, "PUT", base+"/digest-settings", map[string]any{"frequency": "off", "recipients": "none"})
+
+	// Each brand has its own settings and digests, and counts only its
+	// own data.
+	bravo := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Bravo", "handle": "bravo"})["id"].(string)
+	inBravo := "/v1/brands/" + bravo
+	if set := owner.must(200, "PUT", inBravo+"/digest-settings", map[string]any{"frequency": "daily"}); set["frequency"] != "daily" {
+		t.Fatalf("bravo's settings = %v", set)
+	}
+	if set := owner.must(200, "GET", base+"/digest-settings", nil); set["frequency"] != "off" {
+		t.Fatalf("bravo's change reached the first brand: %v", set)
+	}
+	if p := owner.must(200, "GET", base+"/digests/preview", nil); len(p["sections"].([]any)) == 0 {
+		t.Fatalf("the first brand's preview is empty: %v", p)
+	}
+	if p := owner.must(200, "GET", inBravo+"/digests/preview", nil); len(p["sections"].([]any)) != 0 {
+		t.Fatalf("bravo's preview shows the first brand's data: %v", p)
+	}
+	if l := owner.must(200, "GET", inBravo+"/digests", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("bravo lists the first brand's digests: %v", l)
+	}
+	first := owner.must(200, "GET", base+"/digests", nil)["data"].([]any)[0].(map[string]any)
+	owner.must(404, "GET", inBravo+"/digests/"+first["id"].(string), nil)
+	owner.must(200, "GET", base+"/digests/"+first["id"].(string), nil)
 	seen := map[string]bool{}
 	for _, ev := range got() {
 		seen[ev.Name] = true

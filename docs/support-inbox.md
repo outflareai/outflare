@@ -53,7 +53,7 @@ A chat widget puts a chat button on the business's site (`POST .../support/chat-
 
 ## SLAs
 
-An SLA is how fast the team promises to answer and to resolve. Set one for the whole workspace (`PUT .../support/sla-policies/default`) and, if a brand needs different targets, one for that brand (`PUT .../support/sla-policies/{brand}`), which replaces the workspace's for its conversations. In the app it's under **Support settings**.
+An SLA is how fast the team promises to answer and to resolve. Each brand has its own (`PUT .../support/sla-policies/{brand}`, or `default` for the workspace's first brand); brands share none. In the app it's under **Support settings**.
 
 - **First reply**: from the customer's first message to the team's first answer.
 - **Next reply**: from each later message the team hasn't answered to its answer.
@@ -65,7 +65,7 @@ Each conversation's `sla` says when its next reply and its resolution are due, a
 
 ## The support assistant
 
-The assistant answers customers, by chat and email, from your approved knowledge: only articles and answers customers may be told. Switch it on per channel in **Support settings** (`PUT .../support/assistant-settings/default`, or a brand's own with its id or handle; a brand's settings replace the workspace's for its conversations). It uses the workspace's own AI key (the **Support replies** task in AI settings) and nothing else.
+The assistant answers customers, by chat and email, from your approved knowledge: only articles and answers customers may be told. Switch it on per channel in **Support settings** (`PUT .../support/assistant-settings/{brand}` with its id or handle, or `default` for the workspace's first brand; each brand has its own and they share none). It uses the workspace's own AI key (the **Support replies** task in AI settings) and nothing else.
 
 - **Draft**: it drafts a reply to each new customer message, shown above the composer for a teammate to send, edit or discard. **Draft with AI** asks it any time (`POST .../support/conversations/{id}/assistant`).
 - **Auto**: it sends replies that pass every check on its own, signed as the assistant ("Northpeak help (AI assistant)"). Anything it hands off waits for the team; on chat it tells the visitor once that a person will reply. Auto is part of Outflare Cloud: an extension allows it per workspace (`Host.SetSupportAutoReplies`), and `auto_available` says whether it is allowed; the operator's staff can still stop it for one workspace with the `support_auto_blocked` [workspace feature](workspace-features.md). Without that, the engine only drafts.

@@ -9,39 +9,35 @@ import { Button, Card, Loading, field, toast } from "../ui";
 import { plural } from "../format";
 import { Checkbox } from "@/components/ui/checkbox";
 
-type Kind = "domains" | "mailbox_ids" | "lead_list_ids" | "sequence_ids";
+// Lead lists and sequences always get a brand when they are made, so only
+// sending domains and mailboxes can be in none.
+type Kind = "domains" | "mailbox_ids";
 type Row = { key: string; name: string; sub?: string };
 
 const kinds: { kind: Kind; label: string; one: string; many: string }[] = [
   { kind: "domains", label: "Sending domains", one: "domain", many: "domains" },
   { kind: "mailbox_ids", label: "Mailboxes", one: "mailbox", many: "mailboxes" },
-  { kind: "lead_list_ids", label: "Lead lists", one: "lead list", many: "lead lists" },
-  { kind: "sequence_ids", label: "Sequences", one: "sequence", many: "sequences" },
 ];
 
 export function NotInABrand({ ws, brands, canEdit, onMoved }: { ws: string; brands: Brand[]; canEdit: boolean; onMoved?: () => void }) {
   const [rows, setRows] = useState<Record<Kind, Row[]> | null>(null);
-  const [picked, setPicked] = useState<Record<Kind, string[]>>({ domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
+  const [picked, setPicked] = useState<Record<Kind, string[]>>({ domains: [], mailbox_ids: [] });
   const [open, setOpen] = useState<Kind | null>(null);
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     const none = { params: { path: { ws }, query: { brand: "none" } } };
-    const [d, m, l, s] = await Promise.all([
+    const [d, m] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/sending-domains", none),
       api.GET("/v1/workspaces/{ws}/mailboxes", none),
-      api.GET("/v1/workspaces/{ws}/lead-lists", none),
-      api.GET("/v1/workspaces/{ws}/sequences", none),
     ]);
     const loose = <T,>(x: T[] | undefined) => x ?? [];
     setRows({
       domains: loose(d.data?.data).map((x) => ({ key: x.domain, name: x.domain })),
       mailbox_ids: loose(m.data?.data).filter((x) => x.lifecycle.stage !== "retired").map((x) => ({ key: x.id, name: x.email, sub: x.domain })),
-      lead_list_ids: loose(l.data?.data).map((x) => ({ key: x.id, name: x.name })),
-      sequence_ids: loose(s.data?.data).filter((x) => x.status !== "archived").map((x) => ({ key: x.id, name: x.name })),
     });
-    setPicked({ domains: [], mailbox_ids: [], lead_list_ids: [], sequence_ids: [] });
+    setPicked({ domains: [], mailbox_ids: [] });
   }, [ws]);
   useEffect(() => void load(), [load]);
 

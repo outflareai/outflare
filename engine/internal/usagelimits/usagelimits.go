@@ -62,6 +62,7 @@ var starting = map[string]struct {
 }{
 	"ahrefs":     {"API unit", 10000},
 	"dataforseo": {USD, 10},
+	"seranking":  {"API unit", 10000},
 }
 
 // Starting is a connector's starting monthly limit, if it has one.

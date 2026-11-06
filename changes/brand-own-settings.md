@@ -1,5 +1,5 @@
 ---
 kind: improvement
-area: analytics
+area: workspace
 ---
-Each brand has its own attribution, ad consent and visitor settings, under `/v1/brands/{brand}/.../settings`, and two brands of one workspace can use the same flag key, exclusion group, conversion key or attribution model key. The workspace settings routes are deprecated and act on the first brand.
+Each brand now has its own senders, inbox tags, saved inbox views, alert mutes and switched-on features. Every brand starts with a copy of what the workspace had, and changing one brand's no longer changes another's. New routes under `/v1/brands/{brand}/` (`senders`, `inbox-tags`, `inbox-views`, `alerts/mutes`); the workspace routes act on `?brand=`, else the first brand.

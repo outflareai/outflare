@@ -75,7 +75,7 @@ func (s *Server) listWebsiteImports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID}
-	rows, err := s.pool.Query(r.Context(), websiteImportSelect+` WHERE workspace_id = $1`+sharedBrandSQL(brand, "brand_id", &args)+
+	rows, err := s.pool.Query(r.Context(), websiteImportSelect+` WHERE workspace_id = $1`+brand.sql("brand_id", &args)+
 		` ORDER BY created_at DESC LIMIT 20`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -164,8 +164,7 @@ func (s *Server) startWebsiteImport(w http.ResponseWriter, r *http.Request) {
 	site := strings.TrimSpace(req.URL)
 	if site == "" {
 		if err := s.pool.QueryRow(ctx, `SELECT COALESCE(
-				(SELECT COALESCE(NULLIF(website, ''), CASE WHEN cardinality(domains) > 0 THEN 'https://' || domains[1] END) FROM brands WHERE id = $2::uuid AND workspace_id = $1),
-				(SELECT NULLIF(website, '') FROM workspace_context WHERE workspace_id = $1), '')`, a.WorkspaceID, brand).Scan(&site); err != nil {
+				(SELECT COALESCE(NULLIF(website, ''), CASE WHEN cardinality(domains) > 0 THEN 'https://' || domains[1] END) FROM brands WHERE id = COALESCE($2::uuid, outflare_first_brand($1)) AND workspace_id = $1), '')`, a.WorkspaceID, brand).Scan(&site); err != nil {
 			s.internal(w, r, err)
 			return
 		}

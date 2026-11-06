@@ -4,6 +4,8 @@ import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, confirmAction, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Status, toast } from "../ui";
 import { plural } from "../format";
 import { DataTable } from "@/components/data-table";
+import { PickBrand } from "@/components/pick-brand";
+import { useBrand } from "@/lib/brand";
 
 type Match = { mailbox_id: string; email: string; display_name: string; sender_id: string; sender_name: string };
 
@@ -15,9 +17,19 @@ const kinds: { value: NonNullable<Sender["kind"]>; label: string; help: string }
 
 const modeLabel = { automatic: "Automatic", suggest: "Suggest" } as const;
 
+type Props = { ws: string; canManage: boolean; canManageTeams: boolean };
+
 // Teams own sequences and senders; senders are who mailboxes send as. Both
-// shape which mailboxes a sequence gets, so they share a page.
-export function Senders({ ws, canManage, canManageTeams }: { ws: string; canManage: boolean; canManageTeams: boolean }) {
+// shape which mailboxes a sequence gets, so they share a page. Senders are
+// each brand's own (plans/brands/README.md), so the page is the picked
+// brand's.
+export function Senders(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Senders" brands={active.length} />;
+  return <SendersPage key={brand.id} brandId={brand.id} {...props} />;
+}
+
+function SendersPage({ ws, brandId, canManage, canManageTeams }: Props & { brandId: string }) {
   const [senders, setSenders] = useState<Sender[] | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -27,18 +39,19 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
 
   const load = useCallback(async () => {
     const path = { params: { path: { ws } } };
+    const onBrand = { params: { path: { brand: brandId } } };
     const [s, t, m, x] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/senders", path),
+      api.GET("/v1/brands/{brand}/senders", onBrand),
       api.GET("/v1/workspaces/{ws}/teams", path),
       api.GET("/v1/workspaces/{ws}/members", path),
-      api.GET("/v1/workspaces/{ws}/senders/matches", path),
+      api.GET("/v1/brands/{brand}/senders/matches", onBrand),
     ]);
     setSenders(s.data?.data ?? []);
     setTeams(t.data?.data ?? []);
     setMembers(m.data?.data ?? []);
     setMatches((x.data?.data ?? []) as Match[]);
     setUnconfirmed(x.data?.unconfirmed ?? 0);
-  }, [ws]);
+  }, [ws, brandId]);
 
   useEffect(() => {
     load();
@@ -51,7 +64,7 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
     const bySender = new Map<string, string[]>();
     for (const m of matches) bySender.set(m.sender_id, [...(bySender.get(m.sender_id) ?? []), m.mailbox_id]);
     for (const [sender_id, mailbox_ids] of bySender) {
-      const { error } = await api.POST("/v1/workspaces/{ws}/mailboxes/sender", { params: { path: { ws } }, body: { mailbox_ids, sender_id } });
+      const { error } = await api.POST("/v1/brands/{brand}/mailboxes/sender", { params: { path: { brand: brandId } }, body: { mailbox_ids, sender_id } });
       if (error) return toast(errorMessage(error), "error");
     }
     toast(`Confirmed the sender for ${plural(matches.length, "mailbox", "mailboxes")}.`);
@@ -59,7 +72,7 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
   }
 
   async function patchSender(s: Sender, body: Record<string, unknown>, done: string) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/senders/{id}", { params: { path: { ws, id: s.id! } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/senders/{id}", { params: { path: { brand: brandId, id: s.id! } }, body });
     if (error) return toast(errorMessage(error), "error");
     toast(done);
     load();
@@ -82,7 +95,7 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
   async function removeSender(s: Sender) {
     const ok = await confirmAction(`Delete ${s.name}?`, <p>{s.mailboxes ? `Its ${plural(s.mailboxes ?? 0, "mailbox", "mailboxes")} will have no confirmed sender. ` : ""}Retire it instead if it might come back.</p>, "Delete sender");
     if (!ok) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/senders/{id}", { params: { path: { ws, id: s.id! } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/senders/{id}", { params: { path: { brand: brandId, id: s.id! } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Deleted ${s.name}.`);
     load();
@@ -146,7 +159,7 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
         </section>
       )}
 
-      {adding === "sender" && <SenderForm ws={ws} teams={teams} members={members} onDone={(name) => { setAdding(""); if (name) { toast(`Created ${name}.`); load(); } }} />}
+      {adding === "sender" && <SenderForm brandId={brandId} teams={teams} members={members} onDone={(name) => { setAdding(""); if (name) { toast(`Created ${name}.`); load(); } }} />}
       {adding === "team" && <TeamForm ws={ws} members={members} onDone={(name) => { setAdding(""); if (name) { toast(`Created the ${name} team.`); load(); } }} />}
 
       <section className="space-y-3">
@@ -247,7 +260,7 @@ export function Senders({ ws, canManage, canManageTeams }: { ws: string; canMana
   );
 }
 
-function SenderForm({ ws, teams, members, onDone }: { ws: string; teams: Team[]; members: Member[]; onDone: (created?: string) => void }) {
+function SenderForm({ brandId, teams, members, onDone }: { brandId: string; teams: Team[]; members: Member[]; onDone: (created?: string) => void }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<NonNullable<Sender["kind"]>>("person");
   const [userId, setUserId] = useState("");
@@ -256,8 +269,8 @@ function SenderForm({ ws, teams, members, onDone }: { ws: string; teams: Team[];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    const { error } = await api.POST("/v1/workspaces/{ws}/senders", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/senders", {
+      params: { path: { brand: brandId } },
       body: { name: name.trim(), kind, team_ids: teamIds, user_id: kind === "person" && userId ? userId : null },
     });
     if (error) return setError(errorMessage(error));
