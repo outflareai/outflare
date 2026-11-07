@@ -307,3 +307,28 @@ func TestLinksReports(t *testing.T) {
 		t.Fatalf("dfs details: %+v", a)
 	}
 }
+
+// Ahrefs answers 403 for a report the plan doesn't include: that report
+// is refused, the key isn't wrong, so the connection isn't marked broken.
+// A 401 still is.
+func TestAhrefsPlanRefusalIsNotABadKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer bad" {
+			w.WriteHeader(401)
+			return
+		}
+		w.WriteHeader(403)
+		w.Write([]byte(`{"error":"Insufficient plan"}`))
+	}))
+	defer srv.Close()
+	cl := &c.Client{BaseURLs: map[string]string{"ahrefs": srv.URL}}
+	q := c.SEOQuery{Report: c.SEOKeywords, Target: "rival.example", Country: "US", Limit: 10}
+	_, err := Ahrefs{}.SEOReport(ctx, cl, c.Creds{"api_key": "k"}, q)
+	if c.KindOf(err) != c.ErrInvalid {
+		t.Fatalf("403: %v (%s)", err, c.KindOf(err))
+	}
+	_, err = Ahrefs{}.SEOReport(ctx, cl, c.Creds{"api_key": "bad"}, q)
+	if c.KindOf(err) != c.ErrAuth {
+		t.Fatalf("401: %v (%s)", err, c.KindOf(err))
+	}
+}

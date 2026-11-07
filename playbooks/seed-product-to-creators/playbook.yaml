@@ -46,7 +46,7 @@ steps:
   - say: For each creator who accepts, set the deal type to free product, make their tracked link, save it and their promo code on the partnership, record what the product cost as spend, and move it to Agreed.
     tools: [updateBrandRecord, createBrandTrackingLink, recordSpend]
   - say: Two weeks later, check who posted, save the post link and move them to Live; suggest a friendly nudge for the rest.
-    tools: [listSocialItems, updateBrandRecord]
+    tools: [listBrandSocialItems, updateBrandRecord]
   - say: After a month, report visits, sign-ups and paying customers per creator, and say who to offer a paid deal.
     tools: [getAnalyticsReport, outcomesReport]
 guardrails:

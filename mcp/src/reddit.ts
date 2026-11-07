@@ -7,6 +7,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -99,7 +100,7 @@ export function registerRedditTools(
   readOnly: boolean,
   call: Call,
 ): void {
-  const path = () => ({ ws: workspace() });
+  const onBrand = brandCaller(gtm, workspace);
   const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
 
   server.registerResource(
@@ -154,7 +155,7 @@ export function registerRedditTools(
       inputSchema: { brand },
       annotations: read,
     },
-    ({ brand }) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/budget", { params: { path: path(), query: { brand } } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/budget", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -162,10 +163,10 @@ export function registerRedditTools(
     {
       title: "List Reddit campaign settings",
       description: "Each brand's Engain connection and project, its limits (credits a month and a day, actions per subreddit a day, upvotes per item, whether a person approves each action) and its spend.",
-      inputSchema: { brand: z.string().optional().describe("Only this brand.") },
+      inputSchema: { brand },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/settings", { params: { path: path(), query: q } })),
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/settings", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
@@ -174,19 +175,19 @@ export function registerRedditTools(
       title: "List Reddit experiments",
       description: "Experiments, newest first, with hypothesis, strategy, status, conclusion and how many actions each has.",
       inputSchema: {
-        brand: z.string().optional(),
+        brand,
         status: z.enum(["open", "closed"]).optional(),
         limit: z.number().int().min(1).max(200).optional(),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/experiments", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/experiments", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
     "get_reddit_experiment",
-    { title: "Get a Reddit experiment", description: "One experiment.", inputSchema: { experiment: experimentRef }, annotations: read },
-    ({ experiment }) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/experiments/{id}", { params: { path: { ...path(), id: experiment } } })),
+    { title: "Get a Reddit experiment", description: "One experiment.", inputSchema: { brand, experiment: experimentRef }, annotations: read },
+    ({ brand, experiment }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/experiments/{id}", { params: { path: { brand: b, id: experiment } } }))),
   );
 
   server.registerTool(
@@ -195,7 +196,7 @@ export function registerRedditTools(
       title: "List Reddit actions",
       description: "Every comment, reply, post, thread group and upvote order, newest first: status (live, removed, gone...), Reddit link, score, days live, cost. Page back with cursor=next_cursor.",
       inputSchema: {
-        brand: z.string().optional(),
+        brand,
         status: z.string().optional().describe("One or more, comma-separated: draft, approved, sending, submitted, live, frozen, removed, hidden, gone, failed, cancelled, done."),
         kind: z.enum(["comment", "reply", "post", "thread", "upvotes"]).optional(),
         subreddit: z.string().optional(),
@@ -205,7 +206,7 @@ export function registerRedditTools(
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/actions", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/actions", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -213,10 +214,10 @@ export function registerRedditTools(
     {
       title: "Get a Reddit action",
       description: "One action with its timeline (sent, live, removed, restored), every check of Reddit, and Engain's last answer.",
-      inputSchema: { action: actionRef },
+      inputSchema: { brand, action: actionRef },
       annotations: read,
     },
-    ({ action }) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/actions/{id}", { params: { path: { ...path(), id: action } } })),
+    ({ brand, action }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/actions/{id}", { params: { path: { brand: b, id: action } } }))),
   );
 
   server.registerTool(
@@ -234,7 +235,7 @@ export function registerRedditTools(
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/report", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/report", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -246,7 +247,7 @@ export function registerRedditTools(
       annotations: { ...read, openWorldHint: true },
     },
     ({ brand, subreddit }) =>
-      call(() => gtm.GET("/v1/workspaces/{ws}/reddit/subreddits/{name}", { params: { path: { ...path(), name: subreddit.replace(/^r\//, "") }, query: { brand } } })),
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/subreddits/{name}", { params: { path: { brand: b, name: subreddit.replace(/^r\//, "") } } }))),
   );
 
   server.registerTool(
@@ -262,7 +263,7 @@ export function registerRedditTools(
       },
       annotations: { ...read, openWorldHint: true },
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/reddit/threads", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/reddit/threads", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerTool(
@@ -289,7 +290,7 @@ export function registerRedditTools(
       },
       annotations: { ...read, openWorldHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/preflight", { params: { path: path() }, body: body as never })),
+    (body) => call(() => onBrand(body.brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/preflight", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   if (readOnly) return;
@@ -306,7 +307,7 @@ export function registerRedditTools(
       },
       annotations: { ...write, openWorldHint: false },
     },
-    ({ brand, ...body }) => call(() => gtm.PUT("/v1/workspaces/{ws}/reddit/settings/{brand}", { params: { path: { ...path(), brand } }, body: body as never })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/reddit/settings", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -322,7 +323,7 @@ export function registerRedditTools(
       },
       annotations: { ...write, openWorldHint: false },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/experiments", { params: { path: path() }, body: body as never })),
+    (body) => call(() => onBrand(body.brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/experiments", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -330,11 +331,11 @@ export function registerRedditTools(
     {
       title: "Close a Reddit experiment",
       description: "End an experiment with its conclusion: what was tested, the numbers, what to do next. Future agents read it before testing again.",
-      inputSchema: { experiment: experimentRef, conclusion: z.string().min(1).max(5000) },
+      inputSchema: { brand, experiment: experimentRef, conclusion: z.string().min(1).max(5000) },
       annotations: { ...write, openWorldHint: false },
     },
-    ({ experiment, conclusion }) =>
-      call(() => gtm.PATCH("/v1/workspaces/{ws}/reddit/experiments/{id}", { params: { path: { ...path(), id: experiment } }, body: { status: "closed", conclusion } as never })),
+    ({ brand, experiment, conclusion }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/reddit/experiments/{id}", { params: { path: { brand: b, id: experiment } }, body: { status: "closed", conclusion } as never }))),
   );
 
   server.registerTool(
@@ -381,7 +382,7 @@ export function registerRedditTools(
       },
       annotations: write,
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/actions", { params: { path: path() }, body: body as never })),
+    (body) => call(() => onBrand(body.brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/actions", { params: { path: { brand: b } }, body: body as never }))),
   );
 
   server.registerTool(
@@ -389,10 +390,10 @@ export function registerRedditTools(
     {
       title: "Send a draft Reddit action",
       description: "Checks the brand's limits and sends a draft to Engain. When the brand needs a person's approval, only a person can.",
-      inputSchema: { action: actionRef },
+      inputSchema: { brand, action: actionRef },
       annotations: write,
     },
-    ({ action }) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/actions/{id}/approve", { params: { path: { ...path(), id: action } } })),
+    ({ brand, action }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/actions/{id}/approve", { params: { path: { brand: b, id: action } } }))),
   );
 
   server.registerTool(
@@ -400,10 +401,10 @@ export function registerRedditTools(
     {
       title: "Withdraw a Reddit action",
       description: "A draft, or an approved action not yet sent to Engain.",
-      inputSchema: { action: actionRef },
+      inputSchema: { brand, action: actionRef },
       annotations: { ...write, openWorldHint: false },
     },
-    ({ action }) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/actions/{id}/cancel", { params: { path: { ...path(), id: action } } })),
+    ({ brand, action }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/actions/{id}/cancel", { params: { path: { brand: b, id: action } } }))),
   );
 
   server.registerTool(
@@ -411,9 +412,9 @@ export function registerRedditTools(
     {
       title: "Check a Reddit action now",
       description: "Look at a sent action on Engain and Reddit straight away instead of waiting for the next scheduled check.",
-      inputSchema: { action: actionRef },
+      inputSchema: { brand, action: actionRef },
       annotations: write,
     },
-    ({ action }) => call(() => gtm.POST("/v1/workspaces/{ws}/reddit/actions/{id}/check", { params: { path: { ...path(), id: action } } })),
+    ({ brand, action }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/reddit/actions/{id}/check", { params: { path: { brand: b, id: action } } }))),
   );
 }

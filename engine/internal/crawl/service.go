@@ -681,7 +681,7 @@ func (s *Service) allowed(ctx context.Context, r *run, raw string) (bool, error)
 // were new.
 func (s *Service) queue(ctx context.Context, r *run, urls []string, depth int, source, foundOn string) (int, error) {
 	room := r.maxPages*frontierFactor - r.found
-	if room <= 0 || len(urls) == 0 {
+	if len(urls) == 0 || room <= 0 && source != "sitemap" {
 		return 0, nil
 	}
 	// The settings' scope: patterns, depth and parameters.
@@ -700,7 +700,21 @@ func (s *Service) queue(ctx context.Context, r *run, urls []string, depth int, s
 	}
 	urls = kept
 	if len(urls) > room {
-		urls = urls[:room]
+		if source == "sitemap" {
+			// The sitemap's pages past the cap stay listed, as skipped for
+			// the limit, so the indexability report shows every page the
+			// site wants indexed, crawled or not.
+			if _, err := s.Pool.Exec(ctx, `
+				INSERT INTO crawl_pages (workspace_id, run_id, url, depth, source, found_on, in_sitemap, status, reason)
+				SELECT $1, $2, u, $4, 'sitemap', $5, true, 'skipped', 'limit' FROM unnest($3::text[]) u
+				ON CONFLICT (run_id, url) DO UPDATE SET in_sitemap = true`, r.ws, r.id, urls[max(room, 0):], depth, foundOn); err != nil {
+				return 0, err
+			}
+		}
+		urls = urls[:max(room, 0)]
+		if len(urls) == 0 {
+			return 0, nil
+		}
 	}
 	tag, err := s.Pool.Exec(ctx, `
 		INSERT INTO crawl_pages (workspace_id, run_id, url, depth, source, found_on, in_sitemap)
@@ -855,6 +869,7 @@ func (s *Service) page(ctx context.Context, r *run, id int64, raw string, depth 
 				pg, resp, via = &built, fr, r.fb.Connector
 			}
 		}
+		pg.AI.snippetDirectives(xrt)
 		noindex, nofollow, linksOut = noindex || pg.Noindex, nofollow || pg.Nofollow, len(pg.Links)
 		// A meta refresh is a redirect too.
 		if pg.MetaRefreshTo != "" {
@@ -977,12 +992,13 @@ func (s *Service) keepPage(ctx context.Context, r *run, id int64, pg *Page) erro
 	if types == nil {
 		types = []string{}
 	}
+	ai, _ := json.Marshal(pg.AI)
 	_, err := s.Pool.Exec(ctx, `
 		UPDATE crawl_pages SET title = $2, title_count = $3, meta_description = $4, canonical = $5, canonical_count = $6,
 			h1 = $7, lang = $8, hreflang = $9, schema_types = $10, word_count = $11, images = $12, images_no_alt = $13,
-			content_hash = $14, viewport = $15, og_title = $16, og_image = $17, insecure_resources = $18
+			content_hash = $14, viewport = $15, og_title = $16, og_image = $17, insecure_resources = $18, ai_signals = $19
 		WHERE id = $1`, id, pg.Title, pg.TitleCount, pg.Description, pg.Canonical, pg.CanonicalCount, h1, pg.Lang,
-		hreflang, types, pg.WordCount, pg.Images, pg.ImagesNoAlt, pg.ContentHash, !pg.ViewportMissing, pg.OGTitle, pg.OGImage, pg.InsecureResources)
+		hreflang, types, pg.WordCount, pg.Images, pg.ImagesNoAlt, pg.ContentHash, !pg.ViewportMissing, pg.OGTitle, pg.OGImage, pg.InsecureResources, ai)
 	if err != nil || len(pg.Links) == 0 {
 		return err
 	}
@@ -1139,6 +1155,9 @@ func (s *Service) Run(ctx context.Context) {
 			track.Fail(ctx, s.Log, track.Event{Name: "crawl.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 		if err := s.ScheduleGlances(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, s.Log, track.Event{Name: "seo_competitor.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if err := s.ScheduleRegistered(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "seo_competitor.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
 		}
 	}

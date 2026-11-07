@@ -76,7 +76,7 @@ export function PRAutopilot({ ws, canManage, go }: Props) {
   useEffect(() => {
     if (!forBrand) return;
     setExperts(null);
-    api.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query: { brand: forBrand } } }).then(({ data }) => setExperts(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/pr-experts", { params: { path: { brand: forBrand } } }).then(({ data }) => setExperts(data?.data ?? []));
   }, [ws, forBrand]);
 
   const start = async () => {

@@ -944,7 +944,7 @@ func (s *Server) checkJourneyRefs(r *http.Request, ws string, brand *string, ste
 				AND ($3::uuid IS NULL OR brand_id = $3))`, st.JourneyID, "a journey of the journey's brand"
 		case st.SequenceID != "" && (st.Kind == "enroll_in_sequence" || st.Kind == "stop_sequences"):
 			q, ref, what = `SELECT EXISTS (SELECT 1 FROM sequences WHERE workspace_id = $1 AND id = $2 AND status <> 'archived'
-				AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3))`, st.SequenceID, "a sequence the journey's brand can use"
+				AND ($3::uuid IS NULL OR brand_id = $3))`, st.SequenceID, "a sequence the journey's brand can use"
 		default:
 			continue
 		}

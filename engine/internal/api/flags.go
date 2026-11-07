@@ -54,6 +54,11 @@ func (s *Server) routesFlags(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/site/flags/edits", s.siteFlagEdits)
 	mux.HandleFunc("POST /v1/site/flags/edits", s.siteFlagEdits)
 	mux.HandleFunc("OPTIONS /v1/site/flags/edits", s.siteEventsPreflight)
+	mux.HandleFunc("GET /v1/site/flags/edits/ai", s.siteEditorAI)
+	mux.HandleFunc("POST /v1/site/flags/edits/ai", s.siteEditorAI)
+	mux.HandleFunc("OPTIONS /v1/site/flags/edits/ai", s.siteEventsPreflight)
+	mux.HandleFunc("POST /v1/site/flags/edits/ai/stop", s.siteEditorAIStop)
+	mux.HandleFunc("OPTIONS /v1/site/flags/edits/ai/stop", s.siteEventsPreflight)
 	mux.HandleFunc("GET /v1/site/editor.js", s.editorJS)
 }
 

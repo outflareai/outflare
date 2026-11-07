@@ -23,12 +23,19 @@ import (
 func (s *Server) routesDeploys(mux *http.ServeMux) {
 	read, manage := auth.ScopeIntegrationsRead, auth.ScopeIntegrationsManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/integrations/{id}/deploy-options", s.inWorkspace(read, s.listDeployOptions))
+	mux.HandleFunc("GET /v1/brands/{brand}/deploy-targets", s.onBrand(read, s.listDeployTargets))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/deploy-targets", s.inBrand(read, s.listDeployTargets))
+	mux.HandleFunc("POST /v1/brands/{brand}/deploy-targets", s.onBrand(manage, s.createDeployTarget))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/deploy-targets", s.inBrand(manage, s.createDeployTarget))
+	mux.HandleFunc("GET /v1/brands/{brand}/deploy-targets/{target}", s.onBrand(read, s.getDeployTarget))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/deploy-targets/{target}", s.inBrand(read, s.getDeployTarget))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/deploy-targets/{target}", s.onBrand(manage, s.updateDeployTarget))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/deploy-targets/{target}", s.inBrand(manage, s.updateDeployTarget))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/deploy-targets/{target}", s.onBrand(manage, s.deleteDeployTarget))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/deploy-targets/{target}", s.inBrand(manage, s.deleteDeployTarget))
+	mux.HandleFunc("POST /v1/brands/{brand}/deploy-targets/{target}/check", s.onBrand(manage, s.checkDeployTarget))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/deploy-targets/{target}/check", s.inBrand(manage, s.checkDeployTarget))
+	mux.HandleFunc("GET /v1/brands/{brand}/deploys", s.onBrand(read, s.listDeploys))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/deploys", s.inBrand(read, s.listDeploys))
 }
 
@@ -225,7 +232,7 @@ func (s *Server) matchSite(ctx context.Context, a *access, domains []string) (*s
 	}
 	var id, brand *string
 	err := s.pool.QueryRow(ctx, `SELECT id::text, brand_id::text FROM seo_sites WHERE workspace_id = $1 AND regexp_replace(host, '^www\.', '') = ANY($2)
-		ORDER BY created_at LIMIT 1`, a.WorkspaceID, hosts).Scan(&id, &brand)
+		AND ($3::uuid[] IS NULL OR brand_id = ANY($3::uuid[])) ORDER BY created_at LIMIT 1`, a.WorkspaceID, hosts, a.seenBrands()).Scan(&id, &brand)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.writes(brand)) {
 		return nil, nil, nil
 	}
@@ -275,6 +282,7 @@ func (s *Server) createDeployTarget(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	brand = a.orRoute(brand)
 	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
 		return
@@ -336,7 +344,8 @@ func (s *Server) updateDeployTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	site, brand := t.SiteID, t.BrandID
 	if req.SiteID.Set {
-		site, brand = req.SiteID.Value, nil
+		// With no site the target stays in its brand.
+		site = req.SiteID.Value
 		if site != nil {
 			var err error
 			if brand, err = s.siteBrand(ctx, a, *site); s.allocError(w, r, err) {

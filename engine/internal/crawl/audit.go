@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -104,7 +105,21 @@ var Rules = []Rule{
 	{"ai_search_blocked", SevWarning, "ai_visibility", "Hidden from AI search", "robots.txt keeps AI search crawlers (such as OAI-SearchBot, Claude-SearchBot or PerplexityBot) from the page, so AI answers can't read or cite it.", "Allow these crawlers in robots.txt. Training crawlers such as GPTBot and ClaudeBot are separate tokens and can stay blocked."},
 	{"llms_txt_missing", SevNotice, "ai_visibility", "No llms.txt", "An llms.txt at the site's root gives AI assistants a short, plain guide to the site and its key pages.", "Publish /llms.txt: a Markdown file with the site's name, a one-line summary and links to its most important pages (see llmstxt.org)."},
 	{"og_image_missing", SevNotice, "social", "No share image", "The page has Open Graph tags but no og:image, so shared links show no picture.", "Add an og:image of at least 1200 by 630 pixels."},
+	{"ai_snippet_blocked", SevWarning, "ai_visibility", "Kept out of AI answers (nosnippet)", "The page says nosnippet, so Google can't use it in AI Overviews or AI Mode, and Apple keeps it out of Siri's answers.", "Remove nosnippet. To keep only some parts out of AI answers, mark those parts with data-nosnippet."},
+	{"ai_snippet_short", SevNotice, "ai_visibility", "AI can only quote a few words", "A max-snippet under 50 characters limits how much Google's search and AI answers can quote from the page.", "Raise max-snippet, or remove it (-1 means no limit)."},
+	{"ai_copilot_limited", SevNotice, "ai_visibility", "Limited in Copilot (noarchive)", "Bing reads noarchive and nocache as limits on how Microsoft Copilot and Bing's AI answers may use the page.", "Remove noarchive and nocache unless you mean to keep the page out of Copilot's answers."},
+	{"ai_question_unanswered", SevNotice, "ai_visibility", "Question without a direct answer", "A heading asks a question, but the text under it doesn't answer it straight away. AI answers quote short, direct answers that sit right under the question.", "Start the section with one or two sentences that answer the question, then add the detail."},
+	{"ai_no_date", SevNotice, "ai_visibility", "Article without a date", "The article gives no date in its structured data, meta tags or HTML, so AI answers can't tell how fresh it is and may prefer newer pages.", "Add datePublished and dateModified to its Article structured data, and show the date on the page."},
+	{"ai_stale", SevNotice, "ai_visibility", "Not updated in over 2 years", "AI answers favour fresh pages, and this article was last published or updated over 2 years ago.", "Review the article, update what changed, and set dateModified."},
+	{"ai_no_author", SevNotice, "ai_visibility", "Article without an author", "The article doesn't say who wrote it, which AI answers and search use to judge whether to trust it.", "Name the author in the Article structured data (author) and on the page."},
+	{"schema_mismatch", SevWarning, "content", "Structured data doesn't match the page", "The structured data says something the page doesn't show. Google asks for structured data that matches the visible text, and AI answers may quote the wrong thing.", "Make the structured data say what the page shows, or show it on the page."},
 }
+
+// staleAfter is how old an article's newest date is before ai_stale.
+const staleAfter = 2 * 365 * 24 * time.Hour
+
+// auditNow is the audit's clock, for ai_stale.
+var auditNow = time.Now
 
 var ruleByID = func() map[string]Rule {
 	m := map[string]Rule{}
@@ -146,6 +161,8 @@ type AuditPage struct {
 	// the page; NoLLMSTxt marks the start page of a site without llms.txt.
 	AIBlocked []string
 	NoLLMSTxt bool
+	// AI is what the parse found for AI answers.
+	AI AISignals
 }
 
 // AuditLink is an internal link between crawled pages.
@@ -351,6 +368,9 @@ func RunAudit(pages []AuditPage, links []AuditLink) Audit {
 		}
 		if p.NoLLMSTxt {
 			add(p, "llms_txt_missing", "")
+		}
+		if !p.Noindex {
+			aiRules(p, add)
 		}
 		n := utf8.RuneCountInString(p.Title)
 		switch {
@@ -588,7 +608,7 @@ func storeAudit(ctx context.Context, tx pgx.Tx, ws, runID string) (Audit, error)
 		SELECT id, url, source, status, reason, content_type, http_status, depth, bytes, duration_ms, redirect_to, noindex,
 		       title, title_count, meta_description, canonical, lang, canonical_count, coalesce(array_length(h1, 1), 0),
 		       word_count, images_no_alt, content_hash, viewport, links_in, js_shell,
-		       nofollow, links_out, h1, hreflang, coalesce(array_length(schema_types, 1), 0), og_title, og_image, insecure_resources
+		       nofollow, links_out, h1, hreflang, coalesce(array_length(schema_types, 1), 0), og_title, og_image, insecure_resources, ai_signals
 		FROM crawl_pages WHERE run_id = $1 AND workspace_id = $2 ORDER BY id`, runID, ws)
 	if err != nil {
 		return Audit{}, err
@@ -598,7 +618,7 @@ func storeAudit(ctx context.Context, tx pgx.Tx, ws, runID string) (Audit, error)
 		err := row.Scan(&p.ID, &p.URL, &p.Source, &p.Status, &p.Reason, &p.ContentType, &p.HTTPStatus, &p.Depth, &p.Bytes, &p.DurationMS,
 			&p.RedirectTo, &p.Noindex, &p.Title, &p.TitleCount, &p.Description, &p.Canonical, &p.Lang, &p.CanonicalCount,
 			&p.H1Count, &p.WordCount, &p.ImagesNoAlt, &p.ContentHash, &p.Viewport, &p.LinksIn, &p.JSShell,
-			&p.Nofollow, &p.LinksOut, &p.H1, &p.Hreflang, &p.SchemaTypes, &p.OGTitle, &p.OGImage, &p.InsecureResources)
+			&p.Nofollow, &p.LinksOut, &p.H1, &p.Hreflang, &p.SchemaTypes, &p.OGTitle, &p.OGImage, &p.InsecureResources, &p.AI)
 		return p, err
 	})
 	if err != nil {

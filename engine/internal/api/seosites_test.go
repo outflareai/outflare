@@ -259,9 +259,8 @@ func TestSEOSiteSimulatedInTestWorkspace(t *testing.T) {
 	base := "/v1/workspaces/" + ws
 	brand := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Example", "website": "example.com"})
 
-	// The site joins the brand whose domain it is, and passes the check
-	// without one.
-	s := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "www.example.com"})
+	// The site joins its brand, and passes the check without one.
+	s := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "www.example.com", "brand_id": brand["id"]})
 	if s["brand_id"] != brand["id"] || s["start_url"] != "https://www.example.com/" || s["host"] != "www.example.com" {
 		t.Fatalf("site: %v", s)
 	}

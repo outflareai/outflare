@@ -64,7 +64,7 @@ func TestStoriesAI(t *testing.T) {
 	// Ideas: as many as asked for, and only an article it was shown.
 	owner.must(400, "POST", base+"/stories/ideas", map[string]any{"brand_id": "northpeak", "count": 11})
 	owner.must(202, "POST", base+"/stories/ideas", map[string]any{"brand_id": "northpeak", "count": 2, "brief": "Something for the bot traffic beat"})
-	ideas := waitFor(t, owner, base+"/stories?status=idea", func(m map[string]any) bool { return m["total"] == 3.0 })["data"].([]any)
+	ideas := waitFor(t, owner, base+"/stories?brand=northpeak&status=idea", func(m map[string]any) bool { return m["total"] == 3.0 })["data"].([]any)
 	var reactive map[string]any
 	for _, x := range ideas {
 		if x := x.(map[string]any); x["kind"] == "reactive" {

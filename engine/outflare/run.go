@@ -963,6 +963,11 @@ func housekeeping(ctx context.Context, log *slog.Logger, s *api.Server, logReten
 		} else if n > 0 {
 			log.Info("pruned request logs", "deleted", n)
 		}
+		if n, err := s.PrunePageVitals(ctx); err != nil && ctx.Err() == nil {
+			track.Fail(ctx, log, track.Event{Name: "page_vitals.prune_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		} else if n > 0 {
+			log.Info("pruned page speed readings over 90 days old", "deleted", n)
+		}
 		if n, err := s.PruneJobs(ctx); err != nil && ctx.Err() == nil {
 			log.Error("prune jobs", "err", err)
 		} else if n > 0 {

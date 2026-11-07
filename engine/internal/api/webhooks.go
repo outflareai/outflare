@@ -177,7 +177,7 @@ func checkWebhookRules(ctx context.Context, tx pgx.Tx, ws, id string) error {
 	var bad int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM webhook_endpoints e, unnest(e.rule_ids) r
 		WHERE e.id = $1 AND e.workspace_id = $2 AND NOT EXISTS (SELECT 1 FROM rules x WHERE x.id = r AND x.workspace_id = e.workspace_id
-			AND (e.brand_id IS NULL OR x.brand_id IS NULL OR x.brand_id = e.brand_id))`, id, ws).Scan(&bad)
+			AND (x.brand_id IS NULL OR x.brand_id = e.brand_id))`, id, ws).Scan(&bad)
 	if err == nil && bad > 0 {
 		return errInvalid("rule_ids are rules of the webhook's brand")
 	}

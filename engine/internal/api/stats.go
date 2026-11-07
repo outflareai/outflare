@@ -42,6 +42,9 @@ type statsView struct {
 	// LinkPitchesWaiting are draft link pitches: waiting for a person to
 	// approve them, or to write the opener when there is no AI.
 	LinkPitchesWaiting int `json:"link_pitches_waiting"`
+	// ActionsWaiting are agents' changes held for a person's yes or no,
+	// shown next to Agents in the sidebar.
+	ActionsWaiting int `json:"actions_waiting"`
 }
 
 // stats is the workspace overview: one round trip for the home screen and
@@ -89,10 +92,11 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 			(SELECT count(*) FROM mailboxes x WHERE workspace_id = $1 AND lifecycle_stage = 'warming' AND status IN ('active', 'verifying')`+mb("x")+`),
 			(SELECT count(DISTINCT lead_id) FROM messages g WHERE workspace_id = $1 AND status = 'sent' AND lead_id IS NOT NULL AND created_at > now() - interval '7 days'`+viaMailbox("g")+`),
 			(SELECT count(DISTINCT lead_id) FROM inbound_messages i WHERE workspace_id = $1 AND kind = 'reply' AND lead_id IS NOT NULL AND received_at > now() - interval '7 days'`+viaMailbox("i")+`),
-			(SELECT count(*) FROM link_pitches k WHERE workspace_id = $1 AND status = 'draft'`+viaSequence("k")+`)`, args...,
+			(SELECT count(*) FROM link_pitches k WHERE workspace_id = $1 AND status = 'draft'`+viaSequence("k")+`),
+			(SELECT count(*) FROM actions x WHERE workspace_id = $1 AND status = 'held' AND (expires_at IS NULL OR expires_at >= now())`+actionBrandSQL(brand, "x.brand_id", &args)+`)`, args...,
 	).Scan(&m.Total, &m.Active, &m.Error, &m.Paused, &m.Verifying, &m.DailyCapacity,
 		&v.Sent24h, &v.Sent7d, &v.Replies7d, &v.Bounces7d, &v.UnreadReplies, &v.ActiveSequences, &v.ActiveEnrollments, &v.Leads,
-		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.LinkPitchesWaiting)
+		&m.Warming, &v.ContactedLeads7d, &v.RepliedLeads7d, &v.LinkPitchesWaiting, &v.ActionsWaiting)
 	if err != nil {
 		s.internal(w, r, err)
 		return

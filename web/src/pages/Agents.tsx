@@ -9,6 +9,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AgentPageTabsContext, type AgentPageTab } from "@/lib/brandAgent";
 import { ChangePreview } from "@/components/change-preview";
 import { AgentRunDetail, AgentRuns } from "./AgentRuns";
 import type { Tab } from "../App";
@@ -36,7 +37,8 @@ const modeTone = { run: "green", hold: "amber", refuse: "red" } as const;
 const shortPath = (p: string) => p.replace(/^\/v1\/workspaces\/[^/]+\//, "").replace(/^\/v1\//, "");
 const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000));
 
-type View = "agent" | "waiting" | "runs" | "all" | "grants";
+// A view is one of these, or a tab the brand agent's page adds.
+type View = string;
 
 // brandAgent is the brand's own agent, when the server has one (an
 // extension page, such as Outflare Cloud's): it opens first, and the
@@ -52,7 +54,48 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
   }, [ws, canTokens]);
 
   const agents = tokens?.filter((t) => t.action_gate) ?? null;
+  // The tab says how many changes wait before Waiting for you opens.
+  const brandHandle = useBrand(ws).brand?.handle;
+  const hasAgent = !!brandAgent;
+  useEffect(() => {
+    if (!hasAgent || view === "waiting") return;
+    api.GET("/v1/workspaces/{ws}/actions", { params: { path: { ws }, query: { status: "held", limit: 200, ...(brandHandle ? { brand: brandHandle } : {}) } } }).then(({ data }) => setWaiting(data?.data.length ?? 0));
+  }, [ws, hasAgent, view, brandHandle]);
+  const [extra, setExtra] = useState<AgentPageTab[]>([]);
+  const pick = useCallback((v: View) => { setView(v); track("ui.agents_view_opened", { view: v }); }, []);
   if (open) return <AgentRunDetail key={open} ws={ws} id={open} canRun={canRun} canApprove={canApprove} onBack={() => { setOpen(undefined); setView("runs"); }} />;
+  // With a brand agent, the page is its chat, and every other part of it
+  // (the agent's own views, approvals, history, what agents may do) is a
+  // tab in one row at the top.
+  if (brandAgent) {
+    const agentView = view === "agent" || extra.some((t) => t.value === view);
+    return (
+      <div className="space-y-4">
+        <PageHeader
+          title="Agent"
+          description="Ask for anything. It works on your tasks and asks before changes you haven't allowed."
+          action={canTokens ? <Button variant="ghost" onClick={() => go("tokens")}>API tokens</Button> : undefined}
+        />
+        <Tabs value={view} onValueChange={pick}>
+          <TabsList variant="line" className="max-w-full justify-start overflow-x-auto">
+            <TabsTrigger value="agent">Chat</TabsTrigger>
+            {extra.map((t) => <TabsTrigger key={t.value} value={t.value}>{t.label}{t.count ? ` (${t.count})` : ""}</TabsTrigger>)}
+            <TabsTrigger value="waiting">Waiting for you{waiting ? ` (${waiting})` : ""}</TabsTrigger>
+            <TabsTrigger value="all">Everything changed</TabsTrigger>
+            <TabsTrigger value="grants">What agents may do</TabsTrigger>
+            <TabsTrigger value="runs">Runs</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div hidden={!agentView}>
+          <AgentPageTabsContext.Provider value={{ view: agentView ? view : "agent", go: pick, setTabs: setExtra }}>{brandAgent}</AgentPageTabsContext.Provider>
+        </div>
+        {view === "waiting" && <Waiting ws={ws} canApprove={canApprove} canManage={canManage} onCount={setWaiting} />}
+        {view === "runs" && <AgentRuns ws={ws} onOpen={setOpen} />}
+        {view === "all" && <Everything ws={ws} tokens={agents} />}
+        {view === "grants" && <Grants ws={ws} canManage={canManage} tokens={agents} />}
+      </div>
+    );
+  }
   return (
     <div className="space-y-6">
       <PageHeader
@@ -66,15 +109,13 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
           <Button variant="ghost" onClick={() => go("tokens")}>Open API tokens</Button>
         </div>
       )}
-      <Tabs value={view} onValueChange={(v) => { setView(v as View); track("ui.agents_view_opened", { view: v }); }}>
+      <Tabs value={view} onValueChange={pick}>
         <TabsList>
-          {brandAgent && <TabsTrigger value="agent">Brand agent</TabsTrigger>}
           <TabsTrigger value="waiting">Waiting for you{waiting ? ` (${waiting})` : ""}</TabsTrigger>
           <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="all">Everything</TabsTrigger>
           <TabsTrigger value="grants">What agents may do</TabsTrigger>
         </TabsList>
-        {brandAgent && <TabsContent value="agent">{brandAgent}</TabsContent>}
         <TabsContent value="waiting"><Waiting ws={ws} canApprove={canApprove} canManage={canManage} onCount={setWaiting} /></TabsContent>
         <TabsContent value="runs"><AgentRuns ws={ws} onOpen={setOpen} /></TabsContent>
         <TabsContent value="all"><Everything ws={ws} tokens={agents} /></TabsContent>

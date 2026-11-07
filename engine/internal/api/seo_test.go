@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -121,6 +122,11 @@ func (fakeDataForSEO) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"key": "c:Northpeak", "total": map[string]any{"mentions": 280, "ai_search_volume": 9000}},
 		}})
 	case "/v3/dataforseo_labs/google/domain_rank_overview/live":
+		// A domain DataForSEO refuses, which mustn't stop the others.
+		if body, _ := io.ReadAll(r.Body); strings.Contains(string(body), "refused.example") {
+			out = map[string]any{"status_code": 20000, "tasks": []any{map[string]any{"status_code": 40501, "status_message": "Invalid Field: 'target'."}}}
+			break
+		}
 		out = task(0.0101, map[string]any{"items": []any{map[string]any{"metrics": map[string]any{"organic": map[string]any{"count": 1200, "etv": 3400, "pos_1": 5, "pos_2_3": 10}}}}})
 	case "/v3/backlinks/summary/live":
 		rank := dfsRank.Load()

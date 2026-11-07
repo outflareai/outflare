@@ -272,8 +272,8 @@ export function registerBrandTools(server: McpServer, gtm: MissionClient, worksp
   server.registerTool(
     "remove_from_brand",
     {
-      title: "Make a brand's records shared",
-      description: "Takes domains, mailboxes, lead lists, sequences or missions out of a brand so every brand shares them again.",
+      title: "Take missions out of a brand",
+      description: "Makes missions in a brand ones for every brand. Brands share nothing else: to move domains, mailboxes, lead lists or sequences, add them to another brand with add_to_brand.",
       inputSchema: { brand: brandRef, ...records },
       annotations: write,
     },

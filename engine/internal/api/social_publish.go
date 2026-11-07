@@ -31,18 +31,31 @@ import (
 
 func (s *Server) routesSocialPublish(mux *http.ServeMux) {
 	read, manage, post := auth.ScopeSocialRead, auth.ScopeSocialManage, auth.ScopeSocialPost
+	mux.HandleFunc("GET /v1/brands/{brand}/social/publications", s.onBrand(read, s.listSocialPublications))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/publications", s.inBrand(read, s.listSocialPublications))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/publications", s.onBrand(manage, s.createSocialPublication))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/publications", s.inBrand(manage, s.createSocialPublication))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/publications/{id}", s.onBrand(read, s.getSocialPublication))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/publications/{id}", s.inBrand(read, s.getSocialPublication))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/publications/{id}", s.onBrand(manage, s.updateSocialPublication))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/publications/{id}", s.inBrand(manage, s.updateSocialPublication))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/social/publications/{id}", s.onBrand(manage, s.cancelSocialPublication))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/social/publications/{id}", s.inBrand(manage, s.cancelSocialPublication))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/publications/{id}/approve", s.onBrand(post, s.approveSocialPublication))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/publications/{id}/approve", s.inBrand(post, s.approveSocialPublication))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/publications/{id}/draft", s.onBrand(manage, s.draftSocialPublication))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/publications/{id}/draft", s.inBrand(manage, s.draftSocialPublication))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/series", s.onBrand(read, s.listSocialSeries))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/series", s.inBrand(read, s.listSocialSeries))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/series", s.onBrand(manage, s.createSocialSeries))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/series", s.inBrand(manage, s.createSocialSeries))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/series/{id}", s.onBrand(read, s.getSocialSeries))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/series/{id}", s.inBrand(read, s.getSocialSeries))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/series/{id}", s.onBrand(manage, s.updateSocialSeries))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/series/{id}", s.inBrand(manage, s.updateSocialSeries))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/series/{id}/approve", s.onBrand(post, s.approveSocialSeries))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/series/{id}/approve", s.inBrand(post, s.approveSocialSeries))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/series/{id}/posts", s.onBrand(manage, s.addSocialSeriesPost))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/series/{id}/posts", s.inBrand(manage, s.addSocialSeriesPost))
 }
 

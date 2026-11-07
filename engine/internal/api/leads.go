@@ -277,7 +277,7 @@ func (s *Server) importLeads(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, pgx.ErrNoRows) {
 				// A list from before brands had one becomes this brand's.
 				err = tx.QueryRow(ctx, `UPDATE lead_lists SET brand_id = $3
-					WHERE workspace_id = $1 AND lower(name) = lower($2) AND (brand_id = $3 OR brand_id IS NULL) RETURNING id`,
+					WHERE workspace_id = $1 AND lower(name) = lower($2) AND brand_id = $3 RETURNING id`,
 					a.WorkspaceID, listName, brand).Scan(&id)
 				if errors.Is(err, pgx.ErrNoRows) {
 					return errInvalid("a list with that name belongs to another brand; pick another name")

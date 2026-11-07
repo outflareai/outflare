@@ -24,7 +24,7 @@ Mozilla/5.0 (compatible; OutflareBot/1.0; +https://outflare.ai/bot/)
 
 ## Sites and ownership
 
-A site is a website a workspace audits: `POST /v1/workspaces/$WS/seo-sites` with its `url`. It belongs to the brand whose domains include its host, unless `brand_id` says otherwise.
+A site is a website a workspace audits: `POST /v1/brands/$BRAND/seo-sites` with its `url`. It belongs to the brand in its path.
 
 Until you prove you own a site, a crawl reads at most 100 pages, waits at least 2 seconds between requests and always obeys robots.txt. A site you have proved may crawl up to 10,000 pages, as fast as one request every 250 ms, and may set `obey_robots: false` to audit pages its own robots.txt hides from crawlers. That choice applies only to that site. Each site's `limits` say what it may ask for now. The first proof moves a site still on the unproved limits to the proved defaults: up to 10,000 pages, about one request a second. Limits you set yourself stay as they are.
 
@@ -49,7 +49,7 @@ The check runs while you wait, and answers `409 verification_failed` with the pr
 
 ## Crawls
 
-`POST .../seo-sites/{site}/crawls` queues a crawl (`202`). It reads robots.txt, then the sitemaps robots.txt lists (or `/sitemap.xml`), then the start page, and follows links breadth first until nothing is left (`done`) or `max_pages` were read (`limit`). Sitemaps may be gzipped, sitemap indexes or plain text; up to ten sitemap files are read. A crawl queues at most three times its page limit of URLs.
+`POST .../seo-sites/{site}/crawls` queues a crawl (`202`). It reads robots.txt, then the sitemaps robots.txt lists (or `/sitemap.xml`), then the start page, and follows links breadth first until nothing is left (`done`) or `max_pages` were read (`limit`). Sitemaps may be gzipped, sitemap indexes or plain text; up to ten sitemap files are read. A crawl queues at most three times its page limit of URLs. Sitemap pages past that are still listed, `skipped` with the reason `limit`, so the indexability report shows every page the site asks to have indexed, read or not.
 
 One crawl per site runs at a time (`409 crawl_running`). Follow it with `GET .../crawls/{crawl}`, and stop it with `POST .../crawls/{crawl}/stop`. A site with `schedule: daily` or `weekly` is crawled that often by itself. A scheduled crawl that fails (the site down, robots.txt unreachable, an error of Outflare's) is tried again soon, at any hour, rather than at the next scheduled time: after 15 minutes, then 1 and 2 hours, then every 4 hours, until one works.
 
@@ -156,6 +156,14 @@ When a crawl ends, Outflare checks every page it stored against the audit's rule
 | `og_image_missing` | notice | No share image |
 | `ai_search_blocked` | warning | Hidden from AI search |
 | `llms_txt_missing` | notice | No llms.txt |
+| `ai_snippet_blocked` | warning | AI answers can't quote the page (nosnippet) |
+| `ai_snippet_short` | notice | AI answers can quote only a little (max-snippet) |
+| `ai_copilot_limited` | notice | Copilot's use is limited (noarchive or nocache) |
+| `ai_question_unanswered` | notice | Questions without a direct answer |
+| `ai_no_date` | notice | Article without a date |
+| `ai_stale` | notice | Article not updated in two years |
+| `ai_no_author` | notice | Article without an author |
+| `schema_mismatch` | warning | Structured data doesn't match the page |
 
 `js_only_content` marks a page that, as served, is an empty app shell (see below): crawlers and AI assistants that do not run JavaScript see little of it, even when Geonode has read it for the audit.
 
@@ -167,11 +175,21 @@ AI products send their own crawlers, and robots.txt can let each in or keep it o
 
 | Purpose | Crawlers | What blocking it does |
 | --- | --- | --- |
-| search | OAI-SearchBot, Claude-SearchBot, PerplexityBot, DuckAssistBot, Amazonbot | AI search can't find the page, so answers don't cite it |
-| user | ChatGPT-User, Claude-User, Perplexity-User, MistralAI-User | An assistant can't open the page when someone asks about it |
-| training | GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Meta-ExternalAgent, CCBot, Bytespider | Pages aren't collected to train models; answers are unaffected |
+| search | Googlebot, Bingbot, OAI-SearchBot, Claude-SearchBot, PerplexityBot, DuckAssistBot, Applebot, meta-webindexer, Amzn-SearchBot, MistralAI-Index | AI search can't find the page, so answers don't cite it |
+| user | ChatGPT-User, Claude-User, Perplexity-User, MistralAI-User, Meta-ExternalFetcher, Amzn-User | An assistant can't open the page when someone asks about it |
+| training | GPTBot, ClaudeBot, Google-Extended, Applebot-Extended, Meta-ExternalAgent, CCBot, Bytespider, Amazonbot, MistralAI-Training | Pages aren't collected to train models; answers are unaffected |
 
-The audit flags a page that robots.txt keeps from any search or user crawler (`ai_search_blocked`, naming them), and the start page of a site without an llms.txt (`llms_txt_missing`; an HTML page answering at `/llms.txt` counts as none). Blocking only training crawlers is a choice, not an issue. Together with [AI visibility](ai-visibility.md), which asks the models themselves, this shows whether AI can read the site and whether it mentions it.
+Each crawler in the list says which product it feeds (`feeds`), whether its company says it may ignore robots.txt because a person asked for the page (`may_ignore_robots`: ChatGPT-User, Perplexity-User, Meta-ExternalFetcher, Amzn-User), and whether it is a search engine's own crawler (`search_engine`). Googlebot and Bingbot are in the list because Google's AI Overviews and AI Mode answer from Googlebot's index and Copilot from Bing's: blocking Google-Extended changes only Gemini's training and grounding, not AI Overviews. Search engines' crawlers are not counted as AI bot visits in [AI visibility](ai-visibility.md). The ai-access answer also lists `usage_signals`: the `Content-Signal` (Cloudflare) and `Content-Usage` (IETF AI preferences) lines in each host's robots.txt, which say how content may be used, such as `search=yes, ai-train=no`.
+
+The audit flags a page that robots.txt keeps from any search or user crawler (`ai_search_blocked`, naming them), and the start page of a site without an llms.txt (`llms_txt_missing`; an HTML page answering at `/llms.txt` counts as none). Blocking only training crawlers is a choice, not an issue.
+
+The crawl also reads, from the HTML it already fetched, what AI answers need beyond search, and keeps it on each page as `ai_signals`. Pages marked `noindex` are not checked.
+
+- **Quoting.** A robots meta tag (`robots`, `googlebot` or `bingbot`) or `X-Robots-Tag` saying `nosnippet` keeps the page out of Google's AI Overviews and AI Mode (`ai_snippet_blocked`); a `max-snippet` under 50 characters leaves answers little to quote (`ai_snippet_short`); `noarchive` or `nocache` limit how Bing's Copilot may use it (`ai_copilot_limited`). Elements marked `data-nosnippet` are counted, not flagged.
+- **Questions with answers.** An h2 or h3 phrased as a question ("How does it work?", "What is a proxy") needs a paragraph or list of at least eight words right under it, which is what answers quote. Up to five without one are named (`ai_question_unanswered`).
+- **Articles.** A page whose structured data says it is an article needs an author (`ai_no_author`) and a date (`ai_no_date`), from its structured data, the `author` and `article:*` meta tags or a `<time>` element; one last dated over two years ago is flagged as stale (`ai_stale`).
+- **Structured data that matches the page.** Google asks that structured data show what the page shows. An article's headline, a product's name and price, and an FAQ's first three questions are looked for in the visible text; up to five that aren't there are named (`schema_mismatch`). A price matches with or without trailing zeros or thousands separators.
+- **A Markdown copy.** A `<link rel="alternate" type="text/markdown">` is kept as `markdown`. Together with [AI visibility](ai-visibility.md), which asks the models themselves, this shows whether AI can read the site and whether it mentions it.
 
 ## The fixes list
 
@@ -248,13 +266,13 @@ A site's indexability report says which of its pages Google has indexed, and why
 - **Not indexed**: URL Inspection says Google hasn't indexed it, and nothing shows it in results.
 - **Unknown**: no source has looked at it yet.
 
-Where they disagree, results beat an old inspection. The report also finds these issues, worst first: a page that can be indexed but isn't (error), a page in the sitemap that can't be indexed (error), an indexed page that can no longer be (warning), Google choosing another canonical (warning), a page Google knows that the crawl didn't find, an orphan or old address (warning, only after a complete crawl), sources disagreeing (notice), and an indexable page missing from the sitemap (notice). Each issue says why it matters and how to fix it.
+Where they disagree, results beat an old inspection. The report also finds these issues, worst first: a page that can be indexed but isn't (error), a page in the sitemap that can't be indexed (error), an indexed page that can no longer be (warning), Google choosing another canonical (warning), a page Google knows that the crawl didn't find, an orphan or old address (warning, only after a complete crawl), sources disagreeing (notice), and an indexable page missing from the sitemap (notice). Each issue says why it matters and how to fix it. In the app, each page shows its full address, which opens the page, and clicking its row shows what every source says about it.
 
 It reads only what the crawls and syncs stored, so it costs nothing. A snapshot of its counts is kept once a day, after every crawl that read pages and every Search Console sync that brought new days or inspections, so the report shows 90 days of history. Without a crawl or a Search Console connection the report says which to add; an SEO tool is optional.
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/indexability"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/indexability/pages?issue=indexable_not_indexed"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/indexability"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/indexability/pages?issue=indexable_not_indexed"
 ```
 
 The MCP tools are `get_site_indexability` and `list_indexability_pages`.
@@ -263,10 +281,10 @@ The MCP tools are `get_site_indexability` and `list_indexability_pages`.
 
 ```sh
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"url": "https://www.example.com", "schedule": "weekly"}' "$URL/v1/workspaces/$WS/seo-sites"
-curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/verify"
-curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/crawls"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/crawls/$CRAWL/pages?status=blocked"
+  -d '{"url": "https://www.example.com", "schedule": "weekly"}' "$URL/v1/brands/$BRAND/seo-sites"
+curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/verify"
+curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/crawls"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/crawls/$CRAWL/pages?status=blocked"
 ```
 
 Reading needs `seo.read` (viewers and operators have it); adding sites, checking ownership and starting or stopping crawls needs `seo.manage` (operators, admins, owners). Brand-limited members and tokens see and change only their brands' sites and the shared ones.

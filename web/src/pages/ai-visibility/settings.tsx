@@ -4,6 +4,7 @@ import { api, errorMessage } from "../../api";
 import { Badge, Button, CopyButton, confirmAction, field, toast } from "../../ui";
 import { ago } from "../../format";
 import { Frame, Section, held, marketName, markets, screenName, usd, type AIData, type Cohort, type Go, type Settings } from "./shared";
+import { pickedBrandId } from "@/lib/brand";
 
 const aiConnectors = ["claude", "openai", "gemini", "mistral", "xai", "deepseek", "openrouter", "vercel_ai_gateway", "requesty"];
 
@@ -100,8 +101,8 @@ export function Assistants({ ws, brandId, settings, onSaved, go }: { ws: string;
   );
 }
 
-export async function patchCohort(ws: string, c: Cohort, body: { name?: string; schedule?: "off" | "daily" | "weekly"; competitors?: Schemas["AIEntityInput"][] }) {
-  const { data, error } = await api.PATCH("/v1/workspaces/{ws}/ai-cohorts/{cohort}", { params: { path: { ws, cohort: c.id } }, body });
+export async function patchCohort(_ws: string, c: Cohort, body: { name?: string; schedule?: "off" | "daily" | "weekly"; competitors?: Schemas["AIEntityInput"][] }) {
+  const { data, error } = await api.PATCH("/v1/brands/{brand}/ai-cohorts/{cohort}", { params: { path: { brand: pickedBrandId(), cohort: c.id } }, body });
   if (error || !data) {
     toast(errorMessage(error), "error");
     return false;
@@ -147,7 +148,7 @@ function SettingsBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
 // Markets lists the brand's question sets by market and adds one for a
 // new market: the same competitors and aliases, questions drafted in that
 // market's language on the setup.
-function Markets({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
+function Markets({ d, go }: { ws: string; d: AIData; go: Go }) {
   const [locale, setLocale] = useState("");
   const [busy, setBusy] = useState(false);
   const taken = new Set(d.cohorts.map((c) => c.locale));
@@ -156,8 +157,8 @@ function Markets({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
     if (!locale) return;
     setBusy(true);
     const from = d.cohort;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts", {
+      params: { path: { brand: pickedBrandId() } },
       body: { name: `${d.brand.name} · ${marketName(locale)}`, brand_id: d.brand.id, locale, aliases: from?.aliases ?? [], competitors: from?.competitors ?? [], schedule: from?.schedule ?? "off" },
     });
     setBusy(false);
@@ -168,7 +169,7 @@ function Markets({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
     go("ai-visibility", "setup");
   }
   async function setMarket(c: Cohort, value: string) {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/ai-cohorts/{cohort}", { params: { path: { ws, cohort: c.id } }, body: { locale: value } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/ai-cohorts/{cohort}", { params: { path: { brand: pickedBrandId(), cohort: c.id } }, body: { locale: value } });
     if (error || !data) return toast(errorMessage(error), "error");
     if (!held(data)) d.reload();
   }

@@ -6,6 +6,49 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.87.0] - 2026-11-07
+
+### Added
+
+- Site audits now check whether AI answers can use your pages: quoting blocked (nosnippet, short max-snippet, Bing noarchive), questions with no direct answer, articles without an author or date or not updated in two years, and structured data that doesn't match the page. Googlebot, Bingbot and more AI crawlers join the AI crawler list.
+- AI visibility has a new Your pages tab: whether AI assistants can read, quote and trust your own pages, what to fix, and the pages AI answers already cite first.
+- Your pages in AI visibility can check pages with your own AI model: it reads a page the way an AI answer does and says whether it answers up front, which claims are unclear, and what to change, with a score out of 100. Check competitors' cited pages the same way to compare.
+- Page speed: your Outflare tag now measures how fast every page loads, responds to clicks and settles for real visitors, and Analytics › Page speed shows it per page with the pages that got slower. Analytics › Right now shows who is on your website this minute, where they came from and what they are doing.
+
+### Changed
+
+- A/B tests: the visual editor has a bar with a version switcher, undo and redo, and a saved status, plus tabs for the page's parts and the version's changes. Double-click text to type on the page, drag a part to move it, and ask your AI model to change the page or the part you picked, then keep or undo what it wrote.
+- A/B tests: describe a change to a no-code test's page, such as "add a line about premium plans and a Try it button under the header", and your AI model writes real changes to that page for you to keep. A run that takes too long now stops with a clear reason, and you can stop one yourself.
+- With a brand agent, the Agents page opens straight to its chat. Waiting changes, history, what agents may do and API tokens are in one "Approvals and history" menu instead of a row of tabs.
+- The Agent page shows its parts as a row of tabs at the top (Chat, Waiting for you, Everything changed, What agents may do, Runs) instead of hiding them in an "Approvals and history" menu.
+- The sidebar shows how many agent changes wait for your yes or no next to Agents, for the brand you're in, so you see it from any page. The workspace stats (`GET /v1/workspaces/{ws}/stats`) return the same number as `actions_waiting`.
+- The AI visibility Sources table now shows each page's address first and its site next, and leaves out ChatGPT's own image links. Click a page to see when answers first cited it, the site's ratings, the links to it, the questions it answers, and whether it links to or only names you and each competitor.
+- Brands that AI answers name next to you are matched to their websites by themselves. Ones already on your competitor list are recognised by name, and the rest go to the Competitors page to say Yes or No, asking "Is this their website?" when the match isn't certain.
+- AI visibility uses the Competitors page as its one competitor list. Brands that AI answers name next to you wait there for a Yes or No, a competitor added in the AI visibility setup goes there too, and one you said No to stops being suggested.
+- AI visibility now sorts the brands AI answers name: a product of a listed competitor ("Zyte API") counts as that competitor, tools that aren't competitors go under "Named, not competitors", and every name it isn't sure of shows its best guess at the website. Each name is sorted once and remembered.
+- Brands no longer share any people, companies, leads, lists, email topics, sequences, support conversations or websites: older items saved with no brand now belong to the first brand, and news topics and fix guidelines are copied into every brand.
+- A sending domain, mailbox, lead list or sequence can no longer be taken out of a brand to be shared: move it by adding it to the brand it belongs to.
+- SEO sites, audits, keywords, competitors, backlinks, fixes and deploys now belong to one brand each, under `/v1/brands/{brand}/`. The old workspace routes answer 410 and name the route to call instead. The SEO overview shows one brand, or each brand in turn when all brands are picked.
+- Website tracking keys, visits, customer events, webhooks and support addresses saved before they had a brand now belong to one brand, so no brand sees another's.
+- Social, Reddit campaigns, stories, story pitches, PR experts, journalists and coverage now belong to one brand each, under `/v1/brands/{brand}/`. The old workspace routes answer 410 and name the route to call instead. Their pages ask you to pick a brand.
+- AI visibility, link building, news watch and reviews now belong to one brand each, under `/v1/brands/{brand}/`. The old workspace routes answer 410 and name the route to call instead.
+- A competitor's placements and Presence's Where competitors appear now list the most valuable links first, not the biggest sites. Each shows how it's got (can't buy, earned, paid or free), a 0 to 100 value with reasons, and a filter.
+- Each competitor is now read at most once a month by default: search data on an SEO connection (weekly snapshot, Refresh all competitors or one competitor's Read) and Presence scans, top competitors included. Every brand was moved to this default. Change it in the SEO tool's settings or on the Presence competitors page.
+- Developer setup now shows when payments sent from your server can't be matched for certain: orders without an order_id, payments joined by a guess or with different amounts both ways, ids reused for renewals, retries under new ids, amounts sent in dollars instead of cents, and payments going quiet. Payments saved twice before can be merged in one click.
+- Presence Opportunities suggests the English version of a page instead of its translations, so a site with /fr/ and /de/ copies shows up once, on its English page.
+- Presence Opportunities shows how a link on each page is got (can't buy, earned, paid or free to get), and you can filter by it.
+- Presence is now its own item in the menu. Found and Opportunities are tables you can sort by domain rating, traffic, AI citations or competitors, filter, and scroll through without pages. Opportunities can show one row per site, and both can hide your competitors' own sites.
+
+### Fixed
+
+- A/B tests: changes to a page that builds itself in the browser (a React or Next.js site) no longer vanish in the visual editor, preview links always show their version (also while the test is a draft), and when you describe a change to a version your AI model sees what that version already added and can change it too.
+- Refresh all competitors now reads search numbers even right after Ahrefs refused one report your plan doesn't include, which used to mark the whole connection broken. The page also says how many competitors have their search numbers, domain age and site read so far.
+- AI visibility counts every competitor on the brand's list, however long, so the setup and every run include them all; before, the list stopped at 25.
+- Every tracked competitor now gets its search numbers (Domain Rating, keywords, visits, linking sites) each week, not just the first 50, within your SEO connection's budget. A competitor your provider can't read no longer stops the rest, and domain ages that didn't load are tried again within hours.
+- The indexability report lists every page in a site's sitemaps, including those past the crawl's page limit, and shows each page's full address as a link that opens it.
+- When your product sends a verified email that only one record holds unverified, such as an import, a lead or an unsubscribe with no user id or other email of its own, that record is now merged into the person instead of being listed as a possible duplicate. Its consent and opt-outs come with it.
+- A payment or refund sent as an order event and as a transaction at the same moment is now kept once, with its person. Before, it could show twice on the Transactions page, and Developer setup could warn about payments with no person.
+
 ## [0.86.0] - 2026-11-06
 
 ### Added

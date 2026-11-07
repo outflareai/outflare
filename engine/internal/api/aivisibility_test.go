@@ -133,7 +133,7 @@ func TestAIVisibility(t *testing.T) {
 		t.Fatalf("requests: %v", bodies)
 	}
 
-	samples := owner.must(200, "GET", base+"/ai-samples?run_id="+rid, nil)["data"].([]any)
+	samples := owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid, nil)["data"].([]any)
 	if len(samples) != 2 {
 		t.Fatalf("samples: %v", samples)
 	}
@@ -159,7 +159,7 @@ func TestAIVisibility(t *testing.T) {
 	if cheap["brand_named"] != false || cheap["citations"].([]any)[0].(map[string]any)["competitor"] != "Northpeak" {
 		t.Fatalf("cheap: %v", cheap)
 	}
-	if n := len(owner.must(200, "GET", base+"/ai-samples?brand_named=false", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/ai-samples?brand_named=false&brand=acme", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("brand_named=false: %d", n)
 	}
 
@@ -176,7 +176,7 @@ func TestAIVisibility(t *testing.T) {
 	}
 
 	// The prompt whose answer left Acme out is a fix.
-	fixes := owner.must(200, "GET", base+"/fixes?source=ai_visibility", nil)["data"].([]any)
+	fixes := owner.must(200, "GET", base+"/fixes?brand=acme&source=ai_visibility", nil)["data"].([]any)
 	if len(fixes) != 1 {
 		t.Fatalf("fixes: %v", fixes)
 	}
@@ -220,10 +220,10 @@ func TestAIVisibility(t *testing.T) {
 	prompt := cheap["prompt_id"].(string)
 	owner.must(200, "PATCH", base+"/ai-cohorts/"+cid+"/prompts/"+prompt, map[string]any{"status": "paused"})
 	owner.must(204, "DELETE", base+"/ai-cohorts/"+cid+"/prompts/"+prompt, nil)
-	if n := len(owner.must(200, "GET", base+"/fixes?source=ai_visibility", nil)["data"].([]any)); n != 0 {
+	if n := len(owner.must(200, "GET", base+"/fixes?brand=acme&source=ai_visibility", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("fix kept after its prompt: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/ai-runs?cohort_id="+cid, nil)["data"].([]any)); n != 3 {
+	if n := len(owner.must(200, "GET", base+"/ai-runs?brand=acme&cohort_id="+cid, nil)["data"].([]any)); n != 3 {
 		t.Fatalf("runs: %d", n)
 	}
 	// A daily run that failed is tried again the same day, after a wait,
@@ -234,7 +234,7 @@ func TestAIVisibility(t *testing.T) {
 		if err := svc.Schedule(ctx); err != nil {
 			t.Fatal(err)
 		}
-		return len(owner.must(200, "GET", base+"/ai-runs?cohort_id="+cid, nil)["data"].([]any))
+		return len(owner.must(200, "GET", base+"/ai-runs?brand=acme&cohort_id="+cid, nil)["data"].([]any))
 	}
 	if n := runs(); n != 3 {
 		t.Fatalf("scheduled after today's runs: %d", n)

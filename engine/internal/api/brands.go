@@ -222,7 +222,7 @@ func (s *Server) brandFilter(w http.ResponseWriter, r *http.Request) (brandSel, 
 	if a.Brand != "" {
 		return brandSel{id: a.Brand, in: []string{a.Brand}}, true
 	}
-	sel := brandSel{in: a.Brands}
+	sel := brandSel{in: a.seenBrands()}
 	b := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("brand")))
 	if b == "" || b == "none" || b == "all" {
 		sel.id = strings.TrimSuffix(b, "all")
@@ -427,7 +427,7 @@ func handleProblem(h string) string {
 // brand's handle is the part of the app's URLs after the workspace, before
 // the page, so it can't be one of them. TestBrandHandlesAreNotPages keeps
 // the two lists the same.
-var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail"}
+var pageNames = []string{"crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "analytics", "live", "page-speed", "tracking", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-pages", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "suppression", "knowledge", "company", "brands", "brand-accounts", "ideal-customers", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "email-finder", "lead-finder", "link-autopilot", "reviews", "flags", "channels", "funnels", "trends", "retention", "paths", "dashboards", "ab-tests", "support", "help-centre", "agent-mail"}
 
 // handleFrom makes a handle from a brand's name: "Repocket Games" becomes
 // "repocket-games".
@@ -629,9 +629,9 @@ func (s *Server) createBrand(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models, logo_url, colors)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[]), COALESCE($11, ''), COALESCE($12, '{}'::jsonb)) RETURNING id`,
-			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels, req.LogoURL, req.Colors).Scan(&id)
+			INSERT INTO brands (workspace_id, name, handle, website, domains, platforms, links, created_by, business_model, revenue_models, logo_url, colors, presence_top_every_days)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, ''), COALESCE($10, '{}'::text[]), COALESCE($11, ''), COALESCE($12, '{}'::jsonb), $13) RETURNING id`,
+			a.WorkspaceID, *req.Name, handle, website, domains, platforms, links, a.ActorID, req.BusinessModel, req.RevenueModels, req.LogoURL, req.Colors, presenceDefaultEveryDays).Scan(&id)
 		if err != nil {
 			return brandUnique(err)
 		}
@@ -1067,13 +1067,16 @@ func (s *Server) addToBrand(w http.ResponseWriter, r *http.Request) {
 	s.moveBrandMembers(w, r, true)
 }
 
+// removeFromBrand takes missions out of a brand, so they are for every
+// brand. Brands share nothing else: sending domains, mailboxes, lead lists
+// and sequences move to another brand with addToBrand instead.
 func (s *Server) removeFromBrand(w http.ResponseWriter, r *http.Request) {
 	s.moveBrandMembers(w, r, false)
 }
 
 // moveBrandMembers sets brand_id on the named records: to the brand when
 // adding (taking them from any other brand), to null when removing (only
-// records in this brand). Unknown names are ignored and not counted.
+// missions in this brand). Unknown names are ignored and not counted.
 func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bool) {
 	a := accessFrom(r.Context())
 	var req brandMembers
@@ -1081,6 +1084,10 @@ func (s *Server) moveBrandMembers(w http.ResponseWriter, r *http.Request, add bo
 		return
 	}
 	if err := req.check(a); s.allocError(w, r, err) {
+		return
+	}
+	if !add && len(req.Domains)+len(req.MailboxIDs)+len(req.LeadListIDs)+len(req.SequenceIDs) > 0 {
+		s.allocError(w, r, errInvalid("brands share nothing: move sending domains, mailboxes, lead lists and sequences to another brand with POST .../brands/{brand}/add"))
 		return
 	}
 	b, ok := s.brandFor(w, r, a)
@@ -1179,6 +1186,7 @@ var errSharedRecord = errDenied("this is shared by every brand; only someone wit
 func brandWrite(ctx context.Context, tx interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, a *access, brand *string) (*string, error) {
+	brand = a.orRoute(brand)
 	if a.Brands == nil {
 		return brand, nil
 	}

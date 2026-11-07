@@ -7,9 +7,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// MaxCompetitors is how many competitors a run counts.
-const MaxCompetitors = 25
-
 // SEOCompetitors reads the competitors the workspace tracks for a brand's
 // SEO sites (the company's when brand is nil), so AI visibility counts the
 // same list as the rest of SEO. Hosts of one company (the same customer
@@ -44,9 +41,6 @@ func SEOCompetitors(ctx context.Context, q rowsQuerier, ws string, brand *string
 			}
 		}
 		if !found {
-			if len(out) == MaxCompetitors {
-				return nil
-			}
 			label := name
 			if label == "" {
 				label = host
@@ -69,9 +63,9 @@ func SEOCompetitors(ctx context.Context, q rowsQuerier, ws string, brand *string
 	return out, err
 }
 
-// MergeCompetitors puts a cohort's own competitors first and adds the
-// tracked ones it doesn't already name or share a domain with, up to
-// MaxCompetitors.
+// MergeCompetitors puts a cohort's own competitors first and adds every
+// tracked one it doesn't already name or share a domain with: a run
+// counts the brand's whole competitor list, however long.
 func MergeCompetitors(own, tracked []Entity) []Entity {
 	out := append([]Entity{}, own...)
 	names, hosts := map[string]bool{}, map[string]bool{}
@@ -85,9 +79,6 @@ func MergeCompetitors(own, tracked []Entity) []Entity {
 		}
 	}
 	for _, e := range tracked {
-		if len(out) >= MaxCompetitors {
-			break
-		}
 		dup := names[strings.ToLower(e.Name)]
 		for _, d := range e.Domains {
 			dup = dup || hosts[strings.ToLower(Host(d))]

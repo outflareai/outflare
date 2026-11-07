@@ -36,19 +36,33 @@ const jobNewsRun = "news.run"
 
 func (s *Server) routesNews(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/news-searches", s.onBrand(read, s.listNewsSearches))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/news-searches", s.inBrand(read, s.listNewsSearches))
+	mux.HandleFunc("POST /v1/brands/{brand}/news-searches", s.onBrand(manage, s.createNewsSearch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/news-searches", s.inBrand(manage, s.createNewsSearch))
+	mux.HandleFunc("GET /v1/brands/{brand}/news-searches/{search}", s.onBrand(read, s.getNewsSearch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/news-searches/{search}", s.inBrand(read, s.getNewsSearch))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/news-searches/{search}", s.onBrand(manage, s.updateNewsSearch))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/news-searches/{search}", s.inBrand(manage, s.updateNewsSearch))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/news-searches/{search}", s.onBrand(manage, s.deleteNewsSearch))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/news-searches/{search}", s.inBrand(manage, s.deleteNewsSearch))
+	mux.HandleFunc("POST /v1/brands/{brand}/news-searches/{search}/run", s.onBrand(manage, s.runNewsSearch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/news-searches/{search}/run", s.inBrand(manage, s.runNewsSearch))
+	mux.HandleFunc("GET /v1/brands/{brand}/news-articles", s.onBrand(read, s.listNewsArticles))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/news-articles", s.inBrand(read, s.listNewsArticles))
+	mux.HandleFunc("GET /v1/brands/{brand}/journalists", s.onBrand(read, s.listJournalists))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/journalists", s.inBrand(read, s.listJournalists))
+	mux.HandleFunc("POST /v1/brands/{brand}/journalists", s.onBrand(manage, s.addJournalist))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journalists", s.inBrand(manage, s.addJournalist))
+	mux.HandleFunc("POST /v1/brands/{brand}/journalists/import", s.onBrand(manage, s.importJournalists))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/journalists/import", s.inBrand(manage, s.importJournalists))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/journalists/{record}", s.onBrand(manage, s.updateJournalist))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/journalists/{record}", s.inBrand(manage, s.updateJournalist))
+	mux.HandleFunc("GET /v1/brands/{brand}/coverage", s.onBrand(read, s.listCoverage))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/coverage", s.inBrand(read, s.listCoverage))
+	mux.HandleFunc("POST /v1/brands/{brand}/coverage", s.onBrand(manage, s.addCoverage))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/coverage", s.inBrand(manage, s.addCoverage))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/coverage/{coverage}", s.onBrand(manage, s.updateCoverage))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/coverage/{coverage}", s.inBrand(manage, s.updateCoverage))
 }
 
@@ -229,9 +243,21 @@ func (s *Server) createNewsSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		v.BrandID = &id
 	}
+	if v.BrandID == nil {
+		v.BrandID = a.orRoute(nil)
+	}
 	if v.Purpose == "coverage" && v.BrandID == nil {
 		bad("a coverage search needs brand_id: the brand whose coverage it finds")
 		return
+	}
+	if v.BrandID == nil {
+		// Brands share nothing: a search is the route's brand's, else the
+		// first brand's.
+		b, err := ownBrand(ctx, s.pool, a, nil)
+		if s.allocError(w, r, err) {
+			return
+		}
+		v.BrandID = b
 	}
 	if !a.writes(v.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
@@ -660,6 +686,9 @@ func (s *Server) addCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	bad := func(msg string) { writeError(w, r, http.StatusBadRequest, "invalid_request", msg) }
 	ctx := r.Context()
+	if req.BrandID == "" {
+		req.BrandID = a.Brand
+	}
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		bad("brand_id: brand not found")

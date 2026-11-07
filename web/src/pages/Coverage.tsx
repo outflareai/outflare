@@ -59,6 +59,7 @@ import {
   type Resource,
   type Row,
 } from "./brand-coverage/client";
+import { pickedBrandId } from "@/lib/brand";
 
 type Props = {
   ws: string;
@@ -3326,8 +3327,8 @@ function CoverageSearches({
   useEffect(() => {
     let active = true;
     api
-      .GET("/v1/workspaces/{ws}/news-searches", {
-        params: { path: { ws }, query: { brand } },
+      .GET("/v1/brands/{brand}/news-searches", {
+        params: { path: { brand: pickedBrandId() } },
       })
       .then(({ data, error }) => {
         if (!active) return;
@@ -3343,8 +3344,8 @@ function CoverageSearches({
     e.preventDefault();
     setBusy(true);
     try {
-      const r = await api.POST("/v1/workspaces/{ws}/news-searches", {
-        params: { path: { ws } },
+      const r = await api.POST("/v1/brands/{brand}/news-searches", {
+        params: { path: { brand: pickedBrandId() } },
         body: {
           brand_id: brand,
           name: query,
@@ -3395,8 +3396,8 @@ function CoverageSearches({
                   variant="ghost"
                   onClick={async () => {
                     const result = await api.POST(
-                      "/v1/workspaces/{ws}/news-searches/{search}/run",
-                      { params: { path: { ws, search: r.id } } },
+                      "/v1/brands/{brand}/news-searches/{search}/run",
+                      { params: { path: { brand: pickedBrandId(), search: r.id } } },
                     );
                     if (result.error) setError(errorMessage(result.error));
                     else
@@ -3411,9 +3412,9 @@ function CoverageSearches({
                   variant="ghost"
                   onClick={async () => {
                     const result = await api.PATCH(
-                      "/v1/workspaces/{ws}/news-searches/{search}",
+                      "/v1/brands/{brand}/news-searches/{search}",
                       {
-                        params: { path: { ws, search: r.id } },
+                        params: { path: { brand: pickedBrandId(), search: r.id } },
                         body: {
                           status: r.status === "active" ? "paused" : "active",
                         },

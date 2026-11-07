@@ -132,9 +132,12 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	if c := b["counts"].(map[string]any); c["projects"] != nil || c["lead_lists"] != 2.0 {
 		t.Fatalf("counts: %v", c)
 	}
-	owner.must(200, "POST", base+"/brands/repocket/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
+	// Brands share nothing: a list can't be taken out of every brand, only
+	// moved to another.
+	owner.must(400, "POST", base+"/brands/repocket/remove", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
+	owner.must(200, "POST", base+"/brands/geonode/add", map[string]any{"lead_list_ids": []string{list["id"].(string)}})
 	if n := len(owner.must(200, "GET", base+"/lead-lists?brand=repocket", nil)["data"].([]any)); n != 1 {
-		t.Fatalf("repocket lists after remove: %d", n)
+		t.Fatalf("repocket lists after the move: %d", n)
 	}
 
 	// Archiving hides a brand from the default list but keeps it.
@@ -153,7 +156,7 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	reader.must(403, "PATCH", base+"/brands/repocket/context", map[string]any{"about": "x"})
 	time.Sleep(10 * time.Millisecond)
 	ev := got()
-	for _, name := range []string{"brand.created", "brand.context_updated", "brand.records_added", "brand.records_removed", "brand.archived"} {
+	for _, name := range []string{"brand.created", "brand.context_updated", "brand.records_added", "brand.archived"} {
 		if len(named(ev, name)) == 0 {
 			t.Errorf("no %s event", name)
 		}

@@ -31,15 +31,15 @@ inputs:
     example: r/projectmanagement, "best tool for client projects"
 steps:
   - say: Read the brand's context and voice, and the brand's Reddit settings and limits.
-    tools: [getBrandContext, listRedditSettings]
+    tools: [getBrandContext, listBrandRedditSettings]
   - say: Set up a watch on the subreddits and keywords.
-    tools: [createSocialWatch, listSocialWatches]
+    tools: [createBrandSocialWatch, listBrandSocialWatches]
   - say: Read new posts and pick the ones the brand can genuinely help with.
-    tools: [listSocialItems, getSocialItem]
+    tools: [listBrandSocialItems, getBrandSocialItem]
   - say: Draft a reply to each from what the brand knows, held for a person's approval.
-    tools: [findKnowledgePassages, draftSocialReply]
+    tools: [findKnowledgePassages, draftBrandSocialReply]
   - say: Check which replies are still up and what they brought.
-    tools: [listSocialActions]
+    tools: [listBrandSocialActions]
 guardrails:
   - Every reply waits for a person's approval and posts from the brand's own account.
   - Replies help first; the brand is named only where it is the honest answer.

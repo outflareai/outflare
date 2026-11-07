@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import type { Schemas, paths } from "@outflare/sdk";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, Loading, Stat, Stats, field, toast } from "../../ui";
-import { Frame, NotSetUp, Section, cash, downloadCSV, held, pct, th, type AIData, type Go, type Placement } from "./shared";
+import { Frame, NotSetUp, Section, addCompetitor, cash, downloadCSV, held, pct, th, useCompetitorSite, type AIData, type Go, type Placement } from "./shared";
 import { Bar, Leaderboard } from "./overview";
-import { patchCohort } from "./settings";
+import { pickedBrandId } from "@/lib/brand";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { readFirst } from "../LinkBuilding";
+import { ago } from "../../format";
 
 type Fact = Schemas["AIFact"];
 type Claim = Schemas["AIVisibilityClaim"];
@@ -15,7 +18,7 @@ const noAnswers = (d: AIData) => !d.vis || d.vis.answers === 0;
 
 export function AICompetitors({ ws, go }: { ws: string; go: Go }) {
   return (
-    <Frame ws={ws} title="Competitors in AI answers" description="Who AI assistants name and recommend for your questions, and the brands they name that you don't count yet.">
+    <Frame ws={ws} title="Competitors in AI answers" description="Who AI assistants name and recommend for your questions, against every competitor on your Competitors page.">
       {(d) => (noAnswers(d) ? <NotSetUp d={d} go={go} /> : <CompetitorsBody ws={ws} d={d} go={go} />)}
     </Frame>
   );
@@ -23,42 +26,85 @@ export function AICompetitors({ ws, go }: { ws: string; go: Go }) {
 
 function CompetitorsBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   const v = d.vis!;
-  const c = d.cohort!;
-  const [hidden, setHidden] = useState<string[]>([]);
+  const site = useCompetitorSite(ws, d.brand.id);
+  const [sites, setSites] = useState<Record<string, string>>({});
+  const [added, setAdded] = useState<string[]>([]);
   const board = [{ ...v.brand, you: true }, ...v.competitors.map((x) => ({ ...x, you: false }))].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  async function count(name: string) {
-    const competitors = [...c.competitors.map(({ name, domains, aliases }) => ({ name, domains, aliases })), { name }];
-    if (await patchCohort(ws, c, { competitors })) {
-      toast(`Counting ${name} from the next run.`);
+  // New names go to the Competitors page as suggestions to say Yes or No
+  // to there, matched to their websites by themselves each day. A name
+  // nothing could match waits here for its website.
+  const waiting = v.suggested_competitors.filter((b) => b.competitor_id);
+  const noSite = v.suggested_competitors.filter((b) => !b.competitor_id && !added.includes(b.name));
+  async function add(e: React.FormEvent, name: string) {
+    e.preventDefault();
+    const website = (sites[name] ?? v.suggested_competitors.find((b) => b.name === name)?.host ?? "").trim();
+    if (!site || !website) return;
+    if (await addCompetitor(ws, site, name, website)) {
+      setAdded((a) => [...a, name]);
       d.reload();
     }
   }
-  const suggested = v.suggested_competitors.filter((b) => !hidden.includes(b.name));
   return (
     <>
-      <Section title="Leaderboard" note={`${v.answers} answers in this period. Score: recommended counts most, named or listed less, warned against counts nothing.`}>
+      <Section title="Leaderboard" note={`${v.answers} answers in this period. Score: recommended counts most, named or listed less, warned against counts nothing. It counts every competitor on your Competitors page.`} action={<Button variant="ghost" onClick={() => go("competitors")}>Manage competitors</Button>}>
         <div className="overflow-x-auto"><Leaderboard rows={board} full /></div>
       </Section>
-      <Section title="Also named in your answers" note="Brands the assistants name for your questions that you don't count yet. Yes counts them from the next run.">
-        {suggested.length === 0 ? (
+      <Section title="New competitors found in AI answers" note="Brands the assistants name next to you that aren't on your competitor list yet. They wait on the Competitors page for your Yes or No, and each Yes counts from the next run.">
+        {waiting.length === 0 && noSite.length === 0 ? (
           <p className="text-muted-foreground">None right now.</p>
         ) : (
-          <ul className="divide-y">
-            {suggested.map((b) => (
-              <li key={b.name} className="flex items-center justify-between gap-2 py-1.5">
-                <span>{b.name} <span className="text-[12px] text-muted-foreground">in {b.answers} {b.answers === 1 ? "answer" : "answers"}</span></span>
-                <span className="flex gap-1">
-                  <Button variant="ghost" disabled={c.competitors.length >= 25} onClick={() => count(b.name)}>Yes, a competitor</Button>
-                  <Button variant="ghost" onClick={() => setHidden((h) => [...h, b.name])}>No</Button>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <>
+            {waiting.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p>
+                  {waiting.length} waiting for you: {waiting.slice(0, 5).map((b) => b.name).join(", ")}{waiting.length > 5 ? " and more" : ""}.
+                </p>
+                <Button onClick={() => go("competitors")}>Review on Competitors</Button>
+              </div>
+            )}
+            {noSite.length > 0 && (
+              <div className={waiting.length > 0 ? "mt-4" : ""}>
+                <p className="mb-1 text-[12px] text-muted-foreground">Outflare isn't sure of these yet. It checks again each week. The website shown is its best guess: add it if it's right.</p>
+                {site === "" ? (
+                  <p className="text-muted-foreground">Your competitor list needs your website first. <button className="underline" onClick={() => go("competitors")}>Open Competitors</button>.</p>
+                ) : (
+                  <ul className="divide-y">
+                    {noSite.map((b) => (
+                      <li key={b.name} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                        <span>{b.name} <span className="text-[12px] text-muted-foreground">in {b.answers} {b.answers === 1 ? "answer" : "answers"}</span></span>
+                        <form className="flex gap-1" onSubmit={(e) => add(e, b.name)}>
+                          <input className={`${field} w-48`} aria-label={`${b.name} website`} placeholder="website.example" value={sites[b.name] ?? b.host ?? ""} onChange={(e) => setSites((x) => ({ ...x, [b.name]: e.target.value }))} />
+                          <Button variant="ghost" type="submit" disabled={!site || !(sites[b.name] ?? b.host ?? "").trim()}>Add</Button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </>
         )}
-        <p className="mt-3 text-[12px] text-muted-foreground">
-          Competitors on the Competitors page count everywhere in Outflare. <button className="underline" onClick={() => go("competitors")}>Manage them there</button>.
-        </p>
       </Section>
+      {v.named_others.length > 0 && (
+        <Section title="Named, not competitors" note="Companies and tools the answers name that don't sell what you sell: libraries, tools used alongside, review sites. They don't count as competitors. If one is, add it.">
+          <table className="w-full">
+            <thead><tr><th className={th}>Name</th><th className={th}>What it is</th><th className={th}>Website</th><th className={th}>Answers</th><th className={th}></th></tr></thead>
+            <tbody className="divide-y">
+              {v.named_others.filter((o) => !added.includes(o.name)).map((o) => (
+                <tr key={o.name}>
+                  <td className="py-1.5 pr-3">{o.name}</td>
+                  <td className="pr-3">{o.label ? <Badge>{o.label}</Badge> : <span className="text-muted-foreground">–</span>}</td>
+                  <td className="pr-3 font-mono text-[12px]">{o.host || "–"}</td>
+                  <td className="pr-3 font-mono text-[12px]">{o.answers}</td>
+                  <td className="text-right">
+                    <Button variant="ghost" disabled={!site || !o.host} onClick={async () => { if (site && (await addCompetitor(ws, site, o.name, o.host))) { setAdded((a) => [...a, o.name]); d.reload(); } }}>It's a competitor</Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Section>
+      )}
     </>
   );
 }
@@ -66,13 +112,14 @@ function CompetitorsBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
 export function AISources({ ws, go }: { ws: string; go: Go }) {
   return (
     <Frame ws={ws} title="Sources" description="The pages AI assistants cite or read when they answer your questions, most valuable first. Getting named on them is the fastest way into the answers.">
-      {(d) => (noAnswers(d) ? <NotSetUp d={d} go={go} /> : <SourcesBody d={d} go={go} />)}
+      {(d) => (noAnswers(d) ? <NotSetUp d={d} go={go} /> : <SourcesBody ws={ws} d={d} go={go} />)}
     </Frame>
   );
 }
 
-function SourcesBody({ d, go }: { d: AIData; go: Go }) {
+function SourcesBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   const v = d.vis!;
+  const [open, setOpen] = useState<string | null>(null);
   const [places, setPlaces] = useState<{ data: Placement[]; own_pages: { url: string; host: string; title: string; answers: number; questions: number }[] } | null>(null);
   useEffect(() => {
     api.GET("/v1/brands/{brand}/ai-visibility/placements", { params: { path: { brand: d.brand.id }, query: { days: d.days, cohort: d.cohort?.id } } }).then(({ data, error }) => {
@@ -85,17 +132,17 @@ function SourcesBody({ d, go }: { d: AIData; go: Go }) {
     <>
       <Section title="Placements to get" note="Pages the answers cite or read, ranked by how much being named on each is worth: how many answers cite it, how many people ask those questions, and whether it names you already. Each one is a Presence opportunity." action={<span className="flex gap-2">{places && places.data.length > 0 && <Button variant="ghost" onClick={() => downloadCSV(d, "placements")}>Download CSV</Button>}<Button variant="ghost" onClick={() => go("coverage")}>Open Presence</Button></span>}>
         {!places ? <Loading /> : places.data.length === 0 ? <p className="text-muted-foreground">No pages cited in this period. Assistants with web search cite their sources.</p> : (
-          <table className="w-full">
-            <thead><tr><th className={th}>Page</th><th className={th}>Worth</th><th className={th}>Answers citing it</th><th className={th}>Names you</th><th className={th}>Who's named there</th><th className={th}>Kind</th></tr></thead>
+          <table className="w-full table-fixed">
+            <thead><tr><th className={`${th} w-[38%]`}>URL</th><th className={th}>Site</th><th className={th}>Worth</th><th className={th}>Answers citing it</th><th className={th}>Names you</th><th className={th}>Who's named there</th></tr></thead>
             <tbody className="divide-y">
               {places.data.slice(0, 40).map((p) => (
-                <tr key={p.url}>
-                  <td className="max-w-md truncate py-1.5 pr-3"><a className="hover:underline" href={p.url} target="_blank" rel="noreferrer noopener">{p.title || p.url}</a> <span className="font-mono text-[12px] text-muted-foreground">{p.host}</span></td>
+                <tr key={p.url} className="cursor-pointer hover:bg-muted/50" onClick={() => setOpen(p.url)} title="See this page in full">
+                  <td className="truncate py-1.5 pr-3 font-mono text-[12px]" title={p.url}>{p.url.replace(/^https?:\/\/(www\.)?/, "")}</td>
+                  <td className="truncate pr-3">{p.title ? <span title={p.title}>{p.host}</span> : p.host}</td>
                   <td className="pr-3"><Bar value={p.value / 100} /></td>
                   <td className="pr-3 font-mono text-[12px]">{p.answers}{p.reads > 0 && <span className="text-muted-foreground"> · read {p.reads}×</span>}</td>
                   <td className="pr-3">{p.answers === 0 ? "–" : p.named === 0 ? <Badge tone="red">no</Badge> : p.named === p.answers ? <Badge tone="green">yes</Badge> : <span className="font-mono text-[12px]">{p.named} of {p.answers}</span>}</td>
-                  <td className="pr-3 text-[12px]">{p.competitors.length === 0 ? <span className="text-muted-foreground">nobody tracked</span> : p.competitors.slice(0, 4).map((c) => `${c.name} (${c.answers})`).join(", ")}</td>
-                  <td className="text-[12px] capitalize text-muted-foreground">{p.source_type || "–"}</td>
+                  <td className="truncate text-[12px]">{p.competitors.length === 0 ? <span className="text-muted-foreground">nobody tracked</span> : p.competitors.slice(0, 4).map((c) => `${c.name} (${c.answers})`).join(", ")}</td>
                 </tr>
               ))}
             </tbody>
@@ -145,6 +192,7 @@ function SourcesBody({ d, go }: { d: AIData; go: Go }) {
           )}
         </Section>
       </div>
+      {open && <PageSheet ws={ws} brand={d.brand.id} url={open} go={go} onClose={() => setOpen(null)} />}
     </>
   );
 }
@@ -162,21 +210,21 @@ function AccuracyBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   const [text, setText] = useState("");
   const [n, setN] = useState(0);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/ai-facts", { params: { path: { ws }, query: { days: d.days, brand: d.brand.handle } } }).then(({ data }) => setFacts(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/ai-facts", { params: { path: { brand: pickedBrandId() }, query: { days: d.days, brand: d.brand.handle } } }).then(({ data }) => setFacts(data?.data ?? []));
   }, [ws, d.brand.handle, d.days, n]);
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-facts", { params: { path: { ws } }, body: { statement: text.trim(), brand_id: d.brand.id } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-facts", { params: { path: { brand: pickedBrandId() } }, body: { statement: text.trim(), brand_id: d.brand.id } });
     if (error || !data) return toast(errorMessage(error), "error");
     held(data);
     setText("");
     setN((x) => x + 1);
   }
   async function patch(f: Fact, status: "active" | "paused" | null) {
-    const path = { ws, fact: f.id };
+    const path = { brand: pickedBrandId(), fact: f.id };
     const { error } = status
-      ? await api.PATCH("/v1/workspaces/{ws}/ai-facts/{fact}", { params: { path }, body: { status } })
-      : await api.DELETE("/v1/workspaces/{ws}/ai-facts/{fact}", { params: { path } });
+      ? await api.PATCH("/v1/brands/{brand}/ai-facts/{fact}", { params: { path }, body: { status } })
+      : await api.DELETE("/v1/brands/{brand}/ai-facts/{fact}", { params: { path } });
     if (error) return toast(errorMessage(error), "error");
     setN((x) => x + 1);
   }
@@ -389,5 +437,111 @@ function TrafficBody({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
         )}
       </Section>
     </>
+  );
+}
+
+type CitedPage = Schemas["AIVisibilityPage"];
+
+const howBadge = (how: string, nofollow: boolean) =>
+  how === "link" ? <Badge tone="green">{nofollow ? "link (nofollow)" : "link"}</Badge> : how === "mention" ? <Badge tone="amber">named, no link</Badge> : <Badge tone="red">not on the page</Badge>;
+
+// PageSheet is one cited page in full: when the answers found it, its
+// site's numbers and links, who is on it and how, and the questions.
+function PageSheet({ ws, brand, url, go, onClose }: { ws: string; brand: string; url: string; go: Go; onClose: () => void }) {
+  const [p, setP] = useState<CitedPage | null>(null);
+  const [error, setError] = useState("");
+  const [tick, setTick] = useState(0);
+  const site = useCompetitorSite(ws, brand);
+  useEffect(() => {
+    api.GET("/v1/brands/{brand}/ai-visibility/page", { params: { path: { brand }, query: { page: url } } }).then(({ data, error }) => {
+      if (error || !data) return setError(errorMessage(error));
+      setP(data);
+    });
+  }, [brand, url, tick]);
+  // While a read is queued, look again every few seconds.
+  useEffect(() => {
+    if (p?.check.status !== "queued") return;
+    const t = setTimeout(() => setTick((n) => n + 1), 4000);
+    return () => clearTimeout(t);
+  }, [p]);
+  async function check() {
+    const { error } = await api.POST("/v1/brands/{brand}/ai-visibility/page/check", { params: { path: { brand } }, body: { url } });
+    if (error) return toast(errorMessage(error), "error");
+    setP((x) => (x ? { ...x, check: { ...x.check, status: "queued" } } : x));
+  }
+  async function links() {
+    if (await readFirst(ws, { target: url, ...(site ? { site_id: site } : {}) }, setError)) setTick((n) => n + 1);
+  }
+  const num = (v: number | null | undefined) => (v === null || v === undefined ? "–" : Math.round(v).toLocaleString());
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="flex justify-between gap-3 py-1"><span className="text-muted-foreground">{label}</span><span className="text-right">{value}</span></div>
+  );
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle className="break-all font-mono text-[13px]">{url}</SheetTitle>
+          <SheetDescription>{p?.title || p?.host || "A page AI answers cite"}</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-5 px-4 pb-6 text-[13px]">
+          {error && <ErrorText>{error}</ErrorText>}
+          {!p ? <Loading /> : (
+            <>
+              <div className="flex gap-2">
+                <a href={url} target="_blank" rel="noreferrer noopener"><Button variant="ghost">Open the page</Button></a>
+                {p.opportunity_id ? <Button variant="ghost" onClick={() => go("coverage")}>Open in Presence</Button> : null}
+              </div>
+              <div className="divide-y">
+                {row("First cited", p.first_seen_at ? new Date(p.first_seen_at).toLocaleDateString() : "–")}
+                {row("Last cited", ago(p.last_seen_at))}
+                {row("Answers citing it", <span className="font-mono">{p.answers}{p.reads > 0 ? ` · read ${p.reads}×` : ""}</span>)}
+                {row("Answers naming you", <span className="font-mono">{p.named} of {p.answers}</span>)}
+                {row("Domain rating", <span className="font-mono">{num(p.domain_rating)}</span>)}
+                {row("Page rating", <span className="font-mono">{num(p.url_rating)}</span>)}
+                {row("Site traffic", <span className="font-mono">{num(p.domain_traffic)}</span>)}
+                {row("Links to this page", p.links ? <span className="font-mono">{num(p.links.total_links)} from {p.links.referring_domains} sites <span className="text-muted-foreground">({ago(p.links.read_at)})</span></span> : <Button variant="ghost" onClick={links}>Count links</Button>)}
+              </div>
+              {p.domain_rating === null && <p className="text-[12px] text-muted-foreground">Ratings come from your own SEO connection when Presence reads this site. Counting links uses it too, and asks first.</p>}
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <h3 className="font-medium">Who's on the page</h3>
+                  <Button variant="ghost" onClick={check} disabled={p.check.status === "queued"}>{p.check.status === "queued" ? "Reading…" : p.check.status === "none" ? "Read the page" : "Read again"}</Button>
+                </div>
+                {p.check.status === "none" ? <p className="text-muted-foreground">Not read yet. Outflare reads the most cited pages after each run.</p>
+                  : p.check.status === "unreachable" ? <p className="text-muted-foreground">The page didn't load, or its site asks not to be read ({ago(p.check.checked_at)}).</p>
+                  : p.check.status === "queued" && p.check.found.length === 0 ? <Loading />
+                  : (
+                    <table className="w-full">
+                      <tbody className="divide-y">
+                        {p.check.found.map((f, i) => (
+                          <tr key={f.name + i}>
+                            <td className="py-1.5 pr-3">{i === 0 && !f.competitor_id ? <b>{f.name} (you)</b> : f.name}</td>
+                            <td className="pr-3">{howBadge(f.how, f.nofollow)}</td>
+                            <td className="truncate text-[12px] text-muted-foreground">{f.anchor ? `"${f.anchor}"` : ""}</td>
+                          </tr>
+                        ))}
+                        {p.check.found.length === 1 && <tr><td colSpan={3} className="py-1.5 text-muted-foreground">No tracked competitor is on the page.</td></tr>}
+                      </tbody>
+                    </table>
+                  )}
+                {p.check.checked_at && p.check.status === "done" && <p className="mt-1 text-[12px] text-muted-foreground">Read {ago(p.check.checked_at)}.</p>}
+              </div>
+              {p.competitors.length > 0 && (
+                <div>
+                  <h3 className="mb-1 font-medium">Named in the answers citing it</h3>
+                  <p className="text-muted-foreground">{p.competitors.map((c) => `${c.name} (${c.answers})`).join(", ")}</p>
+                </div>
+              )}
+              <div>
+                <h3 className="mb-1 font-medium">Questions it answers</h3>
+                <ul className="space-y-1">
+                  {p.questions.map((q) => <li key={q.id} className="flex justify-between gap-3"><span>{q.text}</span><span className="font-mono text-[12px] text-muted-foreground">{q.answers}</span></li>)}
+                </ul>
+              </div>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

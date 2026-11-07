@@ -363,11 +363,13 @@ func TestSocialAccountsXAndLinkedIn(t *testing.T) {
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example"})
 	owner.must(400, "PATCH", base+"/social/accounts/"+page["id"].(string), map[string]any{"brand_id": "nobody"})
 	owner.must(400, "PATCH", base+"/social/accounts/"+page["id"].(string), map[string]any{"status": "gone"})
-	up := owner.must(200, "PATCH", base+"/social/accounts/"+page["id"].(string), map[string]any{"brand_id": "northpeak", "status": "paused"})
+	// An account stays on its brand: another brand's route can't take it.
+	owner.must(400, "PATCH", base+"/social/accounts/"+page["id"].(string), map[string]any{"brand_id": "northpeak"})
+	up := owner.must(200, "PATCH", base+"/social/accounts/"+page["id"].(string), map[string]any{"status": "paused"})
 	if up["brand_id"] == nil || up["status"] != "paused" {
 		t.Fatalf("update: %v", up)
 	}
-	if n := len(owner.must(200, "GET", base+"/social/posts?brand=northpeak", nil)["data"].([]any)); n != 2 {
+	if n := len(owner.must(200, "GET", base+"/social/posts?brand="+up["brand_id"].(string), nil)["data"].([]any)); n != 4 {
 		t.Fatalf("brand posts: %d", n)
 	}
 	if n := len(owner.must(200, "GET", base+"/social/accounts?status=paused", nil)["data"].([]any)); n != 1 {

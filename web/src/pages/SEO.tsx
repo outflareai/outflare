@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState } from "react";
 import type { SEOHistoryRow, SEOLatest, SEOMetrics, SEOSource } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -5,6 +6,7 @@ import { Button, Empty, ErrorText, field, Loading, PageHeader, toast } from "../
 import type { Tab } from "../App";
 import { ago } from "../format";
 import { Icon } from "../icons";
+import { pickedBrandId, useBrand } from "@/lib/brand";
 
 // SEO numbers from DataForSEO and Ahrefs: a strip per website from the
 // weekly snapshots, the keywords behind it, and each connection's domains
@@ -197,6 +199,7 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
   const [sync, setSync] = useState(source.sync);
   const [linkRows, setLinkRows] = useState(String(source.link_rows));
   const [linkTraffic, setLinkTraffic] = useState(source.link_traffic);
+  const [competitorDays, setCompetitorDays] = useState(String(source.competitor_read_days));
   const [saving, setSaving] = useState(false);
   const readsLinks = source.link_rows > 0;
   const ahrefs = source.connector === "ahrefs";
@@ -215,6 +218,7 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
         sync: sync as "weekly" | "off",
         ...(readsLinks ? { link_rows: Number(linkRows) || null } : {}),
         ...(readsLinks && ahrefs ? { link_traffic: linkTraffic } : {}),
+        competitor_read_days: Number(competitorDays) || null,
       },
     });
     setSaving(false);
@@ -245,6 +249,16 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
           <option value="off">Off</option>
         </select>
       </label>
+      <label className="space-y-1">
+        <span className="font-medium">Read each competitor at most once every</span>
+        <div className="flex items-center gap-2">
+          <input className={`${field} w-24`} type="number" min={1} max={365} placeholder="30" value={competitorDays} onChange={(e) => setCompetitorDays(e.target.value)} />
+          <span>days</span>
+        </div>
+        <span className="block text-[12px] text-muted-foreground">
+          However the read is asked for: the weekly snapshot, refreshing every competitor, or one competitor's Read. {ahrefs ? "About 150 Ahrefs units a competitor each time." : "About $0.03 a competitor each time."}
+        </span>
+      </label>
       {readsLinks && (
         <label className="space-y-1">
           <span className="font-medium">Backlinks read a week, per site</span>
@@ -272,11 +286,18 @@ function Settings({ ws, source, onSaved }: { ws: string; source: SEOSource; onSa
 
 // The SEO page: each SEO tool with its budget, then the keywords each
 // followed domain ranks for.
-export function SEO({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+// SEO tools belong to one brand.
+export function SEO(props: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="SEO tools" brands={active.length} />;
+  return <SEOPage key={brand.id} {...props} />;
+}
+
+function SEOPage({ ws, canManage, go }: { ws: string; canManage: boolean; go: (t: Tab, item?: string) => void }) {
   const [sources, setSources] = useState<SEOSource[] | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/seo", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/seo", { params: { path: { brand: pickedBrandId() } } });
     if (error || !data) return setError(errorMessage(error));
     setSources(data.data);
   }, [ws]);

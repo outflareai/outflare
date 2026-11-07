@@ -63,7 +63,7 @@ jobs:
     outputs:
       tested: ${{ steps.tree.outputs.tested }}
       go: ${{ steps.scope.outputs.go }}
-      parts: ${{ steps.scope.outputs.parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]' }}
+      parts: ${{ steps.scope.outputs.parts || '[{"name":"api 1/5","part":"api 1 5"},{"name":"api 2/5","part":"api 2 5"},{"name":"api 3/5","part":"api 3 5"},{"name":"api 4/5","part":"api 4 5"},{"name":"api 5/5","part":"api 5 5"},{"name":"rest","part":"rest"}]' }}
       # The nightly race run: on the schedule, or dispatched with race on.
       race: ${{ github.event_name == 'schedule' || inputs.race == true }}
       migrations: ${{ steps.scope.outputs.migrations }}
@@ -206,8 +206,8 @@ jobs:
             echo "EOF_CHANGED"
           } >> "$GITHUB_OUTPUT"
 
-  # The tests run in four parts side by side, each with its own database
-  # (scripts/test-shard.sh): the API package split in three, and everything
+  # The tests run in six parts side by side, each with its own database
+  # (scripts/test-shard.sh): the API package split in five, and everything
   # else. One job took 6-8 minutes; a batch is as slow as its slowest part.
   engine:
     needs: same-files
@@ -223,9 +223,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # api 1/3, api 2/3, api 3/3 and rest; light (one or two shards) on a pull request
+        # api 1/5 to api 5/5 and rest; light (one or two shards) on a pull request
         # (same-files above).
-        include: ${{ fromJSON(needs.same-files.outputs.parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]') }}
+        include: ${{ fromJSON(needs.same-files.outputs.parts || '[{"name":"api 1/5","part":"api 1 5"},{"name":"api 2/5","part":"api 2 5"},{"name":"api 3/5","part":"api 3 5"},{"name":"api 4/5","part":"api 4 5"},{"name":"api 5/5","part":"api 5 5"},{"name":"rest","part":"rest"}]') }}
     services:
       # Postgres with pgvector, so meaning-based search is tested. The
       # migrations job below keeps plain Postgres, which proves the engine
@@ -429,7 +429,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.same-files.outputs.migration_parts || '[{"name":"api 1/3","part":"api 1 3"},{"name":"api 2/3","part":"api 2 3"},{"name":"api 3/3","part":"api 3 3"},{"name":"rest","part":"rest"}]') }}
+        include: ${{ fromJSON(needs.same-files.outputs.migration_parts || '[{"name":"api 1/5","part":"api 1 5"},{"name":"api 2/5","part":"api 2 5"},{"name":"api 3/5","part":"api 3 5"},{"name":"api 4/5","part":"api 4 5"},{"name":"api 5/5","part":"api 5 5"},{"name":"rest","part":"rest"}]') }}
     services:
       postgres:
         image: postgres:16-alpine

@@ -35,9 +35,10 @@ var linkKinds = map[string]linkKind{
 	"connection": {scope: auth.ScopeIntegrationsRead, table: "integrations", name: "name", from: "connector"},
 	"token":      {scope: auth.ScopeTokensManage, table: "api_tokens", name: "name"},
 	"webhook":    {scope: auth.ScopeWebhooksRead, table: "webhook_endpoints", name: "COALESCE(NULLIF(description, ''), substring(url from '://([^/:?#]+)'), url)"},
+	"ab_test":    {scope: auth.ScopeAnalyticsRead, table: "ab_tests", name: "name"},
 }
 
-const linkKindNames = "sequence, list, mission, run, server, plan, connection, token or webhook"
+const linkKindNames = "sequence, list, mission, run, server, plan, connection, token, webhook or ab_test"
 
 // itemSlugFrom makes the slug for an item named name: lowercase letters,
 // digits and dashes, at most 60 characters, never a UUID or "new" (which
@@ -48,7 +49,7 @@ func itemSlugFrom(kind, name string) string {
 		s = strings.Trim(s[:60], "-")
 	}
 	if s == "" || s == "new" || validUUID(s) {
-		s = strings.Trim(s+"-"+kind, "-")
+		s = strings.Trim(s+"-"+strings.ReplaceAll(kind, "_", "-"), "-")
 	}
 	return s
 }
@@ -171,7 +172,7 @@ func (s *Server) resolveItem(ctx context.Context, ws, kind string, k linkKind, r
 // its brands' or a shared one, for the kinds that have brands.
 func (s *Server) linkBrand(ctx context.Context, a *access, table, id string) error {
 	switch table {
-	case "sequences", "lead_lists", "missions":
+	case "sequences", "lead_lists", "missions", "ab_tests":
 	default:
 		return errForbidden
 	}

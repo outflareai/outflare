@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FixAutonomy as Setting, SEOSite } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Button, ErrorText, field, Loading, toast } from "../ui";
+import { pickedBrandId } from "@/lib/brand";
 
 // Fix autonomy: how far agents in a mission may go with the fixes list on
 // their own. The workspace's setting applies to every site without one of
@@ -43,7 +44,7 @@ export function FixAutonomy({ ws, sites }: { ws: string; sites: SEOSite[] }) {
   useEffect(() => {
     setSet(null);
     const req = site
-      ? api.GET("/v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", { params: { path: { ws, site } } })
+      ? api.GET("/v1/brands/{brand}/seo-sites/{site}/fix-autonomy", { params: { path: { brand: pickedBrandId(), site } } })
       : api.GET("/v1/workspaces/{ws}/fix-autonomy", { params: { path: { ws } } });
     req.then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
@@ -56,7 +57,7 @@ export function FixAutonomy({ ws, sites }: { ws: string; sites: SEOSite[] }) {
     if (!draft) return;
     setBusy(true);
     const { data, error } = site
-      ? await api.PUT("/v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", { params: { path: { ws, site } }, body: draft })
+      ? await api.PUT("/v1/brands/{brand}/seo-sites/{site}/fix-autonomy", { params: { path: { brand: pickedBrandId(), site } }, body: draft })
       : await api.PUT("/v1/workspaces/{ws}/fix-autonomy", { params: { path: { ws } }, body: draft });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
@@ -67,7 +68,7 @@ export function FixAutonomy({ ws, sites }: { ws: string; sites: SEOSite[] }) {
 
   async function reset() {
     setBusy(true);
-    const { data, error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", { params: { path: { ws, site } } });
+    const { data, error } = await api.DELETE("/v1/brands/{brand}/seo-sites/{site}/fix-autonomy", { params: { path: { brand: pickedBrandId(), site } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     if ("queued" in data || "mission_action" in data) return toast("Held for approval by the mission's owner.");

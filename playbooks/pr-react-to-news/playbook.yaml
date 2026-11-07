@@ -30,17 +30,17 @@ inputs:
     example: Northpeak
 steps:
   - say: Read the brand's experts and their topics, and the articles the news watch found in the last day on those topics.
-    tools: [getBrandContext, listPRExperts, listNewsSearches, runNewsSearch, listNewsArticles]
+    tools: [getBrandContext, listBrandPRExperts, listBrandNewsSearches, runBrandNewsSearch, listBrandNewsArticles]
   - say: Pick the story most worth reacting to and start a reactive story on that article.
-    tools: [suggestStories, createStory, listStories]
+    tools: [suggestBrandStories, createBrandStory, listBrandStories]
   - say: Draft a short comment in the expert's voice as a quote for them to approve, with any number as a sourced fact.
-    tools: [addStoryQuote, addStoryFact, getStory]
+    tools: [addBrandStoryQuote, addBrandStoryFact, getBrandStory]
   - say: Once the expert has approved the quote, draft the release, check it and fix what the check finds. A person approves it.
-    tools: [draftStory, updateStory, checkStory]
+    tools: [draftBrandStory, updateBrandStory, checkBrandStory]
   - say: Pitch the journalists who wrote about the story, through a short sequence whose first step uses {{custom.opener}}, each pitch waiting for a person.
-    tools: [listJournalists, listBrandSequences, createBrandSequence, startStoryPitches, listStoryPitches]
+    tools: [listBrandJournalists, listBrandSequences, createBrandSequence, startBrandStoryPitches, listBrandStoryPitches]
   - say: Report replies and coverage.
-    tools: [getStoryResults]
+    tools: [getBrandStoryResults]
 guardrails:
   - Never puts words in the expert's mouth; the comment is quoted only after they approve those exact words.
   - Comments on the news, never on a person in it, and never on tragedies or anything that would be unkind to profit from.

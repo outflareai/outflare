@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SEOOverviewBrand, SEOTrend } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Empty, ErrorText, Loading, PageHeader, type tones } from "../ui";
 import type { Tab } from "../App";
@@ -36,7 +36,8 @@ export function SEOOverview({ ws, go }: Props) {
   const [error, setError] = useState("");
   const [weeks, setWeeks] = useState(12);
   const [poll, setPoll] = useState(0);
-  const brandKey = useBrand(ws).query.brand ?? "";
+  const { query: brandQuery, active } = useBrand(ws);
+  const brandKey = brandQuery.brand ?? "";
   const reading = data?.some((b) => b.seo_status.state === "reading") ?? false;
 
   useEffect(() => {
@@ -59,9 +60,17 @@ export function SEOOverview({ ws, go }: Props) {
   // longer needs (another brand or range picked since) are dropped.
   useEffect(() => {
     let live = true;
-    api
-      .GET("/v1/workspaces/{ws}/seo/overview", { params: { path: { ws }, query: { weeks, ...(brandKey ? { brand: brandKey } : {}) } } })
-      .then(({ data, error }) => {
+    // Each brand's overview is its own: with all brands picked, every
+    // brand's in turn.
+    const one = (brand: string) => api.GET("/v1/brands/{brand}/seo/overview", { params: { path: { brand }, query: { weeks } } });
+    const ids = pickedBrandId() ? [pickedBrandId()] : active.map((b) => b.id);
+    if (!ids.length) return;
+    Promise.all(ids.map(one))
+      .then((all) => {
+        const failed = all.find((x) => x.error || !x.data);
+        const first = all.find((x) => x.data)?.data;
+        const error = failed?.error ?? (first ? undefined : failed?.error);
+        const data = first && !failed ? { ...first, data: all.flatMap((x) => x.data?.data ?? []), notes: [...new Set(all.flatMap((x) => x.data?.notes ?? []))] } : undefined;
         if (!live) return;
         if (error || !data) {
           if (shown.current) return;
@@ -79,7 +88,7 @@ export function SEOOverview({ ws, go }: Props) {
     return () => {
       live = false;
     };
-  }, [ws, brandKey, weeks, poll]);
+  }, [ws, brandKey, weeks, poll, active.length]);
 
   const header = (
     <PageHeader

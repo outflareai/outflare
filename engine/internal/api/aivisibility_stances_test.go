@@ -55,7 +55,7 @@ func TestAIVisibilityStances(t *testing.T) {
 	if !strings.Contains(read, "1. Acme\n2. Northpeak") || !strings.Contains(read, "Source pages:\n1. https://review.example/proxies") || strings.Contains(read, "acme.example/pricing") {
 		t.Fatalf("read: %s", read)
 	}
-	s := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true", nil)["data"].([]any)[0].(map[string]any)
+	s := owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid+"&brand_named=true", nil)["data"].([]any)[0].(map[string]any)
 	if s["stance_status"] != "judged" || strings.Join(toStrings(s["other_brands"]), ",") != "Lumen Proxies" {
 		t.Fatalf("sample: %v", s)
 	}
@@ -76,7 +76,7 @@ func TestAIVisibilityStances(t *testing.T) {
 		t.Fatalf("source types: %v", s["citations"])
 	}
 
-	ov := owner.must(200, "GET", base+"/ai-visibility", nil)["data"].([]any)[0].(map[string]any)
+	ov := owner.must(200, "GET", base+"/ai-visibility?brand=acme", nil)["data"].([]any)[0].(map[string]any)
 	brand := ov["brand"].(map[string]any)
 	comp := ov["competitors"].([]any)[0].(map[string]any)
 	sug := ov["suggested_competitors"].([]any)
@@ -97,6 +97,14 @@ func TestAIVisibilityStances(t *testing.T) {
 		return ev.Name == "seo_competitors.suggested" && ev.Props["source"] == "ai_visibility"
 	}) {
 		t.Fatalf("no seo_competitors.suggested event")
+	}
+	// Once someone says No to it on Competitors, AI visibility stops
+	// suggesting it; the Competitors page decides.
+	if _, err := e.pool.Exec(ctx, `UPDATE seo_competitors SET status = 'dismissed' WHERE workspace_id = $1 AND host = 'lumenproxies.example'`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if again := owner.must(200, "GET", base+"/ai-visibility?brand=acme", nil)["data"].([]any)[0].(map[string]any); len(again["suggested_competitors"].([]any)) != 0 {
+		t.Fatalf("dismissed competitor still suggested: %v", again["suggested_competitors"])
 	}
 	// The score: Acme is listed on one question and left out on the other
 	// (0.6 and 0, so 30); Northpeak recommended and listed (1 and 0.6, so 80).
@@ -287,7 +295,7 @@ func TestAIVisibilityStances(t *testing.T) {
 	paid := one(`INSERT INTO customer_events (workspace_id, kind, name, occurred_at) VALUES ($1, 'track', 'payment.succeeded', now()) RETURNING id::text`, ws)
 	one(`INSERT INTO attribution_conversions (event_id, workspace_id, brand_id, name, occurred_at, value_minor, currency) VALUES ($1, $2, $3, 'payment.succeeded', now(), 4900, 'USD') RETURNING event_id::text`, paid, ws, acme)
 	one(`INSERT INTO attribution_credits (event_id, workspace_id, model, position, session_id, channel, source, weight) VALUES ($1, $2, 'last_non_direct', 0, $3, 'ai_answers', 'chatgpt', 1) RETURNING event_id::text`, paid, ws, gpt)
-	tr := owner.must(200, "GET", base+"/ai-visibility", nil)["data"].([]any)[0].(map[string]any)["traffic"].(map[string]any)
+	tr := owner.must(200, "GET", base+"/ai-visibility?brand=acme", nil)["data"].([]any)[0].(map[string]any)["traffic"].(map[string]any)
 	srcs, pages := tr["sources"].([]any), tr["landing_pages"].([]any)
 	if tr["visits"] != 3.0 || tr["conversions"] != 1.0 || tr["model"] != "last_non_direct" || len(tr["revenue"].([]any)) != 1 ||
 		tr["revenue"].([]any)[0].(map[string]any)["amount_cents"] != 4900.0 || len(srcs) != 2 ||
@@ -432,7 +440,7 @@ func TestAIVisibilityStances(t *testing.T) {
 	if err := svc.Step(ctx, ws, rid, 0); err != nil {
 		t.Fatal(err)
 	}
-	if s := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true", nil)["data"].([]any)[0].(map[string]any); s["stance_status"] != "failed" {
+	if s := owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid+"&brand_named=true", nil)["data"].([]any)[0].(map[string]any); s["stance_status"] != "failed" {
 		t.Fatalf("failed read: %v", s)
 	}
 	// Unread stances neither find nor confirm the preferred fix.

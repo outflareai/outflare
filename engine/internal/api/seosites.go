@@ -26,30 +26,53 @@ import (
 
 func (s *Server) routesSEOSites(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites", s.onBrand(read, s.listSEOSites))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites", s.inBrand(read, s.listSEOSites))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites", s.onBrand(manage, s.createSEOSite))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites", s.inBrand(manage, s.createSEOSite))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}", s.onBrand(read, s.getSEOSite))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}", s.inBrand(read, s.getSEOSite))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/seo-sites/{site}", s.onBrand(manage, s.updateSEOSite))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/seo-sites/{site}", s.inBrand(manage, s.updateSEOSite))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-sites/{site}", s.onBrand(manage, s.deleteSEOSite))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-sites/{site}", s.inBrand(manage, s.deleteSEOSite))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/verify", s.onBrand(manage, s.verifySEOSite))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/verify", s.inBrand(manage, s.verifySEOSite))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/dns", s.onBrand(manage, s.addSEOSiteDNS))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/dns", s.inBrand(manage, s.addSEOSiteDNS))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/dns/approval", s.onBrand(manage, s.seoSiteDNSApproval))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/dns/approval", s.inBrand(manage, s.seoSiteDNSApproval))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/dns/approved", s.onBrand(manage, s.seoSiteDNSApproved))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/dns/approved", s.inBrand(manage, s.seoSiteDNSApproved))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/crawls", s.onBrand(manage, s.startCrawl))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/crawls", s.inBrand(manage, s.startCrawl))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls", s.onBrand(read, s.listCrawls))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls", s.inBrand(read, s.listCrawls))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}", s.onBrand(read, s.getCrawl))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}", s.inBrand(read, s.getCrawl))
+	mux.HandleFunc("POST /v1/brands/{brand}/crawls/{crawl}/stop", s.onBrand(manage, s.stopCrawl))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/crawls/{crawl}/stop", s.inBrand(manage, s.stopCrawl))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}/pages", s.onBrand(read, s.listCrawlPages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}/pages", s.inBrand(read, s.listCrawlPages))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}/pages/{page}", s.onBrand(read, s.getCrawlPage))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}/pages/{page}", s.inBrand(read, s.getCrawlPage))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}/issues", s.onBrand(read, s.listCrawlIssues))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}/issues", s.inBrand(read, s.listCrawlIssues))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}/issues/{rule}", s.onBrand(read, s.getCrawlIssue))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}/issues/{rule}", s.inBrand(read, s.getCrawlIssue))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-rules", s.onBrand(read, s.listSEORules))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-rules", s.inBrand(read, s.listSEORules))
 	// The fixes list holds only site audits' fixes so far, so it takes the
 	// SEO scopes; a second source brings scopes of the list's own.
+	mux.HandleFunc("GET /v1/brands/{brand}/fixes", s.onBrand(read, s.listFixes))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fixes", s.inBrand(read, s.listFixes))
+	mux.HandleFunc("GET /v1/brands/{brand}/fixes/{fix}", s.onBrand(read, s.getFix))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fixes/{fix}", s.inBrand(read, s.getFix))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/fixes/{fix}", s.onBrand(manage, s.updateFix))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/fixes/{fix}", s.inBrand(manage, s.updateFix))
+	mux.HandleFunc("GET /v1/brands/{brand}/fixes/{fix}/prompt", s.onBrand(read, s.getFixPrompt))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fixes/{fix}/prompt", s.inBrand(read, s.getFixPrompt))
+	mux.HandleFunc("POST /v1/brands/{brand}/fixes/{fix}/verify", s.onBrand(manage, s.verifyFix))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/fixes/{fix}/verify", s.inBrand(manage, s.verifyFix))
 }
 
@@ -216,7 +239,7 @@ func (s *Server) loadSEOSites(ctx context.Context, ws string, id *string, sel br
 func (s *Server) seoSiteFor(w http.ResponseWriter, r *http.Request, a *access) (*seoSite, bool) {
 	id := r.PathValue("site")
 	if validUUID(id) {
-		list, err := s.loadSEOSites(r.Context(), a.WorkspaceID, &id, brandSel{in: a.Brands})
+		list, err := s.loadSEOSites(r.Context(), a.WorkspaceID, &id, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -424,7 +447,9 @@ func (s *Server) createSEOSite(w http.ResponseWriter, r *http.Request) {
 				brand = nil
 			}
 		}
-		brand, err := brandWrite(ctx, tx, a, brand)
+		// Every site is one brand's: the one named, else the one whose
+		// domain it is, else the caller's or the workspace's first.
+		brand, err := ownBrand(ctx, tx, a, brand)
 		if err != nil {
 			return err
 		}
@@ -518,6 +543,9 @@ func (s *Server) updateSEOSite(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if b, err = brandWrite(ctx, tx, a, b); err != nil {
+				return err
+			}
+			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, b); err != nil {
 				return err
 			}
 			brand = b

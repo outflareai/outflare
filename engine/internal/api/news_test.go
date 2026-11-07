@@ -63,7 +63,6 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	bid := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example"})["id"].(string)
 
 	// Checks on what a search takes.
-	owner.must(400, "POST", base+"/news-searches", map[string]any{"query": "Northpeak", "purpose": "coverage"})
 	owner.must(400, "POST", base+"/news-searches", map[string]any{"query": "", "purpose": "topic"})
 	owner.must(400, "POST", base+"/news-searches", map[string]any{"query": "proxies", "check_every_hours": 1})
 	owner.must(400, "POST", base+"/news-searches", map[string]any{"query": "proxies", "time_range": "year"})
@@ -108,7 +107,7 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	}
 	// Coverage: the two articles that name the brand, not its own blog or
 	// the unrelated page.
-	list := owner.must(200, "GET", base+"/coverage", nil)
+	list := owner.must(200, "GET", base+"/coverage?brand=northpeak", nil)
 	data := list["data"].([]any)
 	if list["total"] != 2.0 {
 		t.Fatalf("coverage: %v", list)
@@ -137,7 +136,7 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	if err := e.srv.RunNewsSearch(ctx, ws, covID); err != nil {
 		t.Fatal(err)
 	}
-	if n := owner.must(200, "GET", base+"/coverage", nil)["total"]; n != 2.0 {
+	if n := owner.must(200, "GET", base+"/coverage?brand=northpeak", nil)["total"]; n != 2.0 {
 		t.Fatalf("coverage after a second run: %v", n)
 	}
 
@@ -152,10 +151,10 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 	}
 	other := urls["https://blog.example.net/proxies"]["id"].(string)
 	owner.must(200, "PATCH", base+"/coverage/"+other, map[string]any{"status": "dismissed"})
-	if n := owner.must(200, "GET", base+"/coverage", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/coverage?brand=northpeak", nil)["total"]; n != 1.0 {
 		t.Fatalf("after dismissing: %v", n)
 	}
-	if n := owner.must(200, "GET", base+"/coverage?status=dismissed", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/coverage?brand=northpeak&status=dismissed", nil)["total"]; n != 1.0 {
 		t.Fatalf("dismissed: %v", n)
 	}
 	owner.must(400, "PATCH", base+"/coverage/"+id, map[string]any{"status": "great"})
@@ -193,7 +192,7 @@ func TestNewsWatchFindsArticlesAndCoverage(t *testing.T) {
 		t.Fatalf("updated: %v", s)
 	}
 	owner.must(204, "DELETE", base+"/news-searches/"+covID, nil)
-	if n := owner.must(200, "GET", base+"/coverage?status=new,confirmed,dismissed", nil)["total"]; n != 3.0 {
+	if n := owner.must(200, "GET", base+"/coverage?brand=northpeak&status=new,confirmed,dismissed", nil)["total"]; n != 3.0 {
 		t.Fatalf("coverage after deleting its search: %v", n)
 	}
 	if list := owner.must(200, "GET", base+"/news-searches", nil)["data"].([]any); len(list) != 1 {
@@ -222,10 +221,13 @@ func TestNewsSearchesKeepToTheirBrand(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/news-searches?brand=acme", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("acme's searches: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/news-searches?brand=none", nil)["data"].([]any)); n != 1 {
-		t.Fatalf("shared searches: %d", n)
+	// Each brand sees only its own: a search made without a brand is the
+	// first brand's, so none is shared.
+	if n := len(owner.must(200, "GET", base+"/news-searches?brand=northpeak&purpose=coverage", nil)["data"].([]any)); n != 1 {
+		t.Fatalf("northpeak's coverage searches: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/news-searches?purpose=coverage", nil)["data"].([]any)); n != 2 {
-		t.Fatalf("coverage searches: %d", n)
+	var shared int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM news_searches WHERE workspace_id = (SELECT id FROM workspaces WHERE id::text = $1 OR slug = $1) AND brand_id IS NULL`, ws).Scan(&shared); err != nil || shared != 0 {
+		t.Fatalf("shared searches: %d %v", shared, err)
 	}
 }

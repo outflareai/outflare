@@ -47,11 +47,17 @@ var storyPitchStatuses = []string{"writing", "draft", "enrolled", "rejected"}
 
 func (s *Server) routesStoryPitches(mux *http.ServeMux) {
 	read, manage := auth.ScopeSequencesRead, auth.ScopeSequencesManage
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/pitches", s.onBrand(manage, s.startStoryPitches))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/pitches", s.inBrand(manage, s.startStoryPitches))
+	mux.HandleFunc("GET /v1/brands/{brand}/story-pitches", s.onBrand(read, s.listStoryPitches))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/story-pitches", s.inBrand(read, s.listStoryPitches))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/story-pitches/{pitch}", s.onBrand(manage, s.editStoryPitch))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/story-pitches/{pitch}", s.inBrand(manage, s.editStoryPitch))
+	mux.HandleFunc("POST /v1/brands/{brand}/story-pitches/{pitch}/approve", s.onBrand(manage, s.approveStoryPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/story-pitches/{pitch}/approve", s.inBrand(manage, s.approveStoryPitch))
+	mux.HandleFunc("POST /v1/brands/{brand}/story-pitches/{pitch}/reject", s.onBrand(manage, s.rejectStoryPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/story-pitches/{pitch}/reject", s.inBrand(manage, s.rejectStoryPitch))
+	mux.HandleFunc("GET /v1/brands/{brand}/stories/results", s.onBrand(auth.ScopeSEORead, s.storyResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/stories/results", s.inBrand(auth.ScopeSEORead, s.storyResults))
 }
 

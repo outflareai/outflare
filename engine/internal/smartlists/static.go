@@ -68,7 +68,7 @@ func AddStatic(ctx context.Context, tx pgx.Tx, ws, listID string, recordIDs []st
 	rows, err := tx.Query(ctx, `INSERT INTO static_list_members (workspace_id, list_id, record_id, added_via, added_ref)
 		SELECT $1, $2, r.id, $4, NULLIF($5, '') FROM records r
 		WHERE r.workspace_id = $1 AND r.id = ANY ($3::uuid[]) AND r.record_type = 'person' AND r.merged_into IS NULL AND r.archived_at IS NULL
-		  AND ($6::uuid IS NULL OR r.brand_id IS NULL OR r.brand_id = $6)
+		  AND ($6::uuid IS NULL OR r.brand_id = $6)
 		ON CONFLICT (list_id, record_id) DO NOTHING RETURNING record_id::text`, ws, listID, recordIDs, via, ref, brand)
 	if err != nil {
 		return Change{}, err

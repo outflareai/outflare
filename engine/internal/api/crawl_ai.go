@@ -21,6 +21,11 @@ type crawlAIBotView struct {
 	BlockedPages int  `json:"blocked_pages"`
 }
 
+type crawlUsageSignal struct {
+	Host string `json:"host"`
+	Line string `json:"line"`
+}
+
 func (s *Server) getCrawlAIAccess(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	run, _, ok := s.crawlFor(w, r, a)
@@ -57,6 +62,24 @@ func (s *Server) getCrawlAIAccess(w http.ResponseWriter, r *http.Request) {
 			bots = append(bots, g)
 		}
 	}
+	// What the site says about how its content may be used, from every
+	// robots.txt the crawl read.
+	signals := []crawlUsageSignal{}
+	rows, err = s.pool.Query(ctx, `SELECT host, body FROM crawl_robots WHERE run_id = $1 ORDER BY host`, run.ID)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var host, body string
+	if _, err := pgx.ForEachRow(rows, []any{&host, &body}, func() error {
+		for _, l := range crawl.UsageSignals(body) {
+			signals = append(signals, crawlUsageSignal{Host: host, Line: l})
+		}
+		return nil
+	}); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	searchBlocked := slices.ContainsFunc(bots, func(b crawlAIBotView) bool { return b.Purpose != "training" && b.BlockedPages > 0 })
 	writeJSON(w, http.StatusOK, map[string]any{
 		"crawl_id":       run.ID,
@@ -64,5 +87,6 @@ func (s *Server) getCrawlAIAccess(w http.ResponseWriter, r *http.Request) {
 		"llms_txt":       map[string]any{"status": status, "found": status != nil && *status == 200, "bytes": size},
 		"search_blocked": searchBlocked,
 		"bots":           bots,
+		"usage_signals":  signals,
 	})
 }

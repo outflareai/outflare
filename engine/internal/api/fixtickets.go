@@ -50,13 +50,21 @@ const (
 
 func (s *Server) routesFixTickets(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/fix-tickets", s.onBrand(read, s.listFixTickets))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fix-tickets", s.inBrand(read, s.listFixTickets))
+	mux.HandleFunc("GET /v1/brands/{brand}/fix-tickets/{ticket}", s.onBrand(read, s.getFixTicket))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fix-tickets/{ticket}", s.inBrand(read, s.getFixTicket))
+	mux.HandleFunc("GET /v1/brands/{brand}/fix-tickets/{ticket}/prompt", s.onBrand(read, s.getFixTicketPrompt))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fix-tickets/{ticket}/prompt", s.inBrand(read, s.getFixTicketPrompt))
+	mux.HandleFunc("POST /v1/brands/{brand}/fix-tickets/{ticket}/write", s.onBrand(manage, s.writeFixTicket))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/fix-tickets/{ticket}/write", s.inBrand(manage, s.writeFixTicket))
+	mux.HandleFunc("POST /v1/brands/{brand}/fix-tickets/{ticket}/review", s.onBrand(manage, s.reviewFixTicket))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/fix-tickets/{ticket}/review", s.inBrand(manage, s.reviewFixTicket))
+	mux.HandleFunc("GET /v1/brands/{brand}/fix-guidelines", s.onBrand(read, s.listFixGuidelines))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fix-guidelines", s.inBrand(read, s.listFixGuidelines))
+	mux.HandleFunc("POST /v1/brands/{brand}/fix-guidelines", s.onBrand(manage, s.createFixGuideline))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/fix-guidelines", s.inBrand(manage, s.createFixGuideline))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/fix-guidelines/{guideline}", s.onBrand(manage, s.deleteFixGuideline))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/fix-guidelines/{guideline}", s.inBrand(manage, s.deleteFixGuideline))
 }
 
@@ -587,11 +595,11 @@ func scanGuideline(row pgx.CollectableRow) (fixGuideline, error) {
 }
 
 // guidelinesFor are the guidelines a ticket's brief follows: the
-// workspace's, its brand's and its subject's, for every rule or its own.
+// brand's and its subject's, for every rule or its own.
 func (s *Server) guidelinesFor(ctx context.Context, ws string, brand *string, subject, rule string) ([]fixGuideline, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+guidelineCols+` FROM fix_guidelines g LEFT JOIN actors c ON c.id = g.created_by
 		WHERE g.workspace_id = $1 AND (g.rule = '' OR g.rule = $4)
-		  AND (g.subject_id = $3::uuid OR (g.subject_id IS NULL AND (g.brand_id IS NULL OR g.brand_id = $2::uuid)))
+		  AND (g.subject_id = $3::uuid OR (g.subject_id IS NULL AND g.brand_id IS NOT DISTINCT FROM $2::uuid))
 		ORDER BY g.created_at`, ws, brand, subject, rule)
 	if err != nil {
 		return nil, err
@@ -613,8 +621,13 @@ func (s *Server) insertGuideline(ctx context.Context, tx pgx.Tx, a *access, scop
 	}
 	var b, sub *string
 	switch scope {
-	case "brand":
-		b = brand
+	case "workspace", "brand":
+		// Brands share nothing, so a guideline for the whole workspace is
+		// the brand's: the one named, else the route's or the first.
+		var err error
+		if b, err = ownBrand(ctx, tx, a, brand); err != nil {
+			return "", err
+		}
 	case "site":
 		b, sub = brand, &subject
 	}
@@ -681,7 +694,7 @@ func (s *Server) createFixGuideline(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "subject_id is a site's id")
 			return
 		}
-		list, err := s.loadSEOSites(ctx, a.WorkspaceID, req.SubjectID, brandSel{in: a.Brands})
+		list, err := s.loadSEOSites(ctx, a.WorkspaceID, req.SubjectID, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -703,6 +716,10 @@ func (s *Server) createFixGuideline(w http.ResponseWriter, r *http.Request) {
 	} else if req.Rule != "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "rule is only for a site's guideline (subject_id)")
 		return
+	}
+	// On a brand route a guideline with no site or brand is the brand's.
+	if scope == "workspace" && a.Brand != "" {
+		scope, brand = "brand", a.orRoute(nil)
 	}
 	if !a.writes(brand) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
@@ -852,8 +869,8 @@ func (s *Server) ticketMarkdown(ws string, d *fixTicketDetail) string {
 		}
 	}
 	if len(open) > 0 && d.Source == crawl.FixSource {
-		fmt.Fprintf(&b, "## When it's live\n\nTell Outflare so it checks: for each fix below, POST %s/v1/workspaces/%s/fixes/{fix}/verify with an Outflare API token that has the seo.manage scope (or call the Outflare MCP tool verify_fix), with a short note on what you changed. Outflare crawls the site again and closes the ticket, or opens it again if the problem is still there.\n\nFixes: %s\n",
-			s.publicURL, ws, strings.Join(open, ", "))
+		fmt.Fprintf(&b, "## When it's live\n\nTell Outflare so it checks: for each fix below, POST %s/v1/brands/%s/fixes/{fix}/verify with an Outflare API token that has the seo.manage scope (or call the Outflare MCP tool verify_fix), with a short note on what you changed. Outflare crawls the site again and closes the ticket, or opens it again if the problem is still there.\n\nFixes: %s\n",
+			s.publicURL, deref(d.BrandID), strings.Join(open, ", "))
 	}
 	return b.String()
 }

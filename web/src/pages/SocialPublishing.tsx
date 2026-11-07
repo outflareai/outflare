@@ -4,6 +4,7 @@ import { BrandBadge } from "@/components/brand-badge";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Card, confirmAction, field, toast } from "../ui";
 import { ago, when } from "../format";
+import { pickedBrandId } from "@/lib/brand";
 
 // Publishing: the brand's own posts on X and LinkedIn. Anyone who can
 // manage social writes a post (or has the workspace's own AI draft it);
@@ -36,8 +37,8 @@ export function Publishing({ ws, accounts, canManage }: { ws: string; accounts: 
   const [series, setSeries] = useState<SocialSeries[]>([]);
   const load = useCallback(async () => {
     const [p, s] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/social/publications", { params: { path: { ws }, query: { limit: 50 } } }),
-      api.GET("/v1/workspaces/{ws}/social/series", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/social/publications", { params: { path: { brand: pickedBrandId() }, query: { limit: 50 } } }),
+      api.GET("/v1/brands/{brand}/social/series", { params: { path: { brand: pickedBrandId() } } }),
     ]);
     setPubs(p.data?.data ?? []);
     setSeries(s.data?.data ?? []);
@@ -67,7 +68,7 @@ export function Publishing({ ws, accounts, canManage }: { ws: string; accounts: 
   );
 }
 
-function Composer({ ws, accounts, onDone }: { ws: string; accounts: SocialAccount[]; onDone: () => void }) {
+function Composer({ ws: _ws, accounts, onDone }: { ws: string; accounts: SocialAccount[]; onDone: () => void }) {
   const [account, setAccount] = useState(accounts[0]?.id ?? "");
   const [body, setBody] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -83,8 +84,8 @@ function Composer({ ws, accounts, onDone }: { ws: string; accounts: SocialAccoun
 
   async function create(withAI: boolean) {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/social/publications", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/social/publications", {
+      params: { path: { brand: pickedBrandId() } },
       body: {
         account_id: acct.id,
         ...(withAI ? { prompt: prompt.trim() } : { body: body.trim() }),
@@ -129,7 +130,7 @@ function Composer({ ws, accounts, onDone }: { ws: string; accounts: SocialAccoun
   );
 }
 
-function PubRow({ ws, pub, account, canManage, onChange }: { ws: string; pub: Pub; account?: SocialAccount; canManage: boolean; onChange: () => void }) {
+function PubRow({ ws: _ws, pub, account, canManage, onChange }: { ws: string; pub: Pub; account?: SocialAccount; canManage: boolean; onChange: () => void }) {
   const [body, setBody] = useState(pub.body);
   const [busy, setBusy] = useState(false);
   useEffect(() => setBody(pub.body), [pub.id, pub.body]);
@@ -137,7 +138,7 @@ function PubRow({ ws, pub, account, canManage, onChange }: { ws: string; pub: Pu
   const changed = body !== pub.body;
   const count = length(pub.channel, withLink(body.trim(), pub.link_url));
   const over = count > pub.max_length;
-  const path = { params: { path: { ws, id: pub.id } } };
+  const path = { params: { path: { brand: pickedBrandId(), id: pub.id } } };
 
   async function run(f: () => Promise<{ error?: unknown }>, done: string) {
     setBusy(true);
@@ -150,15 +151,15 @@ function PubRow({ ws, pub, account, canManage, onChange }: { ws: string; pub: Pu
   const approve = () =>
     run(async () => {
       if (changed) {
-        const r = await api.PATCH("/v1/workspaces/{ws}/social/publications/{id}", { ...path, body: { body: body.trim() } });
+        const r = await api.PATCH("/v1/brands/{brand}/social/publications/{id}", { ...path, body: { body: body.trim() } });
         if (r.error) return r;
       }
-      return api.POST("/v1/workspaces/{ws}/social/publications/{id}/approve", path);
+      return api.POST("/v1/brands/{brand}/social/publications/{id}/approve", path);
     }, pub.scheduled_for ? `Approved. It goes out ${when(pub.scheduled_for)}.` : "Approved. It goes out in a moment.");
-  const save = () => run(() => api.PATCH("/v1/workspaces/{ws}/social/publications/{id}", { ...path, body: { body: body.trim() } }), "Saved.");
+  const save = () => run(() => api.PATCH("/v1/brands/{brand}/social/publications/{id}", { ...path, body: { body: body.trim() } }), "Saved.");
   const cancel = async () => {
     if (!(await confirmAction("Cancel this post?", "It won't go out. This can't be undone.", "Cancel post"))) return;
-    run(() => api.DELETE("/v1/workspaces/{ws}/social/publications/{id}", path), "Cancelled.");
+    run(() => api.DELETE("/v1/brands/{brand}/social/publications/{id}", path), "Cancelled.");
   };
 
   return (
@@ -198,7 +199,7 @@ function PubRow({ ws, pub, account, canManage, onChange }: { ws: string; pub: Pu
   );
 }
 
-function SeriesCard({ ws, series, accounts, byId, canManage, onChange }: {
+function SeriesCard({ ws: _ws, series, accounts, byId, canManage, onChange }: {
   ws: string; series: SocialSeries[]; accounts: SocialAccount[]; byId: (id: string) => SocialAccount | undefined; canManage: boolean; onChange: () => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -218,7 +219,7 @@ function SeriesCard({ ws, series, accounts, byId, canManage, onChange }: {
   }
   const create = () =>
     run(async () => {
-      const r = await api.POST("/v1/workspaces/{ws}/social/series", { params: { path: { ws } }, body: { account_id: account || accounts[0].id, name: name.trim(), template: template.trim(), daily_limit: daily } });
+      const r = await api.POST("/v1/brands/{brand}/social/series", { params: { path: { brand: pickedBrandId() } }, body: { account_id: account || accounts[0].id, name: name.trim(), template: template.trim(), daily_limit: daily } });
       if (!r.error) {
         setAdding(false);
         setName("");
@@ -256,7 +257,7 @@ function SeriesCard({ ws, series, accounts, byId, canManage, onChange }: {
         )}
         {series.length === 0 && !adding && <p className="text-muted-foreground">No series yet.</p>}
         {series.map((s) => {
-          const path = { params: { path: { ws, id: s.id } } };
+          const path = { params: { path: { brand: pickedBrandId(), id: s.id } } };
           return (
             <div key={s.id} className="flex flex-wrap items-center gap-2 rounded-md border p-3">
               <div className="min-w-0 flex-1 space-y-0.5">
@@ -271,10 +272,10 @@ function SeriesCard({ ws, series, accounts, byId, canManage, onChange }: {
                 {s.template && <p className="whitespace-pre-wrap text-xs text-muted-foreground">{s.template}</p>}
               </div>
               {canManage && !s.approved_by && (
-                <Button disabled={busy} onClick={() => run(() => api.POST("/v1/workspaces/{ws}/social/series/{id}/approve", path), "Approved. Posts handed in now go out.")}>Approve</Button>
+                <Button disabled={busy} onClick={() => run(() => api.POST("/v1/brands/{brand}/social/series/{id}/approve", path), "Approved. Posts handed in now go out.")}>Approve</Button>
               )}
               {canManage && (
-                <Button variant="ghost" disabled={busy} onClick={() => run(() => api.PATCH("/v1/workspaces/{ws}/social/series/{id}", { ...path, body: { paused: !s.paused } }), s.paused ? "Resumed." : "Paused.")}>
+                <Button variant="ghost" disabled={busy} onClick={() => run(() => api.PATCH("/v1/brands/{brand}/social/series/{id}", { ...path, body: { paused: !s.paused } }), s.paused ? "Resumed." : "Paused.")}>
                   {s.paused ? "Resume" : "Pause"}
                 </Button>
               )}

@@ -111,7 +111,7 @@ func (s *Server) findEmailTopic(w http.ResponseWriter, r *http.Request, ws, ref 
 	// A topic is its brand's: on a brand route only that brand's (or one
 	// with no brand, which the version before 0431 makes for every brand),
 	// and on the workspace route the first brand's before the others.
-	v, err := scanEmailTopic(s.pool.QueryRow(r.Context(), emailTopicSelect+` AND (t.id::text = $2 OR t.key = $2) AND ($3 = '' OR t.brand_id IS NULL OR t.brand_id = $3::uuid)
+	v, err := scanEmailTopic(s.pool.QueryRow(r.Context(), emailTopicSelect+` AND (t.id::text = $2 OR t.key = $2) AND ($3 = '' OR t.brand_id = $3::uuid)
 		ORDER BY t.brand_id IS NOT DISTINCT FROM outflare_first_brand($1) DESC, t.created_at LIMIT 1`, ws, ref, accessFrom(r.Context()).Brand))
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && v.BrandID != nil && !accessFrom(r.Context()).sees(v.BrandID)) {
 		writeError(w, r, http.StatusNotFound, "not_found", "email topic not found")
@@ -236,7 +236,7 @@ func (s *Server) createEmailTopic(w http.ResponseWriter, r *http.Request) {
 		// is a conflict.
 		err := tx.QueryRow(ctx, `
 			INSERT INTO email_topics (workspace_id, key, name, description, subscribed_by_default, visibility, brand_id)
-			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, '')::uuid)
+			VALUES ($1, $2, $3, $4, $5, $6, COALESCE(NULLIF($7, '')::uuid, outflare_first_brand($1)))
 			ON CONFLICT DO NOTHING RETURNING id`,
 			a.WorkspaceID, *f.Key, strings.TrimSpace(*f.Name), strings.TrimSpace(deref(f.Description)), byDefault, visibility, brand).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {

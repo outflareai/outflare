@@ -31,7 +31,7 @@ steps:
   - say: Group questions that mean the same thing and count them.
     tools: []
   - say: Check which ones the site already answers and which pages target them.
-    tools: [listSEOSites, getSiteSearch, listPageTargets]
+    tools: [listBrandSEOSites, getBrandSiteSearch, listBrandPageTargets]
   - say: Write a brief for each missing page and post them to the mission.
     tools: [addAgentRunUpdate]
 guardrails:

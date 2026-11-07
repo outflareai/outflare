@@ -26,10 +26,15 @@ import (
 
 func (s *Server) routesBacklinks(mux *http.ServeMux) {
 	read := auth.ScopeSEORead
+	mux.HandleFunc("GET /v1/brands/{brand}/backlinks", s.onBrand(read, s.listBacklinks))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/backlinks", s.inBrand(read, s.listBacklinks))
+	mux.HandleFunc("GET /v1/brands/{brand}/backlinks/events", s.onBrand(read, s.listBacklinkEvents))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/backlinks/events", s.inBrand(read, s.listBacklinkEvents))
+	mux.HandleFunc("GET /v1/brands/{brand}/backlinks/summary", s.onBrand(read, s.backlinksSummary))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/backlinks/summary", s.inBrand(read, s.backlinksSummary))
+	mux.HandleFunc("GET /v1/brands/{brand}/backlinks/disavow", s.onBrand(read, s.disavowFile))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/backlinks/disavow", s.inBrand(read, s.disavowFile))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/backlinks/{backlink}", s.onBrand(auth.ScopeSEOManage, s.reviewBacklink))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/backlinks/{backlink}", s.inBrand(auth.ScopeSEOManage, s.reviewBacklink))
 }
 
@@ -684,7 +689,7 @@ func (s *Server) reviewBacklink(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	args := []any{a.WorkspaceID, id}
-	b, err := scanBacklink(s.pool.QueryRow(ctx, `SELECT `+backlinkCols+` FROM backlinks b WHERE b.workspace_id = $1 AND b.id = $2`+brandSel{in: a.Brands}.sql("b.brand_id", &args), args...))
+	b, err := scanBacklink(s.pool.QueryRow(ctx, `SELECT `+backlinkCols+` FROM backlinks b WHERE b.workspace_id = $1 AND b.id = $2`+brandSel{in: a.seenBrands()}.sql("b.brand_id", &args), args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "not_found", "backlink not found")
 		return
@@ -744,7 +749,7 @@ func (s *Server) disavowFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &site, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &site, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return

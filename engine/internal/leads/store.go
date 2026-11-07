@@ -103,7 +103,7 @@ func ImportIn(ctx context.Context, tx pgx.Tx, workspaceID, brand, source string,
 	err := tx.QueryRow(ctx, `
 		WITH up AS (
 			INSERT INTO leads (workspace_id, brand_id, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, source)
-			SELECT $1, NULLIF($4, '')::uuid, email, first_name, last_name, company, title, phone, linkedin_url, website, custom, $2 FROM lead_import
+			SELECT $1, COALESCE(NULLIF($4, '')::uuid, outflare_first_brand($1)), email, first_name, last_name, company, title, phone, linkedin_url, website, custom, $2 FROM lead_import
 			ON CONFLICT (brand_id, lower(email)) DO UPDATE SET
 				`+strings.Join(sets, ",\n\t\t\t\t")+`,
 				custom = leads.custom || EXCLUDED.custom,

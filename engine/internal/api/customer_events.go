@@ -701,6 +701,41 @@ func ownerOf(ctx context.Context, tx pgx.Tx, a *access, brand, namespace, value 
 	return &id, owner, nil
 }
 
+// provenEmailOwner is the record in brand, other than rec, that an email
+// someone just proved they own belongs to: the one holding it verified,
+// else the only person holding it at all, when they have no user id of
+// their own (an import, a lead, an unsubscribe) and nobody said the two are
+// different people. Several unverified copies mean someone typed another
+// person's address, so none of them owns it (customers.EnsurePersonIn).
+func provenEmailOwner(ctx context.Context, tx pgx.Tx, a *access, brand, rec, email string) (*string, error) {
+	if owner, _, err := ownerOf(ctx, tx, a, brand, "email", email); err != nil || owner != nil {
+		return owner, err
+	}
+	holders, err := customers.HoldersIn(ctx, tx, a.WorkspaceID, brand, "email", email)
+	if err != nil {
+		return nil, err
+	}
+	holders = slices.DeleteFunc(holders, func(id string) bool { return id == rec })
+	if len(holders) != 1 {
+		return nil, nil
+	}
+	if taken, err := hasUserID(ctx, tx, holders[0]); err != nil || taken {
+		return nil, err
+	}
+	var shared bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM record_identities WHERE record_id = $1 AND namespace = 'email' AND value <> $2 AND valid_to IS NULL)`,
+		holders[0], email).Scan(&shared); err != nil || shared {
+		return nil, err
+	}
+	var decided bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM record_merge_candidates WHERE workspace_id = $1
+		AND record_a = LEAST($2::uuid, $3::uuid) AND record_b = GREATEST($2::uuid, $3::uuid) AND status IN ('dismissed', 'linked'))`,
+		a.WorkspaceID, rec, holders[0]).Scan(&decided); err != nil || decided {
+		return nil, err
+	}
+	return &holders[0], nil
+}
+
 // attach gives a record an identity the ingest trusts. It reports whether
 // it added one, and leaves an identity another record holds verified where
 // it is.
@@ -835,18 +870,20 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 		}
 	}
 	if email != "" {
-		if added, err := attach(ctx, tx, a, *rec, "email", email, emailVerified, totals); err != nil {
-			return nil, err
-		} else if !added && emailVerified {
-			owner, _, err := ownerOf(ctx, tx, a, c.Brand, "email", email)
+		// Settle it first: attach lists every other holder as a possible duplicate.
+		if emailVerified {
+			owner, err := provenEmailOwner(ctx, tx, a, c.Brand, *rec, email)
 			if err != nil {
 				return nil, err
 			}
 			if owner != nil && *owner != *rec {
-				if err := s.claimProvenEmail(ctx, tx, a, c, *rec, *owner, email, res, totals); err != nil {
+				if err := s.claimProvenEmail(ctx, tx, a, c, *rec, *owner, res, totals); err != nil {
 					return nil, err
 				}
 			}
+		}
+		if _, err := attach(ctx, tx, a, *rec, "email", email, emailVerified, totals); err != nil {
+			return nil, err
 		}
 	}
 	if p, _ := traits["phone"].(string); p != "" && kind == "identify" {
@@ -860,11 +897,11 @@ func (s *Server) resolvePerson(ctx context.Context, tx pgx.Tx, a *access, c *cat
 }
 
 // claimProvenEmail settles an email the person just proved they own that
-// another record holds verified. A record with no user id of its own (an
-// import, a CRM sync, a form) is the same person and is merged in; one with
-// its own user id is another account in the product, so the two are only
-// listed as a possible duplicate.
-func (s *Server) claimProvenEmail(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, owner, email string, res *eventResult, totals *ingestTotals) error {
+// another record owns (provenEmailOwner). A record with no user id of its
+// own (an import, a CRM sync, a form) is the same person and is merged in;
+// one with its own user id is another account in the product, so the two
+// are only listed as a possible duplicate.
+func (s *Server) claimProvenEmail(ctx context.Context, tx pgx.Tx, a *access, c *catalog, rec, owner string, res *eventResult, totals *ingestTotals) error {
 	// Brands keep their data apart: a person of another brand is someone
 	// else there, never merged or listed with this one.
 	var same bool
@@ -891,8 +928,7 @@ func (s *Server) claimProvenEmail(ctx context.Context, tx pgx.Tx, a *access, c *
 	}
 	res.Merged = append(res.Merged, owner)
 	totals.merged++
-	_, err = attach(ctx, tx, a, rec, "email", email, true, totals)
-	return err
+	return nil
 }
 
 // releaseClickBrowser takes a browser back from the person it joined

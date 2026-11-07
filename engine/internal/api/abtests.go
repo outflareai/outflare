@@ -434,7 +434,7 @@ func pageTestUnchanged(t abTestView, f flagView) bool {
 	return true
 }
 
-const pageTestUnchangedMessage = "No new version changes the page yet: edit a version on your page (Edit visually) or describe it to AI, then start the test."
+const pageTestUnchangedMessage = "No new version changes the page yet: describe a version to your AI model or edit it on your page, then start the test."
 
 // maxPageVersions is how many new versions a no-code test can start with.
 const maxPageVersions = 4

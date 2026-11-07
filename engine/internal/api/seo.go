@@ -23,8 +23,10 @@ import (
 // has a monthly budget, and the cost of every call lands in Outcomes.
 func (s *Server) routesSEO(mux *http.ServeMux) {
 	read, manage := auth.ScopeAnalyticsRead, auth.ScopeIntegrationsManage
+	mux.HandleFunc("GET /v1/brands/{brand}/seo", s.onBrand(read, s.listSEO))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo", s.inBrand(read, s.listSEO))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo/history", s.inWorkspace(read, s.seoHistory))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo/overview", s.onBrand(read, s.seoOverview))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo/overview", s.inBrand(read, s.seoOverview))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/seo/{id}/settings", s.inWorkspace(manage, s.setSEOSettings))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo/{id}/reports/{report}", s.inWorkspace(read, s.seoReport))
@@ -59,6 +61,9 @@ type seoSource struct {
 	// GapRows is how many keywords and linking domains a weekly read takes
 	// of each tracked competitor; 0 is off.
 	GapRows int `json:"gap_rows"`
+	// CompetitorReadDays is the fewest days between two reads of the same
+	// competitor's site, however they are asked for.
+	CompetitorReadDays int `json:"competitor_read_days"`
 	// DomainsSet: the domains were chosen; otherwise they follow the
 	// analytics tools.
 	DomainsSet bool           `json:"domains_set"`
@@ -92,6 +97,7 @@ func (s *Server) seoSources(ctx context.Context, ws string, sel brandSel) ([]seo
 		src := seoSource{ID: i.ID, Name: i.Name, Connector: i.Connector, ConnectorName: c.Definition().Name, Status: i.Status,
 			LastError: i.LastError, Account: i.Account, Reports: r.SEOReports(), Country: set.Country, Sync: set.Sync, Domains: []seoDomain{}}
 		src.GapRows = set.GapRowsOrDefault()
+		src.CompetitorReadDays = set.CompetitorDaysOrDefault()
 		if connectors.SupportsSEO(r, connectors.SEOLinks) {
 			src.LinkRows = set.LinkRowsOrDefault()
 			src.LinkTraffic = set.LinkTraffic && i.Connector == "ahrefs"
@@ -171,7 +177,7 @@ func (s *Server) openSEO(w http.ResponseWriter, r *http.Request) (*connectors.Op
 	c, _ := s.integrations.Registry.Get(i.Connector)
 	reader, isReader := c.(connectors.SEOReader)
 	if !isReader {
-		writeError(w, r, http.StatusBadRequest, "not_seo", i.Name+" is not an SEO connection; GET /v1/workspaces/{ws}/seo lists them")
+		writeError(w, r, http.StatusBadRequest, "not_seo", i.Name+" is not an SEO connection; GET /v1/brands/{brand}/seo lists them")
 		return nil, nil, false
 	}
 	o, err := s.integrations.Open(r.Context(), s.pool, i.WorkspaceID, i.ID)
@@ -265,13 +271,14 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	a := accessFrom(r.Context())
 	var req struct {
-		Domains       optional[[]string] `json:"domains"`
-		Country       *string            `json:"country"`
-		MonthlyBudget optional[float64]  `json:"monthly_budget"`
-		Sync          *string            `json:"sync"`
-		LinkRows      optional[int]      `json:"link_rows"`
-		LinkTraffic   *bool              `json:"link_traffic"`
-		GapRows       optional[int]      `json:"gap_rows"`
+		Domains        optional[[]string] `json:"domains"`
+		Country        *string            `json:"country"`
+		MonthlyBudget  optional[float64]  `json:"monthly_budget"`
+		Sync           *string            `json:"sync"`
+		LinkRows       optional[int]      `json:"link_rows"`
+		LinkTraffic    *bool              `json:"link_traffic"`
+		GapRows        optional[int]      `json:"gap_rows"`
+		CompetitorDays optional[int]      `json:"competitor_read_days"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -343,11 +350,18 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		set.GapRows = req.GapRows.Value
 	}
+	if req.CompetitorDays.Set {
+		if n := req.CompetitorDays.Value; n != nil && (*n < 1 || *n > 365) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "competitor_read_days is 1 to 365, or null for the default")
+			return
+		}
+		set.CompetitorDays = req.CompetitorDays.Value
+	}
 	patch, _ := json.Marshal(set)
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
 		// Settings keys are replaced whole; unset ones are removed so the
 		// defaults apply.
-		if _, err := tx.Exec(r.Context(), `UPDATE integrations SET config = (config - 'domains' - 'country' - 'monthly_budget' - 'sync' - 'link_rows' - 'link_traffic' - 'gap_rows') || $3::jsonb, updated_at = now()
+		if _, err := tx.Exec(r.Context(), `UPDATE integrations SET config = (config - 'domains' - 'country' - 'monthly_budget' - 'sync' - 'link_rows' - 'link_traffic' - 'gap_rows' - 'competitor_read_days') || $3::jsonb, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`, a.WorkspaceID, o.ID, patch); err != nil {
 			return err
 		}
@@ -362,7 +376,7 @@ func (s *Server) setSEOSettings(w http.ResponseWriter, r *http.Request) {
 		if _, err := seosync.EnqueueRetry(r.Context(), tx, a.WorkspaceID, o.ID); err != nil {
 			return err
 		}
-		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "seo.settings_set", "integration", o.ID, map[string]any{"domains": set.Domains, "country": set.Country, "monthly_budget": set.MonthlyBudget, "sync": set.Sync, "link_rows": set.LinkRows, "link_traffic": set.LinkTraffic, "gap_rows": set.GapRows})
+		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "seo.settings_set", "integration", o.ID, map[string]any{"domains": set.Domains, "country": set.Country, "monthly_budget": set.MonthlyBudget, "sync": set.Sync, "link_rows": set.LinkRows, "link_traffic": set.LinkTraffic, "gap_rows": set.GapRows, "competitor_read_days": set.CompetitorDays})
 	})
 	if err != nil {
 		s.internal(w, r, err)

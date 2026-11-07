@@ -62,7 +62,7 @@ func TestStoryPitches(t *testing.T) {
 	}
 
 	// The AI's opener waits for a person; it passes the check.
-	pitches := waitFor(t, owner, base+"/story-pitches?story_id="+sid, func(m map[string]any) bool {
+	pitches := waitFor(t, owner, base+"/story-pitches?brand=northpeak&story_id="+sid, func(m map[string]any) bool {
 		return m["data"].([]any)[0].(map[string]any)["status"] == "draft"
 	})["data"].([]any)
 	draft := pitches[0].(map[string]any)
@@ -102,7 +102,7 @@ func TestStoryPitches(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, owner, base+"/story-pitches?story_id="+sid+"&status=enrolled", func(m map[string]any) bool {
+	waitFor(t, owner, base+"/story-pitches?brand=northpeak&story_id="+sid+"&status=enrolled", func(m map[string]any) bool {
 		return m["data"].([]any)[0].(map[string]any)["reply_kind"] == "wants_data"
 	})
 	var labels []string
@@ -127,7 +127,7 @@ func TestStoryPitches(t *testing.T) {
 		total["reply_kinds"].(map[string]any)["wants_data"] != 1.0 || len(results["data"].([]any)) != 1 {
 		t.Fatalf("results: %v", results)
 	}
-	owner.must(400, "GET", base+"/stories/results?days=0", nil)
+	owner.must(400, "GET", base+"/stories/results?brand=northpeak&days=0", nil)
 	if c := owner.must(200, "PATCH", base+"/coverage/"+cov, map[string]any{"story_id": sid}); c["story_id"] != sid {
 		t.Fatalf("coverage on a story: %v", c)
 	}

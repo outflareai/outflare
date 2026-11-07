@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { Brand, Schemas, paths } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { PickBrand } from "@/components/pick-brand";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, ErrorText, Loading, PageHeader, field, toast } from "../../ui";
@@ -78,10 +78,9 @@ export function useAIVisibility(ws: string, days: number) {
 
   useEffect(() => {
     if (!brand) return;
-    const q = { brand: brand.handle };
     Promise.all([
-      api.GET("/v1/workspaces/{ws}/ai-visibility", { params: { path: { ws }, query: { ...q, days } } }),
-      api.GET("/v1/workspaces/{ws}/ai-cohorts", { params: { path: { ws }, query: q } }),
+      api.GET("/v1/brands/{brand}/ai-visibility", { params: { path: { brand: brand.id }, query: { days } } }),
+      api.GET("/v1/brands/{brand}/ai-cohorts", { params: { path: { brand: brand.id } } }),
       api.GET("/v1/brands/{brand}/ai-visibility/settings", { params: { path: { brand: brand.id } } }),
     ]).then(([v, c, s]) => {
       const err = v.error ?? c.error ?? s.error;
@@ -162,12 +161,12 @@ export function NotSetUp({ d, go }: { d: AIData; go: Go }) {
 }
 
 // RunBar says where the brand's question set stands and runs it.
-export function RunBar({ ws, d }: { ws: string; d: AIData }) {
+export function RunBar({ d }: { ws: string; d: AIData }) {
   const c = d.cohort;
   if (!c) return null;
   const run = c.last_run;
   async function start() {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts/{cohort}/runs", { params: { path: { ws, cohort: c!.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts/{cohort}/runs", { params: { path: { brand: pickedBrandId(), cohort: c!.id } } });
     if (error || !data) return toast(errorMessage(error), "error");
     if (held(data)) return;
     toast("Asking now. Answers come in over the next few minutes.");
@@ -286,3 +285,25 @@ export const markets = ["en-US", "en-GB", "en-AU", "en-CA", "en-IN", "de-DE", "f
 export const setLabel = (c: Cohort, all: Cohort[]) => (all.some((x) => x.locale !== c.locale) ? `${marketName(c.locale)}${all.filter((x) => x.locale === c.locale).length > 1 ? ` · ${c.name}` : ""}` : c.name);
 
 export const delta = (v: number | null | undefined) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : ""}${Math.round(v)}`);
+
+// The brand's SEO site, which holds its one competitor list (the
+// Competitors page): "" when it has none, null while loading.
+export function useCompetitorSite(ws: string, brand: string) {
+  const [site, setSite] = useState<string | null>(null);
+  useEffect(() => {
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSite(data?.data[0]?.id ?? ""));
+  }, [ws, brand]);
+  return site;
+}
+
+// addCompetitor puts a competitor on the brand's competitor list, which
+// every AI visibility run counts. It says whether it worked.
+export async function addCompetitor(_ws: string, site: string, name: string, website: string) {
+  const { error } = await api.POST("/v1/brands/{brand}/seo-competitors", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site, host: website, ...(name && name !== website ? { name } : {}) } });
+  if (error) {
+    toast(errorMessage(error), "error");
+    return false;
+  }
+  toast(`${name || website} is on your competitor list. It counts from the next run.`);
+  return true;
+}

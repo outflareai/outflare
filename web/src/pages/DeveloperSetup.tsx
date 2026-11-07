@@ -9,8 +9,8 @@ import { nameItem } from "@/lib/records";
 // Developer setup: one brand's live checklist of what its developer sends
 // (sign-ups, orders, payments, refunds, the website and server copies,
 // refunds reaching ad networks), each with what it found and what to
-// send to fix it, and the refunds whose payment Outflare doesn't have, to
-// link by hand.
+// send to fix it, the refunds whose payment Outflare doesn't have, to
+// link by hand, and a merge for payments saved twice.
 
 type Setup = Schemas["DeveloperSetup"];
 type Check = Schemas["DeveloperSetupCheck"];
@@ -70,7 +70,7 @@ function SetupFor({ brand, canManage }: { brand: string; canManage: boolean }) {
       >
         <ul className="divide-y">
           {setup.checks.map((c) => (
-            <CheckRow key={c.key} check={c} />
+            <CheckRow key={c.key} check={c} brand={brand} canManage={canManage} onChanged={load} />
           ))}
         </ul>
       </Card>
@@ -90,8 +90,19 @@ function SetupFor({ brand, canManage }: { brand: string; canManage: boolean }) {
   );
 }
 
-function CheckRow({ check: c }: { check: Check }) {
+function CheckRow({ check: c, brand, canManage, onChanged }: { check: Check; brand: string; canManage: boolean; onChanged: () => void }) {
   const tone = tones[c.status];
+  const [busy, setBusy] = useState(false);
+  // Payments saved twice are merged here: nothing changes in what the
+  // developer sends.
+  async function merge() {
+    setBusy(true);
+    const { data, error } = await api.POST("/v1/brands/{brand}/developer-setup/merge-duplicates", { params: { path: { brand } } });
+    setBusy(false);
+    if (error || !data) return toast(errorMessage(error), "error");
+    toast(data.merged === 1 ? "1 payment merged." : `${data.merged.toLocaleString()} payments merged.`);
+    onChanged();
+  }
   return (
     <li className="space-y-1 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -103,11 +114,23 @@ function CheckRow({ check: c }: { check: Check }) {
         </span>
       </div>
       {c.detail && <p className="text-[12px] text-muted-foreground">{c.detail}</p>}
-      {c.status !== "ok" && c.fix && (
-        <div className="flex items-start gap-2 rounded-md bg-muted/50 p-2">
-          <p className="min-w-0 flex-1 font-mono text-[12px] break-words">{c.fix}</p>
-          <CopyButton text={c.fix} />
-        </div>
+      {c.key === "duplicates" && c.status !== "ok" ? (
+        canManage && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="min-w-0 flex-1 text-[12px] text-muted-foreground">{c.fix}</p>
+            <Button disabled={busy} onClick={merge}>
+              Merge them
+            </Button>
+          </div>
+        )
+      ) : (
+        c.status !== "ok" &&
+        c.fix && (
+          <div className="flex items-start gap-2 rounded-md bg-muted/50 p-2">
+            <p className="min-w-0 flex-1 font-mono text-[12px] break-words">{c.fix}</p>
+            <CopyButton text={c.fix} />
+          </div>
+        )
       )}
     </li>
   );

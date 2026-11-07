@@ -23,11 +23,17 @@ import (
 
 func (s *Server) routesSEORanks(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/rankings", s.onBrand(read, s.listRankings))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/rankings", s.inBrand(read, s.listRankings))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/rankings", s.onBrand(manage, s.trackKeywords))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/rankings", s.inBrand(manage, s.trackKeywords))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/rankings/check", s.onBrand(manage, s.checkRankings))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/rankings/check", s.inBrand(manage, s.checkRankings))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}/history", s.onBrand(read, s.rankHistory))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}/history", s.inBrand(read, s.rankHistory))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", s.onBrand(manage, s.updateTracked))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", s.inBrand(manage, s.updateTracked))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", s.onBrand(manage, s.deleteTracked))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", s.inBrand(manage, s.deleteTracked))
 }
 

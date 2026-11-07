@@ -39,23 +39,25 @@ Under each name it says the day of its latest search numbers, or that it has non
 
 Search numbers come from the SEO connection's weekly snapshot, so a competitor tracked during the week has none until the next one. **Refresh all competitors** (`POST /v1/brands/{brand}/competition/refresh`, MCP `refresh_competition`) reads every tracked competitor of the brand now:
 
-- their search numbers, on one SEO connection that serves the brand (Ahrefs first). It reads the same competitors and reports as the weekly snapshot, only for the ones that connection hasn't read today, within its budget, so a second click on the same day costs nothing;
+- their search numbers, on one SEO connection that serves the brand (Ahrefs first). It reads the same competitors and reports as the weekly snapshot, only for the ones that connection hasn't read in the last 30 days (the connection's "Read each competitor at most once every" setting), within its budget, so clicking again costs nothing;
 - OutflareBot's look at each home page, at most once an hour each, with its domain age;
 - their followed social profiles and review pages, through the page reader.
 
-It runs on the workspace's own connections. Without an SEO connection only their sites and profiles are read, and the page says to connect one. The numbers fill in within a few minutes, and the page reads them again by itself.
+It runs on the workspace's own connections. Without an SEO connection only their sites and profiles are read, and the page says to connect one. A connection marked broken is still tried when it's the only one, since one refused call can leave that mark behind; the read records the error if the key really is wrong. The numbers fill in within a few minutes, and the page reads them again by itself. Until every competitor has them, the page says how many have search numbers, domain age and a look at their site so far.
+
+Ahrefs answers 403 for a report the key's plan doesn't include (Site Audit, for example). That refuses only that report: the connection stays connected and the other reports keep working. Only a 401 marks the key wrong.
 
 Each competitor has its own page (`/competition/{competitor id}` in the app). It shows its score and rank next to the brand's, its Domain Rating, keywords, domain age and pages next to the brand's, every area head to head, and both shares over the year.
 
 The page also shows:
 
-- **Their placements**: every page Presence found them on (`GET /v1/brands/{brand}/coverage/competitor_placements?competitor_id=`), strongest sites first, with whether it looks paid for and whether you are on that site too. This is what their Placements number counts.
+- **Their placements**: every page Presence found them on (`GET /v1/brands/{brand}/coverage/competitor_placements?competitor_id=`), most valuable to you first (see [Link value](coverage.md#link-value)), with how each link is got, why it scores what it does, whether it looks paid for and whether you are on that site too. This is what their Placements number counts.
 - **Their search** (`GET /v1/brands/{brand}/competition/{competitor}/search`): their top keywords with your position beside each, their pages that get the most search visits, the sites linking to them (and whether each links to you too) and the newest pages in their sitemap. It reads only what is stored.
-- **Read their search data** (`POST /v1/brands/{brand}/competition/{competitor}/read`): reads their numbers, top 100 keywords, top 100 linking sites and top 25 pages now, on the brand's own SEO connection (Ahrefs first, else DataForSEO) within its budget. The weekly read gets keywords and linking sites for only 5 competitors a site, so this fills in the rest. It shows what it would read and about what it costs first (`estimate_only`), and skips what that connection read in the last six days, so asking twice costs nothing more. Without an SEO connection it says which to add.
+- **Read their search data** (`POST /v1/brands/{brand}/competition/{competitor}/read`): reads their numbers, top 100 keywords, top 100 linking sites and top 25 pages now, on the brand's own SEO connection (Ahrefs first, else DataForSEO) within its budget. The weekly read gets keywords and linking sites for only 5 competitors a site, so this fills in the rest. It shows what it would read and about what it costs first (`estimate_only`), and skips what that connection read in the last 30 days (the same setting), so asking again costs nothing more. Without an SEO connection it says which to add.
 
 ## Link gaps, page by page
 
-A link gap on the Competitors page is a site that links to your competitors and not to you. Click one to see the exact pages on that site (and its subdomains) that link to each competitor: the page, its title, the competitor's page it links to, the anchor text and nofollow (`GET /v1/workspaces/{ws}/seo-competitors/gaps/links?site_id=&domain=`). Pages come from links already read; **Read their links from this site** (`POST` the same path) reads up to 100 links from that site to each competitor on your own Ahrefs or DataForSEO connection, after showing what it costs. A copy under a day old costs nothing.
+A link gap on the Competitors page is a site that links to your competitors and not to you. Click one to see the exact pages on that site (and its subdomains) that link to each competitor: the page, its title, the competitor's page it links to, the anchor text and nofollow (`GET /v1/brands/{brand}/seo-competitors/gaps/links?site_id=&domain=`). Pages come from links already read; **Read their links from this site** (`POST` the same path) reads up to 100 links from that site to each competitor on your own Ahrefs or DataForSEO connection, after showing what it costs. A copy under a day old costs nothing.
 
 ## A competitor's social profiles and review pages
 

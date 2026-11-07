@@ -43,6 +43,7 @@ const (
 func (s *Server) registerAIVisibilityJobs(q *jobs.Queue) {
 	q.Handle(jobDraftAIPrompts, s.draftAIPromptsJob)
 	q.Handle(aivis.JobBenchmark, s.aiBenchmarkJob)
+	q.Handle(aivis.JobPageChecks, s.aiPageChecksJob)
 }
 
 type draftAIPromptsReq struct {

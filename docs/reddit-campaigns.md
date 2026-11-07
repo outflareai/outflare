@@ -5,12 +5,12 @@ Place comments, replies, posts, thread groups and upvotes on Reddit through [Eng
 ## Set up
 
 1. Connect **Engain** under Connectors with your own Engain API key (Engain's Max plan has API access). Connecting reads your projects and credits; nothing is posted.
-2. For each brand, set its limits with `PUT /v1/workspaces/{ws}/reddit/settings/{brand}`: credits a month and a day, actions per subreddit a day (default 2), upvotes per item (default 50), whether a person approves each action, and the Engain project when the account has more than one. Only a signed-in person can change limits or approval; an agent never raises its own budget.
+2. For each brand, set its limits with `PUT /v1/brands/{brand}/reddit/settings`: credits a month and a day, actions per subreddit a day (default 2), upvotes per item (default 50), whether a person approves each action, and the Engain project when the account has more than one. Only a signed-in person can change limits or approval; an agent never raises its own budget.
 3. Optional: connect **Geonode**. Reddit turns many servers away, so checks read Reddit through Geonode's network when it is connected.
 
 ## Actions
 
-`POST /v1/workspaces/{ws}/reddit/actions` with a `kind`:
+`POST /v1/brands/{brand}/reddit/actions` with a `kind`:
 
 | Kind | `target_url` | About (Engain credits) |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ A comment, reply or post can carry an upvote plan (`upvotes_goal`, `upvotes_per_
 
 Unless the brand needs approval or `submit` is false, the brand's limits are checked and the action is sent to Engain at once, in the background, exactly once. Over a limit it is kept as a draft with `reddit_budget_reached` or `reddit_limit_reached`; approve it later (`.../approve`) or withdraw it (`.../cancel`).
 
-`POST /v1/workspaces/{ws}/reddit/preflight` runs Engain's free rule check on up to 25 drafts; `GET .../reddit/subreddits/{name}` shows Engain's removal rates there beside the brand's own; `GET .../reddit/threads` lists threads Engain found (`type` new or seo).
+`POST /v1/brands/{brand}/reddit/preflight` runs Engain's free rule check on up to 25 drafts; `GET .../reddit/subreddits/{name}` shows Engain's removal rates there beside the brand's own; `GET .../reddit/threads` lists threads Engain found (`type` new or seo).
 
 ## Tracking
 
@@ -44,7 +44,7 @@ After sending, each action is checked on Engain until it is published, then on R
 
 ## Results
 
-`GET /v1/workspaces/{ws}/reddit/report?brand=` answers brand mentions and links placed and live now, credits and cost (at the brand's `credit_price_cents`), credits per mention, median and mean days live, and the share that survived 1, 7 and 30 days. `group_by` (`subreddit`, `strategy`, `kind`, `link_type`, `account_tier`, `experiment`, `tone`, `author`) compares tactics; `experiment_id`, `subreddit` and `from` narrow it. `GET .../reddit/budget` shows what the brand has spent and has left.
+`GET /v1/brands/{brand}/reddit/report` answers brand mentions and links placed and live now, credits and cost (at the brand's `credit_price_cents`), credits per mention, median and mean days live, and the share that survived 1, 7 and 30 days. `group_by` (`subreddit`, `strategy`, `kind`, `link_type`, `account_tier`, `experiment`, `tone`, `author`) compares tactics; `experiment_id`, `subreddit` and `from` narrow it. `GET .../reddit/budget` shows what the brand has spent and has left.
 
 Experiments (`POST .../reddit/experiments`) hold one hypothesis each; close one with its conclusion (`PATCH` with `status: closed`), so the next person or agent starts from what was learned.
 

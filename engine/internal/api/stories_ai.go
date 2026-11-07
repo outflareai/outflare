@@ -40,7 +40,9 @@ const (
 )
 
 func (s *Server) routesStoriesAI(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/ideas", s.onBrand("seo.manage", s.suggestStories))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/ideas", s.inBrand("seo.manage", s.suggestStories))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/draft", s.onBrand("seo.manage", s.draftStory))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/draft", s.inBrand("seo.manage", s.draftStory))
 }
 
@@ -74,6 +76,9 @@ func (s *Server) suggestStories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if req.BrandID == "" {
+		req.BrandID = a.Brand
+	}
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		bad("brand_id: brand not found")
@@ -260,7 +265,7 @@ func (s *Server) storyIdeasContext(ctx context.Context, ws, brand string, count 
 		fmt.Fprintf(&b, "\n## %s\n\n- %s\n", title, strings.Join(list, "\n- "))
 		return nil
 	}
-	if err := lines("Facts the brand states", `SELECT statement FROM ai_brand_facts WHERE workspace_id = $1 AND (brand_id = $2 OR brand_id IS NULL)
+	if err := lines("Facts the brand states", `SELECT statement FROM ai_brand_facts WHERE workspace_id = $1 AND brand_id = $2
 		AND status = 'active' ORDER BY created_at DESC LIMIT 30`, ws, brand); err != nil {
 		return "", nil, err
 	}
@@ -274,10 +279,10 @@ func (s *Server) storyIdeasContext(ctx context.Context, ws, brand string, count 
 	if err := lines("Its existing stories (don't repeat them)", `SELECT title FROM stories WHERE workspace_id = $1 AND brand_id = $2 ORDER BY updated_at DESC LIMIT 30`, ws, brand); err != nil {
 		return "", nil, err
 	}
-	// The news from its own searches and the shared topics, newest first.
+	// The news from its own searches, newest first.
 	rows, err := s.pool.Query(ctx, `SELECT DISTINCT ON (x.first_seen_at, x.id) x.id::text, x.title, x.snippet FROM news_articles x
 		JOIN news_hits h ON h.article_id = x.id JOIN news_searches n ON n.id = h.search_id
-		WHERE x.workspace_id = $1 AND (n.brand_id = $2 OR n.brand_id IS NULL) AND n.purpose = 'topic' AND x.first_seen_at > now() - interval '14 days'
+		WHERE x.workspace_id = $1 AND n.brand_id = $2 AND n.purpose = 'topic' AND x.first_seen_at > now() - interval '14 days'
 		ORDER BY x.first_seen_at DESC, x.id LIMIT 25`, ws, brand)
 	if err != nil {
 		return "", nil, err

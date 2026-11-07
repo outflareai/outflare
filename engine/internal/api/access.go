@@ -35,6 +35,7 @@ func (s *Server) routesAccess(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/workspaces/{ws}", s.inBrand(auth.ScopeWorkspaceRead, s.getWorkspace))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}", s.inWorkspace(auth.ScopeWorkspaceManage, s.updateWorkspace))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/slug-availability", s.inWorkspace(auth.ScopeWorkspaceManage, s.workspaceSlugAvailable))
+	mux.HandleFunc("GET /v1/brands/{brand}/links/{kind}/{ref}", s.onBrand(auth.ScopeWorkspaceRead, s.itemLink))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/links/{kind}/{ref}", s.inBrand(auth.ScopeWorkspaceRead, s.itemLink))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/members", s.inBrand(auth.ScopeMembersRead, s.listMembers))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/members/{user}", s.inWorkspace(auth.ScopeMembersManage, s.updateMember))
@@ -1688,8 +1689,8 @@ func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (stri
 	// Brands own a workspace's data (plans/brands/README.md), so every
 	// workspace starts with one, named after it. It comes first, so the
 	// catalog rows below belong to it.
-	if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, $2, $3)`,
-		id, truncate(name, 100), firstBrandHandle(name)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO brands (workspace_id, name, handle, presence_top_every_days) VALUES ($1, $2, $3, $4)`,
+		id, truncate(name, 100), firstBrandHandle(name), presenceDefaultEveryDays); err != nil {
 		return "", err
 	}
 	// New workspaces start with the Deal type, like Attio's Deals.

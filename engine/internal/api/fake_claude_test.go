@@ -53,7 +53,7 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		answerJSON(w, map[string]any{"kind": "agreed", "confidence": 0.95})
 		return
 	}
-	if strings.Contains(string(body), "proposing A/B tests") || strings.Contains(string(body), "You write versions of website copy") ||
+	if strings.Contains(string(body), "proposing A/B tests") || strings.Contains(string(body), "You write versions of website copy") || strings.Contains(string(body), "You change a company's own web page for an A/B test") ||
 		strings.Contains(string(body), "You explain an A/B test's results") || strings.Contains(string(body), "You write the learning of a finished A/B test") ||
 		strings.Contains(string(body), "You answer a marketer's question about their company's past A/B tests") {
 		answerABTestAI(w, string(body))
@@ -109,6 +109,12 @@ func (fakeClaude) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.Contains(string(body), "You suggest digital PR story ideas") || strings.Contains(string(body), "You write a first draft of a press release") {
 		answerStories(w, string(body))
+		return
+	}
+	if strings.Contains(string(body), "You read a company's web page the way an AI assistant does") {
+		answerJSON(w, map[string]any{"score": -5, "answers_up_front": false, "summary": "The page explains proxies but buries the price.",
+			"questions": []string{"What is a residential proxy?", " "}, "unclear": []string{"fastest proxies"},
+			"changes": []any{map[string]any{"problem": "The price is at the bottom.", "fix": "Say the price in the first paragraph."}, map[string]any{"problem": "x", "fix": ""}}})
 		return
 	}
 	if strings.Contains(string(body), "You write fix tickets for a website") {

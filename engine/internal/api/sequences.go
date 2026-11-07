@@ -539,7 +539,7 @@ func (s *Server) insertSequence(ctx context.Context, tx pgx.Tx, a *access, q *se
 		INSERT INTO sequences (workspace_id, name, pool_id, timezone, send_days, send_start, send_end, daily_new_limit, stop_on_reply,
 		                       team_id, priority, target_daily, min_daily, allocation_mode, created_by, mission_id, brand_id)
 		VALUES ($1, $2, $3, COALESCE($4, 'UTC'), $5, COALESCE($6::time, '09:00'), COALESCE($7::time, '17:00'), $8, COALESCE($9, true),
-		        $10, COALESCE($11, 1), $12, $13, $14, $15, NULLIF($16, '')::uuid, $17)
+		        $10, COALESCE($11, 1), $12, $13, $14, $15, NULLIF($16, '')::uuid, COALESCE($17::uuid, outflare_first_brand($1)))
 		RETURNING id`,
 		a.WorkspaceID, *q.Name, q.PoolID.Value, q.Timezone, days, q.SendStart, q.SendEnd,
 		q.DailyNewLimit.Value, q.StopOnReply,

@@ -41,6 +41,10 @@ func TestActionLayer(t *testing.T) {
 	}
 	// Reads are never gated.
 	agent.must(200, "GET", base+"/sequences", nil)
+	// The sidebar counts it next to Agents.
+	if st := owner.must(200, "GET", base+"/stats", nil); st["actions_waiting"] != 1.0 {
+		t.Fatalf("stats actions_waiting = %v", st["actions_waiting"])
+	}
 
 	// The agent can't approve its own change, even with the scope, and
 	// neither can another agent on the action layer: deciding is a
@@ -56,6 +60,9 @@ func TestActionLayer(t *testing.T) {
 	done := owner.must(200, "POST", base+"/actions/"+held["id"].(string)+"/approve", map[string]any{"note": "looks good"})
 	if done["status"] != "executed" || done["result_status"].(float64) != 201 || done["decision_note"] != "looks good" {
 		t.Fatalf("approved: %v", done)
+	}
+	if st := owner.must(200, "GET", base+"/stats", nil); st["actions_waiting"] != 0.0 {
+		t.Fatalf("stats actions_waiting after approval = %v", st["actions_waiting"])
 	}
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("approved change made %d sequences", n)

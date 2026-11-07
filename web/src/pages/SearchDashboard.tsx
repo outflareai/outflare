@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import type { SEOSite } from "@outflare/sdk";
-import { api, errorMessage } from "../api";
+import { api } from "../api";
 import { Button, Empty, Loading, PageHeader } from "../ui";
 import { useBrand } from "../lib/brand";
 import type { Tab } from "../lib/paths";
 import { SitePicker } from "./Keywords";
 import { SearchInsights } from "./search-insights/Workspace";
 import { ErrorRecovery } from "./search-insights/Primitives";
+import { everyBrand, pickedBrandId } from "@/lib/brand";
 export function SearchDashboard({
   ws,
   canManage,
@@ -26,20 +27,14 @@ export function SearchDashboard({
   useEffect(() => {
     let live = true;
     setSites(undefined);
-    api
-      .GET("/v1/workspaces/{ws}/seo-sites", {
-        params: { path: { ws }, query: brand ? { brand } : {} },
-      })
-      .then(({ data, error }) => {
+    // The picked brand's sites, or every brand's while all are picked.
+    const list = (b: string) => api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: b } } });
+    (pickedBrandId() ? list(pickedBrandId()).then((r) => (r.error || !r.data ? Promise.reject(r.error) : r.data.data)) : everyBrand(list))
+      .then((rows) => {
         if (!live) return;
-        if (error || !data) setError(errorMessage(error));
-        else {
-          setSites(data.data);
-          setError("");
-          setSite((s) =>
-            data.data.some((x) => x.id === s) ? s : (data.data[0]?.id ?? ""),
-          );
-        }
+        setSites(rows);
+        setError("");
+        setSite((s) => (rows.some((x) => x.id === s) ? s : (rows[0]?.id ?? "")));
       })
       .catch(() => {
         if (live) setError("Could not load sites.");

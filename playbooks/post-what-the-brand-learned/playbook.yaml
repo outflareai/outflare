@@ -31,13 +31,13 @@ inputs:
     example: "4"
 steps:
   - say: Read the brand's context and voice, and how recent posts did.
-    tools: [getBrandContext, getSocialOverview, listSocialPosts, getSocialGrowth]
+    tools: [getBrandContext, getBrandSocialOverview, listBrandSocialPosts, getBrandSocialGrowth]
   - say: Gather this week's material from the brand's knowledge and its customer questions.
     tools: [listKnowledgeItems, findKnowledgePassages]
   - say: Draft the week's posts as a series, each held for a person's approval.
-    tools: [createSocialSeries, draftSocialPublication, createSocialPublication]
+    tools: [createBrandSocialSeries, draftBrandSocialPublication, createBrandSocialPublication]
   - say: The next week, read each post's numbers and note what to do more of.
-    tools: [listSocialPosts, getSocialGrowth]
+    tools: [listBrandSocialPosts, getBrandSocialGrowth]
 automation:
   schedule: weekly
 guardrails:

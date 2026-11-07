@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState } from "react";
 import type { Brand, BrandLinkSuggestion, Integration, SocialAccount, SocialGrowth, SocialPost } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
@@ -30,7 +31,13 @@ const n = (v: number | null | undefined) => (v === null || v === undefined ? "â€
 const change = (v: number | null | undefined) => (v === null || v === undefined ? undefined : `${v > 0 ? "+" : ""}${v.toLocaleString()}`);
 const rate = (v: number | null | undefined) => (v === null || v === undefined ? "â€”" : `${(v * 100).toFixed(1)}%`);
 
-export function Social({ ws, canManage, go }: Props) {
+export function Social(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Social" brands={active.length} />;
+  return <SocialPage key={brand.id} {...props} />;
+}
+
+function SocialPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [growth, setGrowth] = useState<SocialGrowth | null>(null);
@@ -41,12 +48,12 @@ export function Social({ ws, canManage, go }: Props) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const path = { ws };
-    const query = brandKey ? { brand: brandKey } : {};
+    const path = { ws, brand: pickedBrandId() };
+    const query = {};
     const [g, a, p, i] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/social/growth", { params: { path, query: { ...query, days: 28 } } }),
-      api.GET("/v1/workspaces/{ws}/social/accounts", { params: { path, query } }),
-      api.GET("/v1/workspaces/{ws}/social/posts", { params: { path, query: { ...query, days: 28, sort: "engagements", limit: 50 } } }),
+      api.GET("/v1/brands/{brand}/social/growth", { params: { path, query: { ...query, days: 28 } } }),
+      api.GET("/v1/brands/{brand}/social/accounts", { params: { path, query } }),
+      api.GET("/v1/brands/{brand}/social/posts", { params: { path, query: { ...query, days: 28, sort: "engagements", limit: 50 } } }),
       api.GET("/v1/workspaces/{ws}/integrations", { params: { path } }),
     ]);
     if (g.error || !g.data) return setError(errorMessage(g.error));
@@ -62,7 +69,7 @@ export function Social({ ws, canManage, go }: Props) {
 
   async function readNow() {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/social/accounts/sync", { params: { path: { ws } } });
+    const { error } = await api.POST("/v1/brands/{brand}/social/accounts/sync", { params: { path: { brand: pickedBrandId() } } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast("Reading your accounts now. Numbers update in a minute.");
@@ -76,7 +83,7 @@ export function Social({ ws, canManage, go }: Props) {
   }
 
   async function update(a: SocialAccount, body: { status?: "active" | "paused"; brand_id?: string | null }) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/social/accounts/{id}", { params: { path: { ws, id: a.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/social/accounts/{id}", { params: { path: { brand: pickedBrandId(), id: a.id } }, body });
     if (error) return toast(errorMessage(error), "error");
     load();
   }
@@ -418,7 +425,7 @@ function YourAccounts({ ws, brands, accounts, conns, canManage, go, signIn, onCh
 
   async function retry(a: SocialAccount) {
     setBusy(a.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/social/accounts/{id}/sync", { params: { path: { ws, id: a.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/social/accounts/{id}/sync", { params: { path: { brand: pickedBrandId(), id: a.id } } });
     setBusy("");
     if (error) return toast(errorMessage(error), "error");
     toast("Reading it again now. This takes a minute.");

@@ -51,6 +51,18 @@ The source is the visit's `utm_source`, else the ad network behind its click id 
 
 Requests from bots, crawlers, link previews, monitors and scripts are counted on the key (`bots_today`) and not stored. A browser driven by automation (`navigator.webdriver`) sends nothing. When a request fails on the network or with a server error, the snippet tries again after 1, 5 and 25 seconds. Each event has its own `messageId`, so a retry is never stored twice.
 
+## Page speed
+
+From version 16, the snippet also measures each page load in the visitor's browser and sends one `vitals` reading when the page is left (hidden or closed): how long the biggest part of the page took to show (`lcp`, Largest Contentful Paint), the slowest response to a click or key (`inp`, Interaction to Next Paint), how much the layout jumped (`cls`, Cumulative Layout Shift), first paint (`fcp`) and the server's response (`ttfb`), in milliseconds (`cls` is a score). A browser that doesn't measure one leaves it out (Safari has no `inp`), and a page opened in a background tab sends no loading time.
+
+A reading carries no visitor id, cookie or query string: only the page's host and path, plus the device type and country the server works out. So it needs no consent, joins no visit or person, and doesn't count toward the event quota or the daily limits. Readings are kept 90 days. `data-vitals="off"` on the tag stops them.
+
+**Page speed** (Analytics › Page speed, or `GET /v1/brands/{brand}/analytics/page-speed`, MCP `get_page_speed`) shows each metric's 75th percentile, the value Google judges a page by, with Google's grade (good, needs improvement, poor), overall and per page, next to the period before, for one website or device if you pick one. It names pages that got clearly slower: past good, and worse by at least 0.5 seconds and 20% to load (or 100 ms and 25% to respond to clicks), with at least 30 loads in both periods. Google's own data, for pages with enough traffic, stays in [Search insights](search-insights.md).
+
+## Right now
+
+**Right now** (Analytics › Right now, or `GET /v1/brands/{brand}/analytics/live`, MCP `get_site_live`) shows who is on the website this minute: visitors active in the last 5 and 30 minutes, visitors per minute for the last 30, the pages they are on, where they came from, their countries and devices, the events of the last hour, and a feed of the last 30 page views and events with their page, country and source. It is read live from the visits, refreshes every 5 seconds while the page is open, and never says who a visitor is: a visitor your records know shows as "a known visitor".
+
 ## Ad tracking templates
 
 A tracking template is one string you paste into an ad network once, so every paid click lands with UTM tags and the network's own campaign, ad set and ad ids. That is how media buyers set up Hyros, RedTrack and Voluum, and it lets a sale be credited to an ad by its id, even after the ad is renamed. **Paid ads → Tracking templates**, `GET /v1/workspaces/{ws}/ads/tracking-templates` (scope `analytics.read`) or MCP `list_ad_tracking_templates` give each network's template, the field it goes in, the click id the network adds by itself and the cookies of its pixel.

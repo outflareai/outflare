@@ -24,20 +24,35 @@ import (
 
 func (s *Server) routesStories(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/pr-experts", s.onBrand(read, s.listPRExperts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/pr-experts", s.inBrand(read, s.listPRExperts))
+	mux.HandleFunc("POST /v1/brands/{brand}/pr-experts", s.onBrand(manage, s.createPRExpert))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/pr-experts", s.inBrand(manage, s.createPRExpert))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/pr-experts/{expert}", s.onBrand(manage, s.updatePRExpert))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/pr-experts/{expert}", s.inBrand(manage, s.updatePRExpert))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/pr-experts/{expert}", s.onBrand(manage, s.deletePRExpert))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/pr-experts/{expert}", s.inBrand(manage, s.deletePRExpert))
+	mux.HandleFunc("GET /v1/brands/{brand}/stories", s.onBrand(read, s.listStories))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/stories", s.inBrand(read, s.listStories))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories", s.onBrand(manage, s.createStory))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories", s.inBrand(manage, s.createStory))
+	mux.HandleFunc("GET /v1/brands/{brand}/stories/{story}", s.onBrand(read, s.getStory))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/stories/{story}", s.inBrand(read, s.getStory))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/stories/{story}", s.onBrand(manage, s.updateStory))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/stories/{story}", s.inBrand(manage, s.updateStory))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/stories/{story}", s.onBrand(manage, s.deleteStory))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/stories/{story}", s.inBrand(manage, s.deleteStory))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/facts", s.onBrand(manage, s.addStoryFact))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/facts", s.inBrand(manage, s.addStoryFact))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/stories/{story}/facts/{fact}", s.onBrand(manage, s.deleteStoryFact))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/stories/{story}/facts/{fact}", s.inBrand(manage, s.deleteStoryFact))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/quotes", s.onBrand(manage, s.addStoryQuote))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/quotes", s.inBrand(manage, s.addStoryQuote))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/stories/{story}/quotes/{quote}", s.onBrand(manage, s.updateStoryQuote))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/stories/{story}/quotes/{quote}", s.inBrand(manage, s.updateStoryQuote))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/check", s.onBrand(read, s.checkStory))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/check", s.inBrand(read, s.checkStory))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/approve", s.onBrand(manage, s.approveStory))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/approve", s.inBrand(manage, s.approveStory))
 }
 
@@ -162,6 +177,9 @@ func (s *Server) createPRExpert(w http.ResponseWriter, r *http.Request) {
 	}
 	bad := func(msg string) { writeError(w, r, http.StatusBadRequest, "invalid_request", msg) }
 	ctx := r.Context()
+	if req.BrandID == "" {
+		req.BrandID = a.Brand
+	}
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		bad("brand_id: brand not found")
@@ -620,6 +638,9 @@ func (s *Server) createStory(w http.ResponseWriter, r *http.Request) {
 	}
 	bad := func(msg string) { writeError(w, r, http.StatusBadRequest, "invalid_request", msg) }
 	ctx := r.Context()
+	if req.BrandID == "" {
+		req.BrandID = a.Brand
+	}
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, req.BrandID)
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		bad("brand_id: brand not found")

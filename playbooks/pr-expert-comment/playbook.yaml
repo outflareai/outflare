@@ -32,15 +32,15 @@ inputs:
     example: AI agents and web data
 steps:
   - say: Read the brand's context and pick the expert whose topics fit; make sure a news search follows the topic.
-    tools: [getBrandContext, listPRExperts, listNewsSearches, createNewsSearch]
+    tools: [getBrandContext, listBrandPRExperts, listBrandNewsSearches, createBrandNewsSearch]
   - say: Start a comment story on the topic and draft the expert's view as a quote for them to approve.
-    tools: [createStory, addStoryQuote, addStoryFact]
+    tools: [createBrandStory, addBrandStoryQuote, addBrandStoryFact]
   - say: Once the quote is approved, draft the release, check it and fix what the check finds. A person approves it.
-    tools: [draftStory, getStory, updateStory, checkStory]
+    tools: [draftBrandStory, getBrandStory, updateBrandStory, checkBrandStory]
   - say: Pick the journalists who covered the topic in the last two months and a short sequence whose first step uses {{custom.opener}}; start a pitch to each, waiting for a person.
-    tools: [listJournalists, listBrandSequences, createBrandSequence, startStoryPitches, listStoryPitches]
+    tools: [listBrandJournalists, listBrandSequences, createBrandSequence, startBrandStoryPitches, listBrandStoryPitches]
   - say: Report replies, flagging every request for an interview, and the coverage that followed.
-    tools: [getStoryResults, listStoryPitches]
+    tools: [getBrandStoryResults, listBrandStoryPitches]
 guardrails:
   - Quotes the expert only in words they approved; offers an interview rather than promising one.
   - The release and every pitch wait for a person's approval.

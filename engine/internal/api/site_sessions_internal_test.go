@@ -224,6 +224,17 @@ func TestSiteFlagsClient(t *testing.T) {
 	if got := run(map[string]any{"href": "https://northpeak.example/", "local": off}); got.FlagAsks != 0 {
 		t.Fatalf("asked for flags on a site without tests: %+v", got)
 	}
+	// A preview link still asks (a draft test's versions are shown to the
+	// person who made them before the site runs tests), and keeps asking
+	// on the next page of the visit.
+	got = run(map[string]any{"href": "https://northpeak.example/?of_flag=hero:control", "flags": answer, "local": off})
+	if got.FlagAsks != 1 || got.Got.Flags["hero"] != "control" {
+		t.Fatalf("preview on a site without tests: %+v", got)
+	}
+	got = run(map[string]any{"href": "https://northpeak.example/pricing", "flags": answer, "local": off, "stored": map[string]string{"of_flag_preview": `{"hero":"control"}`}})
+	if got.FlagAsks != 1 {
+		t.Fatalf("preview kept for the visit on a site without tests: %+v", got)
+	}
 }
 
 // No-code tests: with no data-flags on the tag, the script asks for the

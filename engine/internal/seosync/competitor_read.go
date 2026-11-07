@@ -18,15 +18,15 @@ import (
 // SEO connection, instead of waiting for the weekly snapshot (which reads
 // keywords and linking domains for only the first MaxGapCompetitors). It
 // reads their numbers, top keywords, linking domains and top pages, and
-// skips any of them this connection read in the last CompetitorReadFresh,
-// so asking twice costs nothing more. Everything it reads is stored as
+// skips any of them this connection read in the last CompetitorDays (the
+// connection's setting, a month unless changed), so asking again costs
+// nothing more. Everything it reads is stored as
 // snapshots, the same as the weekly read.
 
 const (
 	CompetitorKeywordRows = 100
 	CompetitorDomainRows  = 100
 	CompetitorPageRows    = 25
-	CompetitorReadFresh   = 6 * 24 * time.Hour
 )
 
 // CompetitorReadPlan is what a read would do: the reports it would read
@@ -63,7 +63,7 @@ func competitorQueries(r connectors.SEOReader, host, country string) []connector
 func dueCompetitorQueries(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, r connectors.SEOReader, host, country string) ([]connectors.SEOQuery, []string, error) {
 	rows, err := pool.Query(ctx, `SELECT DISTINCT report FROM seo_snapshots
 		WHERE workspace_id = $1 AND integration_id = $2 AND host = $3 AND day >= $4::date`,
-		o.WorkspaceID, o.ID, host, time.Now().UTC().Add(-CompetitorReadFresh).Format(time.DateOnly))
+		o.WorkspaceID, o.ID, host, time.Now().UTC().AddDate(0, 0, -SettingsOf(o.Config).CompetitorDaysOrDefault()+1).Format(time.DateOnly))
 	if err != nil {
 		return nil, nil, err
 	}

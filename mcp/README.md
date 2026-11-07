@@ -236,6 +236,8 @@ Read (always available):
 | `get_analytics_overview` | Every website lined up by domain: each analytics tool side by side, search clicks added up, latest SEO figures. Take `brand`: they belong to one brand |
 | `query_analytics_history`, `compare_analytics_tools` | Stored daily analytics: grouped by day, tool or key, and each tool's daily series for one website |
 | `get_site_analytics` | A brand's traffic from Outflare's own tag: totals, days, top pages, sources, websites, countries and devices, live and free |
+| `get_page_speed` | Page speed from real visits: loading, click response and layout jumps per page, with pages that got slower |
+| `get_site_live` | Who is on a brand's website right now: visitors, pages, sources and a feed, naming no one |
 | `list_seo` | DataForSEO and Ahrefs connections: domains, country, budget left this month, snapshot status |
 | `get_seo_overview` | Each brand's search growth: weekly branded search, clicks and visitors, domain rating, backlinks and referring domains with trends, site health and open fixes; free |
 | `get_seo_history` | Stored weekly SEO snapshots (overview, keywords with their previous position); free |
@@ -270,7 +272,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `add_brand_dns` | Add every DNS record a brand still needs (site proof, sending domains, tracking domain) in one go through its own Cloudflare |
 | `check_brand_dns` | Look for a brand's missing DNS records now, after they were added by hand, and see which are in place |
 | `get_brand_rules`, `set_brand_rules` | The cross-brand contact rule: no first email from a second brand within N days of another brand's email |
-| `add_to_brand`, `remove_from_brand` | Move domains, mailboxes, lead lists, sequences or missions into a brand, or make them shared by every brand again |
+| `add_to_brand`, `remove_from_brand` | Move domains, mailboxes, lead lists, sequences or missions into a brand, or take missions out of one so they are for every brand |
 | `search_workspace` | Find records by name, attribute text, email, phone or id, and emails sent and received, meetings, deals and lifecycle email by their words, ranked, with whose each one is. With `mode: meaning`, find records, replies, meetings and deals by what they mean |
 | `get_semantic_search`, `set_semantic_search` | Read whether meaning-based search is on and how far along it is, or turn it off and on |
 | `list_query_tables`, `run_query` | Read-only SQL over one brand's data (`brand`; people, companies, product events, each of the brand's record types as a table of its own, deals, outreach, replies, emails, visits): counts, sums, rates and joins in one call. No SQL reaches another brand's rows; it sees only what the connection may read, and never changes anything |
@@ -284,7 +286,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_record_history`, `list_record_identities`, `list_record_links` | A record's changes (who, when, which source), its emails, phones and ids (closed ones too) and its links |
 | `list_record_field_values`, `pin_record_field` | What every source last said about a record's fields, and pinning a value set by hand so it wins for good |
 | `list_transactions`, `record_transaction` | A brand's payments, refunds, chargebacks and credits, and recording one from your own billing (never twice for the same id) |
-| `get_developer_setup`, `link_refund` | A live checklist of what a brand's developer sends, with the fix for anything that's off, and linking a refund to its payment |
+| `get_developer_setup`, `link_refund`, `merge_duplicate_payments` | A live checklist of what a brand's developer sends, with the fix for anything that's off, linking a refund to its payment, and merging payments saved twice |
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
@@ -331,7 +333,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_reddit_experiment`, `close_reddit_experiment`, `place_reddit_action`, `approve_reddit_action`, `cancel_reddit_action`, `check_reddit_action`, `set_reddit_project` | Run Reddit experiments: place comments, replies, posts, thread groups and upvotes through Engain (spending its credits, within the brand's limits a person set), send or withdraw drafts, check one now, and close an experiment with its conclusion |
 | `create_ab_test`, `update_ab_test`, `get_ab_test_checklist`, `start_ab_test`, `end_ab_test`, `freeze_ab_test`, `duplicate_ab_test`, `ship_ab_test` | Set up an A/B test of a flag with its control, goals and guardrails, check it before it starts, start measuring, stop new visitors joining, end it with the version chosen, copy it into a new draft, or ship a version to everyone |
 | `get_ab_test_version`, `set_ab_test_version` | Read or build a no-code test's version: text, formatting, styles, moves, new elements, CSS or a redirect to another page (an agent's change to a version visitors can see, and starting or shipping a test, wait for a person) |
-| `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests` | Have the workspace's own AI model suggest tests, write versions of a flag from a prompt, summarise results (the engine decides the recommendation), write what a finished test taught, or answer a question over past tests |
+| `suggest_ab_tests`, `write_ab_test_versions`, `summarize_ab_test`, `write_ab_test_learning`, `ask_ab_tests`, `stop_ab_test_ai_run` | Have the workspace's own AI model suggest tests, write versions of a flag (or, for a no-code test, changes to its page) from a prompt, summarise results (the engine decides the recommendation), write what a finished test taught, or answer a question over past tests; stop a run that takes too long |
 | `cancel_list_run` | Stop a run; leads already added stay |
 | `create_sequence` | Create a draft sequence with steps (it sends nothing yet) |
 | `update_sequence` | Change settings (including optional click tracking and the unsubscribe header), or set status `active`, `paused` or `archived` |
@@ -548,6 +550,10 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_ai_visibility` | How often AI answers name and recommend each brand, its score against competitors with weekly real changes, the pages they cite, the daily benchmark, and the visits and revenue AI answers bring, by model and week |
 | `get_ai_visibility_questions` | Each tracked question: whether answers name and recommend the brand, by assistant and week by week, the competitors named, and the change since the period before |
 | `get_ai_visibility_placements` | The pages AI answers cite or read when answering the brand's questions, ranked by how much being on each is worth, with the competitors named there, and the brand's own cited pages |
+| `get_ai_visibility_page` | One page AI answers cite, in full: when they first cited it, the questions, the site's ratings, the links to it, and whether it links to or only names the brand and each competitor |
+| `check_ai_visibility_page` | Read a page AI answers cite now, to see who it links to and who it only names |
+| `get_ai_visibility_pages` | Whether AI answers can read, quote and trust the brand's own pages: per site llms.txt, AI crawlers kept out and content signals, pages per AI rule, and the pages cited or with a problem, cited first |
+| `review_ai_pages` | Have the workspace's own AI model check up to 10 of the brand's pages the way an AI answer reads them: answers up front, questions answered, unclear claims, what to change, a score |
 | `get_ai_visibility_series` | The brand's AI visibility score and mention rate week by week, split by competitor, assistant, the questions' awareness, type, topic or persona, or market |
 | `get_ai_visibility_claims` | What AI answers say about the brand: the attributes they give it and the objections they raise, by phrase, with the pages they cite; the same for each competitor |
 | `dispute_ai_visibility_claim` | Say a claim AI answers make about the brand isn't true: a fix on the fixes list with the pages to correct |
@@ -651,7 +657,7 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | `list_coverage_competitors` | The brand's tracked competitors, how often each is scanned for where it appears, and the brand's scan settings. |
 | `update_coverage_competitor_settings`, `update_coverage_competitor` | Change how many competitors count as top and how often top and other competitors are scanned, or give one competitor its own cadence. |
 | `scan_coverage_competitor` | Scan where a competitor appears now, on the workspace's own connections. |
-| `list_coverage_competitor_placements` | Where competitors appear: type, likely paid with evidence, domain rating and traffic, and the sites where the brand has no publisher yet (`gap`). |
+| `list_coverage_competitor_placements` | Where competitors appear, most valuable to the brand first: a 0 to 100 value with reasons, how the link is got (can't buy, earned, paid, free), type, likely paid with evidence, domain rating and traffic, and the sites where the brand has no publisher yet (`gap`). |
 | `list_coverage_found` | Everywhere the brand was found, grouped by site, with whether each page links to it, names its website or only shares its name. |
 | `review_coverage_found` | Say pages (or a whole site) are about the brand, making them placements, or not, dismissing them. |
 | `list_coverage_opportunities` | Places worth the team's effort, highest leverage (SEO and AI answers together) first, with the reason, the next action and the evidence. |

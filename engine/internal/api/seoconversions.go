@@ -16,6 +16,7 @@ import (
 // for the same pages. Reads only what the analytics sync stored.
 
 func (s *Server) routesSEOConversions(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/conversions", s.onBrand(auth.ScopeSEORead, s.siteConversions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/conversions", s.inBrand(auth.ScopeSEORead, s.siteConversions))
 }
 

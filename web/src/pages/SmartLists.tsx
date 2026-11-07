@@ -31,7 +31,7 @@ export function useRuleChoices(ws: string, brand: string) {
       setEvents((data?.events ?? []).filter((e) => e.status === "approved").map((e) => e.name));
     });
     api.GET("/v1/brands/{brand}/lead-lists", { params: { path: { brand } } }).then(({ data }) => setLeadLists(data?.data ?? []));
-    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/news-searches", { params: { path: { brand } } }).then(({ data }) => setNewsSearches(data?.data ?? []));
   }, [ws, brand]);
   return { fields, events, leadLists, newsSearches };
 }

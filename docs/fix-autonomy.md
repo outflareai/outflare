@@ -6,7 +6,7 @@ Copilot is the default, so nothing changes until an owner or admin chooses other
 
 ## How it works
 
-An agent takes a fix before it changes the site: `POST /v1/workspaces/{ws}/fixes/{fix}/start` (MCP `start_fix`). That marks the fix in progress, assigns it to the agent and answers with the prompt to work from. Inside a mission, the gate decides first:
+An agent takes a fix before it changes the site: `POST /v1/brands/{brand}/fixes/{fix}/start` (MCP `start_fix`). That marks the fix in progress, assigns it to the agent and answers with the prompt to work from. Inside a mission, the gate decides first:
 
 | Mode | What happens when an agent takes a fix |
 | --- | --- |
@@ -28,9 +28,9 @@ Owners, admins and anyone with `seo.manage` change it on **Fixes → Agent auton
 | --- | --- | --- |
 | `GET /v1/workspaces/{ws}/fix-autonomy` | `get_fix_autonomy` | The workspace's setting |
 | `PUT /v1/workspaces/{ws}/fix-autonomy` | `update_fix_autonomy` | Change it; fields left out keep their value |
-| `GET/PUT /v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy` | the same tools with `site_id` | A site's own setting, or the workspace's when it has none (`inherited`) |
-| `DELETE /v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy` | | Put the site back on the workspace's setting |
-| `POST /v1/workspaces/{ws}/fixes/{fix}/start` | `start_fix` | Take a fix before changing the site |
+| `GET/PUT /v1/brands/{brand}/seo-sites/{site}/fix-autonomy` | the same tools with `site_id` | A site's own setting, or the workspace's when it has none (`inherited`) |
+| `DELETE /v1/brands/{brand}/seo-sites/{site}/fix-autonomy` | | Put the site back on the workspace's setting |
+| `POST /v1/brands/{brand}/fixes/{fix}/start` | `start_fix` | Take a fix before changing the site |
 
 ```sh
 curl -X PUT "$OUTFLARE_URL/v1/workspaces/$WS/fix-autonomy" \

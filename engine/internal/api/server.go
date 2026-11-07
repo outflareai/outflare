@@ -640,6 +640,8 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesVisitors(mux)
 	s.routesVisitorBrowsers(mux)
 	s.routesSiteAnalytics(mux)
+	s.routesSiteVitals(mux)
+	s.routesSiteLive(mux)
 	s.routesHealth(mux)
 	s.routesReports(mux)
 	s.routesTracking(mux)

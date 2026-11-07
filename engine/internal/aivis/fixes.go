@@ -27,6 +27,9 @@ var Rules = []crawl.Rule{
 	{ID: "ai_wrong_claim", Severity: crawl.SevError, Category: "ai_visibility", Title: "AI answers hold something against the brand that isn't true",
 		Why: "AI answers give buyers a reason against the brand, or for picking a competitor instead, that the brand says is wrong (a price it doesn't charge, a feature it has, a limit it lifted), so buyers rule it out on a false point.",
 		Fix: "Say the opposite plainly where models read: the brand's own page on that point (pricing, features, a comparison page), with proof. Then correct the third-party pages these answers cite (the claim lists them) and ask for an update where someone else wrote it. The next runs show whether the answers stop saying it."},
+	{ID: "ai_page_unclear", Severity: crawl.SevNotice, Category: "ai_visibility", Title: "Page is hard for AI answers to quote",
+		Why: "An AI check read the page the way an AI answer does and found it doesn't answer up front, or makes claims that are vague or unsupported, so answers may skip it or quote it wrongly.",
+		Fix: "Make the changes the AI check lists, most useful first, then check the page again on Your pages in AI visibility."},
 }
 
 var ruleByID = func() map[string]crawl.Rule {

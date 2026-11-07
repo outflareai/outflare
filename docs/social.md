@@ -59,7 +59,7 @@ API: `GET`/`POST .../social/publications`, `GET`/`PATCH`/`DELETE .../social/publ
 ## Set up
 
 1. Signed in to the brand's Reddit account, create an app at reddit.com/prefs/apps and choose **web app**.
-2. Set its redirect URI to your Outflare's `/v1/integrations/oauth/callback` (the Reddit page shows the exact address, as does `GET /v1/workspaces/{ws}/social`).
+2. Set its redirect URI to your Outflare's `/v1/integrations/oauth/callback` (the Reddit page shows the exact address, as does `GET /v1/brands/{brand}/social`).
 3. Under Connectors, Social, Reddit, paste the app's client id and secret. Outflare checks them with Reddit before saving.
 4. On the Reddit page, choose **Sign in to post** and sign in to the brand's account. Outflare stores the refresh token sealed on the connection (`GET .../integrations/{id}/sign-in`; agents get the link with `format=json` or the MCP tool `get_social_sign_in_link`).
 
@@ -94,7 +94,7 @@ Each reply's link carries `utm_source=reddit`, `utm_medium=social`, `utm_campaig
 
 ## API and MCP
 
-`GET /v1/workspaces/{ws}/social` (overview), `/social/watches`, `/social/items`, `/social/actions`, with scopes `social.read`, `social.manage` and `social.post`. The MCP tools are `get_social_overview`, `list_social_watches`, `create_social_watch`, `update_social_watch`, `delete_social_watch`, `check_social_watch`, `list_social_posts`, `ignore_social_post`, `draft_social_reply`, `write_social_reply`, `update_social_reply`, `reject_social_reply`, `list_social_replies`, `get_social_reply` and `get_social_sign_in_link`.
+`GET /v1/brands/{brand}/social` (overview), `/social/watches`, `/social/items`, `/social/actions`, with scopes `social.read`, `social.manage` and `social.post`. The MCP tools are `get_social_overview`, `list_social_watches`, `create_social_watch`, `update_social_watch`, `delete_social_watch`, `check_social_watch`, `list_social_posts`, `ignore_social_post`, `draft_social_reply`, `write_social_reply`, `update_social_reply`, `reject_social_reply`, `list_social_replies`, `get_social_reply` and `get_social_sign_in_link`.
 
 ## Engain
 

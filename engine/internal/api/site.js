@@ -43,6 +43,10 @@
 // choice is kept in Outflare as the visitor's consent, and joins their
 // record when they sign up. data-banner="off" keeps the banner off.
 //
+// Page speed: each page load reports how long it took to load, respond to
+// clicks and settle (Core Web Vitals), with no visitor id, for Page speed
+// in Outflare. data-vitals="off" stops it.
+//
 // Cookie policy: an element with data-outflare-cookie-policy shows the
 // site's cookie policy, which Outflare keeps up to date. Once a day a
 // browser reports the names (never the values) of the page's cookies,
@@ -79,7 +83,7 @@
   if (!script) return;
   var key = script.getAttribute("data-key") || "";
   // Sent with every batch, so Outflare can tell a site running an old copy.
-  var VERSION = "13";
+  var VERSION = "16";
   // Events go where the script came from: a path the site forwards keeps
   // its prefix.
   var src = new URL(script.src, location.href);
@@ -333,6 +337,67 @@
     return p;
   }
 
+  // Page speed: once per page load, when the page is left, how long the
+  // largest element took to show (LCP), the slowest response to a click or
+  // key (INP), how much the layout jumped (CLS), first paint and the
+  // server's response. It carries no visitor id and no query string, so it
+  // needs no consent. data-vitals="off" stops it.
+  function vitals() {
+    if (script.getAttribute("data-vitals") === "off" || !w.PerformanceObserver || !w.performance) return;
+    var v = {}, sent = false, url = location.origin + location.pathname, path = location.pathname;
+    var hidden = d.visibilityState === "hidden", jumps = 0, burst = 0, burstStart = 0, burstLast = 0, slowest = {};
+    function watchEntries(opts, fn) {
+      try { new PerformanceObserver(function (l) { l.getEntries().forEach(fn); }).observe(opts); } catch (e) {}
+    }
+    // A page opened in the background has no real loading time.
+    if (!hidden) {
+      watchEntries({ type: "largest-contentful-paint", buffered: true }, function (e) { if (!hidden) v.lcp = e.startTime; });
+      watchEntries({ type: "paint", buffered: true }, function (e) { if (e.name === "first-contentful-paint") v.fcp = e.startTime; });
+    }
+    // CLS: the worst burst of jumps (each under a second apart, five
+    // seconds at most), leaving out those right after the visitor's input.
+    watchEntries({ type: "layout-shift", buffered: true }, function (e) {
+      if (e.hadRecentInput) return;
+      if (burst && e.startTime - burstLast < 1000 && e.startTime - burstStart < 5000) burst += e.value;
+      else { burst = e.value; burstStart = e.startTime; }
+      burstLast = e.startTime;
+      if (burst > jumps) jumps = burst;
+      v.cls = jumps;
+    });
+    // INP: each click or key's longest event; the slowest of them, or one
+    // in fifty on a page with many.
+    watchEntries({ type: "event", buffered: true, durationThreshold: 40 }, function (e) {
+      if (e.interactionId && !(slowest[e.interactionId] >= e.duration)) slowest[e.interactionId] = e.duration;
+    });
+    try {
+      var nav = performance.getEntriesByType("navigation")[0];
+      if (nav && nav.responseStart > 0) v.ttfb = nav.responseStart;
+    } catch (e) {}
+    function flush() {
+      if (sent) return;
+      var all = [];
+      for (var k in slowest) all.push(slowest[k]);
+      if (all.length) {
+        all.sort(function (a, b) { return b - a; });
+        v.inp = all[Math.min(all.length - 1, Math.floor(all.length / 50))];
+      }
+      var props = {}, any = false;
+      ["lcp", "inp", "cls", "fcp", "ttfb"].forEach(function (k) {
+        if (typeof v[k] === "number" && isFinite(v[k]) && v[k] >= 0) {
+          props[k] = k === "cls" ? Math.round(v[k] * 10000) / 10000 : Math.round(v[k]);
+          any = true;
+        }
+      });
+      if (!any) return;
+      sent = true;
+      send([{ type: "vitals", messageId: uuid(), properties: props, context: { page: { url: url, path: path } } }]);
+    }
+    d.addEventListener("visibilitychange", function () {
+      if (d.visibilityState === "hidden") { hidden = true; flush(); }
+    }, true);
+    w.addEventListener("pagehide", flush, true);
+  }
+
   var lastURL = "";
   function send(events) {
     post(JSON.stringify({ key: key, batch: events, consent: consented, v: VERSION }), 0);
@@ -395,7 +460,7 @@
   // starts with the last answer.
   var FLAGS = "of_flags", SEEN = "of_flags_seen", flagsAttr = script.getAttribute("data-flags"), classFlags = flagsAttr !== null && flagsAttr !== "off", flagsWanted = classFlags, flagState = null, flagWaiters = [], flagClasses = [], seen = {}, codeAsked = false;
   // No-code tests: Outflare says whether the site runs tests made in the
-  // visual editor (TESTS, kept a day when it does, half an hour when it
+  // visual editor (TESTS, kept a day when it does, ten minutes when it
   // doesn't), so the script asks for the visitor's versions on its own,
   // with no data-flags on the tag. data-flags="off" stops that. HIDE is
   // what the visitor's versions change: on their next visit, the guard in
@@ -404,7 +469,11 @@
   var TESTS = "of_tests", HIDE = "of_hide", hint = null;
   try { hint = JSON.parse(localStorage.getItem(TESTS) || "null"); } catch (e) {}
   if (!hint || hint.key !== key || hint.until < Date.now()) hint = null;
-  if (flagsAttr !== "off" && (!hint || hint.on)) flagsWanted = true;
+  // A preview link or the editor always asks: a draft test's versions
+  // are shown to the person who made them before the site runs tests.
+  var previewing = false;
+  for (var pk in preview) if (Object.prototype.hasOwnProperty.call(preview, pk)) previewing = true;
+  if (flagsAttr !== "off" && (!hint || hint.on || previewing || editToken)) flagsWanted = true;
   function safeSelectors(sel) { return typeof sel === "string" && sel && sel.length < 16000 && !/[{}<@;]|\/\*/.test(sel); }
   var hideEl = d.getElementById("of-hide");
   if (!hideEl && flagsWanted) try {
@@ -422,13 +491,13 @@
   function remember(out) {
     if (typeof out.tests !== "boolean") return;
     try {
-      localStorage.setItem(TESTS, JSON.stringify({ key: key, on: out.tests, until: Date.now() + (out.tests ? 86400000 : 1800000) }));
+      localStorage.setItem(TESTS, JSON.stringify({ key: key, on: out.tests, until: Date.now() + (out.tests ? 86400000 : 600000) }));
       var sel = (out.hide || []).join(",");
       if (out.tests && safeSelectors(sel)) localStorage.setItem(HIDE, JSON.stringify({ sel: sel, until: Date.now() + 30 * 86400000 }));
       else localStorage.removeItem(HIDE);
     } catch (e) {}
     // A site with no visual tests: stop asking, unless the page wants flags.
-    if (!out.tests && !classFlags && !codeAsked) flagsWanted = false;
+    if (!out.tests && !classFlags && !codeAsked && !previewing && !editToken) flagsWanted = false;
   }
   // Where the flags in use came from (bootstrap: the server's, kept: the
   // last page's, fetched: asked for) and how long after the script started
@@ -526,13 +595,34 @@
     } catch (e) {}
     return false;
   }
+  // A new button looks like the page's own: it takes the classes of the
+  // first button-like link on the page, over a plain default that any of
+  // the site's own styles beat.
+  var btnClass = null;
+  function buttonClass() {
+    if (btnClass !== null) return btnClass;
+    btnClass = "of-button";
+    try {
+      var own = d.querySelector("a[class*='btn']:not([data-of-insert]),a[class*='button']:not([data-of-insert]),button[class*='btn'],button[class*='button']");
+      if (own && own.className && typeof own.className === "string") btnClass = own.className + " of-button";
+      if (d.head && !d.getElementById("of-button-css")) {
+        var bs = d.createElement("style");
+        bs.id = "of-button-css";
+        bs.textContent = ":where(.of-button){display:inline-block;padding:10px 18px;border-radius:6px;background:#111827;color:#fff;font-weight:600;text-decoration:none;margin:8px 0}";
+        d.head.appendChild(bs);
+      }
+    } catch (e) {}
+    return btnClass;
+  }
   var redirected = false, missing = {};
   function applyChanges() {
     if (!flagState || !flagState.payloads) return;
     var mobile = phone();
     for (var k in flagState.payloads) {
       var p = flagState.payloads[k], cs = (p && p.changes) || [];
-      if (!variant(k) || !p || typeof p !== "object") continue;
+      // A payload kept from before is for the version the answer named: a
+      // preview of another version waits for its own.
+      if (!variant(k) || flagState.flags[k] !== variant(k) || !p || typeof p !== "object") continue;
       var applied = false, miss = missing[k] = { found: 0, lost: [] };
       // A split URL test: show this version's visitors another page (not
       // while someone edits the version, so the editor stays put).
@@ -570,7 +660,7 @@
           else if (inn.kind === "text") { n = d.createElement("p"); n.textContent = String(inn.text || ""); }
           if (n) {
             n.setAttribute("data-of-insert", mark);
-            if (inn.kind === "button") n.className = "of-button";
+            if (inn.kind === "button") n.className = buttonClass();
             var at = els[0];
             if (at.parentNode) at.parentNode.insertBefore(n, inn.where === "before" ? at : at.nextSibling);
             applied = true;
@@ -604,10 +694,11 @@
   if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", function () { applyChanges(); if (flagState) unhide(); watchPage(); });
   // Pages that build themselves (single-page apps, content that loads
   // late): apply again shortly after the page changes. Applying is
-  // idempotent, so it settles; a cap keeps a busy page cheap.
+  // idempotent, so it settles; a cap keeps a busy page cheap. While the
+  // visual editor is open it owns the page, so its edits aren't undone.
   var watching = false, again = 0, runs = 0;
   function watchPage() {
-    if (watching || !w.MutationObserver || !d.body) return;
+    if (watching || editToken || !w.MutationObserver || !d.body) return;
     watching = true;
     new w.MutationObserver(function () {
       if (again || runs > 500 || !flagState || !flagState.payloads) return;
@@ -615,7 +706,7 @@
     }).observe(d.body, { childList: true, subtree: true });
   }
   if (d.readyState !== "loading") watchPage();
-  w.setTimeout && w.setTimeout(function () { applyChanges(); reportMissing(); }, 1500);
+  w.setTimeout && w.setTimeout(function () { if (editToken) return; applyChanges(); reportMissing(); }, 1500);
   // Changes that found nothing on this page once it settled (the page was
   // redesigned since they were made) are reported once per visit and page,
   // so the test's checklist can say which to pick again.
@@ -1082,6 +1173,7 @@
       if (flagState) { try { fn(flagMap()); } catch (e) {} } else flagWaiters.push(fn);
     }
   };
+  vitals();
   if (flagsWanted) loadFlags();
   if (on()) settle(true);
   else unblock();

@@ -35,6 +35,34 @@ func TestPresenceFound(t *testing.T) {
 	if counts["about"] != 3.0 || counts["maybe"] != 2.0 || counts["checking"] != 0.0 {
 		t.Fatalf("counts: %v", counts)
 	}
+	// Each site carries its numbers; the table sorts and filters on them,
+	// and a tracked competitor's own site can be hidden.
+	var site, rival string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, brand_id, host, start_url, verify_token) VALUES ($1, $2, 'northpeak.example', 'https://northpeak.example/', 'tok') RETURNING id`, ws, brand).Scan(&site); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_competitors (workspace_id, site_id, brand_id, host, name, status) VALUES ($1, $2, $3, 'blog.example', 'Blog', 'tracked') RETURNING id`, ws, site, brand).Scan(&rival); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO coverage_competitor_placements (workspace_id,brand_id,competitor_id,url,host,title,kind,domain_rating,domain_traffic,sources) VALUES
+		($1,$2,$3,'https://blog.example/x','blog.example','X','blog',70,9000,'{backlinks}')`, ws, brand, rival); err != nil {
+		t.Fatal(err)
+	}
+	byRating := owner.must(200, "GET", root+"/found?sort=domain_rating", nil)["data"].([]any)
+	if top := byRating[0].(map[string]any); top["host"] != "blog.example" || top["domain_rating"] != 70.0 || top["competitors"] != 1.0 || top["competitor_site"] != true {
+		t.Fatalf("by rating: %v", top)
+	}
+	if strong := owner.must(200, "GET", root+"/found?min_domain_rating=50", nil); strong["sites_total"] != 1.0 {
+		t.Fatalf("min rating: %v", strong)
+	}
+	if hidden := owner.must(200, "GET", root+"/found?exclude_competitors=true", nil); hidden["sites_total"] != 1.0 || hidden["data"].([]any)[0].(map[string]any)["host"] != "reviews.example" {
+		t.Fatalf("exclude competitors: %v", hidden)
+	}
+	if backlinks := owner.must(200, "GET", root+"/found?source=backlinks", nil); backlinks["sites_total"] != 1.0 || backlinks["pages_total"] != 1.0 {
+		t.Fatalf("source: %v", backlinks)
+	}
+	owner.must(400, "GET", root+"/found?sort=nope", nil)
+
 	// The other GeoNode-like site is not about the brand: dismissed as a site.
 	if r := owner.must(200, "POST", root+"/found/review", map[string]any{"decision": "not_us", "host": "gis.example"}); r["reviewed"] != 2.0 {
 		t.Fatalf("not us: %v", r)

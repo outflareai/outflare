@@ -49,7 +49,9 @@ const quoteApprovalLinkVar = "approval_link"
 
 func (s *Server) routesQuoteApprovals(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/stories/{story}/quotes/{quote}/approval-requests", s.onBrand(read, s.listQuoteApprovals))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", s.inBrand(read, s.listQuoteApprovals))
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/{story}/quotes/{quote}/approval-requests", s.onBrand(manage, s.requestQuoteApproval))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", s.inBrand(manage, s.requestQuoteApproval))
 	mux.HandleFunc("GET /quote-approval/{token}", s.quoteApprovalPage)
 	mux.HandleFunc("POST /quote-approval/{token}", s.quoteApprovalDecide)

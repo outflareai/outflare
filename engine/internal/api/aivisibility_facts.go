@@ -22,10 +22,15 @@ import (
 
 func (s *Server) routesAIFacts(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-facts", s.onBrand(read, s.listAIFacts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-facts", s.inBrand(read, s.listAIFacts))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-facts", s.onBrand(manage, s.createAIFact))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-facts", s.inBrand(manage, s.createAIFact))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-facts/{fact}", s.onBrand(read, s.getAIFact))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-facts/{fact}", s.inBrand(read, s.getAIFact))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/ai-facts/{fact}", s.onBrand(manage, s.updateAIFact))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ai-facts/{fact}", s.inBrand(manage, s.updateAIFact))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/ai-facts/{fact}", s.onBrand(manage, s.deleteAIFact))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ai-facts/{fact}", s.inBrand(manage, s.deleteAIFact))
 }
 
@@ -145,7 +150,7 @@ func (s *Server) aiFactFor(w http.ResponseWriter, r *http.Request, a *access) (*
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "days is 1 to 365")
 			return nil, false
 		}
-		list, err := s.loadAIFacts(r.Context(), a.WorkspaceID, &id, brandSel{in: a.Brands}, from)
+		list, err := s.loadAIFacts(r.Context(), a.WorkspaceID, &id, brandSel{in: a.seenBrands()}, from)
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -226,7 +231,7 @@ func (s *Server) createAIFact(w http.ResponseWriter, r *http.Request) {
 		}
 		err = tx.QueryRow(ctx, `
 			INSERT INTO ai_brand_facts (workspace_id, brand_id, topic, statement, status, created_by)
-			VALUES ($1, $2, COALESCE($3, ''), $4, COALESCE($5, 'active'), $6) RETURNING id`,
+			VALUES ($1, COALESCE($2::uuid, outflare_first_brand($1)), COALESCE($3, ''), $4, COALESCE($5, 'active'), $6) RETURNING id`,
 			a.WorkspaceID, brand, req.Topic, *req.Statement, req.Status, a.ActorID).Scan(&id)
 		if isUnique(err) {
 			return errInvalid("this brand already has that fact")

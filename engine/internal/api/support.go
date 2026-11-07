@@ -147,13 +147,13 @@ func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConvers
 }
 
 // supportBrandFilter keeps a brand-limited caller to its brands'
-// conversations (and ones with no brand).
+// conversations.
 func supportBrandFilter(a *access, args *[]any) string {
 	if a.Brands == nil {
 		return ""
 	}
 	*args = append(*args, a.Brands)
-	return ` AND (c.brand_id IS NULL OR c.brand_id = ANY($` + itoa(len(*args)) + `::uuid[]))`
+	return ` AND c.brand_id = ANY($` + itoa(len(*args)) + `::uuid[])`
 }
 
 func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request) {
@@ -283,23 +283,11 @@ func (s *Server) listSupportConversations(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "total": total, "next_cursor": nextCursor(pageOffset, next), "counts": counts})
 }
 
-// supportBrandSQL keeps a list to the picked brand: its conversations and
-// those of no brand, which every brand sees so no customer's mail is lost.
-// A conversation takes its mailbox's or address's brand, else the
-// workspace's only brand, so only mail to a mailbox or address that isn't
-// in a brand yet, in a workspace of several brands, has none.
+// supportBrandSQL keeps a list to the picked brand's conversations. A
+// conversation takes its mailbox's or address's brand, else the
+// workspace's first brand, so every one belongs to a brand.
 func supportBrandSQL(b brandSel, args *[]any) string {
-	const col = "c.brand_id"
-	if b.id == "" || b.id == "none" {
-		return b.sql(col, args)
-	}
-	*args = append(*args, b.id)
-	out := ` AND (` + col + ` IS NULL OR ` + col + ` = $` + itoa(len(*args)) + `)`
-	if b.in != nil {
-		*args = append(*args, b.in)
-		out += ` AND (` + col + ` IS NULL OR ` + col + ` = ANY($` + itoa(len(*args)) + `::uuid[]))`
-	}
-	return out
+	return b.sql("c.brand_id", args)
 }
 
 // supportCounts are the inbox's folder counts.

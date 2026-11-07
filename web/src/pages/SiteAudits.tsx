@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { Crawl, CrawlIssue, SEOSite } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
@@ -46,7 +47,14 @@ function crawlLine(c: Crawl) {
   return `${plural(c.pages_fetched, "page")} read · ${end}`;
 }
 
+// Site audits belong to one brand.
 export function SiteAudits(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Site audits" brands={active.length} />;
+  return <SiteAuditsPage key={brand.id} {...props} />;
+}
+
+function SiteAuditsPage(props: Props) {
   // Back from signing in to Cloudflare for a site's proof: say how it went.
   useEffect(() => {
     takeConnectOutcome();
@@ -64,7 +72,7 @@ function Sites({ ws, canManage, onOpen, go }: Props) {
   const brandKey = brand.brand ?? "";
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brandKey ? { brand: brandKey } : {} } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } });
     if (error || !data) return setError(errorMessage(error));
     setSites(data.data);
   }, [ws, brandKey]);
@@ -201,17 +209,17 @@ function AddSite({ ws, taken, onAdded }: { ws: string; taken: string[]; onAdded:
     setBusy(true);
     setError("");
     const address = /^https?:\/\//i.test(url.trim()) ? url.trim() : `https://${url.trim()}`;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws } }, body: { url: address, schedule, ...(brand ? { brand_id: brand.id } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } }, body: { url: address, schedule, ...(brand ? { brand_id: brand.id } : {}) } });
     if (error || !data) {
       setBusy(false);
       return setError(errorMessage(error));
     }
-    const path = { params: { path: { ws, site: data.id } } };
+    const path = { params: { path: { brand: pickedBrandId(), site: data.id } } };
     // Look for a proof you already have (Search Console, the tracking tag)
     // before the first crawl, so it runs with the proved limits.
-    const proof = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/verify", path);
+    const proof = await api.POST("/v1/brands/{brand}/seo-sites/{site}/verify", path);
     const proved = proof.data && "verified" in proof.data && proof.data.verified ? proof.data.verify_method : null;
-    const crawl = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/crawls", path);
+    const crawl = await api.POST("/v1/brands/{brand}/seo-sites/{site}/crawls", path);
     setBusy(false);
     if (crawl.error) toast(errorMessage(crawl.error), "error");
     else if (proved) toast(`Added ${data.host}, proved yours through ${proofNames[proved] ?? proved}. The first crawl has started.`);
@@ -266,8 +274,8 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
 
   const load = useCallback(async () => {
     const [s, c] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/seo-sites/{site}", { params: { path: { ws, site: open } } }),
-      api.GET("/v1/workspaces/{ws}/crawls", { params: { path: { ws }, query: { site: open, limit: 10 } } }),
+      api.GET("/v1/brands/{brand}/seo-sites/{site}", { params: { path: { brand: pickedBrandId(), site: open } } }),
+      api.GET("/v1/brands/{brand}/crawls", { params: { path: { brand: pickedBrandId() }, query: { site: open, limit: 10 } } }),
     ]);
     if (s.response.status === 404) return setMissing(true);
     if (s.error || !s.data) return setError(errorMessage(s.error));
@@ -302,25 +310,25 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
   if (error && !site) return <div><PageHeader title="Site" back={back} /><ErrorText>{error}</ErrorText></div>;
   if (!site) return <Loading />;
 
-  const path = { params: { path: { ws, site: site.id } } };
+  const path = { params: { path: { brand: pickedBrandId(), site: site.id } } };
   const proofRecord = [{ type: "TXT", name: site.verification.dns_name, value: site.verification.dns_value }];
   const last = site.last_crawl;
 
   async function crawl() {
-    const { error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/crawls", path);
+    const { error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/crawls", path);
     if (error) return toast(errorMessage(error), "error");
     toast(`Crawling ${site!.host}.`);
     load();
   }
   async function stop() {
     if (!last) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/crawls/{crawl}/stop", { params: { path: { ws, crawl: last.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/crawls/{crawl}/stop", { params: { path: { brand: pickedBrandId(), crawl: last.id } } });
     if (error) return toast(errorMessage(error), "error");
     load();
   }
   async function verify() {
     setChecking(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/verify", path);
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/verify", path);
     setChecking(false);
     if (error) return toast(errorMessage(error), "error");
     if (data && "verified" in data && data.verified) toast(`${site!.host} is proved yours, through ${proofNames[data.verify_method ?? ""] ?? "its proof"}. Crawls can now read up to ${(10000).toLocaleString()} pages.`);
@@ -328,13 +336,13 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
     load();
   }
   async function patch(body: Record<string, unknown>) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}", { ...path, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-sites/{site}", { ...path, body });
     if (error) return toast(errorMessage(error), "error");
     load();
   }
   async function remove() {
     if (!(await confirmAction(`Stop auditing ${site!.host}?`, <p>Its crawls, issues and fixes are deleted. Add it again any time.</p>, "Remove site"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}", path);
+    const { error } = await api.DELETE("/v1/brands/{brand}/seo-sites/{site}", path);
     if (error) return toast(errorMessage(error), "error");
     toast(`Removed ${site!.host}.`);
     onOpen("");
@@ -374,7 +382,7 @@ function Site({ ws, canManage, open, onOpen, go }: Props) {
                 intro={<>Quickest: connect the Cloudflare account {site.host} is on, and Outflare adds the record for you.</>}
                 after="Then Outflare looks for it every minute until the site is proved."
                 onAdd={async (integration) => {
-                  const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns", { ...path, body: { integration_id: integration } });
+                  const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/dns", { ...path, body: { integration_id: integration } });
                   return { error, held: heldByMission(data) };
                 }} />
             </li>
@@ -618,7 +626,7 @@ function LatestCrawl({ ws, site, crawl, siteVerified, go }: { ws: string; site: 
   const done = !running(crawl);
   useEffect(() => {
     if (!done) return;
-    api.GET("/v1/workspaces/{ws}/crawls/{crawl}/issues", { params: { path: { ws, crawl: crawl.id } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues", { params: { path: { brand: pickedBrandId(), crawl: crawl.id } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setIssues(data.data);
     });
@@ -677,7 +685,7 @@ function IssueRow({ ws, crawl, issue }: { ws: string; crawl: string; issue: Craw
   useEffect(() => {
     if (!open) return;
     setPages(null);
-    api.GET("/v1/workspaces/{ws}/crawls/{crawl}/issues/{rule}", { params: { path: { ws, crawl, rule: issue.id }, query: { ...(template ? { template } : {}), limit: 50 } } }).then(({ data }) => setPages(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/crawls/{crawl}/issues/{rule}", { params: { path: { brand: pickedBrandId(), crawl, rule: issue.id }, query: { ...(template ? { template } : {}), limit: 50 } } }).then(({ data }) => setPages(data?.data ?? []));
   }, [open, ws, crawl, issue.id, template]);
 
   return (

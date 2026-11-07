@@ -25,13 +25,13 @@ inputs:
     example: northpeak.example
 steps:
   - say: Find the site and crawl it.
-    tools: [listSEOSites, startCrawl, getCrawl]
+    tools: [listBrandSEOSites, startBrandCrawl, getBrandCrawl]
   - say: Read what the audit found and how the site does in search.
-    tools: [listCrawlIssues, getSiteSearch]
+    tools: [listBrandCrawlIssues, getBrandSiteSearch]
   - say: Rank the fixes by the clicks they are likely to bring and keep the top ten.
-    tools: [listFixes]
+    tools: [listBrandFixes]
   - say: Turn each one into a prompt a coding agent can work from.
-    tools: [getFixPrompt]
+    tools: [getBrandFixPrompt]
 guardrails:
   - Never changes the site itself; fixes go to the fixes list for a person or a coding agent.
 measure:

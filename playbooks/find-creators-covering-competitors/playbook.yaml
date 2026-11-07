@@ -49,7 +49,7 @@ steps:
   - say: Look at partnerships already on the board, so nobody is pitched twice.
     tools: [listBrandRecords]
   - say: Find reviews, comparisons and sponsored posts about each competitor from the last twelve months, with the brand's social watches and web search.
-    tools: [createSocialWatch, checkSocialWatch, listSocialItems]
+    tools: [createBrandSocialWatch, checkBrandSocialWatch, listBrandSocialItems]
   - say: For each creator behind them, find or add a person with their platforms, audience size, topics and past sponsors, and a partnership at Found.
     tools: [lookupRecords, createBrandRecord, updateBrandRecord]
   - say: Vet each one (topic fit, recent views, how the review read) and move them to Vetted or Declined with a one-line reason.

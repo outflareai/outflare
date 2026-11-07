@@ -89,9 +89,9 @@ func TestCompetitorGaps(t *testing.T) {
 	if n := newLinks(); len(n) != 0 {
 		t.Fatalf("new links on the first read: %v", n)
 	}
-	// A week later the rival has two more linking domains; one of them
+	// A month later the rival has two more linking domains; one of them
 	// already links to us, so only the other is news.
-	if _, err := e.pool.Exec(ctx, `UPDATE seo_snapshots SET day = day - 7 WHERE workspace_id = $1`, ws); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE seo_snapshots SET day = day - 30 WHERE workspace_id = $1`, ws); err != nil {
 		t.Fatal(err)
 	}
 	setDFSTarget("rival.example", []any{dfsKeyword("cold email", "https://rival.example/cold", 900, 1)}, []any{

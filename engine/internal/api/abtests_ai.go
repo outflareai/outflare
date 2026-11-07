@@ -56,6 +56,7 @@ func (s *Server) routesABTestAI(mux *http.ServeMux) {
 		mux.HandleFunc("GET "+t.path, t.on(s.inWorkspace)(read, s.listABAIRuns))
 		mux.HandleFunc("GET "+t.path+"/{run}", t.on(s.inWorkspace)(read, s.getABAIRun))
 	}
+	mux.HandleFunc("POST /v1/brands/{brand}/ab-test-ai-runs/{run}/stop", s.onBrand(manage, s.stopABAIRun))
 }
 
 func (s *Server) registerABTestJobs(q *jobs.Queue) {
@@ -142,6 +143,43 @@ func (s *Server) listABAIRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
+// stopABAIRun stops a run that is waiting or running: it ends as failed,
+// "Stopped.", and an answer that comes back later is thrown away.
+func (s *Server) stopABAIRun(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	id := r.PathValue("run")
+	var list []abAIRunView
+	err := errNotFound
+	if validUUID(id) {
+		err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			var err error
+			list, err = loadABAIRuns(ctx, tx, a.WorkspaceID, ` AND id = $2`, id)
+			if err != nil {
+				return err
+			}
+			if len(list) != 1 || !a.sees(list[0].BrandID) {
+				return errNotFound
+			}
+			if !a.writes(list[0].BrandID) {
+				return errForbidden
+			}
+			list, err = stopABAIRunTx(ctx, tx, &a.principal, a.WorkspaceID, list[0])
+			return err
+		})
+	}
+	switch {
+	case errors.Is(err, errNotFound):
+		writeError(w, r, http.StatusNotFound, "not_found", "AI run not found")
+	case errors.Is(err, errForbidden):
+		writeError(w, r, http.StatusForbidden, "forbidden", brandLimitedMessage)
+	case err != nil:
+		s.internal(w, r, err)
+	default:
+		writeJSON(w, http.StatusOK, list[0])
+	}
+}
+
 func (s *Server) getABAIRun(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	if id := r.PathValue("run"); validUUID(id) {
@@ -172,22 +210,55 @@ func (s *Server) startABAIRun(w http.ResponseWriter, r *http.Request, kind strin
 		writeError(w, r, http.StatusConflict, "connector_needed", "this uses your own AI model: connect one under Settings, AI model")
 		return
 	}
-	// Read the run back in the same transaction: once it commits, a worker
-	// can claim the job and mark the run running before a later read.
-	var list []abAIRunView
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		id, err := queueABAIRun(ctx, tx, &a.principal, a.WorkspaceID, a.ActorID, kind, brandID, testID, flagID, input)
-		if err != nil {
-			return err
-		}
-		list, err = loadABAIRuns(ctx, tx, a.WorkspaceID, ` AND id = $2`, id)
-		return err
-	})
-	if err != nil || len(list) != 1 {
+	run, err := s.queueABAIRunView(ctx, &a.principal, a.WorkspaceID, a.ActorID, kind, brandID, testID, flagID, input)
+	if err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, list[0])
+	writeJSON(w, http.StatusAccepted, run)
+}
+
+// stopABAIRunTx ends run as stopped in tx, if it is still queued or
+// running, records ab_test.ai_stopped, and reads it back.
+func stopABAIRunTx(ctx context.Context, tx pgx.Tx, p *principal, ws string, run abAIRunView) ([]abAIRunView, error) {
+	if run.Status != "queued" && run.Status != "running" {
+		return []abAIRunView{run}, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE ab_test_ai_runs SET status = 'failed', error = 'Stopped.', updated_at = now(), finished_at = now()
+		WHERE workspace_id = $1 AND id = $2 AND status IN ('queued', 'running')`, ws, run.ID); err != nil {
+		return nil, err
+	}
+	data := map[string]any{"kind": run.Kind, "run_id": run.ID, "was": run.Status, "seconds": int(time.Since(run.CreatedAt).Seconds())}
+	target, targetID := "ab_test_ai_run", run.ID
+	if run.TestID != nil {
+		target, targetID = "ab_test", *run.TestID
+	}
+	if err := record(ctx, tx, p, ws, "ab_test.ai_stopped", target, targetID, data); err != nil {
+		return nil, err
+	}
+	return loadABAIRuns(ctx, tx, ws, ` AND id = $2`, run.ID)
+}
+
+// queueABAIRunView queues a run for p and reads it back in the same
+// transaction: once it commits, a worker can claim the job and mark the
+// run running before a later read.
+func (s *Server) queueABAIRunView(ctx context.Context, p *principal, ws, actorID, kind string, brandID, testID, flagID *string, input any) (abAIRunView, error) {
+	var list []abAIRunView
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		id, err := queueABAIRun(ctx, tx, p, ws, actorID, kind, brandID, testID, flagID, input)
+		if err != nil {
+			return err
+		}
+		list, err = loadABAIRuns(ctx, tx, ws, ` AND id = $2`, id)
+		return err
+	})
+	if err == nil && len(list) != 1 {
+		err = errors.New("the queued AI run was not found")
+	}
+	if err != nil {
+		return abAIRunView{}, err
+	}
+	return list[0], nil
 }
 
 // queueABAIRun stores a run and queues its job in tx, and records
@@ -264,6 +335,18 @@ type abVersionsInput struct {
 	Prompt string   `json:"prompt"`
 	Count  int      `json:"count"`
 	Fields []string `json:"fields"`
+	// A no-code test's versions are changes to its page: Test names it
+	// (or the flag has one), Version asks for more changes to one of its
+	// versions, and Outline is the page as the visual editor saw it.
+	Test    string        `json:"test,omitempty"`
+	Version string        `json:"version,omitempty"`
+	Outline []pageElement `json:"outline,omitempty"`
+	// Focus is the selector of the part the person picked in the editor;
+	// Editor says the run came from the editor.
+	Focus  string `json:"focus,omitempty"`
+	Editor bool   `json:"editor,omitempty"`
+	Page   string `json:"page,omitempty"`
+	Mode   string `json:"mode,omitempty"`
 }
 
 var fieldRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -274,9 +357,37 @@ func (s *Server) writeABVersions(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	var test *abTestView
+	if in.Test != "" {
+		list, err := loadABTests(r.Context(), s.pool, a.WorkspaceID, ` AND t.id = $2`, in.Test)
+		if !validUUID(in.Test) || err == nil && (len(list) != 1 || !a.sees(list[0].BrandID)) {
+			writeError(w, r, http.StatusNotFound, "not_found", "A/B test not found")
+			return
+		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		test, in.Flag = &list[0], list[0].FlagID
+	}
+	if in.Flag == "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "flag (or test) is required: the flag whose versions to write")
+		return
+	}
 	f, err := s.abFlag(r.Context(), nil, a.WorkspaceID, in.Flag)
 	if s.abWriteError(w, r, err) {
 		return
+	}
+	if test == nil {
+		// A flag a no-code test runs on gets page changes too.
+		list, err := loadABTests(r.Context(), s.pool, a.WorkspaceID, ` AND t.flag_id = $2 AND t.page <> ''`, f.ID)
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if len(list) > 0 {
+			test = &list[0]
+		}
 	}
 	if !a.sees(f.BrandID) {
 		writeError(w, r, http.StatusNotFound, "not_found", "flag not found: use its id or key")
@@ -289,6 +400,32 @@ func (s *Server) writeABVersions(w http.ResponseWriter, r *http.Request) {
 	in.Flag, in.Prompt = f.Key, strings.TrimSpace(in.Prompt)
 	if in.Count == 0 {
 		in.Count = 2
+	}
+	var testID *string
+	if test != nil && test.Page != "" {
+		in.Mode, in.Page, in.Fields, testID = "page", test.Page, nil, &test.ID
+		if len(in.Outline) > 2*maxOutline {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "outline is at most 400 parts of the page")
+			return
+		}
+		if in.Version != "" && (!slices.ContainsFunc(f.Variants, func(v flags.Variant) bool { return v.Key == in.Version }) || in.Version == test.Control) {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "version is one of the test's new versions: "+strings.Join(slices.DeleteFunc(variantKeys(f), func(k string) bool { return k == test.Control }), ", "))
+			return
+		}
+		if in.Prompt == "" || len(in.Prompt) > maxABPrompt {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "prompt is required, up to 2,000 characters: what to change on the page, such as \"add a line about premium proxies under the header, with a Try it button to /signup\"")
+			return
+		}
+		if in.Count < 1 || in.Count > maxAIVersions {
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "count is 1 to 4")
+			return
+		}
+		s.startABAIRun(w, r, "versions", f.BrandID, testID, &f.ID, in)
+		return
+	}
+	if in.Version != "" || len(in.Outline) > 0 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "version and outline are for a no-code test of a page; this flag's versions are content for your code")
+		return
 	}
 	if len(in.Fields) == 0 {
 		in.Fields = payloadFields(f)
@@ -431,9 +568,12 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	ev := track.Event{Name: "ab_test.ai_failed", WorkspaceID: ws, ActorType: "system", Surface: "job",
 		Props: map[string]any{"kind": run.kind, "run_id": id, "task": taskABTests}}
 	fail := func(code, msg string, cause error) error {
+		// Also after the run's time is up.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
 		track.Fail(ctx, s.log, ev, code, cause)
 		_, err := s.pool.Exec(ctx, `UPDATE ab_test_ai_runs SET status = 'failed', error = $3, updated_at = now(), finished_at = now()
-			WHERE workspace_id = $1 AND id = $2`, ws, id, msg)
+			WHERE workspace_id = $1 AND id = $2 AND status IN ('queued', 'running')`, ws, id, msg)
 		return err
 	}
 	ai, err := s.aiModel(ctx, ws, taskABTests)
@@ -456,6 +596,11 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	case "versions":
 		var in abVersionsInput
 		_ = json.Unmarshal(run.input, &in)
+		if in.Mode == "page" {
+			system, schema = abPageVersionsSystem, abPageVersionsSchema()
+			prompt, finish, err = s.abPageVersionsPrompt(ctx, ws, run, in)
+			break
+		}
 		system, schema = abVersionsSystem, abVersionsSchema(in.Fields)
 		prompt, finish, err = s.abVersionsPrompt(ctx, ws, run, in)
 	case "summary":
@@ -476,7 +621,11 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	if err != nil {
 		return err
 	}
-	resp, err := ai.Model.Chat(ctx, llm.Request{System: system, Messages: []llm.Message{{Role: "user", Text: prompt}}, JSONSchema: schema, MaxTokens: 3000})
+	maxTokens := 3000
+	if system == abPageVersionsSystem {
+		maxTokens = 8000
+	}
+	resp, err := ai.Model.Chat(ctx, llm.Request{System: system, Messages: []llm.Message{{Role: "user", Text: prompt}}, JSONSchema: schema, MaxTokens: maxTokens})
 	name := ai.Provider.Name
 	label := map[string]string{"suggest": "suggested A/B tests", "versions": "wrote A/B test versions", "summary": "summarised an A/B test",
 		"learning": "wrote an A/B test learning", "ask": "answered a question about A/B tests"}[run.kind]
@@ -495,9 +644,15 @@ func (s *Server) RunABTestAI(ctx context.Context, ws, id string, last bool) erro
 	}
 	if err != nil {
 		if ctx.Err() != nil {
+			if last {
+				return fail("ai_timeout", fmt.Sprintf("%s took longer than %d minutes to answer. Try again, or ask for fewer versions.", name, int(abAITimeout.Minutes())), err)
+			}
 			return err
 		}
 		code, msg := "ai_failed", "Could not get a usable answer from "+name+". Try again."
+		if u := (errAIUnusable("")); errors.As(err, &u) {
+			msg = name + " " + string(u)
+		}
 		if errors.Is(err, llm.ErrAuth) {
 			code, msg = "connector_auth", name+" did not accept the API key. Reconnect "+name+" under Connectors."
 		}

@@ -27,10 +27,15 @@ func (s *Server) routesLinkReads(mux *http.ServeMux) {
 	// first brand.
 	s.twinRoute(mux, "GET", "link-building/settings", s.inBrand, read, s.getLinkSettings)
 	s.twinRoute(mux, "PATCH", "link-building/settings", s.inWorkspace, manage, s.updateLinkSettings)
+	mux.HandleFunc("GET /v1/brands/{brand}/link-reads", s.onBrand(read, s.listLinkReads))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads", s.inBrand(read, s.listLinkReads))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-reads", s.onBrand(manage, s.readLinks))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-reads", s.inBrand(manage, s.readLinks))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-reads/dead-pages", s.onBrand(read, s.deadPagesReport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads/dead-pages", s.inBrand(read, s.deadPagesReport))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-reads/top-pages", s.onBrand(read, s.topPagesReport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads/top-pages", s.inBrand(read, s.topPagesReport))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-reads/{read}", s.onBrand(read, s.getLinkRead))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-reads/{read}", s.inBrand(read, s.getLinkRead))
 }
 
@@ -236,7 +241,7 @@ func (s *Server) getLinkRead(w http.ResponseWriter, r *http.Request) {
 func (s *Server) loadLinkRead(ctx context.Context, a *access, id string) (*linkReadView, error) {
 	args := []any{a.WorkspaceID, id}
 	v, err := scanLinkRead(s.pool.QueryRow(ctx, `SELECT `+linkReadCols+` FROM link_reads x WHERE x.workspace_id = $1 AND x.id = $2`+
-		brandSel{in: a.Brands}.sql("x.brand_id", &args), args...))
+		brandSel{in: a.seenBrands()}.sql("x.brand_id", &args), args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -353,7 +358,7 @@ func (s *Server) readLinks(w http.ResponseWriter, r *http.Request) {
 			bad("site_id is an SEO site's id")
 			return
 		}
-		sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.Brands})
+		sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -363,6 +368,9 @@ func (s *Server) readLinks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.SiteID, req.BrandID = &sites[0].ID, sites[0].BrandID
+	}
+	if req.BrandID == nil {
+		req.BrandID = a.orRoute(nil)
 	}
 	if !a.writes(req.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", "brand-limited callers read links for one of their brands' sites; pass site_id")
@@ -515,7 +523,7 @@ func (s *Server) topPagesReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID, target}
-	brand := brandSel{in: a.Brands}.sql("brand_id", &args)
+	brand := brandSel{in: a.seenBrands()}.sql("brand_id", &args)
 	var readID *string
 	var readAt *time.Time
 	if err := s.pool.QueryRow(r.Context(), `SELECT id::text, created_at FROM link_reads

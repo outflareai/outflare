@@ -9,7 +9,7 @@ import (
 )
 
 // Where competitors appear: tracked competitors are scanned on the
-// brand's cadence (top ones weekly, the rest monthly, overridable), on the
+// brand's cadence (monthly by default for every competitor, overridable), on the
 // workspace's own connections, and each page is kept with its type, the
 // site's numbers and "likely paid" only with evidence.
 func TestPresenceCompetitors(t *testing.T) {
@@ -34,9 +34,14 @@ func TestPresenceCompetitors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// With one top competitor, the first is weekly and the second monthly.
+	// Every competitor is monthly by default. With one top competitor
+	// made weekly, the first is weekly and the second monthly.
 	owner.must(400, "PATCH", root+"/competitors/settings", map[string]any{"top_every_days": 0})
 	set := owner.must(200, "PATCH", root+"/competitors/settings", map[string]any{"top_competitors": 1})
+	if set["top_every_days"] != 30.0 || set["rest_every_days"] != 30.0 {
+		t.Fatalf("default settings: %v", set)
+	}
+	set = owner.must(200, "PATCH", root+"/competitors/settings", map[string]any{"top_every_days": 7})
 	if set["top_competitors"] != 1.0 || set["top_every_days"] != 7.0 || set["rest_every_days"] != 30.0 {
 		t.Fatalf("settings: %v", set)
 	}
@@ -190,6 +195,31 @@ func TestPresenceCompetitors(t *testing.T) {
 		t.Fatalf("brand present: %v", here)
 	}
 	owner.must(400, "GET", root+"/competitor_placements?gap=maybe", nil)
+
+	// Ranked by what a link is worth, not the site's rating: google.com and
+	// youtube.com (DR 100, anyone can post there) fall below an earned
+	// comparison on a real site, and each row says how the link is got.
+	if _, err := e.pool.Exec(ctx, `INSERT INTO coverage_competitor_placements (workspace_id,brand_id,competitor_id,url,host,title,kind,links_to_them,nofollow,domain_rating,url_rating,domain_traffic) VALUES
+		($1,$2,$3,'https://www.google.com/maps/place/rival','google.com','','',true,false,100,5,5e9),
+		($1,$2,$3,'https://www.youtube.com/channel/rival','youtube.com','Rival','youtube',true,false,100,3,3e9),
+		($1,$2,$3,'https://compare.example/best-crm-tools','compare.example','The 8 best CRM tools, tested','roundup',true,false,60,25,90000)`, ws, brand, rival); err != nil {
+		t.Fatal(err)
+	}
+	ranked := owner.must(200, "GET", root+"/competitor_placements?competitor_id="+rival, nil)["data"].([]any)
+	first := ranked[0].(map[string]any)
+	if first["host"] != "compare.example" || first["access"] != "earned" || first["value"] == nil || len(first["value_reasons"].([]any)) == 0 {
+		t.Fatalf("most valuable first: %v", first)
+	}
+	free := owner.must(200, "GET", root+"/competitor_placements?access=free&competitor_id="+rival, nil)
+	if free["total"] != 2.0 {
+		t.Fatalf("free to get: %v", free)
+	}
+	byRating := owner.must(200, "GET", root+"/competitor_placements?order=domain_rating&competitor_id="+rival, nil)["data"].([]any)
+	if byRating[0].(map[string]any)["domain_rating"] != 100.0 {
+		t.Fatalf("by domain rating: %v", byRating[0])
+	}
+	owner.must(400, "GET", root+"/competitor_placements?access=cheap", nil)
+	owner.must(400, "GET", root+"/competitor_placements?order=random", nil)
 	if got := owner.must(200, "GET", "/v1/brands/"+other+"/coverage/competitor_placements", nil); got["total"] != 0.0 {
 		t.Fatalf("another brand sees them: %v", got)
 	}

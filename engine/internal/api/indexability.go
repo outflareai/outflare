@@ -15,7 +15,9 @@ import (
 
 func (s *Server) routesIndexability(mux *http.ServeMux) {
 	read := auth.ScopeSEORead
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/indexability", s.onBrand(read, s.getIndexability))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/indexability", s.inBrand(read, s.getIndexability))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/indexability/pages", s.onBrand(read, s.listIndexabilityPages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/indexability/pages", s.inBrand(read, s.listIndexabilityPages))
 }
 

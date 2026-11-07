@@ -526,8 +526,8 @@ func (s *Server) fillSEOOverview(ctx context.Context, ws string, e *seoOverviewB
 			SELECT health_score, finished_at FROM crawl_runs
 			WHERE site_id = s.id AND health_score IS NOT NULL ORDER BY created_at DESC LIMIT 1
 		) c ON true
-		WHERE s.workspace_id = $1 AND (s.brand_id IS NOT DISTINCT FROM $2::uuid OR s.brand_id IS NULL AND s.host = ANY($3))
-		ORDER BY s.host`, ws, brandID, e.Hosts)
+		WHERE s.workspace_id = $1 AND s.brand_id IS NOT DISTINCT FROM $2::uuid
+		ORDER BY s.host`, ws, brandID)
 	if err != nil {
 		return err
 	}

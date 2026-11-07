@@ -156,6 +156,14 @@ func (s *Server) createInboundAddress(w http.ResponseWriter, r *http.Request) {
 		}
 		want.BrandID = &id
 	}
+	if p.Suffix != "" && want.BrandID == nil {
+		// A brand's address: the caller's brand, else the first.
+		b, err := ownBrand(r.Context(), s.pool, a, nil)
+		if s.allocError(w, r, err) {
+			return
+		}
+		want.BrandID = b
+	}
 	var addr inboundemail.Address
 	var made bool
 	err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
@@ -223,11 +231,13 @@ func (s *Server) listInboundEmails(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// With a brand picked, mail to its addresses and the workspace's own.
+	// With a brand picked, mail to its addresses and the workspace's own
+	// (AI receipts, for the workspace's AI key).
 	args := []any{a.WorkspaceID}
 	filter := ""
 	if !brand.all() {
-		filter = ` AND (ad.brand_id IS NULL OR (TRUE` + brand.sql("ad.brand_id", &args) + `))`
+		args = append(args, inboundemail.PurposeSupport)
+		filter = ` AND ((ad.brand_id IS NULL AND ad.purpose <> $2) OR (TRUE` + brand.sql("ad.brand_id", &args) + `))`
 	}
 	rows, err := s.pool.Query(r.Context(), `SELECT m.id::text, m.purpose, m.received_at, m.from_address, m.forwarded_by, m.subject, m.dkim_domains, m.status, m.reason, m.size_bytes
 		FROM inbound_emails m JOIN inbound_addresses ad ON ad.id = m.address_id

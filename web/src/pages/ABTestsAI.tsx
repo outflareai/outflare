@@ -20,10 +20,13 @@ export function perVisitor(g: ABTestGoal, mean: number): string {
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(Math.round(n * 100))}%`;
 const weeksText = (w: number) => (w <= 0 ? "over a year" : w < 1 ? "under a week" : `${w.toFixed(w < 10 ? 1 : 0)} weeks`);
 
-// useAIRun starts an AI run and follows it until it is ready or failed.
+// useAIRun starts an AI run and follows it until it is ready or failed. A
+// run keeps going on the server when the page closes, so resume picks one
+// up again, and stop ends one that takes too long.
 export function useAIRun(_ws: string) {
   const [run, setRun] = useState<ABTestAIRun | null>(null);
   const [error, setError] = useState("");
+  const [code, setCode] = useState("");
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const follow = (id: string) => {
@@ -37,14 +40,99 @@ export function useAIRun(_ws: string) {
   };
   const start = async (call: () => Promise<{ data?: ABTestAIRun; error?: unknown }>) => {
     setError("");
+    setCode("");
     setRun(null);
     const { data, error } = await call();
-    if (error) return setError(errorMessage(error));
+    if (error) {
+      setCode((error as { error?: { code?: string } }).error?.code ?? "");
+      return setError(errorMessage(error));
+    }
     setRun(data!);
     follow(data!.id);
   };
+  const resume = (r: ABTestAIRun) => {
+    setError("");
+    setRun(r);
+    if (r.status === "queued" || r.status === "running") follow(r.id);
+  };
+  const stop = async () => {
+    if (!run) return;
+    window.clearTimeout(timer.current);
+    const { data, error } = await api.POST("/v1/brands/{brand}/ab-test-ai-runs/{run}/stop", { params: { path: { brand: pickedBrandId(), run: run.id } } });
+    if (error) return setError(errorMessage(error));
+    if (data && "id" in data) setRun(data as ABTestAIRun);
+  };
+  const clear = () => {
+    window.clearTimeout(timer.current);
+    setRun(null);
+    setError("");
+    setCode("");
+  };
   const busy = run?.status === "queued" || run?.status === "running";
-  return { run, error: error || (run?.status === "failed" ? run.error : ""), busy, start, ready: run?.status === "ready" ? run : null };
+  // "connector_needed" or "ai_model_needed": the workspace has no AI model yet.
+  const noAI = code === "connector_needed" || code === "ai_model_needed";
+  return { run, error: error || (run?.status === "failed" ? run.error : ""), busy, noAI, start, resume, stop, clear, ready: run?.status === "ready" ? run : null };
+}
+
+// elapsed is how long ago a time was, ticking each second while live.
+export function useElapsed(from: string | undefined, live: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [live]);
+  return from ? Math.max(0, Math.round((now - new Date(from).getTime()) / 1000)) : 0;
+}
+
+type AIRun = ReturnType<typeof useAIRun>;
+
+// AIRunCard says what an AI run is doing while it runs: waiting, then
+// working, for how long, that it carries on if you leave, and a way to
+// stop it; then why it failed, with Try again. Without an AI model it
+// says where to connect one.
+export function AIRunCard({ ai, working, onRetry, go }: { ai: AIRun; working: string; onRetry?: () => void; go?: (t: "ai") => void }) {
+  const secs = useElapsed(ai.run?.created_at, ai.busy);
+  if (ai.noAI)
+    return (
+      <div role="status" className="space-y-2 rounded-md border border-amber-600/30 bg-amber-500/10 p-3 text-[13px]">
+        <p>{ai.error.charAt(0).toUpperCase() + ai.error.slice(1)}</p>
+        {go && <Button variant="ghost" onClick={() => go("ai")}>Connect your AI model</Button>}
+      </div>
+    );
+  if (ai.busy && ai.run) {
+    const slow = secs > 60;
+    return (
+      <div role="status" aria-live="polite" className="space-y-2 rounded-md border border-blue-600/25 bg-blue-500/10 p-3 text-[13px]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="flex items-center gap-2 font-medium">
+            <span className="inline-block size-2 animate-pulse rounded-full bg-blue-500" aria-hidden />
+            {ai.run.status === "queued" ? "Waiting to start" : working}
+          </span>
+          <span className="tabular-nums text-muted-foreground">{secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`}</span>
+        </div>
+        <p className="text-[12px] text-muted-foreground">
+          {slow ? "This is taking longer than usual. It stops by itself after 2 minutes, or you can stop it now." : "Usually 15 to 60 seconds. It keeps going if you leave this page."}
+        </p>
+        <Button variant="ghost" onClick={ai.stop}>Stop</Button>
+      </div>
+    );
+  }
+  if (ai.error === "Stopped.")
+    return (
+      <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 p-3 text-[13px]">
+        <span>Stopped. Nothing was changed.</span>
+        {onRetry && <Button variant="ghost" onClick={onRetry}>Try again</Button>}
+      </div>
+    );
+  if (ai.error)
+    return (
+      <div role="alert" className="space-y-2 rounded-md border border-red-600/25 bg-red-500/10 p-3 text-[13px]">
+        <p>{ai.error}</p>
+        {onRetry && <Button variant="ghost" onClick={onRetry}>Try again</Button>}
+      </div>
+    );
+  return null;
 }
 
 // PlanPanel says how long a test of the flag will take on the site's real
@@ -142,7 +230,7 @@ export function SuggestPanel({ ws, onUse }: { ws: string; onUse: (s: { name: str
           {ai.busy ? "Thinking…" : list.length ? "Suggest again" : "Suggest tests"}
         </Button>
       </div>
-      <ErrorText>{ai.error}</ErrorText>
+      <AIRunCard ai={ai} working="Reading your site and thinking of tests" />
       {list.map((s, i) => (
         <div key={i} className="space-y-1.5 rounded-md border p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -185,7 +273,7 @@ export function VersionsPanel({ ws, flag, onAdded }: { ws: string; flag: Flag; o
       <Button disabled={ai.busy || !prompt.trim()} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/versions", { params: { path: { brand: pickedBrandId() } }, body: { flag: flag.id, prompt } }))}>
         {ai.busy ? "Writing…" : "Write versions"}
       </Button>
-      <ErrorText>{ai.error}</ErrorText>
+      <AIRunCard ai={ai} working="Writing versions" />
       {out?.versions?.map((v) => (
         <div key={v.key} className="space-y-1 rounded-md border p-3">
           <div className="flex items-center justify-between gap-2">
@@ -222,7 +310,7 @@ export function SummaryPanel({ ws, testID }: { ws: string; testID: string }) {
       <Button variant="ghost" disabled={ai.busy} onClick={() => ai.start(() => api.POST("/v1/brands/{brand}/ab-tests/{test}/summary", { params: { path: { brand: pickedBrandId(), test: testID } } }))}>
         {ai.busy ? "Summarising…" : out ? "Summarise again" : "Summarise with AI"}
       </Button>
-      <ErrorText>{ai.error}</ErrorText>
+      <AIRunCard ai={ai} working="Reading the results" />
       {out && (
         <div className="space-y-2 rounded-md border p-3">
           <div className="flex flex-wrap items-center gap-2">

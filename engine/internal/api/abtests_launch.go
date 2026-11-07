@@ -313,7 +313,7 @@ func (s *Server) abMissedCheck(ctx context.Context, ws, key string) (abCheck, bo
 	if selectors != nil && *selectors != "" {
 		text += " (" + *selectors + ")"
 	}
-	text += ". The page has probably changed since: open Edit visually for that version and pick those parts again."
+	text += ". The page has probably changed since: open Edit on your page for that version (under Versions) and pick those parts again."
 	return abCheck{"changes_found", "warn", text}, true, nil
 }
 

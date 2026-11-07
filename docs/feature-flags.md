@@ -103,15 +103,19 @@ Add `?of_flag=pricing-headline:faster` to any page's address to see that version
 
 ### Change a page without code
 
-For a version of a split, open the flag under **Analytics → Feature flags**, enter a page of your site under **Page to edit on**, and choose **Edit visually** next to the version. The page opens in a new tab with that version previewed and an editor over it: click anything, then:
+For a version of a split, open the flag under **Analytics → Feature flags**, enter a page of your site under **Page to edit on**, and choose **Edit visually** next to the version. The page opens in a new tab with that version previewed and an editor over it. A bar along the top shows the test or flag, a list to switch to another version (the page reloads with that version; the control is shown but can't be changed), **Undo** and **Redo** (also Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y), whether everything is saved, **Save** (also Ctrl+S) and **Close**. Click anything on the page, then:
 
-- **Content:** change its text, plain or with simple formatting (`**bold**`, `*italic*`, `[a link](/page)` and new lines), or a link or an image (its address and alt text).
+- **Content:** change its text, plain or with simple formatting (`**bold**`, `*italic*`, `[a link](/page)` and new lines), or a link or an image (its address and alt text). Or double-click text to type straight on the page: Enter or clicking away keeps it, Esc cancels.
 - **Style:** its text colour, background, size, weight, alignment, case, padding, margin, corners, border, width and display.
-- **Move:** up or down among the elements around it.
+- **Move:** up or down among the elements around it, or drag it by its **Drag** handle: a line shows where it lands.
 - **Add:** a new piece of text, a button, a link or an image before or after it.
 - **Hide it.**
 
-**New changes apply to** limits the next changes to phones (up to 767px wide) or wider screens. **Undo last** takes back the newest change, and **Preview on a phone** opens the page in a phone-sized window with what you've saved. Under **Version settings**, a version can have its own CSS (looks only: no `url()`, `@import` or fonts) and can send its visitors to another page instead (below). **Save** in the editor, and visitors who get that version see the changes, within a minute.
+The panel's other tabs: **Layers** lists the page's parts (headings, text, buttons, links, images) to pick one without hunting for it; **Changes** lists the version's changes, highlights each on the page as you point at it, and removes one with ×; **Settings** has the version's own CSS (looks only: no `url()`, `@import` or fonts) and the page it can send its visitors to instead (below).
+
+**Ask AI** (on a version of a no-code A/B test, with the workspace's own AI model connected under **Settings → AI model**): describe a change to the page, or pick a part first and describe a change to that part ("make this shorter and say Start free"). Your AI model reads the page as the editor sees it and writes the change, which shows on the page at once; **Keep** keeps it among the version's changes and **Undo** takes it off. It usually takes 15 to 60 seconds, and **Stop** stops it. A change the version already has is left out. Nothing is saved until you save.
+
+**All screens, Phone, Computer** in the bar limits the next changes to phones (up to 767px wide) or wider screens. **Preview on a phone** opens the page in a phone-sized window with what you've saved. **Save**, and visitors who get that version see the changes, within a minute.
 
 Nobody needs to touch the site for this: the page only needs the website script (version 12 or later), without `data-flags`. While a flag that is on has changes from the editor, the script asks for each visitor's versions by itself, on every page. When none has, it checks again every half hour or so, so a site with no tests makes almost no extra requests. To turn this off for a site, switch off **Run A/B tests on this site** in its tracking settings (the site key's `tests`), or put `data-flags="off"` on the tag; pages whose own code asks for flags still get them.
 
@@ -144,7 +148,7 @@ The changes are kept in the version's content, as `changes`, beside anything els
 
 **Split URL tests.** A version's `redirect` sends its visitors to another page instead, keeping the address's query string: a path on your site (`/pricing-b`), or an address on one of the brand's domains (its website or **Domains** in the brand's settings). The script counts the visitor in the version as it sends them, never sends someone already on that page, and doesn't redirect while you edit the version. Set it in the editor's **Version settings** or in the version's content (`"redirect": "/pricing-b"`).
 
-The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a person signed in to Outflare, not an API token. It works for 2 hours, only on that version, and only while you can still manage analytics. It carries a secret token, kept for your visit in the tab: don't share it. The editor reads and saves with it (`GET/POST /v1/site/flags/edits`).
+The edit link (`POST .../flags/{flag}/edit-link`, `analytics.manage`) is for a person signed in to Outflare, not an API token. It works for 2 hours, only on that flag's versions (it opens on the one you chose; `variant` picks another), and only while you can still manage analytics. It carries a secret token, kept for your visit in the tab: don't share it. The editor reads and saves with it (`GET/POST /v1/site/flags/edits`), and asks the AI with it (`POST /v1/site/flags/edits/ai` starts a run as you, `GET` with `run` reads it, `POST .../edits/ai/stop` stops it); those runs show on the test's **Activity** tab like any other.
 
 ## On your servers
 

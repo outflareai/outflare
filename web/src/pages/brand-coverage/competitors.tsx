@@ -1,5 +1,5 @@
 // Where the brand's competitors appear: each tracked competitor is scanned
-// on a cadence (top ones weekly, the rest monthly unless changed), through
+// on a cadence (monthly unless changed), through
 // the workspace's own search results and SEO connections, plus pages AI
 // answers cite when they name it. Gaps are sites where the brand has no
 // publisher yet.
@@ -9,6 +9,7 @@ import type { components } from "@outflare/sdk";
 import { appPath } from "../../lib/paths";
 import { Badge, Button, ErrorText, field, toast } from "../../ui";
 import { label } from "./client";
+import { AccessBadge, AccessSelect, Reasons, ValueCell, type Access } from "./linkvalue";
 
 type Competitor = components["schemas"]["CoverageCompetitor"];
 type Settings = components["schemas"]["CoverageCompetitorSettings"];
@@ -45,6 +46,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
     [rival, setRival] = useState(""),
     [gap, setGap] = useState(true),
     [paid, setPaid] = useState(false),
+    [access, setAccess] = useState<Access | "">(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [reload, setReload] = useState(0);
@@ -71,6 +73,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
             ...(rival ? { competitor_id: rival } : {}),
             ...(gap ? { gap: "true" as const } : {}),
             ...(paid ? { arrangement: "likely_paid" as const } : {}),
+            ...(access ? { access } : {}),
           },
         },
       })
@@ -83,7 +86,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
     return () => {
       active = false;
     };
-  }, [brand, rival, gap, paid, reload]);
+  }, [brand, rival, gap, paid, access, reload]);
   const act = async (fn: () => Promise<{ error?: unknown }>, done: string) => {
     setBusy(true);
     setError("");
@@ -227,6 +230,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
               </option>
             ))}
           </select>
+          <AccessSelect className={`${field} !w-auto`} value={access} onChange={setAccess} />
           <label className="flex items-center gap-1.5">
             <input type="checkbox" checked={gap} onChange={(e) => setGap(e.target.checked)} />
             Only sites we're not on
@@ -241,6 +245,10 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
             <thead className="text-left text-muted-foreground">
               <tr className="border-b">
                 <th className="p-2 font-normal">Page</th>
+                <th className="p-2 text-right font-normal" title="What the link is worth to you, 0 to 100: the page's authority, readers, trust, relevance to your topic and how many competitors it features, weighted by how it's got">
+                  Value
+                </th>
+                <th className="p-2 font-normal">How it's got</th>
                 <th className="p-2 font-normal">Competitor</th>
                 <th className="p-2 font-normal">Type</th>
                 <th className="p-2 font-normal">Paid?</th>
@@ -257,6 +265,13 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
                       {p.title || p.url}
                     </a>
                     <span className="text-muted-foreground">{p.host}</span> {p.brand_present && <Badge tone="green">We're there</Badge>}
+                    <Reasons reasons={p.value_reasons} />
+                  </td>
+                  <td className="p-2 text-right">
+                    <ValueCell value={p.value} reasons={p.value_reasons} />
+                  </td>
+                  <td className="p-2">
+                    <AccessBadge access={p.access} />
                   </td>
                   <td className="p-2">{p.competitor_name || p.competitor_host}</td>
                   <td className="p-2">{p.kind ? label(p.kind) : "–"}</td>
@@ -276,7 +291,7 @@ export function CompetitorPresence({ ws, brand, manage }: { ws: string; brand: s
               ))}
               {pages.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="p-4 text-center text-muted-foreground">
+                  <td colSpan={9} className="p-4 text-center text-muted-foreground">
                     Nothing found yet. Scans run on their schedule, or select Scan now.
                   </td>
                 </tr>

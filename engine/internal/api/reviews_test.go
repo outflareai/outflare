@@ -204,11 +204,11 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 
 	// Nothing to read yet: no zeros, and reading needs a page reader.
 	bid := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Northpeak", "handle": "northpeak", "website": "https://northpeak.example"})["id"].(string)
-	sum := owner.must(200, "GET", base+"/reviews/summary", nil)
+	sum := owner.must(200, "GET", base+"/reviews/summary?brand=northpeak", nil)
 	if sum["outflare_score"] != nil || sum["can_read"] != false || len(sum["platforms"].([]any)) != 0 {
 		t.Fatalf("empty summary: %v", sum)
 	}
-	owner.must(409, "POST", base+"/reviews/pages/sync", nil)
+	owner.must(409, "POST", base+"/reviews/pages/sync?brand=northpeak", nil)
 	owner.must(409, "POST", base+"/brands/northpeak/reviews/discover", nil)
 
 	// Connecting Geonode looks for the brand's review pages.
@@ -239,7 +239,7 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 	if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
 		t.Fatal(err)
 	}
-	pages := owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any)
+	pages := owner.must(200, "GET", base+"/reviews/pages?brand=northpeak", nil)["data"].([]any)
 	if len(pages) != 1 {
 		t.Fatalf("pages: %v", pages)
 	}
@@ -257,7 +257,7 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 	if len(site.fetches) != 2 {
 		t.Fatalf("fetches: %v", site.fetches)
 	}
-	list := owner.must(200, "GET", base+"/reviews", nil)["data"].([]any)
+	list := owner.must(200, "GET", base+"/reviews?brand=northpeak", nil)["data"].([]any)
 	if len(list) != 3 {
 		t.Fatalf("reviews: %v", list)
 	}
@@ -271,20 +271,20 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 		byID["Review r3"]["reply_body"] != "Thanks Ana!" || byID["Review r3"]["replied_at"] == nil {
 		t.Fatalf("reviews: %v", byID)
 	}
-	if n := len(owner.must(200, "GET", base+"/reviews?sentiment=negative&replied=false", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/reviews?sentiment=negative&replied=false&brand=northpeak", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("unanswered negative: %d", n)
 	}
-	owner.must(400, "GET", base+"/reviews?platform=myspace", nil)
-	owner.must(400, "GET", base+"/reviews?stars=9", nil)
+	owner.must(400, "GET", base+"/reviews?platform=myspace&brand=northpeak", nil)
+	owner.must(400, "GET", base+"/reviews?stars=9&brand=northpeak", nil)
 
 	// The unhappy review waits on the fixes list.
-	fixes := owner.must(200, "GET", base+"/fixes?source=reviews", nil)["data"].([]any)
+	fixes := owner.must(200, "GET", base+"/fixes?brand=northpeak&source=reviews", nil)["data"].([]any)
 	if len(fixes) != 1 || fixes[0].(map[string]any)["rule"].(map[string]any)["title"] != "Reviews waiting for an answer" || fixes[0].(map[string]any)["count"] != 1.0 {
 		t.Fatalf("fixes: %v", fixes)
 	}
 
 	// The score and momentum show from the first read.
-	sum = owner.must(200, "GET", base+"/reviews/summary?weeks=8", nil)
+	sum = owner.must(200, "GET", base+"/reviews/summary?weeks=8&brand=northpeak", nil)
 	if sum["outflare_score"] == nil || sum["reviews"] != 3.0 || sum["can_read"] != true || len(sum["weeks"].([]any)) != 8 ||
 		sum["momentum"].(map[string]any)["state"] != "too_few" || len(sum["platforms"].([]any)) != 1 {
 		t.Fatalf("summary: %v", sum)
@@ -318,7 +318,7 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 		t.Fatalf("answered on the platform: %v", r)
 	}
 	var spam map[string]any
-	for _, x := range owner.must(200, "GET", base+"/reviews?stars=1", nil)["data"].([]any) {
+	for _, x := range owner.must(200, "GET", base+"/reviews?stars=1&brand=northpeak", nil)["data"].([]any) {
 		spam = x.(map[string]any)
 	}
 	if spam == nil || spam["title"] != "Review r4" {
@@ -364,7 +364,7 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 	// A token that only reads cannot draft or pause.
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reader", "scopes": []string{"social.read"}})["token"].(string)
 	bot := &client{t: t, h: e.h, bearer: tok}
-	bot.must(200, "GET", base+"/reviews", nil)
+	bot.must(200, "GET", base+"/reviews?brand=northpeak", nil)
 	bot.must(403, "POST", base+"/reviews/"+lee["id"].(string)+"/draft", nil)
 	bot.must(403, "PATCH", base+"/reviews/pages/"+pid, map[string]any{"status": "paused"})
 
@@ -373,15 +373,15 @@ func TestReviewsFindReadScoreAndDraft(t *testing.T) {
 	if p := owner.must(200, "PATCH", base+"/reviews/pages/"+pid, map[string]any{"status": "paused"}); p["status"] != "paused" {
 		t.Fatalf("paused: %v", p)
 	}
-	owner.must(202, "POST", base+"/reviews/pages/sync", nil)
+	owner.must(202, "POST", base+"/reviews/pages/sync?brand=northpeak", nil)
 	owner.must(200, "PATCH", base+"/brands/northpeak", map[string]any{"links": []map[string]any{}})
 	if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
 		t.Fatal(err)
 	}
-	if n := len(owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any)); n != 0 {
+	if n := len(owner.must(200, "GET", base+"/reviews/pages?brand=northpeak", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("pages after removing the link: %d", n)
 	}
-	if n := len(owner.must(200, "GET", base+"/reviews/pages?status=removed", nil)["data"].([]any)); n != 1 {
+	if n := len(owner.must(200, "GET", base+"/reviews/pages?status=removed&brand=northpeak", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("removed pages: %d", n)
 	}
 
@@ -427,7 +427,7 @@ func TestReviewPageReadRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	pages := map[string]map[string]any{}
-	for _, x := range owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any) {
+	for _, x := range owner.must(200, "GET", base+"/reviews/pages?brand=northpeak", nil)["data"].([]any) {
 		x := x.(map[string]any)
 		pages[x["external_id"].(string)] = x
 	}
@@ -460,7 +460,7 @@ func TestReviewPageReadRetries(t *testing.T) {
 		t.Fatalf("capterra page: %v", capterra)
 	}
 	byTitle := map[string]map[string]any{}
-	for _, x := range owner.must(200, "GET", base+"/reviews?platform=capterra", nil)["data"].([]any) {
+	for _, x := range owner.must(200, "GET", base+"/reviews?platform=capterra&brand=northpeak", nil)["data"].([]any) {
 		x := x.(map[string]any)
 		byTitle[x["title"].(string)] = x
 	}
@@ -488,7 +488,7 @@ func TestReviewPageReadRetries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	p := owner.must(200, "GET", base+"/reviews/pages?platform=capterra", nil)["data"].([]any)
+	p := owner.must(200, "GET", base+"/reviews/pages?platform=capterra&brand=northpeak", nil)["data"].([]any)
 	for _, x := range p {
 		x := x.(map[string]any)
 		if x["id"] != blocked["id"] {
@@ -585,7 +585,7 @@ func TestReviewPageJobs(t *testing.T) {
 	if site.posts[p1] != 1 {
 		t.Fatalf("page 1 sent %d times", site.posts[p1])
 	}
-	if pages := owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any); pages[0].(map[string]any)["score"] == nil {
+	if pages := owner.must(200, "GET", base+"/reviews/pages?brand=northpeak", nil)["data"].([]any); pages[0].(map[string]any)["score"] == nil {
 		t.Fatalf("first page not kept: %v", pages)
 	}
 	// It keeps failing: the history is read again on the usual ladder,

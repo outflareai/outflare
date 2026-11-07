@@ -51,6 +51,8 @@ type Page struct {
 	// InsecureResources counts what a https page loads over plain http:
 	// scripts, styles, icons, images, media and frames.
 	InsecureResources int
+	// AI is what AI answers need from the page (aipage.go).
+	AI AISignals
 }
 
 // Link is one link on a page.
@@ -105,7 +107,21 @@ func ParsePage(base *url.URL, body []byte) Page {
 		canons   []string
 		hrefl    [][2]string
 		schemaSn = map[string]bool{}
+		// For AI answers: the h2 or h3 being read, the block read as a
+		// question heading's answer, and whether one is awaited.
+		inHead   *strings.Builder
+		answer   *strings.Builder
+		answerTo string
+		awaiting bool
+		claims   []schemaClaim
+		timeAt   string
 	)
+	unanswered := func() {
+		if awaiting && len(p.AI.Unanswered) < maxUnanswered {
+			p.AI.Unanswered = append(p.AI.Unanswered, clip(answerTo, maxTitle))
+		}
+		awaiting, answer = false, nil
+	}
 	z := html.NewTokenizer(bytes.NewReader(body))
 	for {
 		tt := z.Next()
@@ -126,6 +142,13 @@ func ParsePage(base *url.URL, body []byte) Page {
 				}
 				if inH1 != nil {
 					inH1.WriteString(s)
+				}
+				if inHead != nil {
+					inHead.WriteString(s)
+				}
+				if answer != nil {
+					answer.WriteString(s)
+					answer.WriteByte(' ')
 				}
 				if open != nil {
 					open.anchor.WriteString(s)
@@ -151,6 +174,11 @@ func ParsePage(base *url.URL, body []byte) Page {
 					if p.ArticleAuthor == "" && p.ArticlePublished == "" {
 						p.ArticleAuthor, p.ArticlePublished = articleInfo(jsonLD.String())
 					}
+					c, mod := schemaClaims(jsonLD.String())
+					claims = append(claims, c...)
+					if p.AI.Modified == "" {
+						p.AI.Modified = mod
+					}
 					jsonLD = nil
 				}
 				skip = max(skip-1, 0)
@@ -165,6 +193,24 @@ func ParsePage(base *url.URL, body []byte) Page {
 					p.H1 = append(p.H1, clip(squash(inH1.String()), maxTitle))
 				}
 				inH1 = nil
+			case "h2", "h3":
+				if inHead != nil {
+					h := squash(inHead.String())
+					p.AI.Headings++
+					if isQuestion(h) {
+						p.AI.QuestionHeadings++
+						awaiting, answerTo = true, h
+					}
+				}
+				inHead = nil
+			case "p", "li", "dd", "td":
+				if answer != nil {
+					if len(strings.Fields(answer.String())) >= answerMinWords {
+						awaiting, answer = false, nil
+					} else {
+						answer = nil // too short to be the answer; the next block may be
+					}
+				}
 			case "a", "area":
 				open = nil
 			case "nav", "aside":
@@ -207,6 +253,25 @@ func ParsePage(base *url.URL, body []byte) Page {
 			}
 			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(ref)), "http://") {
 				p.InsecureResources++
+			}
+		}
+		if _, ok := attrs["data-nosnippet"]; ok {
+			p.AI.DataNoSnippet++
+		}
+		switch string(name) {
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			// A new heading ends the wait for the last question's answer.
+			unanswered()
+			if (string(name) == "h2" || string(name) == "h3") && !selfClosing {
+				inHead = &strings.Builder{}
+			}
+		case "p", "li", "dd", "td":
+			if awaiting && answer == nil && !selfClosing {
+				answer = &strings.Builder{}
+			}
+		case "time":
+			if timeAt == "" {
+				timeAt = clip(strings.TrimSpace(attrs["datetime"]), 40)
 			}
 		}
 		switch string(name) {
@@ -277,6 +342,11 @@ func ParsePage(base *url.URL, body []byte) Page {
 					if hl := strings.TrimSpace(attrs["hreflang"]); hl != "" {
 						hrefl = append(hrefl, [2]string{hl, attrs["href"]})
 					}
+					if strings.EqualFold(strings.TrimSpace(attrs["type"]), "text/markdown") && p.AI.Markdown == "" {
+						if u, ok := Normalize(base, attrs["href"]); ok {
+							p.AI.Markdown = u
+						}
+					}
 				}
 			}
 		case "meta":
@@ -305,6 +375,10 @@ func ParsePage(base *url.URL, body []byte) Page {
 				noindex, nofollow := RobotsDirectives(attrs["content"])
 				p.Noindex = p.Noindex || noindex
 				p.Nofollow = p.Nofollow || nofollow
+			}
+			if n == "robots" || n == "googlebot" || n == "bingbot" {
+				// The agent is the tag's name, not a prefix in its value.
+				p.AI.snippetDirectives(attrs["content"])
 			}
 		case "a", "area":
 			if h, ok := attrs["href"]; ok {
@@ -362,6 +436,8 @@ func ParsePage(base *url.URL, body []byte) Page {
 		}
 		p.Links = append(p.Links, Link{URL: u, Anchor: clip(squash(l.anchor.String()), maxAnchor), Nofollow: nf, Rel: strings.Fields(l.rel), Boilerplate: l.boilerplate})
 	}
+	unanswered()
+	p.aiFinish(claims, timeAt, p.Title+" "+text.String())
 	words := strings.FieldsFunc(text.String(), func(r rune) bool { return unicode.IsSpace(r) || unicode.IsPunct(r) })
 	p.WordCount = len(words)
 	if len(words) > 0 {

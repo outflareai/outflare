@@ -553,8 +553,8 @@ function BrandKnowledgeCard({ ws, brand: b, canEdit, go }: { ws: string; brand: 
   );
 }
 
-// Members moves sending domains in and out of the brand; a domain brings its
-// mailboxes.
+// Members moves sending domains into the brand; a domain brings its
+// mailboxes. Brands share nothing, so one leaves only by moving to another.
 function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Brand; canEdit: boolean; onChanged: () => void }) {
   const { byId } = useBrand(ws);
   const [domains, setDomains] = useState<SendingDomain[] | null>(null);
@@ -568,10 +568,9 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
   }, [ws]);
   useEffect(() => void load(), [load]);
 
-  async function move(key: string, on: boolean, body: { domains?: string[] }) {
+  async function move(key: string, body: { domains?: string[] }) {
     setBusy(key);
-    const call = on ? "/v1/workspaces/{ws}/brands/{brand}/add" : "/v1/workspaces/{ws}/brands/{brand}/remove";
-    const { data, error } = await api.POST(call, { params: { path: { ws, brand: b.id } }, body });
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/brands/{brand}/add", { params: { path: { ws, brand: b.id } }, body });
     setBusy("");
     if (error || !data || !("moved" in data)) return toast(errorMessage(error), "error");
     load();
@@ -594,7 +593,7 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
   );
 
   return (
-    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. A mailbox sends only for its own brand's sequences, and one in no brand sends for none.">
+    <Card title={`What belongs to ${b.name}`} description="Turn on what is this brand's. To move something out, turn it on in the brand it belongs to. A mailbox sends only for its own brand's sequences.">
       {!domains ? (
         <Loading />
       ) : (
@@ -612,8 +611,8 @@ function Members({ ws, brand: b, canEdit, onChanged }: { ws: string; brand: Bran
                     <span className="font-mono">{d.domain}</span>,
                     other ? `In ${other}` : d.brand_id ? `${plural(d.mailboxes, "mailbox", "mailboxes")}` : "Not in a brand",
                     d.brand_id === b.id,
-                    undefined,
-                    (on) => move(`d:${d.domain}`, on, { domains: [d.domain] }),
+                    d.brand_id === b.id ? `In ${b.name}` : undefined,
+                    () => move(`d:${d.domain}`, { domains: [d.domain] }),
                   );
                 })}
               </ul>

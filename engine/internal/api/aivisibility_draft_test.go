@@ -154,7 +154,7 @@ func TestAIVisibilityQuestionLibrary(t *testing.T) {
 	}
 	var vis map[string]any
 	for deadline := time.Now().Add(10 * time.Second); ; {
-		vis = owner.must(200, "GET", base+"/ai-visibility", nil)["data"].([]any)[0].(map[string]any)
+		vis = owner.must(200, "GET", base+"/ai-visibility?brand=acme", nil)["data"].([]any)[0].(map[string]any)
 		if vis["benchmark_day"] != yesterday && vis["benchmark_day"] != nil || time.Now().After(deadline) {
 			break
 		}

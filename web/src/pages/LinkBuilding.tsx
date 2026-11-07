@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useState } from "react";
 import type { LinkBuildingSettings, LinkPitch, LinkProspect, LinkRead, LinkResultRow, LinkSequence, SEOSite } from "@outflare/sdk";
 import { pickedBrandId, useBrand } from "@/lib/brand";
@@ -100,7 +101,14 @@ const path = (u: string) => {
   }
 };
 
-export function LinkBuilding({ ws, canManage, go, waiting = 0, onWaiting }: Props) {
+// Link building belong to one brand.
+export function LinkBuilding(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Link building" brands={active.length} />;
+  return <LinkBuildingPage key={brand.id} {...props} />;
+}
+
+function LinkBuildingPage({ ws, canManage, go, waiting = 0, onWaiting }: Props) {
   const [sites, setSites] = useState<SEOSite[] | null>(null);
   const [site, setSite] = useState("");
   const [section, setSection] = useState<Section>("prospects");
@@ -110,7 +118,7 @@ export function LinkBuilding({ ws, canManage, go, waiting = 0, onWaiting }: Prop
 
   useEffect(() => {
     setSites(null);
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setSites(data.data);
@@ -173,8 +181,8 @@ export function LinkBuilding({ ws, canManage, go, waiting = 0, onWaiting }: Prop
 
 // readFirst estimates a read, asks to spend it, then reads. It answers the
 // read, or null when the person said no or it failed (with the error set).
-async function readFirst(ws: string, body: { target: string; site_id?: string }, setError: (e: string) => void): Promise<LinkRead | null> {
-  const est = await api.POST("/v1/workspaces/{ws}/link-reads", { params: { path: { ws } }, body: { ...body, estimate_only: true } });
+export async function readFirst(_ws: string, body: { target: string; site_id?: string }, setError: (e: string) => void): Promise<LinkRead | null> {
+  const est = await api.POST("/v1/brands/{brand}/link-reads", { params: { path: { brand: pickedBrandId() } }, body: { ...body, estimate_only: true } });
   if (est.error || !est.data) {
     setError(errorMessage(est.error));
     return null;
@@ -182,7 +190,7 @@ async function readFirst(ws: string, body: { target: string; site_id?: string },
   const e = est.data as { estimate: number; budget: { unit: string; spent: number; limit: number; unlimited: boolean } };
   const left = e.budget.unlimited ? "no monthly limit" : `${cost(e.budget.unit, Math.max(0, e.budget.limit - e.budget.spent))} left this month`;
   if (!(await confirmAction(`Read who links to ${body.target}?`, `About ${cost(e.budget.unit, e.estimate)} on your own SEO connection (${left}). A read from the last day is free.`, "Read links"))) return null;
-  const { data, error } = await api.POST("/v1/workspaces/{ws}/link-reads", { params: { path: { ws } }, body });
+  const { data, error } = await api.POST("/v1/brands/{brand}/link-reads", { params: { path: { brand: pickedBrandId() } }, body });
   if (error || !data) {
     setError(errorMessage(error));
     return null;
@@ -192,13 +200,13 @@ async function readFirst(ws: string, body: { target: string; site_id?: string },
 }
 
 // addFromRead adds a read's linking pages to the prospects list.
-async function addFromRead(ws: string, site: string, readID: string, method: Method, evidence: Record<string, string>, setError: (e: string) => void) {
-  const { data, error } = await api.GET("/v1/workspaces/{ws}/link-reads/{read}", { params: { path: { ws, read: readID } } });
+async function addFromRead(_ws: string, site: string, readID: string, method: Method, evidence: Record<string, string>, setError: (e: string) => void) {
+  const { data, error } = await api.GET("/v1/brands/{brand}/link-reads/{read}", { params: { path: { brand: pickedBrandId(), read: readID } } });
   if (error || !data) return setError(errorMessage(error));
   const rows = (data.rows ?? []).filter((r) => !r.lost).slice(0, 500);
   if (rows.length === 0) return toast("No live links to add.");
-  const res = await api.POST("/v1/workspaces/{ws}/link-prospects", {
-    params: { path: { ws } },
+  const res = await api.POST("/v1/brands/{brand}/link-prospects", {
+    params: { path: { brand: pickedBrandId() } },
     body: {
       site_id: site,
       source: "link_read",
@@ -225,7 +233,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
 
   useEffect(() => {
     setList(null);
-    api.GET("/v1/workspaces/{ws}/link-prospects", { params: { path: { ws }, query: { ...brand, site_id: site.id, stage: shows[show].stages.join(","), limit: 500 } } })
+    api.GET("/v1/brands/{brand}/link-prospects", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site.id, stage: shows[show].stages.join(","), limit: 500 } } })
       .then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
         setList(data.data);
@@ -237,7 +245,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
     e.preventDefault();
     if (!page.trim()) return;
     setBusy("add");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/link-prospects", { params: { path: { ws } }, body: { site_id: site.id, prospects: [{ page_url: page.trim(), method }] } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/link-prospects", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site.id, prospects: [{ page_url: page.trim(), method }] } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -265,7 +273,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
       body = { stage, excluded_reason: r.choice as NonNullable<LinkProspect["excluded_reason"]> };
     }
     setBusy(p.id);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/link-prospects/{prospect}", { params: { path: { brand: pickedBrandId(), prospect: p.id } }, body });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -279,19 +287,19 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
     });
     if (r?.choice !== "ok") return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } }, body: { target_url: r.value.trim() } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/link-prospects/{prospect}", { params: { path: { brand: pickedBrandId(), prospect: p.id } }, body: { target_url: r.value.trim() } });
     if (error) return setError(errorMessage(error));
     setError("");
     setReload((n) => n + 1);
   };
   const checkOne = async (p: LinkProspect) => {
-    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: p.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/link-prospects/{prospect}/check", { params: { path: { brand: pickedBrandId(), prospect: p.id } } });
     if (error) return setError(errorMessage(error));
     toast(`Checking ${p.domain}. It takes a minute; checks run at most once an hour.`);
   };
   const checkAll = async () => {
     setBusy("check");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/link-prospects/check", { params: { path: { ws } }, body: { site_id: site.id } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/link-prospects/check", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site.id } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -300,7 +308,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
   };
   const reclaim = async () => {
     setBusy("reclaim");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/link-prospects/reclaim", { params: { path: { ws } }, body: { site_id: site.id } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/link-prospects/reclaim", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site.id } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -309,7 +317,7 @@ function Prospects({ ws, site, canManage, brand }: { ws: string; site: SEOSite; 
   };
   const remove = async (p: LinkProspect) => {
     if (!(await confirmAction(`Delete ${p.page_url}?`, "For a page added by mistake. To keep the website out of outreach, exclude it instead.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/link-prospects/{prospect}", { params: { path: { brand: pickedBrandId(), prospect: p.id } } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };
@@ -424,12 +432,12 @@ function ProspectSheet({ ws, prospect: p, canManage, onClose, onChanged }: { ws:
   const [error, setError] = useState("");
   const c = p.check;
   const offer = async (url: string) => {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-prospects/{prospect}", { params: { path: { ws, prospect: p.id } }, body: { target_url: url } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/link-prospects/{prospect}", { params: { path: { brand: pickedBrandId(), prospect: p.id } }, body: { target_url: url } });
     if (error) return setError(errorMessage(error));
     onChanged();
   };
   const check = async () => {
-    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/check", { params: { path: { ws, prospect: p.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/link-prospects/{prospect}/check", { params: { path: { brand: pickedBrandId(), prospect: p.id } } });
     if (error) return setError(errorMessage(error));
     toast(`Checking ${p.domain}. It takes a minute; checks run at most once an hour.`);
   };
@@ -526,8 +534,8 @@ function ProspectSheet({ ws, prospect: p, canManage, onClose, onChanged }: { ws:
 // createStarter makes the starter sequence for link pitches: a draft whose
 // first step is the AI's opener, with a follow-up. It answers the sequence,
 // or null when it failed (with the error set).
-async function createStarter(ws: string, setError: (e: string) => void): Promise<LinkSequence | null> {
-  const { data, error } = await api.POST("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws } }, body: {} });
+async function createStarter(_ws: string, setError: (e: string) => void): Promise<LinkSequence | null> {
+  const { data, error } = await api.POST("/v1/brands/{brand}/link-building/sequences", { params: { path: { brand: pickedBrandId() } }, body: {} });
   if (error || !data) {
     setError(errorMessage(error));
     return null;
@@ -546,12 +554,12 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { prospect_id: p.id, limit: 5 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-pitches", { params: { path: { brand: pickedBrandId() }, query: { prospect_id: p.id, limit: 5 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setPitches(data.data);
     });
     if (canManage && p.stage === "prospect")
-      api.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws } } }).then(({ data, error }) => {
+      api.GET("/v1/brands/{brand}/link-building/sequences", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
         setSeqs(data.data);
         setSeq(data.data.find((x) => x.uses_opener)?.sequence_id ?? data.data[0]?.sequence_id ?? "");
@@ -559,8 +567,8 @@ function PitchSection({ ws, prospect: p, canManage, onChanged }: { ws: string; p
   }, [ws, p.id, p.stage, canManage]);
   const start = async () => {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/link-prospects/{prospect}/pitches", {
-      params: { path: { ws, prospect: p.id } },
+    const { error } = await api.POST("/v1/brands/{brand}/link-prospects/{prospect}/pitches", {
+      params: { path: { brand: pickedBrandId(), prospect: p.id } },
       body: { sequence_id: seq, ...(contact ? { record_id: contact } : {}) },
     });
     setBusy(false);
@@ -636,7 +644,7 @@ function Pitches({ ws, canManage, brand, onWaiting }: { ws: string; canManage: b
   const [reload, setReload] = useState(0);
   useEffect(() => {
     setList(null);
-    api.GET("/v1/workspaces/{ws}/link-pitches", { params: { path: { ws }, query: { ...brand, ...(status ? { status } : {}), limit: 200 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-pitches", { params: { path: { brand: pickedBrandId() }, query: { ...brand, ...(status ? { status } : {}), limit: 200 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
       if (status === "draft" && data.next_cursor === null) onWaiting?.(data.data.length);
@@ -648,7 +656,7 @@ function Pitches({ ws, canManage, brand, onWaiting }: { ws: string; canManage: b
     if (!opener) return setError("Write an opener first.");
     if (!(await confirmAction(`Send the pitch to ${k.contact_email ?? k.contact_name}?`, `They are enrolled in ${k.sequence_name}, whose sending limits and checks apply.`, "Send"))) return;
     setBusy(k.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/approve", { params: { path: { ws, pitch: k.id } }, body: { opener } });
+    const { error } = await api.POST("/v1/brands/{brand}/link-pitches/{pitch}/approve", { params: { path: { brand: pickedBrandId(), pitch: k.id } }, body: { opener } });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -657,7 +665,7 @@ function Pitches({ ws, canManage, brand, onWaiting }: { ws: string; canManage: b
   };
   const reject = async (k: LinkPitch) => {
     setBusy(k.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/link-pitches/{pitch}/reject", { params: { path: { ws, pitch: k.id } }, body: {} });
+    const { error } = await api.POST("/v1/brands/{brand}/link-pitches/{pitch}/reject", { params: { path: { brand: pickedBrandId(), pitch: k.id } }, body: {} });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -720,7 +728,7 @@ function Results({ ws, site, brand }: { ws: string; site: SEOSite; brand: { bran
   const [error, setError] = useState("");
   useEffect(() => {
     setRes(null);
-    api.GET("/v1/workspaces/{ws}/link-prospects/results", { params: { path: { ws }, query: { ...brand, site_id: site.id, days } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-prospects/results", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site.id, days } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRes(data);
     });
@@ -763,7 +771,7 @@ function DeadPages({ ws, site, canManage, brand, go }: { ws: string; site: SEOSi
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/link-reads/dead-pages", { params: { path: { ws }, query: { ...brand, site_id: site.id, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-reads/dead-pages", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site.id, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data as DeadPage[]);
     });
@@ -852,7 +860,7 @@ function TopPages({ ws, site, canManage, brand }: { ws: string; site: SEOSite; c
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo", { params: { path: { ws }, query: brand } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/seo", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => {
       const c = data?.data.find((x) => x.status === "ok" && x.reports.includes("pages"));
       setConn(c ? { id: c.id, name: c.name || c.connector_name } : null);
     });
@@ -860,7 +868,7 @@ function TopPages({ ws, site, canManage, brand }: { ws: string; site: SEOSite; c
   }, [ws, brand.brand]);
 
   const load = async (domain: string) => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/link-reads/top-pages", { params: { path: { ws }, query: { target: domain, limit: 100 } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/link-reads/top-pages", { params: { path: { brand: pickedBrandId() }, query: { target: domain, limit: 100 } } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setShown(domain);
@@ -1027,7 +1035,7 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
   const [list, setList] = useState<LinkSequence[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/link-building/sequences", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/link-building/sequences", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -1042,14 +1050,14 @@ function PitchSequences({ ws, canManage, brand, go }: { ws: string; canManage: b
   };
   const toggle = async (q: LinkSequence, on: boolean) => {
     if (!on && !(await confirmAction(`Send ${q.name}'s pitches without approval?`, `Each pitch goes out as soon as your AI writes its opener, without a person reading it first, at most ${q.auto_send_per_day} a day. Pitches your AI is unsure about, or to spammy sites, still wait for you.`, "Send without approval"))) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { approve_pitches: on } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/link-building/sequences/{sequence}", { params: { path: { brand: pickedBrandId(), sequence: q.sequence_id } }, body: { approve_pitches: on } });
     if (error) return setError(errorMessage(error));
     setError("");
     setList((l) => l?.map((x) => (x.sequence_id === q.sequence_id ? { ...x, approve_pitches: on } : x)) ?? null);
   };
   const setPerDay = async (q: LinkSequence, n: number) => {
     if (!Number.isInteger(n) || n < 1 || n > 200 || n === q.auto_send_per_day) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/link-building/sequences/{sequence}", { params: { path: { ws, sequence: q.sequence_id } }, body: { auto_send_per_day: n } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/link-building/sequences/{sequence}", { params: { path: { brand: pickedBrandId(), sequence: q.sequence_id } }, body: { auto_send_per_day: n } });
     if (error) return setError(errorMessage(error));
     setError("");
     setList((l) => l?.map((x) => (x.sequence_id === q.sequence_id ? { ...x, auto_send_per_day: n } : x)) ?? null);

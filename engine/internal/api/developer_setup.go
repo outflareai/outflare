@@ -25,6 +25,7 @@ func (s *Server) routesDeveloperSetup(mux *http.ServeMux) {
 	read, manage := auth.ScopeCustomersRead, auth.ScopeCustomersManage
 	mux.HandleFunc("GET /v1/brands/{brand}/developer-setup", s.onBrand(read, s.getDeveloperSetup))
 	mux.HandleFunc("POST /v1/brands/{brand}/transactions/{transaction}/refund-of", s.onBrand(manage, s.linkRefund))
+	mux.HandleFunc("POST /v1/brands/{brand}/developer-setup/merge-duplicates", s.onBrand(manage, s.mergeDuplicatePayments))
 }
 
 // setupCheck is one line of the checklist.
@@ -145,8 +146,29 @@ func developerSetupFor(ctx context.Context, q setupQuerier, ws, brand string) (d
 		if noPerson > 0 {
 			c.Status, c.Detail = "warning", nOf(noPerson, "payment", "payments")+" in the last 30 days had no person, so they don't count toward revenue or ads. Send user_id with each transaction."
 		}
+		// Gone quiet: no payment for three times the usual gap between
+		// payments (at least two days), in a brand that had five or more.
+		if c.Status == "ok" {
+			var gap *float64
+			if err := q.QueryRow(ctx, `SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY g) FROM (
+					SELECT extract(epoch FROM occurred_at - lag(occurred_at) OVER (ORDER BY occurred_at)) AS g
+					FROM transactions WHERE brand_id = $1 AND kind = 'payment' AND status = 'succeeded'
+					  AND occurred_at > now() - interval '60 days' AND occurred_at <= now()) x
+				WHERE g IS NOT NULL HAVING count(*) >= 4`, brand).Scan(&gap); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return out, err
+			}
+			if gap != nil {
+				usual := time.Duration(*gap) * time.Second
+				if quiet := max(3*usual, 48*time.Hour); time.Since(*payAt) > quiet {
+					c.Status, c.Detail = "warning", "No payment for "+span(time.Since(*payAt))+", when one usually comes every "+span(usual)+". Check that your server still sends them."
+				}
+			}
+		}
 	}
 	out.Checks = append(out.Checks, c)
+	if err := paymentChecks(ctx, q, ws, brand, &out); err != nil {
+		return out, err
+	}
 
 	// Refunds, and the ones whose payment isn't known.
 	rows, err := q.Query(ctx, `SELECT `+transactionColumns+` FROM transactions t
@@ -236,6 +258,135 @@ func developerSetupFor(ctx context.Context, q setupQuerier, ws, brand string) (d
 	return out, nil
 }
 
+// paymentChecks adds the checks that payments sent from the brand's
+// server are kept once and as sent: orders carry their payment's id, the
+// two copies of a payment share an id and an amount, no payment is saved
+// twice, each charge has its own id, a retry keeps its id, and amounts are
+// in the currency's minor unit (docs/developer-setup.md).
+func paymentChecks(ctx context.Context, q setupQuerier, ws, brand string, out *developerSetup) error {
+	transactionsURL := "POST /v1/brands/" + brand + "/transactions"
+
+	// Orders without an id can only be matched by a guess.
+	var orders, noID int
+	if err := q.QueryRow(ctx, `SELECT count(*)::int, count(*) FILTER (WHERE NOT (e.properties ?| array['order_id', 'orderId', 'transaction_id', 'payment_id']))::int
+		FROM customer_events e WHERE e.workspace_id = $1 AND e.brand_id = $2 AND e.name = 'order_completed' AND e.source <> 'browser'
+		  AND COALESCE(e.message_id, '') NOT LIKE 'browser:%' AND e.received_at > now() - interval '30 days'`, ws, brand).Scan(&orders, &noID); err != nil {
+		return err
+	}
+	c := setupCheck{Key: "order_ids", Title: "Orders carry their payment's id", Count: orders, Status: "ok",
+		Fix: `Put your invoice id in order_id on every Order Completed, the same id you send as source_id on its transaction: {"type": "track", "event": "Order Completed", "userId": "<your user id>", "properties": {"order_id": "<invoice id>", "revenue": 49.00, "currency": "USD"}}.`}
+	switch {
+	case orders == 0:
+		c.Detail = "No orders from your server in the last 30 days. That's fine if you send payments only as transactions."
+	case noID > 0:
+		c.Status, c.Detail = "warning", nOf(noID, "order", "orders")+" in the last 30 days had no order_id, so Outflare can only match them to their transaction by a guess (the same person and amount within 15 minutes)."
+	}
+	out.Checks = append(out.Checks, c)
+
+	// Payments sent both ways: joined by id or by a guess, and whether the
+	// two copies agreed on the amount.
+	var merged, guessed, differ int
+	if err := q.QueryRow(ctx, `SELECT count(*)::int, count(*) FILTER (WHERE data->>'matched_by' = 'guess')::int,
+			count(*) FILTER (WHERE (data->>'amounts_differ')::boolean)::int
+		FROM audit_events WHERE workspace_id = $1 AND action = 'transaction.merged' AND data->>'brand_id' = $2
+		  AND data->>'kind' = 'payment' AND created_at > now() - interval '30 days'`, ws, brand).Scan(&merged, &guessed, &differ); err != nil {
+		return err
+	}
+	c = setupCheck{Key: "matched_by_id", Title: "Payments sent two ways share an id and an amount", Count: merged, Status: "ok",
+		Fix: `Send the same id as order_id on Order Completed and as source_id on the transaction, and the same amount: revenue 49.00 on the event is amount_minor 4900 (cents) on the transaction.`}
+	switch {
+	case merged == 0:
+		c.Detail = "No payment arrived both as an order and as a transaction in the last 30 days."
+	case differ > 0:
+		c.Status, c.Detail = "warning", nOf(differ, "payment", "payments")+" arrived with a different amount or currency as an order and as a transaction, and the first one kept its amount. Usually amount_minor was sent in dollars (49) instead of cents (4900)."
+	case guessed > 0:
+		c.Status, c.Detail = "warning", nOf(guessed, "payment was", "payments were")+" matched to their other copy only by a guess (the same person, amount and currency within 15 minutes), because the ids differed. A guess can miss, or join two real payments, so send the same id both ways."
+	default:
+		c.Detail = nOf(merged, "payment", "payments") + " sent both ways matched by id."
+	}
+	out.Checks = append(out.Checks, c)
+
+	// Payments saved twice (before both ways took turns on an id).
+	var twice int
+	if err := q.QueryRow(ctx, `SELECT count(*)::int FROM (`+duplicateGroups+`) d`, brand).Scan(&twice); err != nil {
+		return err
+	}
+	c = setupCheck{Key: "duplicates", Title: "No payment is saved twice", Count: twice, Status: "ok",
+		Fix: "Merge them: each is kept once, with its person, and the extra copy goes to Recently deleted for 7 days."}
+	if twice > 0 {
+		c.Status, c.Detail = "warning", nOf(twice, "payment or refund was", "payments or refunds were")+" saved twice, once from an order event and once as a transaction with the same id, so they show twice on the Transactions page. Nothing needs to change in what you send: merge them here."
+	}
+	out.Checks = append(out.Checks, c)
+
+	// The same id sent again a day or more later.
+	var resent int
+	if err := q.QueryRow(ctx, `SELECT count(*)::int FROM audit_events WHERE workspace_id = $1 AND action = 'transaction.resent'
+		AND data->>'brand_id' = $2 AND created_at > now() - interval '30 days'`, ws, brand).Scan(&resent); err != nil {
+		return err
+	}
+	c = setupCheck{Key: "ids_reused", Title: "Each charge has its own id", Count: resent, Status: "ok",
+		Fix: `Send each charge's own id (its invoice id) as source_id and order_id, never a subscription or customer id: every renewal is a new payment with a new id. ` + transactionsURL + ` with {"kind": "payment", "amount_minor": 4900, "currency": "USD", "source_id": "<invoice id>", "user_id": "<your user id>"}.`}
+	if resent > 0 {
+		c.Status, c.Detail = "warning", nOf(resent, "payment id was", "payment ids were")+" sent again a day or more after the payment they first named, so Outflare kept the first and left the new one out. Usually that's a subscription id sent for every renewal: each renewal after the first is missing from revenue."
+	}
+	out.Checks = append(out.Checks, c)
+
+	// The same payment under two ids from the same source: a retry that
+	// made a new id.
+	var retried int
+	if err := q.QueryRow(ctx, `SELECT count(*)::int FROM transactions a
+		WHERE a.brand_id = $1 AND a.kind = 'payment' AND a.source IN ('api', 'events') AND a.record_id IS NOT NULL
+		  AND a.created_at > now() - interval '30 days'
+		  AND EXISTS (SELECT 1 FROM transactions b WHERE b.brand_id = a.brand_id AND b.kind = 'payment' AND b.source = a.source
+			AND b.record_id = a.record_id AND b.amount_minor = a.amount_minor AND b.currency = a.currency AND b.source_id <> a.source_id
+			AND b.created_at BETWEEN a.created_at - interval '10 minutes' AND a.created_at AND b.id <> a.id
+			AND b.occurred_at BETWEEN a.occurred_at - interval '10 minutes' AND a.occurred_at + interval '10 minutes')`, brand).Scan(&retried); err != nil {
+		return err
+	}
+	c = setupCheck{Key: "retries", Title: "A retry keeps its payment's id", Count: retried, Status: "ok",
+		Fix: "Make the id when the payment happens (your invoice id) and send that same id on every retry: Outflare keeps one payment per id, so a retry with the same id is never counted twice."}
+	if retried > 0 {
+		c.Status, c.Detail = "warning", nOf(retried, "payment", "payments")+" in the last 30 days came minutes after another from the same person, of the same amount, under a different id. If those were retries of one payment, each is counted twice: delete the extra ones on the Transactions page and keep the id on retries. If they were real separate payments, nothing needs to change."
+	}
+	out.Checks = append(out.Checks, c)
+
+	// Amounts far below the brand's usual: dollars sent as cents.
+	var small, sample int
+	if err := q.QueryRow(ctx, `WITH recent AS (
+			SELECT currency, amount_minor FROM transactions WHERE brand_id = $1 AND kind = 'payment' AND status = 'succeeded'
+			  AND source IN ('api', 'events') AND amount_minor > 0 AND occurred_at > now() - interval '30 days'),
+		usual AS (SELECT currency, percentile_cont(0.5) WITHIN GROUP (ORDER BY amount_minor) AS mid, count(*) AS n FROM recent GROUP BY currency)
+		SELECT COALESCE(sum(CASE WHEN u.n >= 5 AND u.mid >= 1000 AND r.amount_minor * 50 <= u.mid THEN 1 ELSE 0 END), 0)::int, count(*)::int
+		FROM recent r JOIN usual u USING (currency)`, brand).Scan(&small, &sample); err != nil {
+		return err
+	}
+	c = setupCheck{Key: "amounts", Title: "Amounts are in cents", Count: sample, Status: "ok",
+		Fix: `amount_minor is in the currency's smallest unit: $49.00 is 4900, ¥4900 is 4900. On Order Completed, revenue is in dollars (49.00).`}
+	if small > 0 {
+		c.Status, c.Detail = "warning", nOf(small, "payment", "payments")+" in the last 30 days were 50 or more times smaller than this brand's usual payment, which usually means dollars were sent as amount_minor (49 instead of 4900). Fix the sender, then delete and send those payments again with the right amount."
+	}
+	out.Checks = append(out.Checks, c)
+	return nil
+}
+
+// duplicateGroups are a brand's payments and refunds ($1) kept twice: one
+// row from an order event and one from the API with the same id, saved at
+// the same moment before both ways took turns on an id. One row per id.
+const duplicateGroups = `SELECT CASE WHEN t.kind = 'payment' THEN 'payment' ELSE 'refund' END AS class, t.source_id
+	FROM transactions t WHERE t.brand_id = $1 AND t.source IN ('api', 'events')
+	GROUP BY 1, 2 HAVING count(DISTINCT t.source) > 1`
+
+// span is a duration in words: "3 days" or "5 hours".
+func span(d time.Duration) string {
+	if d >= 48*time.Hour {
+		return strconv.Itoa(int(d/(24*time.Hour))) + " days"
+	}
+	if h := int(d / time.Hour); h >= 1 {
+		return nOf(h, "hour", "hours")
+	}
+	return nOf(max(int(d/time.Minute), 1), "minute", "minutes")
+}
+
 // nOf is "1 order" or "3 orders".
 func nOf(n int, one, many string) string {
 	if n == 1 {
@@ -310,4 +461,134 @@ func (s *Server) linkRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// mergeDuplicatePayments keeps each payment or refund the brand has twice
+// (an order event's row and the API's with the same id, duplicateGroups)
+// once: the copy already counted (else the one with a person, else the
+// first) stays, takes the other's person when it has none, and counts; the
+// other goes to Recently deleted, restorable for 7 days. Its partner sale,
+// if any, belongs to the copy kept, so none is taken back.
+func (s *Server) mergeDuplicatePayments(w http.ResponseWriter, r *http.Request) {
+	a := accessFrom(r.Context())
+	ctx := r.Context()
+	if !decodeOptional(w, r, &struct{}{}) {
+		return
+	}
+	start := time.Now()
+	merged := 0
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, duplicateGroups, a.Brand)
+		if err != nil {
+			return err
+		}
+		type group struct{ class, sourceID string }
+		groups, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (group, error) {
+			var g group
+			return g, row.Scan(&g.class, &g.sourceID)
+		})
+		if err != nil {
+			return err
+		}
+		billing := map[string]bool{}
+		for _, g := range groups {
+			n, rec, err := mergeDuplicate(ctx, tx, a, g.class, g.sourceID)
+			if err != nil {
+				return err
+			}
+			merged += n
+			if rec != "" {
+				billing[rec] = true
+			}
+		}
+		for rec := range billing {
+			if err := quietBilling(ctx, tx, a.WorkspaceID, rec); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	outcome := "merged"
+	if err != nil {
+		outcome = "error"
+	}
+	metrics.TransactionSaved("duplicates", outcome, time.Since(start))
+	if s.allocError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"merged": merged})
+}
+
+// mergeDuplicate keeps one row of the payment or refund (class) with
+// sourceID, as mergeDuplicatePayments says. It returns how many copies it
+// removed and the person of the one kept.
+func mergeDuplicate(ctx context.Context, tx pgx.Tx, a *access, class, sourceID string) (int, string, error) {
+	if err := lockTransaction(ctx, tx, a.Brand, class, sourceID); err != nil {
+		return 0, "", err
+	}
+	kinds := []string{"payment"}
+	if class != "payment" {
+		kinds = []string{"refund", "chargeback"}
+	}
+	var counted string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT properties->>'transaction_id' FROM customer_events WHERE workspace_id = $1 AND message_id = $2 LIMIT 1), '')`,
+		a.WorkspaceID, paymentMessageID(a.Brand, "api", class, sourceID)).Scan(&counted); err != nil {
+		return 0, "", err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+transactionColumns+` FROM transactions t
+		WHERE t.brand_id = $1 AND t.workspace_id = $2 AND t.source IN ('api', 'events') AND t.source_id = $3 AND t.kind = ANY($4)
+		ORDER BY t.id::text = $5 DESC, t.record_id IS NOT NULL DESC, t.created_at, t.id FOR UPDATE`, a.Brand, a.WorkspaceID, sourceID, kinds, counted)
+	if err != nil {
+		return 0, "", err
+	}
+	copies, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (transactionView, error) { return scanTransaction(row) })
+	if err != nil || len(copies) < 2 {
+		return 0, "", err
+	}
+	keep := copies[0]
+	for _, gone := range copies[1:] {
+		if keep.RecordID == nil && gone.RecordID != nil {
+			if _, err := tx.Exec(ctx, `UPDATE transactions SET record_id = $2, updated_at = now() WHERE id = $1`, keep.ID, *gone.RecordID); err != nil {
+				return 0, "", err
+			}
+			keep.RecordID = gone.RecordID
+		}
+		d, err := startDeletion(ctx, tx, a, deletedTransaction, gone.RecordID, gone.ID)
+		if err != nil {
+			return 0, "", err
+		}
+		if _, err := d.move(ctx, tx, "transactions", `gone.record_id`, `t.workspace_id = $1 AND t.id = $2`, d.ws, gone.ID); err != nil {
+			return 0, "", err
+		}
+		if err := d.finish(ctx, tx); err != nil {
+			return 0, "", err
+		}
+		metrics.RecoveryDeleted(deletedTransaction)
+		data := map[string]any{"kind": deletedTransaction, "transaction_kind": gone.Kind, "source": gone.Source, "merged_into": keep.ID}
+		if gone.RecordID != nil {
+			data["record_id"] = *gone.RecordID
+		}
+		if err := recordDeleted(ctx, tx, a, "transaction.deleted", "transaction", gone.ID, d, data); err != nil {
+			return 0, "", err
+		}
+		if err := record(ctx, tx, &a.principal, a.WorkspaceID, "transaction.merged", "transaction", keep.ID, map[string]any{"brand_id": a.Brand,
+			"kind": keep.Kind, "matched_by": "duplicate", "source": gone.Source, "source_id": gone.SourceID, "amount_minor": gone.AmountMinor,
+			"currency": gone.Currency, "kept_source": keep.Source, "kept_source_id": keep.SourceID, "kept_amount_minor": keep.AmountMinor,
+			"kept_currency": keep.Currency, "amounts_differ": gone.AmountMinor != keep.AmountMinor || gone.Currency != keep.Currency,
+			"deletion_id": d.id}); err != nil {
+			return 0, "", err
+		}
+	}
+	v, err := scanTransaction(tx.QueryRow(ctx, `SELECT `+transactionColumns+` FROM transactions t WHERE t.id = $1`, keep.ID))
+	if err != nil {
+		return 0, "", err
+	}
+	if _, err := countPayment(ctx, tx, a.WorkspaceID, v); err != nil {
+		return 0, "", err
+	}
+	rec := ""
+	if v.RecordID != nil {
+		rec = *v.RecordID
+	}
+	return len(copies) - 1, rec, nil
 }

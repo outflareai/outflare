@@ -75,7 +75,7 @@ var aiTasks = []aiTask{
 	{taskCheckIn, "Routine check-ins", "Outflare's agent looking in on a running mission when nothing new came from you."},
 	{taskReplyLabelling, "Reply labelling", "Labelling replies to your outreach: interested, not now, out of office and so on."},
 	{taskDomainResearch, "Domain research", "Reading an unknown email domain's homepage to tell what kind of company it is."},
-	{taskAIVisibility, "AI visibility", "Reading what AI models answer about your brands, such as checking the answers against your brand's facts."},
+	{taskAIVisibility, "AI visibility", "Reading what AI models answer about your brands, such as checking the answers against your brand's facts, and checking your own pages the way an AI answer reads them."},
 	{taskSocialReplies, "Social replies", "Drafting replies to posts your social watches found, such as Reddit threads, for a person to approve."},
 	{taskSocialPosts, "Social posts", "Drafting the brand's own posts on X and LinkedIn, for a person to approve."},
 	{taskReviewReplies, "Review answers", "Drafting public answers to reviews of your brands, for a person to edit and post."},

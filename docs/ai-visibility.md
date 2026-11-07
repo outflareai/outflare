@@ -35,10 +35,34 @@ question:
 - **Questions.** Every tracked question by topic, awareness and question
   type. Open one to read each assistant's latest answer side by side, with
   the brands it named, its sources and a link to ask it yourself.
-- **Competitors.** The full leaderboard, and brands the answers name that
-  you don't count yet, with one click to count them.
+- **Competitors.** The full leaderboard, against every competitor on the
+  Competitors page. Brands the answers name next to you are matched to
+  their websites by themselves and go to the Competitors page as
+  suggestions to say Yes or No to. Each name is sorted once and
+  remembered, so it isn't asked about again:
+  - a listed competitor's domain written as words ("Bright Data" for
+    brightdata.com) is that competitor, and gets the name;
+  - a product of a listed competitor ("Bright Data Web Unlocker",
+    "Zyte API") counts as that competitor, and is added to its names;
+  - for the rest, after each run and once a day, the workspace's model for
+    the `ai_visibility` task, on its own key, sorts each name, using the
+    sites the answers cited where it was named. A competitor it is certain
+    of is a plain suggestion; one it only thinks is right asks "Is this
+    their website?", with a Wrong website button. A product of a company
+    that isn't listed suggests the company. A name that isn't a competitor
+    (an open-source library, a framework, a marketplace) goes under
+    "Named, not competitors" with what it is, and an "It's a competitor"
+    button. A name that is a kind of product rather than a brand ("web
+    scraping API") leaves the list. Names it doesn't know show its best
+    guess at their website to add, and are checked again each week.
+
+  A competitor added in the setup goes on the Competitors page too.
 - **Sources.** The pages to get onto (sent to Presence), the sites answers
-  cite and the kinds of source.
+  cite and the kinds of source. The table shows each page's address first
+  and its site next; click a row for the page in full (see "One page in
+  full" below). The images and files an assistant shows from its own
+  servers (ChatGPT's images.openai.com) aren't pages, and are left out
+  everywhere.
 - **How AI describes you.** Recommended, listed or warned against, for you
   and each competitor; your facts and the answers that get them wrong.
 - **Traffic.** Visits, conversions and revenue from AI answers, and AI
@@ -60,8 +84,9 @@ Northpeak". Each cohort has:
   brand's sites count by themselves (hosts of one company grouped under its
   name, with its other names), and the cohort can add others or name one
   differently (each with a name, domains and aliases). The cohort's own come
-  first, and a run counts at most 25. `tracked_competitors` on the cohort
-  lists the tracked ones it counts;
+  first, then every tracked one: a run counts the brand's whole competitor
+  list, however long. `tracked_competitors` on the cohort lists the tracked
+  ones it counts;
 - a locale (`en-US`) that each question mentions, so answers suit that market;
 - a schedule: `off` (run by hand), `daily` or `weekly`. A scheduled run that fails, or gets no answer from any model, is tried again after 15 minutes, then 1 and 2 hours, then every 4 hours, so the day (or week) still has answers; a run a person stopped, or one the AI budget stopped, waits for the next scheduled time.
 
@@ -118,12 +143,12 @@ line on `why` a buyer asks it. Runs skip them until a person keeps one
 connected, drafting says which connection to add.
 
 ```sh
-curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/ai-cohorts" \
+curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/ai-cohorts" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Proxy buyers", "brand_id": "'$BRAND'", "schedule": "weekly",
        "competitors": [{"name": "Northpeak", "domains": ["northpeak.example"]}]}'
 
-curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/ai-cohorts/$COHORT/prompts" \
+curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/ai-cohorts/$COHORT/prompts" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"prompts": [{"text": "best residential proxy provider", "intent": "discovery"}]}'
 ```
@@ -158,7 +183,7 @@ direct connection Outflare uses Claude's list prices, or the price you enter.
 ## Runs
 
 A run asks every chosen model every active prompt in a cohort. Start one with
-`POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/runs` (or MCP
+`POST /v1/brands/{brand}/ai-cohorts/{cohort}/runs` (or MCP
 `run_ai_prompts`), or let the schedule do it. One run per cohort goes at a
 time; stop it with `POST .../ai-runs/{run}/stop`. Runs happen in the
 background, a few answers at a time, and each answer is kept with its model,
@@ -182,7 +207,7 @@ the model's own citations first, then links in the text. A cited page is the
 brand's, a competitor's or another site's (a review site, a forum) by its
 domain.
 
-`GET /v1/workspaces/{ws}/ai-visibility?days=28` answers, per cohort:
+`GET /v1/brands/{brand}/ai-visibility?days=28` answers, per cohort:
 
 | Figure | Meaning |
 | --- | --- |
@@ -235,6 +260,23 @@ brand, which competitors they named and how many questions it answers;
 `own_pages` are the brand's own pages the answers cite. The Sources page
 shows the same table; the pages to get onto are also Presence opportunities
 (below).
+
+### One page in full
+
+`GET /v1/brands/{brand}/ai-visibility/page?page=` is one page the answers
+cited or read in the last 90 days: when they first and last did, the
+questions they answered and the competitors they named; the site's domain
+rating, page rating and traffic (from Presence's reads on the workspace's
+own SEO connection, or null); the links to the page, from its latest link
+read (counting them is a paid read on the workspace's own SEO connection,
+estimated and confirmed first, `POST /v1/workspaces/{ws}/link-reads`); and
+who is on the page. OutflareBot reads the page (obeying robots.txt and
+opt-outs) and says, for the brand and each tracked competitor, whether it
+links to their website (with nofollow and the link text), names them
+without a link, or doesn't have them. After each run it reads the 25 pages
+the answers cite most that it hasn't read in 14 days;
+`POST /v1/brands/{brand}/ai-visibility/page/check` reads one now. This
+shows where competitors get named, and how, so you can do the same.
 
 ### Downloading the tables
 
@@ -414,7 +456,7 @@ Each brand can have up to 50 facts, each with an optional topic (pricing,
 product, company, availability, integrations, other).
 
 ```sh
-curl -X POST "$OUTFLARE_URL/v1/workspaces/$WS/ai-facts" \
+curl -X POST "$OUTFLARE_URL/v1/brands/$BRAND/ai-facts" \
   -H "Authorization: Bearer $OUTFLARE_TOKEN" -H "Content-Type: application/json" \
   -d '{"brand_id": "'$BRAND'", "topic": "pricing", "statement": "Plans start at $49 a month"}'
 ```
@@ -464,6 +506,13 @@ A fact that any of the latest run's answers contradict is a fix too (rule
 confirmed when a later run's answers agree with the fact and none
 contradict it.
 
+A page of the brand's own that an [AI check](#your-pages) scores under 80
+with changes to make is a fix on its site (rule `ai_page_unclear`, one per
+page), with the changes as its count. Its prompt lists what the check said
+to change, and the fix ticket's brief is written from it. Checking the page
+again confirms it when the score reaches 80; a competitor's page never gets
+a fix.
+
 `GET .../fixes/{fix}/prompt` (MCP `get_fix_prompt`) turns the fix into a
 prompt for a writer or an agent: the question, who the answers named
 instead (or, for a fact, the wrong words), the pages they cited, and the
@@ -476,13 +525,48 @@ checks what robots.txt lets every AI search, user and training crawler
 read, and whether the site has an llms.txt; pages hidden from AI search go
 on the fixes list. See [the crawler's AI checks](crawler.md#ai-crawlers).
 
+### Your pages
+
+The **Your pages** tab (`GET /v1/brands/{brand}/ai-visibility/pages`, MCP
+`get_ai_visibility_pages`) shows whether AI answers can read, quote and
+trust the brand's own pages. It joins the latest site audit of each of the
+brand's sites with the answers of the period, so nothing is fetched and no
+AI is called:
+
+- **Your sites**: whether each has an llms.txt, which AI search and user
+  crawlers robots.txt keeps out, and what its robots.txt says about AI use
+  (`Content-Signal`, `Content-Usage`).
+- **What to fix**: how many pages break each AI rule of the audit (see
+  [the crawler's AI checks](crawler.md#ai-crawlers)), with why it matters
+  and how to fix it. They are on the fixes list too.
+- **Pages**: the pages that answers cite or that break a rule, cited pages
+  first, with the questions that have no direct answer and what the
+  structured data claims that the page doesn't show.
+- **Cited pages the audit didn't read**, so the next audit can reach them.
+- **Competitors' pages the answers cite** for the brand's questions (up to 20), with how many of those answers named the brand too. Check them with AI as well (below) to compare their score with yours.
+
+**Check with AI.** The rules find what code can see; reading finds the
+rest. `POST /v1/brands/{brand}/ai-visibility/pages/review` with up to 10
+`urls` on the brand's sites or tracked competitors' sites (MCP `review_ai_pages`, or **Check with AI** on
+a page) has the workspace's own AI model, the **AI visibility** task under
+Settings → AI model, read each page after OutflareBot fetches it (obeying
+robots.txt). It says whether the page answers up front, which questions it
+answers, which claims are vague or unsupported, and what to change, with a
+score from 0 to 100. It runs as a job and the result shows in `reviews`;
+checking again replaces it. Without an AI connection it answers
+`409 connector_needed`: Outflare never uses a key of its own. Asking is
+`ai_page.review_requested`, a finished check `ai_page.reviewed`, a failed
+one the product event `ai_page.review_failed`.
+
 ### Are AI crawlers visiting?
 
 With a Cloudflare Web Analytics connection, the analytics sync also reads
 the workspace's own Cloudflare request logs once a day and counts requests
 by each AI crawler, per host and day (`GET /v1/workspaces/{ws}/ai-bot-hits`,
 MCP `get_ai_bot_hits`). Search and user requests mean AI answers are
-reading the site; training requests only collect pages for training. The
+reading the site; training requests only collect pages for training.
+Googlebot and Bingbot are not counted here, though they feed AI Overviews
+and Copilot, because they are search engines' crawlers. The
 first read covers the last three days, then each day adds the newest
 complete days.
 

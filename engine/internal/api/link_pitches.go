@@ -24,15 +24,25 @@ import (
 
 func (s *Server) routesLinkPitches(mux *http.ServeMux) {
 	read, manage := auth.ScopeSequencesRead, auth.ScopeSequencesManage
+	mux.HandleFunc("POST /v1/brands/{brand}/link-prospects/{prospect}/pitches", s.onBrand(manage, s.startLinkPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/{prospect}/pitches", s.inBrand(manage, s.startLinkPitch))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-pitches", s.onBrand(read, s.listLinkPitches))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-pitches", s.inBrand(read, s.listLinkPitches))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-pitches/{pitch}", s.onBrand(read, s.getLinkPitch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-pitches/{pitch}", s.inBrand(read, s.getLinkPitch))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/link-pitches/{pitch}", s.onBrand(manage, s.editLinkPitch))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-pitches/{pitch}", s.inBrand(manage, s.editLinkPitch))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-pitches/{pitch}/approve", s.onBrand(manage, s.approveLinkPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-pitches/{pitch}/approve", s.inBrand(manage, s.approveLinkPitch))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-pitches/{pitch}/reject", s.onBrand(manage, s.rejectLinkPitch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-pitches/{pitch}/reject", s.inBrand(manage, s.rejectLinkPitch))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-building/sequences", s.onBrand(read, s.listLinkSequences))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-building/sequences", s.inBrand(read, s.listLinkSequences))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-building/sequences", s.onBrand(manage, s.createLinkSequence))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-building/sequences", s.inBrand(manage, s.createLinkSequence))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/link-building/sequences/{sequence}", s.onBrand(manage, s.updateLinkSequence))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-building/sequences/{sequence}", s.inBrand(manage, s.updateLinkSequence))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-prospects/results", s.onBrand(auth.ScopeSEORead, s.linkResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects/results", s.inBrand(auth.ScopeSEORead, s.linkResults))
 }
 
@@ -87,7 +97,7 @@ func (s *Server) loadLinkPitch(ctx context.Context, ws, id string, sel brandSel)
 func (s *Server) linkPitchFor(w http.ResponseWriter, r *http.Request, a *access) (*linkPitchView, bool) {
 	id := r.PathValue("pitch")
 	if validUUID(id) {
-		p, err := s.loadLinkPitch(r.Context(), a.WorkspaceID, id, brandSel{in: a.Brands})
+		p, err := s.loadLinkPitch(r.Context(), a.WorkspaceID, id, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false

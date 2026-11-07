@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -188,5 +189,47 @@ func TestIndexability(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if h := owner.must(200, "GET", path, nil)["history"].([]any); len(h) != 1 {
 		t.Fatalf("history: %v", h)
+	}
+}
+
+// A sitemap bigger than the crawl's cap: every page it lists is still in
+// the report, the ones past the cap as not crawled.
+func TestIndexabilityListsTheWholeSitemap(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/robots.txt":
+			w.Header().Set("Content-Type", "text/plain")
+			io.WriteString(w, "User-agent: *\nSitemap: http://"+r.Host+"/sitemap.xml\n")
+		case "/sitemap.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			io.WriteString(w, "<urlset>")
+			for i := range 40 {
+				fmt.Fprintf(w, "<url><loc>http://%s/p%d</loc></url>", r.Host, i)
+			}
+			io.WriteString(w, "</urlset>")
+		default:
+			w.Header().Set("Content-Type", "text/html")
+			io.WriteString(w, `<html><head><title>A page with a long enough title</title></head><body><a href="/p1">p1</a></body></html>`)
+		}
+	}))
+	defer site.Close()
+	id := owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": site.URL + "/", "max_pages": 5})["id"].(string)
+	e.runCrawls(t)
+	rid := owner.must(202, "POST", base+"/seo-sites/"+id+"/crawls", nil)["id"].(string)
+	waitFor(t, owner, base+"/crawls/"+rid, func(m map[string]any) bool { return m["status"] == "done" })
+
+	r := owner.must(200, "GET", base+"/seo-sites/"+id+"/indexability", nil)
+	sum := r["summary"].(map[string]any)
+	// The start page and the 40 sitemap pages, found; at most 5 read.
+	if sum["pages"] != 41.0 || sum["in_sitemap"] != 40.0 || sum["indexable"].(float64) > 5 {
+		t.Fatalf("summary: %v", sum)
+	}
+	for _, p := range owner.must(200, "GET", base+"/seo-sites/"+id+"/indexability/pages?limit=100", nil)["data"].([]any) {
+		if p := p.(map[string]any); p["url"] == site.URL+"/p39" && (p["in_sitemap"] != true || p["crawl_status"] != "skipped") {
+			t.Fatalf("last sitemap page: %v", p)
+		}
 	}
 }

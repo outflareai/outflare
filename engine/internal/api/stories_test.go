@@ -102,10 +102,10 @@ func TestStoriesCheckAndApproval(t *testing.T) {
 	}
 	owner.must(400, "PATCH", path, map[string]any{"status": "approved"})
 	owner.must(200, "PATCH", path, map[string]any{"status": "archived"})
-	if n := owner.must(200, "GET", base+"/stories", nil)["total"]; n != 0.0 {
+	if n := owner.must(200, "GET", base+"/stories?brand=northpeak", nil)["total"]; n != 0.0 {
 		t.Fatalf("archived stories leave the list: %v", n)
 	}
-	if n := owner.must(200, "GET", base+"/stories?status=archived", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/stories?brand=northpeak&status=archived", nil)["total"]; n != 1.0 {
 		t.Fatalf("archived: %v", n)
 	}
 

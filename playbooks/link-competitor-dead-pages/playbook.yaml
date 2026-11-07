@@ -30,19 +30,19 @@ inputs:
     example: northpeak.example
 steps:
   - say: List your competitors' pages that went dead and still have links, the most linking sites first.
-    tools: [listSEOSites, listDeadPages]
+    tools: [listBrandSEOSites, listBrandDeadPages]
   - say: For dead pages not read yet, read who links to them, after showing the cost and the budget.
-    tools: [readLinks, getLinkRead]
+    tools: [readBrandLinks, getBrandLinkRead]
   - say: Add the linking pages as competitor dead page prospects, with the dead page as evidence and your page that covers the same ground as the page to offer.
-    tools: [addLinkProspects]
+    tools: [addBrandLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
-    tools: [checkLinkProspects, listLinkProspects]
+    tools: [checkBrandLinkProspects, listBrandLinkProspects]
   - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
-    tools: [listLinkSequences, createLinkSequence, previewBrandSequence]
+    tools: [listBrandLinkSequences, createBrandLinkSequence, previewBrandSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
-    tools: [startLinkPitch, listLinkPitches]
+    tools: [startBrandLinkPitch, listBrandLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
-    tools: [getLinkResults, listLinkProspects]
+    tools: [getBrandLinkResults, listBrandLinkProspects]
 automation:
   events: [competitor.page_removed]
   gather: daily

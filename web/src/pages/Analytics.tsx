@@ -108,7 +108,7 @@ function AnalyticsPage({ ws, canManage, go }: { ws: string; canManage: boolean; 
   const tracking = useSiteTracking(ws);
 
   const load = useCallback(async () => {
-    const seoReq = api.GET("/v1/workspaces/{ws}/seo", { params: { path: { ws } } });
+    const seoReq = api.GET("/v1/brands/{brand}/seo", { params: { path: { brand: pickedBrandId() } } });
     const { data, error } = await api.GET("/v1/brands/{brand}/analytics", { params: { path: { brand: pickedBrandId() } } });
     if (error || !data) return setError(errorMessage(error));
     setSources(data.data);

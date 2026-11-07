@@ -505,12 +505,18 @@ func (s *Service) store(ctx context.Context, ws string, r sampleRow) error {
 			}
 		}
 		for _, c := range r.citations {
+			if AssetHost(c.Host) {
+				continue // the assistant's own image, not a page
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO ai_citations (sample_id, workspace_id, cohort_id, url, host, title, position, owner, competitor, sampled_at, source_type)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $8 IN ('brand', 'competitor') THEN $8 ELSE '' END) ON CONFLICT DO NOTHING`, id, ws, r.cohort.ID, c.URL, c.Host, c.Title, c.Position, c.Owner, clip(c.Competitor, 200), at); err != nil {
 				return err
 			}
 		}
 		for _, c := range r.read {
+			if AssetHost(c.Host) {
+				continue
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO ai_pages_read (sample_id, workspace_id, cohort_id, brand_id, url, host, title, position, owner, competitor, cited, sampled_at)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT DO NOTHING`,
 				id, ws, r.cohort.ID, r.cohort.BrandID, c.URL, c.Host, c.Title, c.Position, c.Owner, clip(c.Competitor, 200), c.Cited, at); err != nil {
@@ -568,6 +574,10 @@ func (s *Service) finish(ctx context.Context, ws, runID, status, reason, code st
 			data["reason"] = reason
 		}
 		if status == "done" {
+			// Match the brands the answers named to the competitor list.
+			if err := enqueueRunWebsites(ctx, tx, ws, cohortID, runID); err != nil {
+				return err
+			}
 			ch, err := syncFixes(ctx, tx, ws, cohortID, runID)
 			if err != nil {
 				return err
@@ -593,4 +603,18 @@ func (s *Service) finish(ctx context.Context, ws, runID, status, reason, code st
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "ai_run.finished",
 			TargetType: "ai_run", TargetID: runID, Data: data})
 	})
+}
+
+// enqueueRunWebsites queues finding the websites of the brands a finished
+// run's answers named, for the cohort's brand.
+func enqueueRunWebsites(ctx context.Context, tx pgx.Tx, ws, cohortID, runID string) error {
+	var brand *string
+	if err := tx.QueryRow(ctx, `SELECT brand_id::text FROM ai_cohorts WHERE workspace_id = $1 AND id = $2`, ws, cohortID).Scan(&brand); err != nil || brand == nil {
+		return err
+	}
+	if err := EnqueueWebsites(ctx, tx, ws, *brand, "run:"+runID); err != nil {
+		return err
+	}
+	// And read the pages the answers cite most, once a day at most.
+	return EnqueuePageChecks(ctx, tx, ws, *brand, "", time.Now().UTC().Format("2006-01-02"))
 }

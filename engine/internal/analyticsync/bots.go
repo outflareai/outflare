@@ -29,6 +29,9 @@ const (
 func BotToken(userAgent string) string {
 	ua := strings.ToLower(userAgent)
 	for _, b := range crawl.AIBots {
+		if b.SearchEngine {
+			continue // mostly ordinary search visits
+		}
 		if strings.Contains(ua, strings.ToLower(b.Token)) {
 			return b.Token
 		}
@@ -50,9 +53,11 @@ func (s *Syncer) syncBots(ctx context.Context, o *connectors.Opened, r connector
 	if last != nil {
 		days = botsRecent
 	}
-	agents := make([]string, len(crawl.AIBots))
-	for i, b := range crawl.AIBots {
-		agents[i] = b.Token
+	agents := make([]string, 0, len(crawl.AIBots))
+	for _, b := range crawl.AIBots {
+		if !b.SearchEngine {
+			agents = append(agents, b.Token)
+		}
 	}
 	type key struct{ host, day, token string }
 	sums := map[key]int64{}

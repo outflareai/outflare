@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useState } from "react";
 import type { Coverage, Journalist, JournalistImportResult, JournalistInput, NewsArticle, NewsSearch, OutletTier, SmartListRule } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -41,7 +42,14 @@ const path = (u: string) => {
   }
 };
 
-export function News({ ws, canManage, canLists, go }: Props) {
+// News searches belong to one brand.
+export function News(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="News searches" brands={active.length} />;
+  return <NewsPage key={brand.id} {...props} />;
+}
+
+function NewsPage({ ws, canManage, canLists, go }: Props) {
   const [section, setSection] = useState<Section>("coverage");
   const brandKey = useBrand(ws).query.brand ?? "";
   const brand = brandKey ? { brand: brandKey } : {};
@@ -80,7 +88,7 @@ function CoverageList({ ws, canManage, brand }: { ws: string; canManage: boolean
 
   useEffect(() => {
     setList(null);
-    api.GET("/v1/workspaces/{ws}/coverage", { params: { path: { ws }, query: { ...brand, status: show === "open" ? "new,confirmed" : "dismissed", limit: 200 } } })
+    api.GET("/v1/brands/{brand}/coverage", { params: { path: { brand: pickedBrandId() }, query: { ...brand, status: show === "open" ? "new,confirmed" : "dismissed", limit: 200 } } })
       .then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
         setList(data.data);
@@ -92,7 +100,7 @@ function CoverageList({ ws, canManage, brand }: { ws: string; canManage: boolean
     e.preventDefault();
     if (!url.trim() || !forBrand) return;
     setBusy("add");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/coverage", { params: { path: { ws } }, body: { brand_id: forBrand, url: url.trim() } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/coverage", { params: { path: { brand: pickedBrandId() } }, body: { brand_id: forBrand, url: url.trim() } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -102,7 +110,7 @@ function CoverageList({ ws, canManage, brand }: { ws: string; canManage: boolean
   };
   const move = async (c: Coverage, body: { status?: CoverageStatus; linked?: boolean }) => {
     setBusy(c.id);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/coverage/{coverage}", { params: { path: { ws, coverage: c.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/coverage/{coverage}", { params: { path: { brand: pickedBrandId(), coverage: c.id } }, body });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -203,12 +211,12 @@ function Articles({ ws, brand }: { ws: string; brand: { brand?: string } }) {
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query: brand } }).then(({ data }) => setSearches(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/news-searches", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSearches(data?.data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand.brand]);
   useEffect(() => {
     setList(null);
-    api.GET("/v1/workspaces/{ws}/news-articles", { params: { path: { ws }, query: { ...brand, ...(search ? { search_id: search } : {}), limit: 200 } } })
+    api.GET("/v1/brands/{brand}/news-articles", { params: { path: { brand: pickedBrandId() }, query: { ...brand, ...(search ? { search_id: search } : {}), limit: 200 } } })
       .then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
         setError("");
@@ -282,12 +290,12 @@ function Journalists({ ws, canManage, canLists, brand }: { ws: string; canManage
   const [reload, setReload] = useState(0);
   const [dialog, setDialog] = useState<"add" | "import" | Journalist | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query: brand } }).then(({ data }) => setSearches(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/news-searches", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSearches(data?.data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand.brand]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/journalists", {
-      params: { path: { ws }, query: { ...brand, ...(search ? { search_id: search } : {}), ...(beat ? { beat } : {}), ...(tier ? { tier } : {}), limit: 200 } },
+    api.GET("/v1/brands/{brand}/journalists", {
+      params: { path: { brand: pickedBrandId() }, query: { ...brand, ...(search ? { search_id: search } : {}), ...(beat ? { beat } : {}), ...(tier ? { tier } : {}), limit: 200 } },
     }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
@@ -324,7 +332,7 @@ function Journalists({ ws, canManage, canLists, brand }: { ws: string; canManage
     toast("Media list made. It's under Lists and keeps itself up to date.");
   };
   const patch = async (j: Journalist, body: { beats?: string[]; job_title?: string | null; journalist?: boolean }) => {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/journalists/{record}", { params: { path: { ws, record: j.record_id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/journalists/{record}", { params: { path: { brand: pickedBrandId(), record: j.record_id } }, body });
     if (error) return setError(errorMessage(error));
     setError("");
     setReload((n) => n + 1);
@@ -482,7 +490,7 @@ function AddJournalist({ ws, onClose, onDone }: { ws: string; onClose: () => voi
       ...(splitBeats(v.beats).length ? { beats: splitBeats(v.beats) } : {}),
       ...(v.brand_id ? { brand_id: v.brand_id } : {}),
     };
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journalists", { params: { path: { ws } }, body });
+    const { data, error } = await api.POST("/v1/brands/{brand}/journalists", { params: { path: { brand: pickedBrandId() } }, body });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
     toast(`${data.name || data.email} is on the list.`);
@@ -548,7 +556,7 @@ function AddJournalist({ ws, onClose, onDone }: { ws: string; onClose: () => voi
   );
 }
 
-function ImportJournalists({ ws, brand, onClose, onDone }: { ws: string; brand: { brand?: string }; onClose: () => void; onDone: () => void }) {
+function ImportJournalists({ ws: _ws, brand, onClose, onDone }: { ws: string; brand: { brand?: string }; onClose: () => void; onDone: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [check, setCheck] = useState<JournalistImportResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -557,8 +565,8 @@ function ImportJournalists({ ws, brand, onClose, onDone }: { ws: string; brand: 
   const send = async (dry: boolean) => {
     if (!file) return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/journalists/import", {
-      params: { path: { ws }, query: { ...brand, dry_run: dry } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/journalists/import", {
+      params: { path: { brand: pickedBrandId() }, query: { ...brand, dry_run: dry } },
       body: await file.text(),
       bodySerializer: (b: string) => b,
       headers: { "Content-Type": "text/csv" },
@@ -661,7 +669,7 @@ function Searches({ ws, canManage, brand, go }: { ws: string; canManage: boolean
   const forBrand = brand.brand ? active.find((b) => b.handle === brand.brand)?.id : draft.brand_id || active[0]?.id;
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/news-searches", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/news-searches", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -678,7 +686,7 @@ function Searches({ ws, canManage, brand, go }: { ws: string; canManage: boolean
       time_range: draft.time_range,
       ...(draft.purpose === "coverage" || brand.brand ? { brand_id: forBrand } : {}),
     };
-    const { error } = await api.POST("/v1/workspaces/{ws}/news-searches", { params: { path: { ws } }, body });
+    const { error } = await api.POST("/v1/brands/{brand}/news-searches", { params: { path: { brand: pickedBrandId() } }, body });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -688,21 +696,21 @@ function Searches({ ws, canManage, brand, go }: { ws: string; canManage: boolean
   };
   const run = async (s: NewsSearch) => {
     setBusy(s.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/news-searches/{search}/run", { params: { path: { ws, search: s.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/news-searches/{search}/run", { params: { path: { brand: pickedBrandId(), search: s.id } } });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
     toast("Running. New articles show in a minute.");
   };
   const patch = async (s: NewsSearch, body: { status?: NewsSearch["status"]; check_every_hours?: number }) => {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/news-searches/{search}", { params: { path: { ws, search: s.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/news-searches/{search}", { params: { path: { brand: pickedBrandId(), search: s.id } }, body });
     if (error) return setError(errorMessage(error));
     setError("");
     setReload((n) => n + 1);
   };
   const remove = async (s: NewsSearch) => {
     if (!(await confirmAction(`Delete "${s.name}"?`, "The articles only it found go too. Coverage it found stays.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/news-searches/{search}", { params: { path: { ws, search: s.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/news-searches/{search}", { params: { path: { brand: pickedBrandId(), search: s.id } } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };

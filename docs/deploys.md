@@ -24,7 +24,7 @@ On the Connectors page, **Deploys** on a GitHub or Vercel connection lists what 
 curl -s $OUTFLARE_URL/v1/workspaces/$WS/integrations/$INTEGRATION/deploy-options -H "Authorization: Bearer $OUTFLARE_TOKEN"
 
 # Watch one. Without site_id, the matching SEO site is picked.
-curl -s -X POST $OUTFLARE_URL/v1/workspaces/$WS/deploy-targets -H "Authorization: Bearer $OUTFLARE_TOKEN" \
+curl -s -X POST $OUTFLARE_URL/v1/brands/$BRAND/deploy-targets -H "Authorization: Bearer $OUTFLARE_TOKEN" \
   -H "Content-Type: application/json" -d '{"integration_id": "'$INTEGRATION'", "target": "acme/website"}'
 ```
 
@@ -37,10 +37,10 @@ A production deploy going live records `deploy.detected`; one that fails records
 | Endpoint | Scope | |
 | --- | --- | --- |
 | `GET /v1/workspaces/{ws}/integrations/{id}/deploy-options` | `integrations.read` | Repositories or projects the connection can see |
-| `GET`, `POST /v1/workspaces/{ws}/deploy-targets` | `integrations.read`, `integrations.manage` | Watched targets; watch one |
-| `GET`, `PATCH`, `DELETE /v1/workspaces/{ws}/deploy-targets/{id}` | `integrations.read`, `integrations.manage` | Change its site, pause it, stop watching |
-| `POST /v1/workspaces/{ws}/deploy-targets/{id}/check` | `integrations.manage` | Check now |
-| `GET /v1/workspaces/{ws}/deploys` | `integrations.read` | Production deploys, newest first, by target, site or state |
+| `GET`, `POST /v1/brands/{brand}/deploy-targets` | `integrations.read`, `integrations.manage` | Watched targets; watch one |
+| `GET`, `PATCH`, `DELETE /v1/brands/{brand}/deploy-targets/{id}` | `integrations.read`, `integrations.manage` | Change its site, pause it, stop watching |
+| `POST /v1/brands/{brand}/deploy-targets/{id}/check` | `integrations.manage` | Check now |
+| `GET /v1/brands/{brand}/deploys` | `integrations.read` | Production deploys, newest first, by target, site or state |
 
 Targets and deploys take the brand of the site they serve, so a brand-limited member sees only their brands' deploys.
 

@@ -30,12 +30,19 @@ var errAlreadyTracked = errors.New("already tracked")
 
 func (s *Server) routesCompetitors(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-competitors", s.onBrand(read, s.listCompetitors))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-competitors", s.inBrand(read, s.listCompetitors))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-competitors", s.onBrand(manage, s.addCompetitor))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-competitors", s.inBrand(manage, s.addCompetitor))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-competitors/events", s.onBrand(read, s.listCompetitorEvents))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-competitors/events", s.inBrand(read, s.listCompetitorEvents))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-competitors/gaps", s.onBrand(read, s.competitorGaps))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-competitors/gaps", s.inBrand(read, s.competitorGaps))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/seo-competitors/{competitor}", s.onBrand(manage, s.updateCompetitor))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/seo-competitors/{competitor}", s.inBrand(manage, s.updateCompetitor))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-competitors/{competitor}", s.onBrand(manage, s.removeCompetitor))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-competitors/{competitor}", s.inBrand(manage, s.removeCompetitor))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-competitors/{competitor}/check", s.onBrand(manage, s.checkCompetitor))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-competitors/{competitor}/check", s.inBrand(manage, s.checkCompetitor))
 }
 
@@ -99,7 +106,7 @@ func (s *Server) loadCompetitor(r *http.Request, ws, id string, sel brandSel) (*
 func (s *Server) competitorFor(w http.ResponseWriter, r *http.Request, a *access) (*competitorView, bool) {
 	id := r.PathValue("competitor")
 	if validUUID(id) {
-		c, err := s.loadCompetitor(r, a.WorkspaceID, id, brandSel{in: a.Brands})
+		c, err := s.loadCompetitor(r, a.WorkspaceID, id, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -222,7 +229,7 @@ func (s *Server) addCompetitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &req.SiteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &req.SiteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -573,7 +580,7 @@ func (s *Server) competitorGaps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &siteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &siteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return

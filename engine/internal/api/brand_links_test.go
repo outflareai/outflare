@@ -224,9 +224,11 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 		t.Fatal(err)
 	}
 	accts := map[string]map[string]any{}
-	for _, a := range owner.must(200, "GET", base+"/social/accounts", nil)["data"].([]any) {
-		a := a.(map[string]any)
-		accts[a["handle"].(string)] = a
+	for _, brand := range []string{bid, "ghostpeak"} {
+		for _, a := range owner.must(200, "GET", base+"/social/accounts?brand="+brand, nil)["data"].([]any) {
+			a := a.(map[string]any)
+			accts[a["handle"].(string)] = a
+		}
 	}
 	np, gp := accts["northpeak"], accts["ghostpeak"]
 	if np == nil || np["channel"] != "x" || np["followers"] != 12300.0 || np["following"] != 258.0 || np["name"] != "Northpeak" || np["brand_id"] != bid ||
@@ -244,7 +246,7 @@ func TestBrandLinkDiscoveryAndPublicXFollowers(t *testing.T) {
 		t.Fatalf("ghostpeak's retry: %v", gp)
 	}
 	// Read now reads it again at once, as does Try again on the account.
-	owner.must(202, "POST", base+"/social/accounts/sync", nil)
+	owner.must(202, "POST", base+"/social/accounts/sync?brand=ghostpeak", nil)
 	var due bool
 	e.pool.QueryRow(ctx, `SELECT next_sync_at <= now() FROM social_accounts WHERE id = $1`, gp["id"]).Scan(&due)
 	if !due {

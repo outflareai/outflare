@@ -75,7 +75,7 @@ func IntakeChat(ctx context.Context, tx pgx.Tx, m ChatMessage) (Received, error)
 		err := tx.QueryRow(ctx, `
 			INSERT INTO support_conversations (workspace_id, brand_id, record_id, channel, subject, contact_email,
 				first_message_at, last_message_at, chat_widget_id, chat_token_hash, identity_verified, visitor_seen_at)
-			VALUES ($1, $2, $3, 'chat', $4, $5, $6, $6, $7, $8, $9, $6) RETURNING id::text`,
+			VALUES ($1, COALESCE($2::uuid, outflare_first_brand($1)), $3, 'chat', $4, $5, $6, $6, $7, $8, $9, $6) RETURNING id::text`,
 			ws, m.BrandID, record, subject, email, now, m.WidgetID, m.TokenHash, m.Verified).Scan(&conv)
 		if err != nil {
 			return out, err

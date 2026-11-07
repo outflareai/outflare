@@ -1,3 +1,5 @@
+import { createContext } from "react";
+
 // The brand agent (Outflare Cloud): one agent per brand that works toward
 // the team's objectives. Its routes are the hosted extension's, so they
 // are called without the typed client. The link and PR pages give the
@@ -17,6 +19,14 @@ export type AgentObjective = {
   measured_at: string | null;
   measure_error: string;
 };
+// The Agents page's tabs: the brand agent's page adds its own views to the
+// row at the top (its tasks, its activity), so every part of the page is
+// one click away instead of in a menu. view is the tab that is open; go
+// opens one ("agent" is the chat).
+export type AgentPageTab = { value: string; label: string; count?: number };
+export type AgentPageTabs = { view: string; go: (view: string) => void; setTabs: (tabs: AgentPageTab[]) => void };
+export const AgentPageTabsContext = createContext<AgentPageTabs | null>(null);
+
 export type BrandAgent = { id: string; brand_id: string; status: string; objectives: AgentObjective[] };
 type Failure = { error: { code: string; message: string } };
 

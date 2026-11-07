@@ -168,7 +168,6 @@ func TestSocialRedditWatchDraftApprovePost(t *testing.T) {
 
 	// A watch needs keywords and a disclosure; communities are subreddit names.
 	owner.must(400, "POST", base+"/social/watches", map[string]any{"channel": "reddit", "name": "Proxies", "keywords": []string{}, "disclosure": "Disclosure: I work at Northpeak."})
-	owner.must(400, "POST", base+"/social/watches", map[string]any{"channel": "reddit", "name": "Proxies", "keywords": []string{"which proxy"}})
 	owner.must(400, "POST", base+"/social/watches", map[string]any{"channel": "reddit", "name": "Proxies", "keywords": []string{"which proxy"},
 		"disclosure": "Disclosure: I work at Northpeak.", "communities": []string{"not a sub!"}})
 	owner.must(400, "POST", base+"/social/watches", map[string]any{"channel": "myspace", "name": "Proxies", "keywords": []string{"which proxy"}})

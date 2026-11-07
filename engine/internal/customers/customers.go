@@ -53,6 +53,18 @@ func OwnerOfIn(ctx context.Context, q Querier, workspaceID, brand, namespace, va
 	return recordID, err == nil, err
 }
 
+// HoldersIn returns the people of a brand holding an identity, verified or
+// not, oldest first. An empty brand looks in every brand. value is as
+// stored: trimmed, and lowercase for an email or domain.
+func HoldersIn(ctx context.Context, q Querier, workspaceID, brand, namespace, value string) ([]string, error) {
+	var holders []string
+	err := q.QueryRow(ctx, `SELECT COALESCE(array_agg(i.record_id::text ORDER BY i.valid_from), '{}') FROM record_identities i JOIN records r ON r.id = i.record_id
+		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.record_type = 'person'
+		AND ($4 = '' OR i.brand_id = NULLIF($4, '')::uuid)`,
+		workspaceID, namespace, value, brand).Scan(&holders)
+	return holders, err
+}
+
 // EnsurePerson returns the person an email, phone or other identity belongs
 // to, making one (origin first_party) when nobody holds it. verified says
 // the person just proved they own it, such as by clicking a link sent to
@@ -77,15 +89,11 @@ func EnsurePersonIn(ctx context.Context, q Querier, workspaceID, brand, namespac
 	if id, ok, err := OwnerOfIn(ctx, q, workspaceID, brand, namespace, value); err != nil || ok {
 		return id, err
 	}
-	var holders []string
-	var oldest string
-	err := q.QueryRow(ctx, `SELECT COALESCE(array_agg(i.record_id::text ORDER BY i.valid_from), '{}') FROM record_identities i JOIN records r ON r.id = i.record_id
-		WHERE i.workspace_id = $1 AND i.namespace = $2 AND i.value = $3 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.record_type = 'person'
-		AND ($4 = '' OR i.brand_id = NULLIF($4, '')::uuid)`,
-		workspaceID, namespace, value, brand).Scan(&holders)
+	holders, err := HoldersIn(ctx, q, workspaceID, brand, namespace, value)
 	if err != nil {
 		return "", err
 	}
+	var oldest string
 	if len(holders) > 0 {
 		oldest = holders[0]
 	}

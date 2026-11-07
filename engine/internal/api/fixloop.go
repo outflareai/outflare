@@ -51,7 +51,7 @@ func (s *Server) getFixPrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) buildFixPrompt(ctx context.Context, ws string, fix *fixView) (fixPrompt, error) {
-	out := fixPrompt{Pages: []fixPromptPage{}, VerifyURL: fmt.Sprintf("%s/v1/workspaces/%s/fixes/%s/verify", s.publicURL, ws, fix.ID)}
+	out := fixPrompt{Pages: []fixPromptPage{}, VerifyURL: fmt.Sprintf("%s/v1/brands/%s/fixes/%s/verify", s.publicURL, deref(fix.BrandID), fix.ID)}
 	if fix.Source == aivis.FixSource {
 		return s.buildAIFixPrompt(ctx, ws, fix, out)
 	}
@@ -162,6 +162,10 @@ func (s *Server) verifyFix(w http.ResponseWriter, r *http.Request) {
 	}
 	if !a.writes(fix.BrandID) {
 		writeError(w, r, http.StatusForbidden, "forbidden", string(errSharedRecord))
+		return
+	}
+	if fix.Source == aivis.FixSource && fix.Rule.ID == "ai_page_unclear" {
+		writeError(w, r, http.StatusConflict, "conflict", "a page's AI check fix is checked by checking the page again: POST /v1/brands/{brand}/ai-visibility/pages/review (MCP review_ai_pages)")
 		return
 	}
 	if fix.Source == aivis.FixSource {

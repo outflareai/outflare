@@ -29,6 +29,7 @@ import (
 
 func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility", s.onBrand(read, s.getAIVisibility))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-visibility", s.inBrand(read, s.getAIVisibility))
 	// Settings are the brand's; the workspace route acts on ?brand= or the
 	// first brand.
@@ -36,23 +37,44 @@ func (s *Server) routesAIVisibility(mux *http.ServeMux) {
 	s.twinRoute(mux, "PUT", "ai-visibility/settings", s.inWorkspace, manage, s.putAIVisibilitySettings)
 	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/questions", s.onBrand(read, s.getAIVisibilityQuestions))
 	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/placements", s.onBrand(read, s.getAIVisibilityPlacements))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/page", s.onBrand(read, s.getAIVisibilityPage))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-visibility/page/check", s.onBrand(manage, s.checkAIVisibilityPage))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/pages", s.onBrand(read, s.getAIVisibilityPages))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-visibility/pages/review", s.onBrand(manage, s.reviewAIPages))
 	mux.HandleFunc("GET /v1/brands/{brand}/ai-visibility/series", s.onBrand(read, s.getAIVisibilitySeries))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-cohorts", s.onBrand(read, s.listAICohorts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts", s.inBrand(read, s.listAICohorts))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-cohorts", s.onBrand(manage, s.createAICohort))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts", s.inBrand(manage, s.createAICohort))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-cohorts/{cohort}", s.onBrand(read, s.getAICohort))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(read, s.getAICohort))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/ai-cohorts/{cohort}", s.onBrand(manage, s.updateAICohort))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(manage, s.updateAICohort))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/ai-cohorts/{cohort}", s.onBrand(manage, s.deleteAICohort))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ai-cohorts/{cohort}", s.inBrand(manage, s.deleteAICohort))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-cohorts/{cohort}/prompts", s.onBrand(read, s.listAIPrompts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", s.inBrand(read, s.listAIPrompts))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-cohorts/{cohort}/prompts", s.onBrand(manage, s.addAIPrompts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", s.inBrand(manage, s.addAIPrompts))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-cohorts/{cohort}/prompts/draft", s.onBrand(manage, s.draftAIPrompts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/draft", s.inBrand(manage, s.draftAIPrompts))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/ai-cohorts/{cohort}/prompts/{prompt}", s.onBrand(manage, s.updateAIPrompt))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", s.inBrand(manage, s.updateAIPrompt))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/ai-cohorts/{cohort}/prompts/{prompt}", s.onBrand(manage, s.deleteAIPrompt))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", s.inBrand(manage, s.deleteAIPrompt))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-cohorts/{cohort}/runs", s.onBrand(manage, s.startAIRun))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-cohorts/{cohort}/runs", s.inBrand(manage, s.startAIRun))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-runs", s.onBrand(read, s.listAIRuns))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-runs", s.inBrand(read, s.listAIRuns))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-runs/{run}", s.onBrand(read, s.getAIRun))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-runs/{run}", s.inBrand(read, s.getAIRun))
+	mux.HandleFunc("POST /v1/brands/{brand}/ai-runs/{run}/stop", s.onBrand(manage, s.stopAIRun))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ai-runs/{run}/stop", s.inBrand(manage, s.stopAIRun))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-samples", s.onBrand(read, s.listAISamples))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-samples", s.inBrand(read, s.listAISamples))
+	mux.HandleFunc("GET /v1/brands/{brand}/ai-samples/{sample}", s.onBrand(read, s.getAISample))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-samples/{sample}", s.inBrand(read, s.getAISample))
+	mux.HandleFunc("GET /v1/brands/{brand}/crawls/{crawl}/ai-access", s.onBrand(read, s.getCrawlAIAccess))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/crawls/{crawl}/ai-access", s.inBrand(read, s.getCrawlAIAccess))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ai-bot-hits", s.inWorkspace(read, s.getAIBotHits))
 }
@@ -454,7 +476,7 @@ func (s *Server) loadAICohorts(ctx context.Context, ws string, id *string, sel b
 func (s *Server) aiCohortFor(w http.ResponseWriter, r *http.Request, a *access) (*aiCohortView, bool) {
 	id := r.PathValue("cohort")
 	if validUUID(id) {
-		list, err := s.loadAICohorts(r.Context(), a.WorkspaceID, &id, brandSel{in: a.Brands})
+		list, err := s.loadAICohorts(r.Context(), a.WorkspaceID, &id, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -501,7 +523,7 @@ var localeRe = regexp.MustCompile(`^[a-z]{2,3}(-[A-Z]{2})?$`)
 
 const (
 	maxAliases     = 20
-	maxCompetitors = 25
+	maxCompetitors = 100
 	maxPrompts     = 200
 )
 
@@ -1243,7 +1265,7 @@ func (s *Server) listAIRuns(w http.ResponseWriter, r *http.Request) {
 func (s *Server) aiRunFor(w http.ResponseWriter, r *http.Request, a *access) (*aiRunView, bool) {
 	id := r.PathValue("run")
 	if validUUID(id) {
-		list, err := s.loadAIRuns(r.Context(), a.WorkspaceID, &id, nil, brandSel{in: a.Brands}, 1, 0)
+		list, err := s.loadAIRuns(r.Context(), a.WorkspaceID, &id, nil, brandSel{in: a.seenBrands()}, 1, 0)
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -1503,7 +1525,7 @@ func (s *Server) getAISample(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("sample")
 	if validUUID(id) {
 		args := []any{a.WorkspaceID, id}
-		list, err := s.loadAISamples(r.Context(), a.WorkspaceID, " AND s.id = $2"+brandSel{in: a.Brands}.sql("s.brand_id", &args), args, 1, 0)
+		list, err := s.loadAISamples(r.Context(), a.WorkspaceID, " AND s.id = $2"+brandSel{in: a.seenBrands()}.sql("s.brand_id", &args), args, 1, 0)
 		if err != nil {
 			s.internal(w, r, err)
 			return
@@ -1525,6 +1547,9 @@ func (s *Server) buildAIFixPrompt(ctx context.Context, ws string, fix *fixView, 
 	if fix.Subject.Type == "ai_fact" {
 		return s.buildAIFactFixPrompt(ctx, ws, fix, out)
 	}
+	if fix.Rule.ID == "ai_page_unclear" {
+		return s.buildAIPageFixPrompt(ctx, ws, fix, out)
+	}
 	var text, cohort, brand string
 	err := s.pool.QueryRow(ctx, `
 		SELECT p.text, p.cohort_id, COALESCE(b.name, '')
@@ -1535,7 +1560,7 @@ func (s *Server) buildAIFixPrompt(ctx context.Context, ws string, fix *fixView, 
 		return out, err
 	}
 	if cohort != "" {
-		out.VerifyURL = fmt.Sprintf("%s/v1/workspaces/%s/ai-cohorts/%s/runs", s.publicURL, ws, cohort)
+		out.VerifyURL = fmt.Sprintf("%s/v1/brands/%s/ai-cohorts/%s/runs", s.publicURL, deref(fix.BrandID), cohort)
 	}
 	var named []string
 	if fix.LastFoundBy != nil {
@@ -1635,7 +1660,7 @@ func (s *Server) buildAIFactFixPrompt(ctx context.Context, ws string, fix *fixVi
 		out.Pages = append(out.Pages, pages...)
 	}
 	if cohort != "" {
-		out.VerifyURL = fmt.Sprintf("%s/v1/workspaces/%s/ai-cohorts/%s/runs", s.publicURL, ws, cohort)
+		out.VerifyURL = fmt.Sprintf("%s/v1/brands/%s/ai-cohorts/%s/runs", s.publicURL, deref(fix.BrandID), cohort)
 	}
 	if brand == "" {
 		brand = "the brand"

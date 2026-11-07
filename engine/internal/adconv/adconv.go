@@ -229,7 +229,7 @@ func Match(ctx context.Context, q conversions.Querier, ws string) (int64, error)
 			AND e.received_at >= r.created_at AND e.received_at > now() - $2::interval
 		WHERE r.enabled AND ($1 = '' OR r.workspace_id::text = $1)
 		  AND (r.conversion_id IS NULL OR (d.archived_at IS NULL AND d.filters = '[]'::jsonb))
-		  AND (e.brand_id IS NULL OR a.brand_id IS NULL OR e.brand_id = a.brand_id)
+		  AND (a.brand_id IS NULL OR e.brand_id = a.brand_id)
 		  AND `+oneCopy("r.id")+`
 		ON CONFLICT (rule_id, event_row_id) DO NOTHING`, ws, fmt.Sprintf("%d seconds", int(window.Seconds())))
 	if err != nil {
@@ -288,7 +288,7 @@ func matchFiltered(ctx context.Context, q conversions.Querier, ws string) (int64
 		ev, err := q.Query(ctx, `SELECT e.id::text, e.record_id::text, `+conversionID+`, e.occurred_at, e.properties, e.received_at
 			FROM customer_events e
 			WHERE e.workspace_id = $1 AND e.name = $2 AND e.received_at > $3 AND e.received_at <= $4 AND e.occurred_at > now() - interval '30 days'
-			  AND (e.brand_id IS NULL OR $5::uuid IS NULL OR e.brand_id = $5::uuid)
+			  AND ($5::uuid IS NULL OR e.brand_id = $5::uuid)
 			  AND `+oneCopy("$7::uuid")+`
 			ORDER BY e.received_at, e.id LIMIT $6`, p.ws, d.Event, p.from, cutoff, p.brand, filterBatch, p.id)
 		if err != nil {

@@ -302,6 +302,9 @@ func TestQuoteApprovalLinkIsNeverReplayed(t *testing.T) {
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
 	_, qpath := quoteStory(t, owner, base, "northpeak", "ana@northpeak.example")
+	// The brand route itself: a key is kept per route.
+	bid := owner.must(200, "GET", base+"/brands/northpeak", nil)["id"].(string)
+	qpath = "/v1/brands/" + bid + strings.TrimPrefix(qpath, base)
 	keyed := &client{t: t, h: e.h, cookie: owner.cookie, header: map[string]string{"Idempotency-Key": "ask-ana-once"}}
 	first := keyed.must(201, "POST", qpath+"/approval-requests", map[string]any{"delivery": "link"})["url"].(string)
 	second := keyed.must(201, "POST", qpath+"/approval-requests", map[string]any{"delivery": "link"})["url"].(string)

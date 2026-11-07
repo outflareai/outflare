@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { Fix, FixGuideline, FixTicket, FixTicketDetail, SEOSite } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
@@ -31,7 +32,14 @@ type View = keyof typeof views;
 const severityRank: Record<string, number> = { error: 0, warning: 1, notice: 2 };
 const subjectName = (f: Pick<Fix, "source" | "subject">, hosts: Record<string, string>) => (f.source === "social" ? "A social watch" : f.source === "ai_visibility" ? "AI answers" : hosts[f.subject.id] ?? "A site");
 
-export function Fixes({ ws, canManage, go }: Props) {
+// Fixes belong to one brand.
+export function Fixes(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Fixes" brands={active.length} />;
+  return <FixesPage key={brand.id} {...props} />;
+}
+
+function FixesPage({ ws, canManage, go }: Props) {
   const [tickets, setTickets] = useState<FixTicket[] | null>(null);
   const [sites, setSites] = useState<SEOSite[]>([]);
   const [error, setError] = useState("");
@@ -46,7 +54,7 @@ export function Fixes({ ws, canManage, go }: Props) {
 
   const load = useCallback(async () => {
     const query = { ...(brandKey ? { brand: brandKey } : {}), status: view, ...(site ? { subject_id: site } : {}) };
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/fix-tickets", { params: { path: { ws }, query } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets", { params: { path: { brand: pickedBrandId() }, query } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setTickets(data.data);
@@ -55,7 +63,7 @@ export function Fixes({ ws, canManage, go }: Props) {
     load();
   }, [load]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brandKey ? { brand: brandKey } : {} } }).then(({ data }) => setSites(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSites(data?.data ?? []));
   }, [ws, brandKey]);
 
   const hosts = useMemo(() => Object.fromEntries(sites.map((s) => [s.id, s.host])), [sites]);
@@ -233,7 +241,7 @@ function TicketSheet({
   const [remember, setRemember] = useState<"" | "site" | "brand" | "workspace">("");
 
   const fetchDetail = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/fix-tickets/{ticket}", { params: { path: { ws, ticket: ticket.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     setD(data);
@@ -257,7 +265,7 @@ function TicketSheet({
 
   async function write(feedback?: string) {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/fix-tickets/{ticket}/write", { params: { path: { ws, ticket: ticket.id } }, body: feedback ? { feedback } : {} });
+    const { error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/write", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } }, body: feedback ? { feedback } : {} });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setMode("");
@@ -268,7 +276,7 @@ function TicketSheet({
 
   async function review(body: Review, done: string) {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/fix-tickets/{ticket}/review", { params: { path: { ws, ticket: ticket.id } }, body });
+    const { data, error } = await api.POST("/v1/brands/{brand}/fix-tickets/{ticket}/review", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } }, body });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     setMode("");
@@ -283,7 +291,7 @@ function TicketSheet({
   async function eachOpen(body: { status: "in_progress" | "done"; assignee_id?: string }) {
     const open = (d?.fixes ?? []).filter((f) => f.status === "open" || f.status === "in_progress");
     for (const f of open) {
-      const { error } = await api.PATCH("/v1/workspaces/{ws}/fixes/{fix}", { params: { path: { ws, fix: f.id } }, body });
+      const { error } = await api.PATCH("/v1/brands/{brand}/fixes/{fix}", { params: { path: { brand: pickedBrandId(), fix: f.id } }, body });
       if (error) return errorMessage(error);
     }
     return "";
@@ -305,13 +313,13 @@ function TicketSheet({
     setBusy(true);
     const rest = open.slice(1);
     for (const f of rest) {
-      const { error } = await api.PATCH("/v1/workspaces/{ws}/fixes/{fix}", { params: { path: { ws, fix: f.id } }, body: { status: "done" } });
+      const { error } = await api.PATCH("/v1/brands/{brand}/fixes/{fix}", { params: { path: { brand: pickedBrandId(), fix: f.id } }, body: { status: "done" } });
       if (error) {
         setBusy(false);
         return toast(errorMessage(error), "error");
       }
     }
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/fixes/{fix}/verify", { params: { path: { ws, fix: open[0].id } }, body: {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/fixes/{fix}/verify", { params: { path: { brand: pickedBrandId(), fix: open[0].id } }, body: {} });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     if ("queued" in data) return toast("Held for approval by the mission's owner.");
@@ -322,7 +330,7 @@ function TicketSheet({
 
   async function copy() {
     setBusy(true);
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/fix-tickets/{ticket}/prompt", { params: { path: { ws, ticket: ticket.id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/fix-tickets/{ticket}/prompt", { params: { path: { brand: pickedBrandId(), ticket: ticket.id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     await navigator.clipboard?.writeText(data.prompt);
@@ -580,7 +588,7 @@ function GuidelinesSheet({ ws, sites, brandId, brandName, canManage, onClose }: 
   const hosts = useMemo(() => Object.fromEntries(sites.map((s) => [s.id, s.host])), [sites]);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/fix-guidelines", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/fix-guidelines", { params: { path: { brand: pickedBrandId() } } });
     if (error || !data) return setError(errorMessage(error));
     setList(data.data);
   }, [ws]);
@@ -592,7 +600,7 @@ function GuidelinesSheet({ ws, sites, brandId, brandName, canManage, onClose }: 
     e.preventDefault();
     setBusy(true);
     const body = { text: text.trim(), ...(scope === "brand" && brandId ? { brand_id: brandId } : {}), ...(scope.startsWith("site:") ? { subject_id: scope.slice(5) } : {}) };
-    const { error } = await api.POST("/v1/workspaces/{ws}/fix-guidelines", { params: { path: { ws } }, body });
+    const { error } = await api.POST("/v1/brands/{brand}/fix-guidelines", { params: { path: { brand: pickedBrandId() } }, body });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setText("");
@@ -601,7 +609,7 @@ function GuidelinesSheet({ ws, sites, brandId, brandName, canManage, onClose }: 
   }
 
   async function remove(g: FixGuideline) {
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/fix-guidelines/{guideline}", { params: { path: { ws, guideline: g.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/fix-guidelines/{guideline}", { params: { path: { brand: pickedBrandId(), guideline: g.id } } });
     if (error) return toast(errorMessage(error), "error");
     setList((l) => l?.filter((x) => x.id !== g.id) ?? null);
   }

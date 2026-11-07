@@ -46,7 +46,7 @@ function ExperimentsPage({ ws, canManage, go }: Props) {
   }, [ws, brandKey]);
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brandKey ? { brand: brandKey } : {} } }).then(({ data }) => setSites(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSites(data?.data ?? []));
   }, [load, ws, brandKey]);
 
   return (

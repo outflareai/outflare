@@ -3,9 +3,10 @@ import type { Schemas } from "@outflare/sdk";
 import { QueryChart } from "@/components/query-chart";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, Loading, Stat, Stats, field, toast } from "../../ui";
-import { Frame, RunBar, Section, answerCents, awarenessLevels, awarenessName, held, marketName, pct, questionTypes, score, th, typeName, usd, type AIData, type Entity, type Go, type Series } from "./shared";
+import { Frame, RunBar, Section, addCompetitor, answerCents, awarenessLevels, awarenessName, held, marketName, pct, questionTypes, score, th, typeName, usd, useCompetitorSite, type AIData, type Entity, type Go, type Series } from "./shared";
 import { Assistants, patchCohort } from "./settings";
 import { Suggestions, WhatChanged, usePrompts } from "./questions";
+import { pickedBrandId } from "@/lib/brand";
 
 type Fix = Schemas["Fix"];
 type Opportunity = Schemas["PlacementOpportunity"];
@@ -31,24 +32,34 @@ function Setup({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   const { list, reload } = usePrompts(ws, d.cohort);
   const [rival, setRival] = useState("");
   const [busy, setBusy] = useState(false);
+  const site = useCompetitorSite(ws, d.brand.id);
   const c = d.cohort;
   const active = (list ?? []).filter((p) => p.status === "active").length;
 
   async function confirmBrand() {
     if (c) return setStep(1);
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts", { params: { path: { ws } }, body: { name: `${d.brand.name} questions`, brand_id: d.brand.id, competitors: [], schedule: "weekly" } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts", { params: { path: { brand: pickedBrandId() } }, body: { name: `${d.brand.name} questions`, brand_id: d.brand.id, competitors: [], schedule: "weekly" } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     if (held(data)) return;
     d.reload();
     setStep(1);
   }
+  // A competitor added here goes on the brand's one competitor list (the
+  // Competitors page), which every run counts. Only a brand without an
+  // SEO site, so without that list, keeps it on its question set alone.
   async function addRival(e: React.FormEvent) {
     e.preventDefault();
     if (!c) return;
     const [name, ...domains] = rival.split(",").map((s) => s.trim()).filter(Boolean);
     if (!name) return;
+    if (site) {
+      const website = domains[0] ?? (name.includes(".") ? name : "");
+      if (!website) return toast("Add its website after a comma, like Northpeak, northpeak.example.", "error");
+      if (await addCompetitor(ws, site, website === name ? "" : name, website)) { setRival(""); d.reload(); }
+      return;
+    }
     const competitors = [...c.competitors.map(({ name, domains, aliases }) => ({ name, domains, aliases })), { name, domains }];
     if (await patchCohort(ws, c, { competitors })) { setRival(""); d.reload(); }
   }
@@ -60,7 +71,7 @@ function Setup({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   async function run() {
     if (!c) return;
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts/{cohort}/runs", { params: { path: { ws, cohort: c.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts/{cohort}/runs", { params: { path: { brand: pickedBrandId(), cohort: c.id } } });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     if (held(data)) return;
@@ -101,17 +112,17 @@ function Setup({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
           </Section>
         )}
         {step === 1 && c && (
-          <Section title="Who do you compete with?" note="Answers are counted for you and for each of these. The ones on the Competitors page count already.">
+          <Section title="Who do you compete with?" note={<>Answers are counted for you and for every competitor on your <button className="underline" onClick={() => go("competitors")}>Competitors page</button>. Adding one here adds it there.</>}>
             {rivals.length > 0 ? (
               <ul className="mb-3 divide-y rounded-md border">
                 {rivals.map((r) => (
                   <li key={r.name} className="flex items-center justify-between px-3 py-2">
-                    <span>{r.name} <span className="font-mono text-[12px] text-muted-foreground">{r.domains.join(", ")}</span></span>
-                    {r.own ? <Button variant="ghost" onClick={() => dropRival(r.name)}>Remove</Button> : <span className="text-[12px] text-muted-foreground">from Competitors</span>}
+                    <span>{r.name} <span className="font-mono text-[12px] text-muted-foreground">{r.domains.filter((x) => x !== r.name).join(", ")}</span></span>
+                    {r.own ? <Button variant="ghost" onClick={() => dropRival(r.name)}>Remove</Button> : <span className="text-[12px] text-muted-foreground">on Competitors</span>}
                   </li>
                 ))}
               </ul>
-            ) : <p className="mb-3 text-muted-foreground">No competitors yet. Add three or four. After the first run, brands the answers name next to you are suggested too.</p>}
+            ) : <p className="mb-3 text-muted-foreground">No competitors yet. Add three or four. After each run, brands the answers name next to you are suggested on the Competitors page too.</p>}
             <form className="flex flex-wrap gap-2" onSubmit={addRival}>
               <input className={`${field} w-72`} aria-label="Competitor" placeholder="Northpeak, northpeak.example" value={rival} onChange={(e) => setRival(e.target.value)} />
               <Button variant="ghost" type="submit" disabled={!rival.trim()}>Add</Button>
@@ -403,7 +414,7 @@ function NextSteps({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
   const [fixes, setFixes] = useState<Fix[]>([]);
   const [opps, setOpps] = useState<Opportunity[]>([]);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/fixes", { params: { path: { ws }, query: { source: "ai_visibility", status: "open" } } }).then(({ data }) => setFixes((data?.data ?? []).filter((f) => f.brand_id === d.brand.id || f.brand_id === null)));
+    api.GET("/v1/brands/{brand}/fixes", { params: { path: { brand: pickedBrandId() }, query: { source: "ai_visibility", status: "open" } } }).then(({ data }) => setFixes((data?.data ?? []).filter((f) => f.brand_id === d.brand.id || f.brand_id === null)));
     api.GET("/v1/brands/{brand}/coverage/opportunities", { params: { path: { brand: d.brand.id }, query: { reason: "ai_cited", state: "open", limit: 3 } } }).then(({ data }) => setOpps(data?.data ?? []));
   }, [ws, d.brand.id]);
   const v = d.vis!;
@@ -412,7 +423,7 @@ function NextSteps({ ws, d, go }: { ws: string; d: AIData; go: Go }) {
     ...fixes.slice().sort((a, b) => sev[a.rule.severity] - sev[b.rule.severity] || b.count - a.count).slice(0, 4).map((f) => ({ key: f.id, what: f.count > 1 ? `${f.rule.title} (${f.count} ${f.unit})` : f.rule.title, why: f.rule.why, act: "Fix it", go: () => go("fixes") })),
     ...opps.map((o) => ({ key: o.id, what: `Get onto ${o.host}`, why: "AI answers to your questions cite this page, and it doesn't name you.", act: "Open in Presence", go: () => go("coverage") })),
     ...(v.facts.facts_wrong > 0 ? [{ key: "facts", what: `AI gets ${v.facts.facts_wrong} of your facts wrong`, why: `${v.facts.wrong_answers} of ${v.facts.checked_answers} checked answers said something untrue about you.`, act: "See what", go: () => go("ai-perception") }] : []),
-    ...(v.suggested_competitors.length > 0 ? [{ key: "rivals", what: `${v.suggested_competitors.length} more brands are named next to you`, why: `${v.suggested_competitors.slice(0, 3).map((b) => b.name).join(", ")} and others. Count them to see how you compare.`, act: "Review", go: () => go("ai-competitors") }] : []),
+    ...(v.suggested_competitors.length > 0 ? [{ key: "rivals", what: `${v.suggested_competitors.length} more brands are named next to you`, why: `${v.suggested_competitors.slice(0, 3).map((b) => b.name).join(", ")} and others. Say Yes or No to them on Competitors to see how you compare.`, act: "Review", go: () => go(v.suggested_competitors.some((b) => b.competitor_id) ? "competitors" : "ai-competitors") }] : []),
   ];
   return (
     <Section title="What to do next" note="The changes most likely to get you named and recommended, from your latest answers.">

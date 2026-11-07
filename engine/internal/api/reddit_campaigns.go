@@ -30,22 +30,39 @@ import (
 
 func (s *Server) routesRedditCampaigns(mux *http.ServeMux) {
 	read, manage, post := auth.ScopeSocialRead, auth.ScopeSocialManage, auth.ScopeSocialPost
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/settings", s.onBrand(read, s.listRedditSettings))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/settings", s.inBrand(read, s.listRedditSettings))
+	mux.HandleFunc("PUT /v1/brands/{brand}/reddit/settings", s.onBrand(manage, s.putRedditSettings))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/reddit/settings/{brand}", s.inBrand(manage, s.putRedditSettings))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/budget", s.onBrand(read, s.getRedditBudget))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/budget", s.inBrand(read, s.getRedditBudget))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/experiments", s.onBrand(read, s.listRedditExperiments))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/experiments", s.inBrand(read, s.listRedditExperiments))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/experiments", s.onBrand(manage, s.createRedditExperiment))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/experiments", s.inBrand(manage, s.createRedditExperiment))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/experiments/{id}", s.onBrand(read, s.getRedditExperiment))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/experiments/{id}", s.inBrand(read, s.getRedditExperiment))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/reddit/experiments/{id}", s.onBrand(manage, s.updateRedditExperiment))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/reddit/experiments/{id}", s.inBrand(manage, s.updateRedditExperiment))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/actions", s.onBrand(read, s.listRedditActions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/actions", s.inBrand(read, s.listRedditActions))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/actions", s.onBrand(manage, s.createRedditAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/actions", s.inBrand(manage, s.createRedditAction))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/actions/{id}", s.onBrand(read, s.getRedditAction))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/actions/{id}", s.inBrand(read, s.getRedditAction))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/actions/{id}/approve", s.onBrand(post, s.approveRedditAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/actions/{id}/approve", s.inBrand(post, s.approveRedditAction))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/actions/{id}/cancel", s.onBrand(manage, s.cancelRedditAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/actions/{id}/cancel", s.inBrand(manage, s.cancelRedditAction))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/actions/{id}/check", s.onBrand(manage, s.checkRedditActionNow))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/actions/{id}/check", s.inBrand(manage, s.checkRedditActionNow))
+	mux.HandleFunc("POST /v1/brands/{brand}/reddit/preflight", s.onBrand(manage, s.redditPreflight))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reddit/preflight", s.inBrand(manage, s.redditPreflight))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/subreddits/{name}", s.onBrand(read, s.getRedditSubreddit))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/subreddits/{name}", s.inBrand(read, s.getRedditSubreddit))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/threads", s.onBrand(read, s.listRedditThreads))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/threads", s.inBrand(read, s.listRedditThreads))
+	mux.HandleFunc("GET /v1/brands/{brand}/reddit/report", s.onBrand(read, s.getRedditReport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reddit/report", s.inBrand(read, s.getRedditReport))
 }
 
@@ -189,6 +206,9 @@ func redditBudget(ctx context.Context, q pgx.Tx, ws string, set redditSettingsVi
 
 // redditBrand resolves a brand id or handle the caller may see.
 func (s *Server) redditBrand(w http.ResponseWriter, r *http.Request, a *access, ref string) (string, bool) {
+	if a.Brand != "" {
+		return a.Brand, true
+	}
 	if strings.TrimSpace(ref) == "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand is required: a brand's id or handle")
 		return "", false

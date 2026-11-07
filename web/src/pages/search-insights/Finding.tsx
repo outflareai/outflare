@@ -1,4 +1,3 @@
-import { pickedBrandId } from "@/lib/brand";
 import { useState } from "react";
 import type { SearchInsightRow } from "@outflare/sdk";
 import { api, errorMessage } from "../../api";
@@ -16,7 +15,6 @@ import {
 } from "./model";
 import { TagEditor } from "./Primitives";
 export function Finding({
-  ws,
   path,
   row,
   filters,
@@ -90,8 +88,8 @@ export function Finding({
   }
   async function claim() {
     if (!item?.fix_id) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/fixes/{fix}", {
-      params: { path: { ws, fix: item.fix_id } },
+    const { error } = await api.PATCH("/v1/brands/{brand}/fixes/{fix}", {
+      params: { path: { brand: path.brand, fix: item.fix_id } },
       body: { assignee_id: "me", status: "in_progress" },
     });
     if (error) throw Error(errorMessage(error));
@@ -101,9 +99,9 @@ export function Finding({
   }
   async function target() {
     const { error } = await api.PUT(
-      "/v1/workspaces/{ws}/seo-sites/{site}/targets",
+      "/v1/brands/{brand}/seo-sites/{site}/targets",
       {
-        params: { path: { ws, site: path.site } },
+        params: { path },
         body: { url: row.page!, keyword: row.query! },
       },
     );
@@ -113,7 +111,7 @@ export function Finding({
   }
   async function experiment() {
     const { error } = await api.POST("/v1/brands/{brand}/experiments", {
-      params: { path: { brand: pickedBrandId() } },
+      params: { path: { brand: path.brand } },
       body: {
         site_id: path.site,
         name: advice.title.slice(0, 120),

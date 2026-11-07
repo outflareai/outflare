@@ -75,14 +75,14 @@ func TestAIFacts(t *testing.T) {
 		t.Fatalf("checks = %d", checks)
 	}
 
-	samples := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true", nil)["data"].([]any)
+	samples := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true&brand=acme", nil)["data"].([]any)
 	s := samples[0].(map[string]any)
 	fc := s["fact_checks"].([]any)
 	if len(samples) != 1 || s["facts_status"] != "checked" || s["facts_cost_cents"] != 2.0 || len(fc) != 2 ||
 		fc[0].(map[string]any)["verdict"] != "contradicted" || fc[0].(map[string]any)["quote"] != "ACME has a free trial" {
 		t.Fatalf("sample: %v", s)
 	}
-	other := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=false", nil)["data"].([]any)[0].(map[string]any)
+	other := owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=false&brand=acme", nil)["data"].([]any)[0].(map[string]any)
 	if other["facts_status"] != "unchecked" || len(other["fact_checks"].([]any)) != 0 {
 		t.Fatalf("unnamed sample: %v", other)
 	}
@@ -93,7 +93,7 @@ func TestAIFacts(t *testing.T) {
 		f1["supported"] != 1.0 || f1["accuracy"] != 1.0 || f2["accuracy"] != nil {
 		t.Fatalf("facts: %v", facts)
 	}
-	ov := owner.must(200, "GET", base+"/ai-visibility", nil)["data"].([]any)[0].(map[string]any)["facts"].(map[string]any)
+	ov := owner.must(200, "GET", base+"/ai-visibility?brand=acme", nil)["data"].([]any)[0].(map[string]any)["facts"].(map[string]any)
 	if ov["checked_answers"] != 1.0 || ov["wrong_answers"] != 1.0 || ov["accuracy"] != 0.0 || ov["facts_wrong"] != 1.0 {
 		t.Fatalf("overview facts: %v", ov)
 	}
@@ -106,7 +106,7 @@ func TestAIFacts(t *testing.T) {
 
 	// The contradicted fact is a fix, with a prompt quoting the wrong words.
 	var fix map[string]any
-	for _, v := range owner.must(200, "GET", base+"/fixes?source=ai_visibility", nil)["data"].([]any) {
+	for _, v := range owner.must(200, "GET", base+"/fixes?brand=acme&source=ai_visibility", nil)["data"].([]any) {
 		if v.(map[string]any)["rule"].(map[string]any)["id"] == "ai_fact_wrong" {
 			fix = v.(map[string]any)
 		}
@@ -134,7 +134,7 @@ func TestAIFacts(t *testing.T) {
 	if r := owner.must(200, "GET", base+"/ai-runs/"+rid, nil); r["status"] != "done" {
 		t.Fatalf("run with a failed check: %v", r)
 	}
-	s = owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true", nil)["data"].([]any)[0].(map[string]any)
+	s = owner.must(200, "GET", base+"/ai-samples?run_id="+rid+"&brand_named=true&brand=acme", nil)["data"].([]any)[0].(map[string]any)
 	if s["facts_status"] != "failed" {
 		t.Fatalf("failed check: %v", s)
 	}
@@ -147,7 +147,7 @@ func TestAIFacts(t *testing.T) {
 	owner.must(400, "PATCH", base+"/ai-facts/"+fid, map[string]any{"brand_id": nil})
 	owner.must(204, "DELETE", base+"/ai-facts/"+fid, nil)
 	owner.must(404, "GET", base+"/ai-facts/"+fid, nil)
-	for _, v := range owner.must(200, "GET", base+"/fixes?source=ai_visibility", nil)["data"].([]any) {
+	for _, v := range owner.must(200, "GET", base+"/fixes?brand=acme&source=ai_visibility", nil)["data"].([]any) {
 		if v.(map[string]any)["subject"].(map[string]any)["id"] == fid {
 			t.Fatal("fix kept after its fact")
 		}

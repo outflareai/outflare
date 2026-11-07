@@ -419,43 +419,93 @@ func suggestCompetitorLinks(ctx context.Context, tx pgx.Tx, ws, competitorID str
 // it only changes when a domain lapses and is registered anew.
 const registeredEvery = 180 * 24 * time.Hour
 
+// registeredRetry is how soon a registry that didn't answer (or rate
+// limited the lookup) is asked again.
+const registeredRetry = 6 * time.Hour
+
+// registeredPerTick is how many registration dates ScheduleRegistered
+// reads a minute, one after another, so the public RDAP service isn't
+// flooded when many competitors are tracked at once.
+const registeredPerTick = 5
+
+// registeredTables are the tables with a registration date; the names are
+// constants, never input.
+var registeredTables = []string{"seo_competitors", "seo_sites"}
+
 // readRegistered reads when a competitor's domain, and its SEO site's,
-// was registered, if not read in the last half year. A registry that
-// doesn't answer is tried again at the next look.
+// was registered, if not read in the last half year or due a retry.
 func (s *Service) readRegistered(ctx context.Context, ws, competitorID, siteID, host string) {
 	if s.RDAP == nil {
 		return
 	}
-	targets := []struct{ table, id, host string }{{"seo_competitors", competitorID, host}}
-	var siteHost string
-	var due bool
-	if err := s.Pool.QueryRow(ctx, `SELECT host, registered_checked_at IS NULL OR registered_checked_at < now() - $3::interval
-		FROM seo_sites WHERE id = $1 AND workspace_id = $2`, siteID, ws, registeredEvery.String()).Scan(&siteHost, &due); err == nil && due {
-		targets = append(targets, struct{ table, id, host string }{"seo_sites", siteID, siteHost})
+	targets := []struct{ table, id string }{{"seo_competitors", competitorID}, {"seo_sites", siteID}}
+	for _, t := range targets {
+		var h string
+		err := s.Pool.QueryRow(ctx, `UPDATE `+t.table+` SET registered_checked_at = now() - $3::interval + $4::interval
+			WHERE id = $1 AND workspace_id = $2 AND (registered_checked_at IS NULL OR registered_checked_at < now() - $3::interval)
+			RETURNING host`, t.id, ws, registeredEvery.String(), registeredRetry.String()).Scan(&h)
+		if err != nil {
+			continue // not due, or claimed by another look
+		}
+		s.saveRegistered(ctx, t.table, ws, t.id, h)
 	}
-	for i, t := range targets {
-		if i == 0 {
-			var due bool
-			if err := s.Pool.QueryRow(ctx, `SELECT registered_checked_at IS NULL OR registered_checked_at < now() - $3::interval
-				FROM seo_competitors WHERE id = $1 AND workspace_id = $2`, t.id, ws, registeredEvery.String()).Scan(&due); err != nil || !due {
-				continue
+}
+
+// saveRegistered looks one domain up and keeps its date. The row was
+// claimed with a retry time first, so a lookup that fails is tried again
+// in registeredRetry, not at the next weekly look.
+func (s *Service) saveRegistered(ctx context.Context, table, ws, id, host string) {
+	at, err := s.RDAP.Registered(ctx, host)
+	var on *time.Time
+	switch {
+	case err == nil:
+		on = &at
+	case errors.Is(err, rdap.ErrNotFound):
+	default:
+		s.Log.Info("rdap read failed, retrying later", "table", table, "id", id, "err", err)
+		return
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE `+table+` SET registered_on = $3, registered_checked_at = now()
+		WHERE id = $1 AND workspace_id = $2`, id, ws, on); err != nil {
+		s.Log.Warn("saving registration date", "table", table, "err", err)
+	}
+}
+
+// ScheduleRegistered reads the registration dates that are due (never
+// read, half a year old, or a failed lookup's retry), a few each minute,
+// so every tracked competitor gets its domain age without waiting for its
+// weekly look.
+func (s *Service) ScheduleRegistered(ctx context.Context) error {
+	if s.RDAP == nil {
+		return nil
+	}
+	for _, table := range registeredTables {
+		live := `status = 'tracked'`
+		if table == "seo_sites" {
+			live = `status = 'active'`
+		}
+		rows, err := s.Pool.Query(ctx, `UPDATE `+table+` SET registered_checked_at = now() - $1::interval + $2::interval
+			WHERE id IN (SELECT id FROM `+table+` WHERE `+live+`
+				AND (registered_checked_at IS NULL OR registered_checked_at < now() - $1::interval)
+				ORDER BY registered_checked_at NULLS FIRST LIMIT $3 FOR UPDATE SKIP LOCKED)
+			RETURNING id::text, workspace_id::text, host`, registeredEvery.String(), registeredRetry.String(), registeredPerTick)
+		if err != nil {
+			return err
+		}
+		type due struct{ id, ws, host string }
+		list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (due, error) {
+			var d due
+			return d, row.Scan(&d.id, &d.ws, &d.host)
+		})
+		if err != nil {
+			return err
+		}
+		for _, d := range list {
+			if ctx.Err() != nil {
+				return nil
 			}
-		}
-		at, err := s.RDAP.Registered(ctx, t.host)
-		var on *time.Time
-		switch {
-		case err == nil:
-			on = &at
-		case errors.Is(err, rdap.ErrNotFound):
-		default:
-			s.Log.Debug("rdap read failed", "table", t.table, "id", t.id, "err", err)
-			continue
-		}
-		// Both tables are written with the same statement shape; the
-		// table name comes from the list above, never from input.
-		if _, err := s.Pool.Exec(ctx, `UPDATE `+t.table+` SET registered_on = $3, registered_checked_at = now()
-			WHERE id = $1 AND workspace_id = $2`, t.id, ws, on); err != nil {
-			s.Log.Warn("saving registration date", "table", t.table, "err", err)
+			s.saveRegistered(ctx, table, d.ws, d.id, d.host)
 		}
 	}
+	return nil
 }

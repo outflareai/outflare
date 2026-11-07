@@ -59,7 +59,7 @@ For each numbered company that the answer names, say its stance:
 Quote the answer's own words about it (at most 200 characters). Leave out companies it doesn't name.
 For each such company also give its attributes: what the answer says it is, has or is known for, as short phrases in the answer's terms (at most 5, each a few words, such as "cheapest plans", "190 countries", "slow support"), each positive, negative or neutral; and its objections: the reasons the answer gives against it, or for picking another over it (at most 3, each a short phrase), with the answer's words for each (at most 300 characters). Empty lists when the answer gives none.
 
-Then list the other brands (companies or products) the answer recommends or lists that are not in the numbered list, as the answer writes them, each with its own website's domain when the answer shows or links it (such as example.com), else an empty string. Leave out generic words, the assistant itself and the sites it cites.
+Then list the other brands (companies or products) the answer recommends or lists that are not in the numbered list, as the answer writes them, each with its own website's domain when the answer shows or links it (such as example.com), else an empty string. Leave out generic words, descriptions of a kind of product or service (such as "web scraping API"), the assistant itself and the sites it cites.
 
 Then, for each numbered source page, say what kind of site it is: review (a review or "best of" site), comparison (one product against another), forum (Reddit, Quora, a community), news, video, social, directory (a list or marketplace), docs (documentation or a help centre), blog, or other. Answer with JSON only.`
 

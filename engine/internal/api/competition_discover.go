@@ -22,6 +22,7 @@ import (
 
 func (s *Server) routesCompetitionDiscover(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/brands/{brand}/competition/discover", s.onBrand(auth.ScopeSEOManage, s.discoverCompetitors))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-competitors/results", s.onBrand(auth.ScopeSEORead, s.keywordResults))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-competitors/results", s.inBrand(auth.ScopeSEORead, s.keywordResults))
 }
 
@@ -147,7 +148,7 @@ func (s *Server) keywordResults(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "site_id is an SEO site's id and keyword the keyword")
 		return
 	}
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &siteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &siteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return

@@ -159,12 +159,14 @@ var errorCodes = []errorCode{
 	{"reply_learning_running", []int{409}, "Outflare is already learning from past replies in this workspace. Wait for it to finish (GET .../knowledge/reply-imports).", false},
 	{"crawl_opted_out", []int{409}, "The site's owner asked not to be crawled from this Outflare server.", false},
 	{"ai_run_running", []int{409}, "A run of this AI visibility cohort is already going. Stop it or wait for it to finish.", false},
+	{"page_unreadable", []int{502}, "OutflareBot could not read the page: robots.txt forbids it, it didn't answer, or it had no text. The message says which.", true},
 
 	// AI models.
 	{"website_needed", []int{409}, "The brand needs a website first, so there is something to read.", false},
 	{"ai_model_needed", []int{409}, "The workspace's AI model needs a choice first: a model, or its price. The message says which, under Settings, AI model.", false},
 	{"ai_budget_reached", []int{409}, "AI calls reached the workspace's monthly limit. An admin can raise it under Settings, AI model.", false},
 	{"ai_failed", []int{502}, "The workspace's AI model did not answer, or not usably. Retry; the message says more.", true},
+	{"ai_timeout", []int{504}, "The workspace's AI model took too long to answer. Retry, or ask for less at once.", true},
 
 	// Reddit campaigns.
 	{"reddit_budget_reached", []int{409}, "The action would pass the brand's Reddit credit limit for the month or the day. A person can raise it in PUT .../reddit/settings/{brand}; GET .../reddit/budget shows what is left.", false},

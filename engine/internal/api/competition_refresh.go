@@ -40,6 +40,8 @@ type competitionRefreshView struct {
 
 // seoReaderFor is the SEO connection that reads a brand's competitors:
 // Ahrefs when connected, else the oldest other one that serves the brand.
+// One marked broken is still tried when there's no other: the mark can
+// be stale (one refused call), and the read says so if it really is.
 func (s *Server) seoReaderFor(ctx context.Context, q pgx.Tx, ws, brand string) (*string, error) {
 	if s.integrations == nil {
 		return nil, nil
@@ -57,8 +59,8 @@ func (s *Server) seoReaderFor(ctx context.Context, q pgx.Tx, ws, brand string) (
 	}
 	var id string
 	err := q.QueryRow(ctx, `SELECT i.id::text FROM integrations i
-		WHERE i.workspace_id = $1 AND i.status = 'connected' AND i.connector = ANY($2) AND integration_serves(i, $3::uuid)
-		ORDER BY i.connector <> 'ahrefs', i.created_at LIMIT 1`, ws, ids, brand).Scan(&id)
+		WHERE i.workspace_id = $1 AND i.connector = ANY($2) AND integration_serves(i, $3::uuid)
+		ORDER BY i.status <> 'connected', i.connector <> 'ahrefs', i.created_at LIMIT 1`, ws, ids, brand).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

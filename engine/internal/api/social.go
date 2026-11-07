@@ -33,22 +33,39 @@ import (
 
 func (s *Server) routesSocial(mux *http.ServeMux) {
 	read, manage, post := auth.ScopeSocialRead, auth.ScopeSocialManage, auth.ScopeSocialPost
+	mux.HandleFunc("GET /v1/brands/{brand}/social", s.onBrand(read, s.socialOverview))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social", s.inBrand(read, s.socialOverview))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/watches", s.onBrand(read, s.listSocialWatches))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/watches", s.inBrand(read, s.listSocialWatches))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/watches", s.onBrand(manage, s.createSocialWatch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/watches", s.inBrand(manage, s.createSocialWatch))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/watches/{id}", s.onBrand(read, s.getSocialWatch))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/watches/{id}", s.inBrand(read, s.getSocialWatch))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/watches/{id}", s.onBrand(manage, s.updateSocialWatch))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/watches/{id}", s.inBrand(manage, s.updateSocialWatch))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/social/watches/{id}", s.onBrand(manage, s.deleteSocialWatch))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/social/watches/{id}", s.inBrand(manage, s.deleteSocialWatch))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/watches/{id}/check", s.onBrand(manage, s.checkSocialWatch))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/watches/{id}/check", s.inBrand(manage, s.checkSocialWatch))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/items", s.onBrand(read, s.listSocialItems))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/items", s.inBrand(read, s.listSocialItems))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/items/{id}", s.onBrand(read, s.getSocialItem))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/items/{id}", s.inBrand(read, s.getSocialItem))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/items/{id}", s.onBrand(manage, s.updateSocialItem))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/items/{id}", s.inBrand(manage, s.updateSocialItem))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/items/{id}/draft", s.onBrand(manage, s.draftSocialReply))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/items/{id}/draft", s.inBrand(manage, s.draftSocialReply))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/actions", s.onBrand(read, s.listSocialActions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/actions", s.inBrand(read, s.listSocialActions))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/actions", s.onBrand(manage, s.createSocialAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/actions", s.inBrand(manage, s.createSocialAction))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/actions/{id}", s.onBrand(read, s.getSocialAction))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/actions/{id}", s.inBrand(read, s.getSocialAction))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/actions/{id}", s.onBrand(manage, s.updateSocialAction))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/actions/{id}", s.inBrand(manage, s.updateSocialAction))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/actions/{id}/approve", s.onBrand(post, s.approveSocialAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/actions/{id}/approve", s.inBrand(post, s.approveSocialAction))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/actions/{id}/reject", s.onBrand(manage, s.rejectSocialAction))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/actions/{id}/reject", s.inBrand(manage, s.rejectSocialAction))
 }
 
@@ -356,6 +373,9 @@ func (s *Server) applySocialWatch(ctx context.Context, a *access, f socialWatchF
 			}
 			v.BrandID = &id
 		}
+	}
+	if v.BrandID == nil {
+		v.BrandID = a.orRoute(nil)
 	}
 	if !a.writes(v.BrandID) {
 		return errInvalid("brand_id: you can only add watches to your own brands")
@@ -1570,7 +1590,7 @@ func syncSocialFixes(ctx context.Context, tx pgx.Tx, ws, watchID string) error {
 			       (SELECT count(*) FROM social_actions x WHERE x.watch_id = $2 AND x.status = 'draft')::int),
 		up AS (
 			INSERT INTO fixes (workspace_id, brand_id, source, subject_type, subject_id, rule, severity, group_key, count, unit)
-			SELECT $1, w.brand_id, $3, 'social_watch', w.id, n.rule, n.severity, '', n.cnt, n.unit FROM w, n WHERE n.cnt > 0
+			SELECT $1, COALESCE(w.brand_id, outflare_first_brand($1)), $3, 'social_watch', w.id, n.rule, n.severity, '', n.cnt, n.unit FROM w, n WHERE n.cnt > 0
 			ON CONFLICT (workspace_id, source, subject_id, rule, group_key) DO UPDATE SET
 				count = EXCLUDED.count, brand_id = EXCLUDED.brand_id,
 				status = CASE WHEN fixes.status = 'done' THEN 'open' ELSE fixes.status END,

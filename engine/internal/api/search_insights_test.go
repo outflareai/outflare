@@ -300,7 +300,7 @@ func TestSearchInsightCollectionAndFixes(t *testing.T) {
 	if len(data) != 2 || data[0].(map[string]any)["status"] != "regressed" {
 		t.Fatal(data)
 	}
-	fixes := owner.must(200, "GET", base+"/fixes?source=seo_keywords&subject_id="+site, nil)["data"].([]any)
+	fixes := owner.must(200, "GET", base+"/fixes?brand="+brand+"&source=seo_keywords&subject_id="+site, nil)["data"].([]any)
 	if len(fixes) != 1 || fixes[0].(map[string]any)["rule"].(map[string]any)["id"] != "web_vitals_regressed" {
 		t.Fatal(fixes)
 	}

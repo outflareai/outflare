@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState } from "react";
 import type { RedditAction, RedditBudget, RedditExperiment, RedditReport, RedditReportRow, RedditSettings } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, errorMessage } from "../api";
@@ -33,7 +34,13 @@ const days = (v: number | null | undefined) => (v == null ? "–" : v < 1 ? `${M
 const credits = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const money = (cents: number, currency: string) => (cents > 0 ? (cents / 100).toLocaleString(undefined, { style: "currency", currency }) : "");
 
-export function RedditCampaigns({ ws, canManage, go }: Props) {
+export function RedditCampaigns(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Reddit campaigns" brands={active.length} />;
+  return <RedditCampaignsPage key={brand.id} {...props} />;
+}
+
+function RedditCampaignsPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const [picked, setPicked] = useState("");
   const brandKey = brand.brand?.handle ?? picked ?? "";
@@ -55,14 +62,14 @@ export function RedditCampaigns({ ws, canManage, go }: Props) {
 
   const load = useCallback(async () => {
     if (!brandKey) return;
-    const path = { ws };
+    const path = { ws, brand: pickedBrandId() };
     const [conns, s, b, r, a, e] = await Promise.all([
       api.GET("/v1/workspaces/{ws}/integrations", { params: { path, query: { connector: "engain" } } }),
-      api.GET("/v1/workspaces/{ws}/reddit/settings", { params: { path, query: { brand: brandKey } } }),
-      api.GET("/v1/workspaces/{ws}/reddit/budget", { params: { path, query: { brand: brandKey } } }),
-      api.GET("/v1/workspaces/{ws}/reddit/report", { params: { path, query: { brand: brandKey, group_by: groupBy } } }),
-      api.GET("/v1/workspaces/{ws}/reddit/actions", { params: { path, query: { brand: brandKey, limit: 200, ...(status ? { status } : {}) } } }),
-      api.GET("/v1/workspaces/{ws}/reddit/experiments", { params: { path, query: { brand: brandKey } } }),
+      api.GET("/v1/brands/{brand}/reddit/settings", { params: { path } }),
+      api.GET("/v1/brands/{brand}/reddit/budget", { params: { path } }),
+      api.GET("/v1/brands/{brand}/reddit/report", { params: { path, query: { group_by: groupBy } } }),
+      api.GET("/v1/brands/{brand}/reddit/actions", { params: { path, query: { limit: 200, ...(status ? { status } : {}) } } }),
+      api.GET("/v1/brands/{brand}/reddit/experiments", { params: { path } }),
     ]);
     if (r.error || !r.data) return setError(errorMessage(r.error));
     setError("");
@@ -257,7 +264,7 @@ function ActionSheet({ ws, id, canManage, onClose, onChange }: { ws: string; id:
   const [a, setA] = useState<RedditAction | null>(null);
   const [error, setError] = useState("");
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/reddit/actions/{id}", { params: { path: { ws, id } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/reddit/actions/{id}", { params: { path: { brand: pickedBrandId(), id } } });
     if (error || !data) return setError(errorMessage(error));
     setA(data);
   }, [ws, id]);
@@ -266,13 +273,13 @@ function ActionSheet({ ws, id, canManage, onClose, onChange }: { ws: string; id:
   }, [load]);
 
   async function run(path: "approve" | "cancel" | "check") {
-    const p = { params: { path: { ws, id } } };
+    const p = { params: { path: { brand: pickedBrandId(), id } } };
     const res =
       path === "approve"
-        ? await api.POST("/v1/workspaces/{ws}/reddit/actions/{id}/approve", p)
+        ? await api.POST("/v1/brands/{brand}/reddit/actions/{id}/approve", p)
         : path === "cancel"
-          ? await api.POST("/v1/workspaces/{ws}/reddit/actions/{id}/cancel", p)
-          : await api.POST("/v1/workspaces/{ws}/reddit/actions/{id}/check", p);
+          ? await api.POST("/v1/brands/{brand}/reddit/actions/{id}/cancel", p)
+          : await api.POST("/v1/brands/{brand}/reddit/actions/{id}/check", p);
     if (res.error) return toast(errorMessage(res.error), "error");
     toast(path === "check" ? "Checking now." : path === "approve" ? "Sent to Engain." : "Withdrawn.");
     await load();
@@ -356,7 +363,7 @@ function ActionSheet({ ws, id, canManage, onClose, onChange }: { ws: string; id:
   );
 }
 
-function LimitsSheet({ ws, brand, settings, onClose, onSaved }: { ws: string; brand: string; settings: RedditSettings; onClose: () => void; onSaved: () => void }) {
+function LimitsSheet({ ws: _ws, brand: _brand, settings, onClose, onSaved }: { ws: string; brand: string; settings: RedditSettings; onClose: () => void; onSaved: () => void }) {
   const [monthly, setMonthly] = useState(settings.monthly_credit_limit?.toString() ?? "");
   const [daily, setDaily] = useState(settings.daily_credit_limit?.toString() ?? "");
   const [perSub, setPerSub] = useState(settings.max_actions_per_subreddit_day.toString());
@@ -368,8 +375,8 @@ function LimitsSheet({ ws, brand, settings, onClose, onSaved }: { ws: string; br
 
   async function save() {
     setBusy(true);
-    const { error } = await api.PUT("/v1/workspaces/{ws}/reddit/settings/{brand}", {
-      params: { path: { ws, brand } },
+    const { error } = await api.PUT("/v1/brands/{brand}/reddit/settings", {
+      params: { path: { brand: pickedBrandId() } },
       body: {
         ...(monthly.trim() ? { monthly_credit_limit: Number(monthly) } : { no_monthly_limit: true }),
         ...(daily.trim() ? { daily_credit_limit: Number(daily) } : { no_daily_limit: true }),

@@ -319,7 +319,7 @@ func coverageReferences(ctx context.Context, tx pgx.Tx, a *access, res coverageR
 			if !auth.Grants(a.Scopes, auth.ScopeCustomersRead) {
 				return errDenied("Linking CRM records requires customers.read")
 			}
-			query = "SELECT EXISTS(SELECT 1 FROM records WHERE workspace_id=$1 AND (brand_id=$2 OR brand_id IS NULL) AND id=$3 AND merged_into IS NULL)"
+			query = "SELECT EXISTS(SELECT 1 FROM records WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND merged_into IS NULL)"
 			if key == "record_id" && res.Table == "coverage_publishers" {
 				query = strings.TrimSuffix(query, ")") + " AND record_type='account')"
 			}

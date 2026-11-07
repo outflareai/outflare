@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Backlink, BacklinkEvent, BacklinkSiteSummary, paths } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Empty, ErrorText, field, Loading, Menu, PageHeader, Stat, Stats, toast, type tones } from "../ui";
@@ -19,7 +20,7 @@ type Tone = keyof typeof tones;
 type Section = "links" | "changes";
 type Kind = BacklinkEvent["kind"];
 type Review = "ok" | "disavow" | "none";
-type ListQuery = NonNullable<paths["/v1/workspaces/{ws}/backlinks"]["get"]["parameters"]["query"]>;
+type ListQuery = NonNullable<paths["/v1/brands/{brand}/backlinks"]["get"]["parameters"]["query"]>;
 
 const kindLabel: Record<Kind, string> = { new: "New", lost: "Lost", regained: "Regained" };
 const kindTone: Record<Kind, Tone> = { new: "green", lost: "red", regained: "blue" };
@@ -131,7 +132,14 @@ function toQuery(f: Filters, site: string, brand: object): ListQuery {
   return q;
 }
 
-export function Backlinks({ ws, go }: Props) {
+// Backlinks belong to one brand.
+export function Backlinks(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Backlinks" brands={active.length} />;
+  return <BacklinksPage key={brand.id} {...props} />;
+}
+
+function BacklinksPage({ ws, go }: Props) {
   const [sites, setSites] = useState<BacklinkSiteSummary[] | null>(null);
   const [site, setSite] = useState("");
   const [section, setSection] = useState<Section>("links");
@@ -162,7 +170,7 @@ export function Backlinks({ ws, go }: Props) {
 
   useEffect(() => {
     setSites(null);
-    api.GET("/v1/workspaces/{ws}/backlinks/summary", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/backlinks/summary", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setSites(data.data);
@@ -176,7 +184,7 @@ export function Backlinks({ ws, go }: Props) {
   useEffect(() => {
     if (!query) return;
     setLinks(null);
-    api.GET("/v1/workspaces/{ws}/backlinks", { params: { path: { ws }, query } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/backlinks", { params: { path: { brand: pickedBrandId() }, query } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setLinks(data.data);
@@ -188,7 +196,7 @@ export function Backlinks({ ws, go }: Props) {
   const loadMore = async () => {
     if (!query || next === null) return;
     setMore(true);
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/backlinks", { params: { path: { ws }, query: { ...query, cursor: next } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/backlinks", { params: { path: { brand: pickedBrandId() }, query: { ...query, cursor: next } } });
     setMore(false);
     if (error || !data) return setError(errorMessage(error));
     setLinks((l) => [...(l ?? []), ...data.data]);
@@ -196,7 +204,7 @@ export function Backlinks({ ws, go }: Props) {
   };
 
   const review = async (l: Backlink, review: Review, domain = false) => {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/backlinks/{backlink}", { params: { path: { ws, backlink: l.id } }, body: { review, domain } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/backlinks/{backlink}", { params: { path: { brand: pickedBrandId(), backlink: l.id } }, body: { review, domain } });
     if (error || !data) return setError(errorMessage(error));
     setError("");
     if (domain) toast(`${data.updated.toLocaleString()} links from ${l.source_domain} marked.`);
@@ -204,7 +212,7 @@ export function Backlinks({ ws, go }: Props) {
     setSites((list) => list && list.map((x) => (x.site.id === site ? { ...x, spam: { ...x.spam, disavowed: x.spam.disavowed + (review === "disavow" ? data.updated : 0) } } : x)));
   };
   const download = async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/backlinks/disavow", { params: { path: { ws }, query: { site_id: site } }, parseAs: "text" });
+    const { data, error } = await api.GET("/v1/brands/{brand}/backlinks/disavow", { params: { path: { brand: pickedBrandId() }, query: { site_id: site } }, parseAs: "text" });
     if (error || data === undefined) return setError(errorMessage(error));
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([data], { type: "text/plain" }));
@@ -216,7 +224,7 @@ export function Backlinks({ ws, go }: Props) {
   useEffect(() => {
     if (!site || section !== "changes") return;
     setEvents(null);
-    api.GET("/v1/workspaces/{ws}/backlinks/events", { params: { path: { ws }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/backlinks/events", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setEvents(data.data);
     });
@@ -443,7 +451,7 @@ function lostReason(l: Backlink) {
   return "";
 }
 
-function LinkTable({ ws, brand, links, total, filters, onReview }: {
+function LinkTable({ brand, links, total, filters, onReview }: {
   ws: string;
   brand: object;
   links: Backlink[] | null;
@@ -461,7 +469,7 @@ function LinkTable({ ws, brand, links, total, filters, onReview }: {
     if (open[l.id]) return setOpen(({ [l.id]: _, ...rest }) => rest);
     setOpen((o) => ({ ...o, [l.id]: "loading" }));
     const q = { ...toQuery({ ...filters, group: "all", order: "url_rating" }, l.site_id, brand), limit: 200, source_domain: l.source_domain, ...(filters.group === "page" ? { q: l.source_url, q_in: "source_url" as const } : {}) };
-    const { data } = await api.GET("/v1/workspaces/{ws}/backlinks", { params: { path: { ws }, query: q } });
+    const { data } = await api.GET("/v1/brands/{brand}/backlinks", { params: { path: { brand: pickedBrandId() }, query: q } });
     setOpen((o) => ({ ...o, [l.id]: (data?.data ?? []).filter((x) => x.id !== l.id) }));
   };
 

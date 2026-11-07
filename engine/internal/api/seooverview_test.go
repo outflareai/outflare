@@ -19,11 +19,9 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		}
 	}
 
-	// Nothing stored: no brands, an empty shared entry. Sign-up made a
-	// brand; this test is about brands people add, so it archives that one.
-	owner.must(200, "PATCH", base+"/brands/acme-outbound", map[string]any{"status": "archived"})
+	// Nothing stored: the brand's entry, with empty weeks.
 	empty := owner.must(200, "GET", base+"/seo/overview", nil)["data"].([]any)
-	if len(empty) != 1 || empty[0].(map[string]any)["brand"] != nil || len(empty[0].(map[string]any)["weeks"].([]any)) != 12 {
+	if len(empty) != 1 || empty[0].(map[string]any)["brand"] == nil || len(empty[0].(map[string]any)["weeks"].([]any)) != 12 {
 		t.Fatalf("empty: %v", empty)
 	}
 	if st := empty[0].(map[string]any)["seo_status"].(map[string]any); st["state"] != "not_connected" || st["integration_id"] != nil {
@@ -62,7 +60,7 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	snap := `INSERT INTO seo_snapshots (workspace_id, integration_id, connector, host, report, day, key, metrics) VALUES ($1, $2, $3, 'repocket.com', 'overview', $4, '', $5)`
 	exec(snap, ws, dfs, "ahrefs", day(35), `{"domain_rating": 40, "backlinks": 1000, "referring_domains": 100}`)
 	exec(snap, ws, dfs, "ahrefs", day(0), `{"domain_rating": 44, "backlinks": 900, "referring_domains": 101}`)
-	owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://repocket.com/"})
+	owner.must(201, "POST", base+"/seo-sites", map[string]any{"url": "https://repocket.com/", "brand_id": "repocket"})
 
 	// Connecting an SEO tool reads it straight away, not at the next
 	// weekly snapshot.
@@ -113,13 +111,13 @@ func TestSEOOverviewByBrand(t *testing.T) {
 	if sites := rp["sites"].([]any); len(sites) != 1 || rp["open_fixes"] != 0.0 {
 		t.Fatalf("sites: %v fixes %v", sites, rp["open_fixes"])
 	}
-	// The brands' websites are read first, then the analytics domains.
-	srcs := owner.must(200, "GET", base+"/seo", nil)["data"].([]any)
+	// The brand's websites are read first, then its analytics domains.
+	srcs := owner.must(200, "GET", base+"/seo?brand=repocket", nil)["data"].([]any)
 	var followed []string
 	for _, d := range srcs[0].(map[string]any)["domains"].([]any) {
 		followed = append(followed, d.(map[string]any)["host"].(string))
 	}
-	if strings.Join(followed, " ") != "geonode.com repocket.com example.com" {
+	if strings.Join(followed, " ") != "repocket.com" {
 		t.Fatalf("domains read: %v", followed)
 	}
 	status := func(c *client, brand string) map[string]any {
@@ -159,11 +157,16 @@ func TestSEOOverviewByBrand(t *testing.T) {
 		t.Fatalf("latest numbers: %v", tr)
 	}
 
-	// Every brand, then the website no brand claims as shared.
-	all := owner.must(200, "GET", base+"/seo/overview", nil)["data"].([]any)
-	if len(all) != 3 || all[2].(map[string]any)["brand"] != nil || !hasString(all[2].(map[string]any)["hosts"], "example.com") {
-		t.Fatalf("all: %v", all)
+	// Each brand's own overview: never another brand's, nor a shared entry.
+	one := func(brand string) any {
+		t.Helper()
+		l := owner.must(200, "GET", base+"/seo/overview?brand="+brand, nil)["data"].([]any)
+		if len(l) != 1 {
+			t.Fatalf("%s: %v", brand, l)
+		}
+		return l[0]
 	}
+	all := []any{one("geonode"), one("repocket")}
 	if gn := all[0].(map[string]any); gn["brand"].(map[string]any)["name"] != "Geonode" || gn["trends"].(map[string]any)["branded_search"].(map[string]any)["direction"] != "unknown" {
 		t.Fatalf("geonode: %v", gn)
 	}

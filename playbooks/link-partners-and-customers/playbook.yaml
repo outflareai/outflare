@@ -26,17 +26,17 @@ inputs:
     example: northpeak.example
 steps:
   - say: List partner and customer companies with a website, and leave out the ones whose sites already link to you.
-    tools: [listSEOSites, listBrandRecords, listBacklinks]
+    tools: [listBrandSEOSites, listBrandRecords, listBrandBacklinks]
   - say: Add each one's partners, integrations or customers page (or home page) as a partner prospect.
-    tools: [addLinkProspects]
+    tools: [addBrandLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
-    tools: [checkLinkProspects, listLinkProspects]
+    tools: [checkBrandLinkProspects, listBrandLinkProspects]
   - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
-    tools: [listLinkSequences, createLinkSequence, previewBrandSequence]
+    tools: [listBrandLinkSequences, createBrandLinkSequence, previewBrandSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
-    tools: [startLinkPitch, listLinkPitches]
+    tools: [startBrandLinkPitch, listBrandLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
-    tools: [getLinkResults, listLinkProspects]
+    tools: [getBrandLinkResults, listBrandLinkProspects]
 automation:
   schedule: monthly
   events: [partner.created]

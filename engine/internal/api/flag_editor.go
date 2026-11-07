@@ -138,12 +138,13 @@ func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var in struct {
 		Token    string          `json:"token"`
+		Variant  string          `json:"variant"`
 		Changes  json.RawMessage `json:"changes"`
 		CSS      *string         `json:"css"`
 		Redirect *string         `json:"redirect"`
 	}
 	if r.Method == http.MethodGet {
-		in.Token = r.URL.Query().Get("token")
+		in.Token, in.Variant = r.URL.Query().Get("token"), r.URL.Query().Get("variant")
 	} else {
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 		if err != nil || json.Unmarshal(body, &in) != nil {
@@ -166,6 +167,11 @@ func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
+	// The link opens one version; the editor can switch to another of the
+	// same flag, which the link's person may edit as well.
+	if in.Variant != "" {
+		c.Variant = in.Variant
+	}
 	i := -1
 	if len(list) == 1 {
 		i = slices.IndexFunc(list[0].Variants, func(v flags.Variant) bool { return v.Key == c.Variant })
@@ -175,6 +181,14 @@ func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f := list[0]
+	// A no-code test's control is today's page, and the AI helps only there.
+	control, testName, aiOK := "", "", false
+	if test, err := s.editorTest(ctx, c.Workspace, f.ID); err != nil {
+		s.internal(w, r, err)
+		return
+	} else if test != nil {
+		control, testName, aiOK = test.Control, test.Name, true
+	}
 	answer := func(v flags.Variant) {
 		changes, _ := flags.Changes(v.Payload)
 		if changes == nil {
@@ -188,7 +202,8 @@ func (s *Server) siteFlagEdits(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(v.Payload, &extra)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"flag_key": f.Key, "flag_name": f.Name, "variant": c.Variant, "changes": changes,
-			"css": extra.CSS, "redirect": extra.Redirect, "expires_at": time.Unix(c.Expires, 0).UTC()})
+			"css": extra.CSS, "redirect": extra.Redirect, "expires_at": time.Unix(c.Expires, 0).UTC(),
+			"versions": variantKeys(f), "control": control, "test_name": testName, "ai": aiOK})
 	}
 	if r.Method == http.MethodGet {
 		answer(f.Variants[i])

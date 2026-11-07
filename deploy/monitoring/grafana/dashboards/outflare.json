@@ -14120,6 +14120,72 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Page speed readings",
+      "id": 950,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1100
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Page speed readings, by outcome",
+      "description": "Page speed readings per minute from visitors' browsers (site.js sends one per page load when the page is left): stored is normal and follows page views; rejected is a reading in the wrong shape or from a site key with no brand; pruned is readings over 90 days old deleted once an hour. Stored near zero while page views flow means the tag is an old copy (before version 16) or data-vitals=\"off\" is set.",
+      "id": 951,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1101
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_ingest_page_vitals_total{job=\"$job\"}[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     }
   ]
 }

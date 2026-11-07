@@ -673,24 +673,33 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]int{"accepted": 0, "rejected": 0})
 		return
 	}
-	if !s.allowQuota(w, r, k.workspaceID, quota.TrackedEvents, int64(len(in.Batch))) {
+	// Page speed readings don't count toward the event quota or the daily
+	// limits: they are one per page load, and the site's owner didn't send
+	// them as events.
+	counted := 0
+	for _, raw := range in.Batch {
+		if !isVitals(raw) {
+			counted++
+		}
+	}
+	if counted > 0 && !s.allowQuota(w, r, k.workspaceID, quota.TrackedEvents, int64(counted)) {
 		return
 	}
 	var today, own, safari int
 	if throughOwnDomain(r) {
-		own = len(in.Batch)
+		own = counted
 	} else if forgetfulBrowser(ua) {
-		safari = len(in.Batch)
+		safari = counted
 	}
 	if err := s.pool.QueryRow(ctx, `INSERT INTO site_key_days (key_id, workspace_id, day, events, own_domain, safari_direct) VALUES ($1, $2, current_date, $3, $4, $5)
 		ON CONFLICT (key_id, day) DO UPDATE SET events = site_key_days.events + EXCLUDED.events,
 			own_domain = site_key_days.own_domain + EXCLUDED.own_domain, safari_direct = site_key_days.safari_direct + EXCLUDED.safari_direct
 		RETURNING events`,
-		k.id, k.workspaceID, len(in.Batch), own, safari).Scan(&today); err != nil {
+		k.id, k.workspaceID, counted, own, safari).Scan(&today); err != nil {
 		s.internal(w, r, err)
 		return
 	}
-	if today > siteKeyDailyEvents {
+	if counted > 0 && today > siteKeyDailyEvents {
 		metrics.SiteEventsCapped(len(in.Batch))
 		writeError(w, r, http.StatusTooManyRequests, "rate_limited", "this site key took its 250,000 events for today; it takes more tomorrow (UTC)")
 		return
@@ -701,7 +710,7 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if workspaceToday > siteWorkspaceDailyEvents {
+	if counted > 0 && workspaceToday > siteWorkspaceDailyEvents {
 		metrics.SiteEventsCapped(len(in.Batch))
 		writeError(w, r, http.StatusTooManyRequests, "rate_limited", "this workspace's site keys took their 1,000,000 events for today; they take more tomorrow (UTC)")
 		return
@@ -727,7 +736,7 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if in.Consent && accepted > 0 {
+	if in.Consent && accepted > 0 && anon != "" {
 		s.revealOrLog(ctx, k.workspaceID, anon, siteClientIP(r, k))
 	}
 	if in.Consent && anon != "" {
@@ -762,6 +771,16 @@ func (s *Server) revealOrLog(ctx context.Context, ws, anon, ip string) {
 func (s *Server) queueSiteBatch(ctx context.Context, k siteKeyRow, ua string, batch []json.RawMessage) (accepted, rejected int, anon string, err error) {
 	keep := make([]json.RawMessage, 0, len(batch))
 	for _, raw := range batch {
+		if isVitals(raw) {
+			if _, err := siteVitalsOf(raw); err != nil || k.brandID == nil {
+				rejected++
+				metrics.PageVitals("rejected", 1)
+				continue
+			}
+			accepted++
+			keep = append(keep, raw)
+			continue
+		}
 		m, _, err := siteMessage(raw, ua, k.excludedParams)
 		if err != nil {
 			rejected++
@@ -807,6 +826,25 @@ func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua
 	}
 	totals := ingestTotals{names: map[string]*seenName{}}
 	for _, raw := range batch {
+		// A page speed reading has no visitor: it is kept on its own.
+		if isVitals(raw) {
+			vit, err := siteVitalsOf(raw)
+			if err == nil {
+				err = storeVitals(ctx, tx, k, v.device, vit, now)
+			}
+			var bad errInvalid
+			switch {
+			case err == nil:
+				accepted++
+				metrics.PageVitals("stored", 1)
+			case errors.As(err, &bad):
+				rejected++
+				metrics.PageVitals("rejected", 1)
+			default:
+				return 0, 0, "", err
+			}
+			continue
+		}
 		m, token, err := siteMessage(raw, ua, k.excludedParams)
 		if err == nil && m.text("type") == "track" {
 			name, _ := eventNameFor(m.text("event"))

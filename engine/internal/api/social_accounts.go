@@ -21,13 +21,21 @@ import (
 
 func (s *Server) routesSocialAccounts(mux *http.ServeMux) {
 	read, manage := auth.ScopeSocialRead, auth.ScopeSocialManage
+	mux.HandleFunc("GET /v1/brands/{brand}/social/accounts", s.onBrand(read, s.listSocialAccounts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/accounts", s.inBrand(read, s.listSocialAccounts))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/accounts/sync", s.onBrand(manage, s.syncSocialAccounts))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/accounts/sync", s.inBrand(manage, s.syncSocialAccounts))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/accounts/{id}", s.onBrand(read, s.getSocialAccount))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/accounts/{id}", s.inBrand(read, s.getSocialAccount))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/social/accounts/{id}", s.onBrand(manage, s.updateSocialAccount))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/social/accounts/{id}", s.inBrand(manage, s.updateSocialAccount))
+	mux.HandleFunc("POST /v1/brands/{brand}/social/accounts/{id}/sync", s.onBrand(manage, s.syncSocialAccountNow))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/social/accounts/{id}/sync", s.inBrand(manage, s.syncSocialAccountNow))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/accounts/{id}/days", s.onBrand(read, s.listSocialAccountDays))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/accounts/{id}/days", s.inBrand(read, s.listSocialAccountDays))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/posts", s.onBrand(read, s.listSocialPosts))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/posts", s.inBrand(read, s.listSocialPosts))
+	mux.HandleFunc("GET /v1/brands/{brand}/social/growth", s.onBrand(read, s.socialGrowth))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/social/growth", s.inBrand(read, s.socialGrowth))
 }
 
@@ -250,7 +258,7 @@ func (s *Server) syncSocialAccounts(w http.ResponseWriter, r *http.Request) {
 		// Accounts whose last read failed are read again now too, rather
 		// than at their next try.
 		args := []any{a.WorkspaceID}
-		sel := brandSel{in: a.Brands}
+		sel := brandSel{in: a.seenBrands()}
 		if _, err := tx.Exec(ctx, `UPDATE social_accounts a SET next_sync_at = now() WHERE a.workspace_id = $1 AND a.status = 'active'
 			AND a.last_error IS NOT NULL`+sel.sql("a.brand_id", &args), args...); err != nil {
 			return err

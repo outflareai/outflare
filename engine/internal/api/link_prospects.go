@@ -25,13 +25,21 @@ import (
 
 func (s *Server) routesLinkProspects(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/link-prospects", s.onBrand(read, s.listLinkProspects))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects", s.inBrand(read, s.listLinkProspects))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-prospects", s.onBrand(manage, s.addLinkProspects))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects", s.inBrand(manage, s.addLinkProspects))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-prospects/reclaim", s.onBrand(manage, s.reclaimLinkProspects))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/reclaim", s.inBrand(manage, s.reclaimLinkProspects))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-prospects/check", s.onBrand(manage, s.checkLinkProspects))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/check", s.inBrand(manage, s.checkLinkProspects))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-prospects/{prospect}/check", s.onBrand(manage, s.checkLinkProspect))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-prospects/{prospect}/check", s.inBrand(manage, s.checkLinkProspect))
+	mux.HandleFunc("GET /v1/brands/{brand}/link-prospects/{prospect}", s.onBrand(read, s.getLinkProspect))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(read, s.getLinkProspect))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/link-prospects/{prospect}", s.onBrand(manage, s.updateLinkProspect))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(manage, s.updateLinkProspect))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/link-prospects/{prospect}", s.onBrand(manage, s.deleteLinkProspect))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/link-prospects/{prospect}", s.inBrand(manage, s.deleteLinkProspect))
 }
 
@@ -106,7 +114,7 @@ func (s *Server) loadLinkProspect(ctx context.Context, ws, id string, sel brandS
 func (s *Server) linkProspectFor(w http.ResponseWriter, r *http.Request, a *access) (*linkProspectView, bool) {
 	id := r.PathValue("prospect")
 	if validUUID(id) {
-		p, err := s.loadLinkProspect(r.Context(), a.WorkspaceID, id, brandSel{in: a.Brands})
+		p, err := s.loadLinkProspect(r.Context(), a.WorkspaceID, id, brandSel{in: a.seenBrands()})
 		if err != nil {
 			s.internal(w, r, err)
 			return nil, false
@@ -290,7 +298,7 @@ func (s *Server) addLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &req.SiteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &req.SiteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -392,7 +400,7 @@ func (s *Server) reclaimLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -471,7 +479,7 @@ func (s *Server) checkLinkProspects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(ctx, a.WorkspaceID, &in.SiteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return

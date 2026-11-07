@@ -128,7 +128,7 @@ Each rule tests one thing about a person:
 
 A person must pass all the rules, or any of them (`match`). With no rules a list holds everyone.
 
-A list holds people unless it is a [list of companies](#lists-of-companies); merged and archived records never count. A list for one brand holds that brand's people and the people shared by every brand; a list for every brand holds everyone.
+A list holds people unless it is a [list of companies](#lists-of-companies); merged and archived records never count. A list is one brand's and holds only that brand's people.
 
 Lists fill straight away when saved, and refresh on their own every 15 minutes, which also moves people in and out of time windows such as "in the last 90 days". **Refresh now** does it at once. If a refresh takes over two minutes, it stops and the list shows `query_timeout`: narrow the rules, for example with a time window on an event.
 

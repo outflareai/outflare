@@ -105,7 +105,7 @@ func TestRedditCampaigns(t *testing.T) {
 		"brand_mentioned": true, "strategy": "top_comment_on_ranking_thread"}
 
 	// Nothing goes out without an Engain connection: the action stays a draft.
-	owner.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"monthly_credit_limit": 30, "credit_price_cents": 10})
+	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"monthly_credit_limit": 30, "credit_price_cents": 10})
 	noConn := owner.must(201, "POST", base+"/reddit/actions", comment)
 	if noConn["status"] != "approved" {
 		t.Fatalf("queued: %v", noConn)
@@ -183,21 +183,21 @@ func TestRedditCampaigns(t *testing.T) {
 	}
 
 	// Limits: a day's actions in one subreddit, then the month's credits.
-	owner.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"max_actions_per_subreddit_day": 1})
+	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"max_actions_per_subreddit_day": 1})
 	code, out := owner.do("POST", base+"/reddit/actions", comment)
 	if code != 409 || out["error"].(map[string]any)["code"] != "reddit_limit_reached" {
 		t.Fatalf("subreddit limit: %d %v", code, out)
 	}
-	owner.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"max_actions_per_subreddit_day": 5, "monthly_credit_limit": 6})
+	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"max_actions_per_subreddit_day": 5, "monthly_credit_limit": 6})
 	code, out = owner.do("POST", base+"/reddit/actions", comment)
 	if code != 409 || out["error"].(map[string]any)["code"] != "reddit_budget_reached" {
 		t.Fatalf("budget: %d %v", code, out)
 	}
-	drafts := owner.must(200, "GET", base+"/reddit/actions?status=draft", nil)["data"].([]any)
+	drafts := owner.must(200, "GET", base+"/reddit/actions?brand=geonode&status=draft", nil)["data"].([]any)
 	if len(drafts) != 2 {
 		t.Fatalf("refused actions are kept as drafts: %v", drafts)
 	}
-	owner.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"no_monthly_limit": true})
+	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"no_monthly_limit": true})
 	owner.must(200, "POST", base+"/reddit/actions/"+drafts[0].(map[string]any)["id"].(string)+"/approve", nil)
 	owner.must(200, "POST", base+"/reddit/actions/"+drafts[1].(map[string]any)["id"].(string)+"/cancel", nil)
 
@@ -235,9 +235,9 @@ func TestRedditCampaigns(t *testing.T) {
 	// a brand that needs approval keeps their actions as drafts.
 	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Reddit agent", "scopes": []string{"social.read", "social.manage", "social.post"}})["token"].(string)
 	bot := &client{t: t, h: e.h, bearer: tok}
-	bot.must(403, "PUT", base+"/reddit/settings/geonode", map[string]any{"monthly_credit_limit": 1000})
-	bot.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"engain_project_id": "proj-1"})
-	owner.must(200, "PUT", base+"/reddit/settings/geonode", map[string]any{"require_approval": true})
+	bot.must(403, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"monthly_credit_limit": 1000})
+	bot.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"engain_project_id": "proj-1"})
+	owner.must(200, "PUT", "/v1/brands/"+geo+"/reddit/settings", map[string]any{"require_approval": true})
 	reply := bot.must(201, "POST", base+"/reddit/actions", map[string]any{"brand": "geonode", "kind": "reply", "target_url": thread + "k9xyz12/",
 		"content": "Same here, it held up for scraping", "brand_mentioned": false})
 	if reply["status"] != "draft" {

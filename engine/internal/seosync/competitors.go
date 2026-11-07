@@ -25,11 +25,10 @@ import (
 const (
 	// competitorRows is how many competitors a site's read suggests.
 	competitorRows = 50
-	// MaxTrackedNumbers is how many tracked competitors per site get an
-	// overview each week, oldest first, so one site can't spend the budget.
-	MaxTrackedNumbers = 50
-	// MaxGapCompetitors is how many of them also get their keywords and
-	// linking domains read for the gaps.
+	// MaxGapCompetitors is how many tracked competitors (the first
+	// tracked) also get their keywords and linking domains read for the
+	// gaps. Every tracked competitor gets its overview; the connection's
+	// budget is the only limit, and the ones read longest ago go first.
 	MaxGapCompetitors = 5
 	// DefaultGapRows is how many keywords and linking domains that read
 	// takes of each.
@@ -68,9 +67,19 @@ type CompetitorRun struct {
 	Events    int    `json:"events"`
 	// NewLinks are linking domains new among a competitor's since its
 	// previous read (competitor_link.new).
-	NewLinks int     `json:"new_links"`
-	Cost     float64 `json:"cost"`
-	Error    *string `json:"error"`
+	NewLinks int `json:"new_links"`
+	// Failed are competitors the provider couldn't read; the rest still are.
+	Failed int     `json:"failed"`
+	Cost   float64 `json:"cost"`
+	Error  *string `json:"error"`
+}
+
+// skippable is a provider's refusal of one competitor (a domain it
+// doesn't know or won't read), which shouldn't stop the others. Running
+// out of budget or credits, a bad key or an outage stops the run.
+func skippable(err error) bool {
+	var be *BudgetError
+	return !errors.As(err, &be) && connectors.KindOf(err) == connectors.ErrInvalid
 }
 
 // SuggestSiteCompetitors asks the connection which domains share the most
@@ -143,8 +152,8 @@ func (s *Syncer) SyncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 
 // RefreshSiteCompetitors reads now the numbers of a site's tracked
 // competitors (the same ones and the same reads as the weekly snapshot)
-// that this connection hasn't read today, without asking for new
-// suggestions. Asking twice in a day costs nothing more.
+// that this connection hasn't read in the last CompetitorDays, without
+// asking for new suggestions. Asking again before then costs nothing more.
 func (s *Syncer) RefreshSiteCompetitors(ctx context.Context, o *connectors.Opened, r connectors.SEOReader, site LinkSite, country string, now time.Time) (CompetitorRun, error) {
 	return s.syncSiteCompetitors(ctx, o, r, site, country, now, true)
 }
@@ -168,36 +177,41 @@ func (s *Syncer) syncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 			return fail(err)
 		}
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT c.id::text, c.host FROM seo_competitors c
-		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'tracked' AND `+notPlatform("$4")+`
-		ORDER BY c.created_at, c.host LIMIT $3`, ws, site.ID, MaxTrackedNumbers, platformList())
+	// Every tracked competitor, never read or read longest ago first, so
+	// when the budget runs out the next run carries on where this one
+	// stopped. The first tracked few also get the gap reads.
+	// A competitor this connection read in the last CompetitorDays (the
+	// setting, a month unless changed) is skipped, however the read was
+	// asked for, so reading again costs nothing until then.
+	fresh := now.UTC().AddDate(0, 0, -SettingsOf(o.Config).CompetitorDaysOrDefault()+1).Format(time.DateOnly)
+	rows, err := s.Pool.Query(ctx, `SELECT id, host, gaps FROM (SELECT c.id::text AS id, c.host, last.day,
+			c.created_at, row_number() OVER (ORDER BY c.created_at, c.host) <= $4 AS gaps
+		FROM seo_competitors c
+		LEFT JOIN LATERAL (SELECT max(day) AS day FROM seo_snapshots n
+			WHERE n.integration_id = $5 AND n.host = c.host AND n.report = 'overview' AND n.key = '') last ON true
+		WHERE c.workspace_id = $1 AND c.site_id = $2 AND c.status = 'tracked' AND `+notPlatform("$3")+`) t
+		WHERE t.day IS NULL OR t.day < $6::date
+		ORDER BY t.day NULLS FIRST, t.created_at, t.host`, ws, site.ID, platformList(), MaxGapCompetitors, o.ID, fresh)
 	if err != nil {
 		return fail(err)
 	}
-	type tracked struct{ id, host string }
+	type tracked struct {
+		id, host string
+		gaps     bool
+	}
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (tracked, error) {
 		var t tracked
-		return t, row.Scan(&t.id, &t.host)
+		return t, row.Scan(&t.id, &t.host, &t.gaps)
 	})
 	if err != nil {
 		return fail(err)
 	}
 	day := now.UTC().Format(time.DateOnly)
 	gapRows := SettingsOf(o.Config).GapRowsOrDefault()
-	for i, c := range list {
+	for _, c := range list {
 		q, err := connectors.CheckSEOQuery(connectors.SEOQuery{Report: connectors.SEOOverview, Target: c.host, Country: country})
 		if err != nil {
 			continue
-		}
-		if refresh {
-			var today bool
-			if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM seo_snapshots
-				WHERE integration_id = $1 AND host = $2 AND report = 'overview' AND key = '' AND day = $3)`, o.ID, c.host, day).Scan(&today); err != nil {
-				return fail(err)
-			}
-			if today {
-				continue
-			}
 		}
 		var before *connectors.SEOMetrics
 		var raw []byte
@@ -215,6 +229,14 @@ func (s *Syncer) syncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		a, err := Fetch(ctx, s.Pool, o, r, q, Options{Fresh: true})
 		run.Cost += amountOf(unit, a.Cost)
 		if err != nil {
+			// One competitor the provider can't read (a parked domain, a
+			// host it doesn't know) doesn't stop the rest; the budget, a
+			// bad key or anything else does.
+			if skippable(err) {
+				run.Failed++
+				s.Log.Info("competitor overview not read", "site_id", site.ID, "competitor_id", c.id, "err", err)
+				continue
+			}
 			return fail(err)
 		}
 		if _, err := s.store(ctx, ws, o, c.host, day, a.SEOReport); err != nil {
@@ -223,7 +245,7 @@ func (s *Syncer) syncSiteCompetitors(ctx context.Context, o *connectors.Opened, 
 		run.Checked++
 		// The first few also get their top keywords and linking domains,
 		// for the keyword and link gaps.
-		if i < MaxGapCompetitors && gapRows > 0 {
+		if c.gaps && gapRows > 0 {
 			for _, report := range []string{connectors.SEOKeywords, connectors.SEOBacklinks} {
 				if !connectors.SupportsSEO(r, report) {
 					continue

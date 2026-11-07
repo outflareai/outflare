@@ -91,8 +91,9 @@ func TestCompetitorsSuggestTrackAndNumbers(t *testing.T) {
 	if _, err := e.pool.Exec(context.Background(), `DELETE FROM seo_competitors WHERE workspace_id = $1 AND host IN ('gitlab.com', 'old.reddit.com')`, ws); err != nil {
 		t.Fatal(err)
 	}
-	// A week later the domain rating moved.
-	if _, err := e.pool.Exec(context.Background(), `UPDATE seo_snapshots SET day = day - 7 WHERE workspace_id = $1`, ws); err != nil {
+	// A month later the domain rating moved (a competitor is read at most
+	// once a month).
+	if _, err := e.pool.Exec(context.Background(), `UPDATE seo_snapshots SET day = day - 30 WHERE workspace_id = $1`, ws); err != nil {
 		t.Fatal(err)
 	}
 	dfsRank.Store(47)

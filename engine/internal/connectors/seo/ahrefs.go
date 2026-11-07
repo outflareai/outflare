@@ -107,6 +107,23 @@ func (Ahrefs) get(ctx context.Context, cl *c.Client, creds c.Creds, path string,
 		http.Header{"Authorization": {"Bearer " + c.Token(creds)}}, out)
 }
 
+// report is get for one report. Ahrefs answers 403 for a report the
+// key's plan doesn't include (Site Audit on a plan without it, say), so a
+// 403 there is a refusal of that report, not a wrong key: only 401 marks
+// the connection broken, and the other reports keep working.
+func (a Ahrefs) report(ctx context.Context, cl *c.Client, creds c.Creds, path string, q url.Values, out any) error {
+	req, err := http.NewRequest(http.MethodGet, cl.Base("ahrefs", ahrefsAPI)+path+"?"+q.Encode(), nil)
+	if err != nil {
+		return c.Errf(c.ErrInvalid, "bad Ahrefs address: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token(creds))
+	status, err := c.DoJSON(ctx, cl, "Ahrefs", req, out)
+	if status == http.StatusForbidden {
+		return c.Errf(c.ErrInvalid, "Ahrefs refused this report (HTTP 403): the Ahrefs plan or API key may not include it")
+	}
+	return err
+}
+
 func (a Ahrefs) Test(ctx context.Context, cl *c.Client, creds c.Creds) (c.Account, error) {
 	var resp struct {
 		L struct {
@@ -162,15 +179,15 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				OrgCost       *float64 `json:"org_cost"`
 			} `json:"metrics"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/domain-rating", url.Values{"target": {q.Target}, "date": {today}, "output": {"json"}}, &dr); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/domain-rating", url.Values{"target": {q.Target}, "date": {today}, "output": {"json"}}, &dr); err != nil {
 			return rep, err
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/backlinks-stats", base, &links); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/backlinks-stats", base, &links); err != nil {
 			return rep, err
 		}
 		mq := cloneValues(base)
 		mq.Set("country", country)
-		if err := a.get(ctx, cl, creds, "/site-explorer/metrics", mq, &metrics); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/metrics", mq, &metrics); err != nil {
 			return rep, err
 		}
 		rep.Totals = c.SEOMetrics{
@@ -196,7 +213,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				Traffic  *float64 `json:"sum_traffic"`
 			} `json:"keywords"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/organic-keywords", v, &resp); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/organic-keywords", v, &resp); err != nil {
 			return rep, err
 		}
 		for _, k := range resp.Keywords {
@@ -222,7 +239,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				Traffic *float64 `json:"traffic_domain"`
 			} `json:"refdomains"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/refdomains", v, &resp); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/refdomains", v, &resp); err != nil {
 			return rep, err
 		}
 		for _, d := range resp.Refdomains {
@@ -284,7 +301,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				RefDomains   *float64 `json:"refdomains_source"`
 			} `json:"backlinks"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/all-backlinks", v, &resp); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/all-backlinks", v, &resp); err != nil {
 			return rep, err
 		}
 		for _, b := range resp.Backlinks {
@@ -329,7 +346,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				Traffic *float64 `json:"traffic"`
 			} `json:"competitors"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/organic-competitors", v, &resp); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/organic-competitors", v, &resp); err != nil {
 			return rep, err
 		}
 		for _, x := range resp.Competitors {
@@ -354,7 +371,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				TopVolume  *float64 `json:"top_keyword_volume"`
 			} `json:"pages"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-explorer/top-pages", v, &resp); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-explorer/top-pages", v, &resp); err != nil {
 			return rep, err
 		}
 		for _, p := range resp.Pages {
@@ -375,7 +392,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				Errors      *float64 `json:"urls_with_errors"`
 			} `json:"healthscores"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-audit/projects", url.Values{"project_url": {q.Target}, "output": {"json"}}, &projects); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-audit/projects", url.Values{"project_url": {q.Target}, "output": {"json"}}, &projects); err != nil {
 			return rep, err
 		}
 		if len(projects.Healthscores) == 0 {
@@ -391,7 +408,7 @@ func (a Ahrefs) SEOReport(ctx context.Context, cl *c.Client, creds c.Creds, q c.
 				Crawled    *float64 `json:"crawled"`
 			} `json:"issues"`
 		}
-		if err := a.get(ctx, cl, creds, "/site-audit/issues", url.Values{"project_id": {p.ProjectID}, "output": {"json"}}, &issues); err != nil {
+		if err := a.report(ctx, cl, creds, "/site-audit/issues", url.Values{"project_id": {p.ProjectID}, "output": {"json"}}, &issues); err != nil {
 			return rep, err
 		}
 		rank := map[string]int{"error": 0, "warning": 1, "notice": 2}

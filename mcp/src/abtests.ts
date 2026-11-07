@@ -162,6 +162,18 @@ export function registerABTestTools(
   if (readOnly) return;
 
   server.registerTool(
+    "stop_ab_test_ai_run",
+    {
+      title: "Stop an A/B test AI run",
+      description: "Stop a queued or running AI run that is taking too long. It ends as failed with the error Stopped.; a run that already finished is returned as it is.",
+      inputSchema: { brand: brandRef, run: z.string().uuid() },
+      annotations: write,
+    },
+    ({ brand, run }) =>
+      call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/ab-test-ai-runs/{run}/stop", { params: { path: { brand: b, run } } }))),
+  );
+
+  server.registerTool(
     "suggest_ab_tests",
     {
       title: "Suggest A/B tests with AI",
@@ -185,10 +197,12 @@ export function registerABTestTools(
     {
       title: "Write test versions with AI",
       description:
-        "The workspace's own AI model writes new versions of a flag's content from a prompt, in the brand's voice. Returns a queued run (get_ab_test_ai_run); the versions are proposals: add the ones the person approves to the flag with update_flag.",
+        "The workspace's own AI model writes new versions of a flag's content from a prompt, in the brand's voice. For a no-code test of a page (send test), it reads the page and writes each version as changes to it, ready for set_ab_test_version; with version, more changes to that one version. Returns a queued run (get_ab_test_ai_run); the versions are proposals: add the ones the person approves (update_flag, or set_ab_test_version for page changes).",
       inputSchema: {
         brand: brandRef,
-        flag: z.string().min(1).describe("The flag's id or key."),
+        flag: z.string().min(1).optional().describe("The flag's id or key. Leave out when sending test."),
+        test: z.string().uuid().optional().describe("A no-code test of a page: its versions are written as changes to the page."),
+        version: z.string().min(1).max(64).optional().describe("With test: one of its new versions, to write more changes to."),
         prompt: z.string().min(1).max(2000).describe('What to change and for whom, such as "a shorter, more urgent headline for agencies".'),
         count: z.number().int().min(1).max(4).optional(),
         fields: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/)).max(8).optional().describe("Content fields to write, such as headline and cta. Default: those the flag's versions carry."),

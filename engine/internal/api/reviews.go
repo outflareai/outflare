@@ -25,15 +25,25 @@ import (
 
 func (s *Server) routesReviews(mux *http.ServeMux) {
 	read, manage := auth.ScopeSocialRead, auth.ScopeSocialManage
+	mux.HandleFunc("GET /v1/brands/{brand}/reviews", s.onBrand(read, s.listReviews))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews", s.inBrand(read, s.listReviews))
+	mux.HandleFunc("GET /v1/brands/{brand}/reviews/summary", s.onBrand(read, s.reviewsSummary))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/summary", s.inBrand(read, s.reviewsSummary))
+	mux.HandleFunc("GET /v1/brands/{brand}/reviews/pages", s.onBrand(read, s.listReviewPages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/pages", s.inBrand(read, s.listReviewPages))
+	mux.HandleFunc("POST /v1/brands/{brand}/reviews/pages/sync", s.onBrand(manage, s.syncReviewPagesNow))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/pages/sync", s.inBrand(manage, s.syncReviewPagesNow))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/reviews/pages/{id}", s.onBrand(manage, s.updateReviewPage))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/reviews/pages/{id}", s.inBrand(manage, s.updateReviewPage))
+	mux.HandleFunc("POST /v1/brands/{brand}/reviews/pages/{id}/read", s.onBrand(manage, s.readReviewPageNow))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/pages/{id}/read", s.inBrand(manage, s.readReviewPageNow))
+	mux.HandleFunc("GET /v1/brands/{brand}/reviews/pages/{id}/days", s.onBrand(read, s.listReviewPageDays))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/pages/{id}/days", s.inBrand(read, s.listReviewPageDays))
+	mux.HandleFunc("GET /v1/brands/{brand}/reviews/{id}", s.onBrand(read, s.getReview))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/reviews/{id}", s.inBrand(read, s.getReview))
+	mux.HandleFunc("POST /v1/brands/{brand}/reviews/{id}/draft", s.onBrand(manage, s.draftReviewReply))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/{id}/draft", s.inBrand(manage, s.draftReviewReply))
+	mux.HandleFunc("POST /v1/brands/{brand}/reviews/{id}/replied", s.onBrand(manage, s.markReviewReplied))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/reviews/{id}/replied", s.inBrand(manage, s.markReviewReplied))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/brands/{brand}/reviews/discover", s.inBrand(manage, s.discoverReviewPages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/brands/{brand}/review-guide", s.inBrand(read, s.getReviewGuide))
@@ -267,7 +277,7 @@ func (s *Server) syncReviewPagesNow(w http.ResponseWriter, r *http.Request) {
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		args := []any{a.WorkspaceID}
-		sel := brandSel{in: a.Brands}
+		sel := brandSel{in: a.seenBrands()}
 		if _, err := tx.Exec(ctx, `UPDATE review_pages p SET next_read_at = now() WHERE p.workspace_id = $1 AND p.status = 'active'`+sel.sql("p.brand_id", &args), args...); err != nil {
 			return err
 		}

@@ -123,6 +123,64 @@ func TestPresenceOpportunities(t *testing.T) {
 	if states["reviews.example"] != "won" || states["news.example"] != "won" || states["tiny.example"] != "dismissed" {
 		t.Fatalf("states: %v", states)
 	}
+	// Two pages on one site and one on a competitor's own site: grouped by
+	// domain they are two rows, and competitors' sites can be hidden.
+	exec(`INSERT INTO coverage_competitor_placements (workspace_id,brand_id,competitor_id,url,host,title,kind,domain_rating,domain_traffic,sources) VALUES
+		($1,$2,$3,'https://blog.example/a','blog.example','A','blog',40,1000,'{backlinks}'),
+		($1,$2,$3,'https://blog.example/b','blog.example','B','blog',40,1000,'{backlinks}'),
+		($1,$2,$4,'https://rival.example/partners','rival.example','Partners','blog',60,5000,'{backlinks}')`, ws, brand, rival, small)
+	if got = owner.must(200, "POST", root+"/opportunities/refresh", nil); got["added"] != 3.0 {
+		t.Fatalf("third refresh: %v", got)
+	}
+	if all := owner.must(200, "GET", root+"/opportunities", nil); all["total"] != 3.0 {
+		t.Fatalf("open: %v", all)
+	}
+	grouped := owner.must(200, "GET", root+"/opportunities?group=domain&sort=domain_rating", nil)
+	if grouped["total"] != 2.0 {
+		t.Fatalf("grouped: %v", grouped)
+	}
+	first := grouped["data"].([]any)[0].(map[string]any)
+	if first["host"] != "rival.example" || first["competitor_site"] != true || first["site_opportunities"] != 1.0 {
+		t.Fatalf("grouped by rating: %v", first)
+	}
+	if blog := grouped["data"].([]any)[1].(map[string]any); blog["host"] != "blog.example" || blog["site_opportunities"] != 2.0 || blog["competitor_site"] != false {
+		t.Fatalf("grouped site: %v", blog)
+	}
+	if hidden := owner.must(200, "GET", root+"/opportunities?exclude_competitors=true&group=domain", nil); hidden["total"] != 1.0 {
+		t.Fatalf("exclude competitors: %v", hidden)
+	}
+	if one := owner.must(200, "GET", root+"/opportunities?host=www.blog.example", nil); one["total"] != 2.0 {
+		t.Fatalf("host: %v", one)
+	}
+	if strong := owner.must(200, "GET", root+"/opportunities?min_domain_rating=50", nil); strong["total"] != 1.0 {
+		t.Fatalf("min_domain_rating: %v", strong)
+	}
+	if page := owner.must(200, "GET", root+"/opportunities?limit=2", nil); page["next_cursor"] == nil {
+		t.Fatalf("no next page: %v", page)
+	}
+	// A translation of a page is the English page: competitors on /fr/ and
+	// on the English page make one opportunity, on the English page.
+	exec(`INSERT INTO placement_opportunities (workspace_id,brand_id,url,host,title,kind,reason,action,source,evidence,factors,score)
+		VALUES ($1,$2,'https://lists.example/fr/proxies','lists.example','Proxys','blog','competitor_gap','pitch','presence','{}','{}',10)`, ws, brand)
+	exec(`INSERT INTO coverage_competitor_placements (workspace_id,brand_id,competitor_id,url,host,title,kind,domain_rating,domain_traffic,sources) VALUES
+		($1,$2,$3,'https://lists.example/fr/proxies','lists.example','Proxys','blog',30,100,'{backlinks}'),
+		($1,$2,$4,'https://lists.example/proxies','lists.example','Proxies','blog',30,100,'{backlinks}'),
+		($1,$2,$4,'https://lists.example/de/proxies','lists.example','Proxys','blog',30,100,'{backlinks}')`, ws, brand, rival, small)
+	owner.must(200, "POST", root+"/opportunities/refresh", nil)
+	lists := owner.must(200, "GET", root+"/opportunities?host=lists.example", nil)
+	if lists["total"] != 1.0 {
+		t.Fatalf("translations: %v", lists)
+	}
+	if l := lists["data"].([]any)[0].(map[string]any); l["url"] != "https://lists.example/proxies" || l["title"] != "Proxies" || l["factors"].(map[string]any)["competitors"] == nil ||
+		len(l["evidence"].(map[string]any)["competitor_ids"].([]any)) != 2 || l["evidence"].(map[string]any)["translations"] != true {
+		t.Fatalf("english page: %v", l)
+	}
+	owner.must(400, "GET", root+"/opportunities?access=nope", nil)
+	owner.must(200, "GET", root+"/opportunities?access=earned", nil)
+	owner.must(400, "GET", root+"/opportunities?sort=nope", nil)
+	owner.must(400, "GET", root+"/opportunities?group=site", nil)
+	owner.must(400, "GET", root+"/opportunities?exclude_competitors=maybe", nil)
+
 	if got := owner.must(200, "GET", "/v1/brands/"+other+"/coverage/opportunities?state=all", nil); got["total"] != 0.0 {
 		t.Fatalf("another brand sees them: %v", got)
 	}

@@ -24,12 +24,19 @@ import (
 
 func (s *Server) routesSEOTargets(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/targets", s.onBrand(read, s.listPageTargets))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/targets", s.inBrand(read, s.listPageTargets))
+	mux.HandleFunc("PUT /v1/brands/{brand}/seo-sites/{site}/targets", s.onBrand(manage, s.putPageTarget))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/seo-sites/{site}/targets", s.inBrand(manage, s.putPageTarget))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-sites/{site}/targets/accept", s.onBrand(manage, s.acceptPageTargets))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-sites/{site}/targets/accept", s.inBrand(manage, s.acceptPageTargets))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/seo-sites/{site}/targets/{target}", s.onBrand(manage, s.updatePageTarget))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", s.inBrand(manage, s.updatePageTarget))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-sites/{site}/targets/{target}", s.onBrand(manage, s.deletePageTarget))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", s.inBrand(manage, s.deletePageTarget))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/cannibalisation", s.onBrand(read, s.siteCannibalisation))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/cannibalisation", s.inBrand(read, s.siteCannibalisation))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/internal-links", s.onBrand(read, s.siteInternalLinks))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/internal-links", s.inBrand(read, s.siteInternalLinks))
 }
 

@@ -65,6 +65,8 @@ import { Trends } from "./pages/Trends";
 import { Dashboards } from "./pages/Dashboards";
 import { Retention } from "./pages/Retention";
 import { Paths } from "./pages/Paths";
+import { Live } from "./pages/Live";
+import { PageSpeed } from "./pages/PageSpeed";
 import { IdealCustomers } from "./pages/IdealCustomers";
 import { LeadFinder } from "./pages/LeadFinder";
 import { EmailFinder } from "./pages/EmailFinder";
@@ -105,6 +107,7 @@ import { AIVisibility } from "./pages/ai-visibility/overview";
 import { AIQuestions } from "./pages/ai-visibility/questions";
 import { AIAccuracy, AICompetitors, AISources, AITraffic } from "./pages/ai-visibility/more";
 import { AIVisibilitySettings } from "./pages/ai-visibility/settings";
+import { AIPages } from "./pages/ai-visibility/pages";
 import { Backlinks } from "./pages/Backlinks";
 import { Competitors } from "./pages/Competitors";
 import { Competition } from "./pages/Competition";
@@ -120,7 +123,7 @@ import { Authorize } from "./pages/Authorize";
 import { ConnectComputer } from "./pages/ConnectComputer";
 import { SharedDashboard } from "./pages/SharedDashboard";
 import { SharedAIVisibility } from "./pages/SharedAIVisibility";
-import { setBrand, useBrand } from "@/lib/brand";
+import { setBrand, useBrand, pickedBrandId } from "@/lib/brand";
 
 const CRMWorkspace = lazy(() => import("./pages/crm/Workspace").then((m) => ({ default: m.CRMWorkspace })));
 
@@ -311,7 +314,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   useEffect(() => {
     if (findWs || !findItem || !kind || !wsId) return;
     let live = true;
-    api.GET("/v1/workspaces/{ws}/links/{kind}/{ref}", { params: { path: { ws: wsId, kind, ref: findItem } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/links/{kind}/{ref}", { params: { path: { brand: pickedBrandId(), kind, ref: findItem } } }).then(({ data }) => {
       if (!live) return;
       if (data) {
         setLinks((l) => ({ ...l, [linkKey(kind, findItem)]: data, [linkKey(kind, data.id)]: data }));
@@ -333,7 +336,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   useEffect(() => {
     if (!kind || !item || !isID(item) || link) return;
     let live = true;
-    api.GET("/v1/workspaces/{ws}/links/{kind}/{ref}", { params: { path: { ws: wsId, kind, ref: item } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/links/{kind}/{ref}", { params: { path: { brand: pickedBrandId(), kind, ref: item } } }).then(({ data }) => {
       if (live) setLinks((l) => ({ ...l, [linkKey(kind, item)]: data ?? { id: item, slug: item } }));
     });
     return () => {
@@ -343,6 +346,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
   const [unread, setUnread] = useState(0);
   const [badges, setBadges] = useState<Record<string, string>>({});
   const [pitchesWaiting, setPitchesWaiting] = useState(0);
+  const [actionsWaiting, setActionsWaiting] = useState(0);
   const ws = me.workspaces.find((w) => w.id === wsId);
   // What the person may do here, from their role. The server checks every
   // request; this only hides what would be refused.
@@ -441,15 +445,17 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
     return () => clearInterval(t);
   }, [wsId, me.menu_links?.length]);
 
-  // Unread replies show on the Inbox tab, and link pitches waiting for
-  // approval on Link building, for the brand picked in the sidebar,
-  // refreshed every 30 seconds.
+  // Unread replies show on the Inbox tab, agents' changes waiting for a
+  // yes or no on Agents, and link pitches waiting for approval on Link
+  // building, for the brand picked in the sidebar, refreshed every 30
+  // seconds.
   useEffect(() => {
     if (!wsId) return;
     const load = () => api.GET("/v1/workspaces/{ws}/stats", { params: { path: { ws: wsId }, query: pickedBrand ? { brand: pickedBrand } : {} } }).then(({ data }) => {
       if (!data) return;
       setUnread(data.unread_replies);
       setPitchesWaiting(data.link_pitches_waiting);
+      setActionsWaiting(data.actions_waiting);
     });
     load();
     const t = setInterval(load, 30000);
@@ -626,7 +632,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         tab={tab}
         onTab={go}
         unread={unread}
-        counts={{ "link-building": pitchesWaiting }}
+        counts={{ "link-building": pitchesWaiting, agents: actionsWaiting }}
         theme={theme}
         onTheme={toggleTheme}
         onSearch={() => setPalette(true)}
@@ -658,10 +664,12 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "setup" && <BrandSetup key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
         {ready && ws && tab === "get-started" && !isAdmin && <p className="text-sm text-muted-foreground">An owner or admin of {ws.name} sets this up.</p>}
         {ready && ws && tab === "flags" && <Flags key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
-        {ready && ws && tab === "ab-tests" && <ABTests key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "ab-tests" && <ABTests key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} open={item} setOpen={setItem} />}
         {ready && ws && tab === "funnels" && <Funnels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "trends" && <Trends key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "retention" && <Retention key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
+        {ready && ws && tab === "live" && <Live key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
+        {ready && ws && tab === "page-speed" && <PageSpeed key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
         {ready && ws && tab === "paths" && <Paths key={ws.id} ws={ws.id} canManage={can("analytics.manage")} />}
         {ready && ws && tab === "dashboards" && <Dashboards key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} item={item} />}
         {ready && ws && tab === "channels" && <Channels key={ws.id} ws={ws.id} canManage={can("analytics.manage")} go={setTab} />}
@@ -679,6 +687,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "ai-questions" && <AIQuestions key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} item={item} />}
         {ready && ws && tab === "ai-competitors" && <AICompetitors key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-sources" && <AISources key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
+        {ready && ws && tab === "ai-pages" && <AIPages key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-perception" && <AIAccuracy key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-traffic" && <AITraffic key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}
         {ready && ws && tab === "ai-visibility-settings" && <AIVisibilitySettings key={`${ws.id}:${brandState.brand?.id ?? "all"}`} ws={ws.id} go={setTab} />}

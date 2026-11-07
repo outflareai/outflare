@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useState } from "react";
 import type { InternalLinkTarget, PageConversion, PageTarget, SEORegression, TrackedKeyword, SEOSite, SearchCompetition, SearchRow, SearchSitemap, SearchSource, URLInspection } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -41,7 +42,14 @@ export function SitePicker({ sites, site, onChange }: { sites: SEOSite[]; site: 
   );
 }
 
-export function Keywords({ ws, go }: Props) {
+// Search keywords belong to one brand.
+export function Keywords(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Search keywords" brands={active.length} />;
+  return <KeywordsPage key={brand.id} {...props} />;
+}
+
+function KeywordsPage({ ws, go }: Props) {
   const [sites, setSites] = useState<SEOSite[] | null>(null);
   const [site, setSite] = useState("");
   const [section, setSection] = useState<Section>("pages");
@@ -49,7 +57,7 @@ export function Keywords({ ws, go }: Props) {
   const brandKey = useBrand(ws).query.brand ?? "";
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brandKey ? { brand: brandKey } : {} } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setSites(data.data);
       setSite((s) => (data.data.some((x) => x.id === s) ? s : (data.data[0]?.id ?? "")));
@@ -107,7 +115,7 @@ function useTracker(ws: string, site: string): Tracker {
   const [ready, setReady] = useState(false);
   const [connected, setConnected] = useState(false);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path: { ws, site } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/rankings", { params: { path: { brand: pickedBrandId(), site } } }).then(({ data }) => {
       if (!data) return;
       setTracked(new Set(data.data.map((t) => kwKey(t.keyword))));
       setConnected(data.connections.length > 0);
@@ -115,7 +123,7 @@ function useTracker(ws: string, site: string): Tracker {
     });
   }, [ws, site]);
   const add = async (keyword: string) => {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path: { ws, site } }, body: { keywords: [keyword] } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/rankings", { params: { path: { brand: pickedBrandId(), site } }, body: { keywords: [keyword] } });
     if (error) return toast(errorMessage(error), "error");
     setTracked((t) => new Set(t).add(kwKey(keyword)));
     toast(data?.added ? `Tracking "${keyword}". The first check has started.` : `"${keyword}" was already tracked.`);
@@ -179,7 +187,7 @@ function Performance({ ws, site, group, go }: { ws: string; site: string; group:
   const tracker = useTracker(ws, site);
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/search", { params: { path: { ws, site }, query: { group, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/search", { params: { path: { brand: pickedBrandId(), site }, query: { group, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setTotals(data.totals);
@@ -243,7 +251,7 @@ function Breakdown({ ws, site, row, group, tracker, go, onClose }: { ws: string;
   const [rows, setRows] = useState<SearchRow[] | null>(null);
   useEffect(() => {
     const query = group === "page" ? { page: row.page ?? "" } : { keyword: row.query ?? "" };
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/search", { params: { path: { ws, site }, query: { group: "page_query", limit: 100, ...query } } }).then(({ data }) => setRows(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/search", { params: { path: { brand: pickedBrandId(), site }, query: { group: "page_query", limit: 100, ...query } } }).then(({ data }) => setRows(data?.data ?? []));
   }, [ws, site, row, group]);
   const title = group === "page" ? pathOf(row.page ?? "") : (row.query ?? "");
   return (
@@ -294,7 +302,7 @@ function Indexing({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
 
   useEffect(() => {
     const query = state ? { state: state as "indexed" | "not_indexed" | "canonical_differs" | "changed" } : {};
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/indexing", { params: { path: { ws, site }, query } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/indexing", { params: { path: { brand: pickedBrandId(), site }, query } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setSummary(data.summary);
@@ -354,7 +362,7 @@ function Sitemaps({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   const [src, setSrc] = useState<SearchSource | null | undefined>(undefined);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/sitemaps", { params: { path: { ws, site } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/sitemaps", { params: { path: { brand: pickedBrandId(), site } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setSrc(data.source);
@@ -395,10 +403,10 @@ function Targets({ ws, site, host, go }: { ws: string; site: string; host: strin
   const [keyword, setKeyword] = useState("");
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
-  const path = { ws, site };
+  const path = { brand: pickedBrandId(), site };
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/targets", { params: { path } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/targets", { params: { path } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setSrc(data.source);
@@ -414,26 +422,26 @@ function Targets({ ws, site, host, go }: { ws: string; site: string; host: strin
   };
   const set = async (body: { url: string; keyword?: string; status?: "set" | "dismissed" }, ok: string) => {
     setBusy(true);
-    const { error } = await api.PUT("/v1/workspaces/{ws}/seo-sites/{site}/targets", { params: { path }, body });
+    const { error } = await api.PUT("/v1/brands/{brand}/seo-sites/{site}/targets", { params: { path }, body });
     done(error, ok);
     return !error;
   };
   const accept = async (urls?: string[]) => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/targets/accept", { params: { path }, body: urls ? { urls } : {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/targets/accept", { params: { path }, body: urls ? { urls } : {} });
     done(error, data ? plural(data.accepted, "target") + " set" : "");
   };
   const edit = async (t: PageTarget) => {
     const r = await ask({ title: "Change the target keyword", body: <span className="font-mono text-[12px] break-all">{pathOf(t.url)}</span>, input: { label: "Keyword", value: t.keyword, maxLength: 200 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }] });
     if (r?.choice !== "ok" || !t.id) return;
     setBusy(true);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", { params: { path: { ...path, target: t.id } }, body: { keyword: r.value } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-sites/{site}/targets/{target}", { params: { path: { ...path, target: t.id } }, body: { keyword: r.value } });
     done(error, "Target changed");
   };
   const remove = async (t: PageTarget) => {
     if (!t.id) return;
     setBusy(true);
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}/targets/{target}", { params: { path: { ...path, target: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/seo-sites/{site}/targets/{target}", { params: { path: { ...path, target: t.id } } });
     done(error, t.status === "dismissed" ? "Suggestions are back for this page" : "Target removed");
   };
 
@@ -551,7 +559,7 @@ function Cannibalisation({ ws, site, go }: { ws: string; site: string; go: Props
   const [error, setError] = useState("");
   const tracker = useTracker(ws, site);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/cannibalisation", { params: { path: { ws, site }, query: { limit: 200 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/cannibalisation", { params: { path: { brand: pickedBrandId(), site }, query: { limit: 200 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setSrc(data.source);
@@ -610,7 +618,7 @@ function InternalLinks({ ws, site, go, onTargets }: { ws: string; site: string; 
   const [notCrawled, setNotCrawled] = useState(0);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/internal-links", { params: { path: { ws, site } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/internal-links", { params: { path: { brand: pickedBrandId(), site } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setNotCrawled(data.not_crawled.length);
@@ -682,10 +690,10 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
-  const path = { ws, site };
+  const path = { brand: pickedBrandId(), site };
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/rankings", { params: { path } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setConn(data.connection);
@@ -702,35 +710,35 @@ function Rankings({ ws, site, go }: { ws: string; site: string; go: Props["go"] 
   };
   const track = async (body: { keywords?: string[]; from_targets?: boolean }) => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings", { params: { path }, body: { ...body, device, ...(source ? { integration_id: source } : {}) } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/rankings", { params: { path }, body: { ...body, device, ...(source ? { integration_id: source } : {}) } });
     done(error, data ? `${plural(data.added, "keyword")} tracked${data.skipped ? `, ${data.skipped} already were` : ""}. The first check has started.` : "");
     return !error;
   };
   const check = async () => {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/seo-sites/{site}/rankings/check", { params: { path } });
+    const { error } = await api.POST("/v1/brands/{brand}/seo-sites/{site}/rankings/check", { params: { path } });
     done(error, "Checking now. Positions update in a minute or two.");
   };
   const toggle = async (t: TrackedKeyword) => {
     setBusy(true);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { status: t.status === "active" ? "paused" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { status: t.status === "active" ? "paused" : "active" } });
     done(error, t.status === "active" ? "Paused" : "Resumed");
   };
   const often = async (t: TrackedKeyword) => {
     setBusy(true);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { frequency: t.frequency === "daily" ? "weekly" : "daily" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { frequency: t.frequency === "daily" ? "weekly" : "daily" } });
     done(error, t.frequency === "daily" ? "Checked weekly" : "Checked daily");
   };
   const switchSource = async (t: TrackedKeyword, id: string) => {
     setBusy(true);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { integration_id: id } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } }, body: { integration_id: id } });
     done(error, `Checked through ${conns.find((c) => c.integration_id === id)?.name ?? "that connection"}`);
   };
   const sourceOf = (t: TrackedKeyword) => conns.find((c) => c.integration_id === t.integration_id) ?? conn;
   const importOf = (t: TrackedKeyword) => imports.find((c) => c.integration_id === t.integration_id);
   const remove = async (t: TrackedKeyword) => {
     setBusy(true);
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/seo-sites/{site}/rankings/{tracked}", { params: { path: { ...path, tracked: t.id } } });
     done(error, "No longer tracked");
   };
 
@@ -900,7 +908,7 @@ function Conversions({ ws, site, go }: { ws: string; site: string; go: Props["go
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/conversions", { params: { path: { ws, site } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/conversions", { params: { path: { brand: pickedBrandId(), site } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
       setSrc(data.source);
@@ -1002,7 +1010,7 @@ function Drops({ ws, site, go }: { ws: string; site: string; go: Props["go"] }) 
   const [error, setError] = useState("");
   useEffect(() => {
     setRows(null);
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/regressions", { params: { path: { ws, site }, query: { status } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/regressions", { params: { path: { brand: pickedBrandId(), site }, query: { status } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setRows(data.data);
     });

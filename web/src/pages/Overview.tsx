@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { AttributionChannels, components, StoryResult, WorkspaceStats, WorkspaceStatus } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { api } from "../api";
 import { Button, Card, Loading, PageHeader, Stat, Stats } from "../ui";
 import { Icon } from "../icons";
@@ -279,7 +279,8 @@ function ChannelTiles({ brand, go }: { brand: string; go: Go }) {
 function PRTiles({ ws, brand, go }: { ws: string; brand?: string; go: Go }) {
   const [total, setTotal] = useState<Omit<StoryResult, "story_id" | "brand_id" | "title" | "status"> | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/stories/results", { params: { path: { ws }, query: brand ? { brand } : {} } }).then(({ data }) => setTotal(data?.total ?? null));
+    if (!brand) return setTotal(null);
+    api.GET("/v1/brands/{brand}/stories/results", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setTotal(data?.total ?? null));
   }, [ws, brand]);
   if (!total || (total.pitched === 0 && total.coverage === 0)) return null;
   const wanted = (total.reply_kinds.wants_data ?? 0) + (total.reply_kinds.wants_interview ?? 0);

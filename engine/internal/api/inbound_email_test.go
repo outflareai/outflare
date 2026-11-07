@@ -82,7 +82,8 @@ func TestInboundEmail(t *testing.T) {
 	// Support addresses read like support inboxes, one per brand, and can
 	// be renamed.
 	sup := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "support"})
-	if sup["email"] != "acme-outbound-support@in.example.test" || sup["brand_id"] != nil {
+	// With no brand named, it is the workspace's first brand's.
+	if sup["email"] != "acme-outbound-support@in.example.test" || sup["brand_id"] == nil {
 		t.Fatalf("support address: %v", sup)
 	}
 	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "handle": "repocket", "website": "https://repocket.com"})

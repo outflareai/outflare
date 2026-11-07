@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 // The link autopilot (Outflare Cloud): an agent run that keeps the link
 // building playbooks working toward a number of new live links a month,
 // within a monthly budget, on the workspace's own accounts. The server
@@ -8,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import type { SEOSite } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { addBrandObjective, brandAgentURL, listBrandAgents, type AgentObjective, type BrandAgent } from "@/lib/brandAgent";
 import { useCapabilities } from "@/lib/cloud";
 import { api, errorMessage } from "../api";
@@ -54,7 +55,14 @@ const finished = (s: string) => s === "completed" || s === "stopped" || s === "f
 const host = (h: string) => h.replace(/^www\./, "");
 const dollars = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: cents % 100 ? 2 : 0 })}`;
 
-export function LinkAutopilot({ ws, canManage, go }: Props) {
+// Link autopilot settings belong to one brand.
+export function LinkAutopilot(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Link autopilot settings" brands={active.length} />;
+  return <LinkAutopilotPage key={brand.id} {...props} />;
+}
+
+function LinkAutopilotPage({ ws, canManage, go }: Props) {
   const base = `/v1/workspaces/${ws}/cloud/link-autopilot`;
   const { brand } = useBrand(ws);
   const [list, setList] = useState<Autopilot[] | null>(null);
@@ -75,7 +83,7 @@ export function LinkAutopilot({ ws, canManage, go }: Props) {
   useEffect(() => {
     setList(null);
     void load();
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws } } }).then(({ data }) => setSites(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => setSites(data?.data ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand?.id]);
   useEffect(() => {
@@ -165,7 +173,7 @@ function AutopilotCard({ ws, a, site, go }: { ws: string; a: Autopilot; site?: S
   useEffect(() => {
     if (!site) return;
     const day = new Date().getUTCDate();
-    api.GET("/v1/workspaces/{ws}/link-prospects/results", { params: { path: { ws }, query: { site_id: site.id, days: day } } }).then(({ data }) => setLive(data?.totals.live ?? null));
+    api.GET("/v1/brands/{brand}/link-prospects/results", { params: { path: { brand: pickedBrandId() }, query: { site_id: site.id, days: day } } }).then(({ data }) => setLive(data?.totals.live ?? null));
   }, [ws, site]);
   const [label, tone] = statusLabel[a.status] ?? [a.status, "grey"];
   const waiting = a.status === "draft" || a.status === "pending_approval";

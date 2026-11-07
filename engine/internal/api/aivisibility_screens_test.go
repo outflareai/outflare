@@ -50,7 +50,7 @@ func TestAIVisibilityScreens(t *testing.T) {
 	if run["status"] != "done" || run["samples_done"] != 1.0 || run["cost_micros"] != 4000.0 || run["cost_cents"] != 0.0 {
 		t.Fatalf("run: %v", run)
 	}
-	s := owner.must(200, "GET", base+"/ai-samples?run_id="+rid, nil)["data"].([]any)[0].(map[string]any)
+	s := owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid, nil)["data"].([]any)[0].(map[string]any)
 	if s["surface"] != "screen" || s["answer_model"] != "gpt-6" || s["brand_named"] != true || s["check_url"] != "https://chatgpt.com/?q=best+proxy" ||
 		len(s["searches"].([]any)) != 1 || len(s["brands_named"].([]any)) != 3 {
 		t.Fatalf("sample: %v", s)
@@ -83,7 +83,7 @@ func TestAIVisibilityScreens(t *testing.T) {
 	if err := svc.Step(ctx, ws, rid, 0); err != nil {
 		t.Fatal(err)
 	}
-	s = owner.must(200, "GET", base+"/ai-samples?run_id="+rid, nil)["data"].([]any)[0].(map[string]any)
+	s = owner.must(200, "GET", base+"/ai-samples?brand=acme&run_id="+rid, nil)["data"].([]any)[0].(map[string]any)
 	if s["status"] != "failed" || s["error_code"] != "connector_needed" {
 		t.Fatalf("no connection: %v", s)
 	}

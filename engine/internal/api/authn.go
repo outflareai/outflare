@@ -110,6 +110,15 @@ func (a *access) writes(brand *string) bool {
 
 // seenBrands is the brands a query may show the caller: the route's brand
 // on a brand route, else the brands it is limited to (nil for every brand).
+// orRoute is brand, or on a brand route with no brand given, the route's.
+func (a *access) orRoute(brand *string) *string {
+	if brand == nil && a.Brand != "" {
+		b := a.Brand
+		return &b
+	}
+	return brand
+}
+
 func (a *access) seenBrands() []string {
 	if a.Brand != "" {
 		return []string{a.Brand}

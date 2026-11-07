@@ -34,6 +34,18 @@ var coverageFoundViews = map[string]string{
 	"confirmed": "c.status='confirmed'",
 }
 
+// foundSorts orders Found's sites; the default puts sites that link first.
+var foundSorts = map[string]string{
+	"":              "(best='links')::int DESC,pages DESC,host",
+	"best":          "(best='links')::int DESC,pages DESC,host",
+	"pages":         "pages DESC,host",
+	"domain_rating": "dr DESC NULLS LAST,pages DESC,host",
+	"traffic":       "traffic DESC NULLS LAST,pages DESC,host",
+	"ai_citations":  "cited DESC,pages DESC,host",
+	"competitors":   "rivals DESC NULLS LAST,pages DESC,host",
+	"latest":        "latest DESC,host",
+}
+
 // foundHost is a find's site.
 var foundHost = coverageHostSQL("c.url")
 
@@ -62,13 +74,49 @@ func (s *Server) coverageFound(w http.ResponseWriter, r *http.Request) {
 	if len(search) > 200 {
 		search = search[:200]
 	}
+	source := q.Get("source")
+	if len(source) > 40 {
+		writeError(w, r, 400, "invalid_request", "Unknown source")
+		return
+	}
+	minDR := -1.0
+	if v := q.Get("min_domain_rating"); v != "" {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n < 0 || n > 100 {
+			writeError(w, r, 400, "invalid_request", "min_domain_rating is a number from 0 to 100")
+			return
+		}
+		minDR = n
+	}
+	hideRivals := false
+	switch q.Get("exclude_competitors") {
+	case "", "false":
+	case "true":
+		hideRivals = true
+	default:
+		writeError(w, r, 400, "invalid_request", "exclude_competitors is true or false")
+		return
+	}
+	order, ok := foundSorts[q.Get("sort")]
+	if !ok {
+		writeError(w, r, 400, "invalid_request", "sort is best, pages, domain_rating, traffic, ai_citations, competitors or latest")
+		return
+	}
 	var data json.RawMessage
 	err := s.pool.QueryRow(r.Context(), `WITH c AS (SELECT c.id,c.url,c.title,c.source,c.kind,c.verdict,c.status,c.created_at,`+foundHost+` AS host
  FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+where+`
- AND ($5='' OR strpos(lower(c.url),$5)>0 OR strpos(lower(c.title),$5)>0)),
- sites AS (SELECT host,count(*) AS pages,max(created_at) AS latest,
+ AND ($5='' OR strpos(lower(c.url),$5)>0 OR strpos(lower(c.title),$5)>0) AND ($7='' OR c.source=$7)),
+ grouped AS (SELECT host,count(*) AS pages,min(created_at) AS first,max(created_at) AS latest,array_agg(DISTINCT source) AS sources,
   CASE WHEN bool_or(verdict='links') THEN 'links' WHEN bool_or(verdict='mentions') THEN 'mentions' ELSE min(verdict) END AS best
-  FROM c GROUP BY host ORDER BY (bool_or(verdict='links'))::int DESC,count(*) DESC,host LIMIT $3 OFFSET $4),
+  FROM c GROUP BY host),
+ measured AS (SELECT g.*,m.dr,m.traffic,m.rivals,
+  coalesce((SELECT count(*) FROM ai_citations ci JOIN ai_cohorts co ON co.id=ci.cohort_id AND co.workspace_id=ci.workspace_id
+   WHERE ci.workspace_id=$1 AND co.brand_id=$2 AND ci.host=g.host AND ci.sampled_at>now()-interval '90 days'),0)::int AS cited,
+  `+coverageCompetitorSite("g.host")+` AS rival_site
+  FROM grouped g LEFT JOIN LATERAL (SELECT max(p.domain_rating) AS dr,max(p.domain_traffic) AS traffic,count(DISTINCT p.competitor_id)::int AS rivals
+   FROM coverage_competitor_placements p WHERE p.workspace_id=$1 AND p.brand_id=$2 AND p.host=g.host AND p.gone_at IS NULL) m ON true),
+ kept AS (SELECT * FROM measured WHERE coalesce(dr,0)>=$8 AND NOT ($9 AND rival_site)),
+ sites AS (SELECT * FROM kept ORDER BY `+order+` LIMIT $3 OFFSET $4),
  counts AS (SELECT
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["about"]+`) AS about,
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["maybe"]+`) AS maybe,
@@ -77,11 +125,13 @@ func (s *Server) coverageFound(w http.ResponseWriter, r *http.Request) {
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status='new' AND c.verdict='unchecked') AS checking)
  SELECT jsonb_build_object('view',$6::text,
   'counts',(SELECT to_jsonb(counts) FROM counts),
-  'sites_total',(SELECT count(DISTINCT host) FROM c),
-  'data',coalesce((SELECT jsonb_agg(jsonb_build_object('host',s.host,'pages',s.pages,'best',s.best,'latest',s.latest,
+  'sites_total',(SELECT count(*) FROM kept),
+  'pages_total',(SELECT coalesce(sum(pages),0) FROM kept),
+  'data',coalesce((SELECT jsonb_agg(jsonb_build_object('host',s.host,'pages',s.pages,'best',s.best,'first',s.first,'latest',s.latest,
+   'sources',s.sources,'domain_rating',s.dr,'domain_traffic',s.traffic,'ai_citations',s.cited,'competitors',s.rivals,'competitor_site',s.rival_site,
    'items',(SELECT jsonb_agg(jsonb_build_object('id',c.id,'url',c.url,'title',c.title,'source',c.source,'kind',c.kind,'verdict',c.verdict,'status',c.status,'found_at',c.created_at) ORDER BY c.created_at DESC) FROM (SELECT * FROM c WHERE c.host=s.host ORDER BY created_at DESC LIMIT 20) c))
-   ORDER BY (s.best='links')::int DESC,s.pages DESC,s.host) FROM sites s),'[]'))`,
-		a.WorkspaceID, a.Brand, limit, offset, search, view).Scan(&data)
+   ORDER BY `+order+`) FROM sites s),'[]'))`,
+		a.WorkspaceID, a.Brand, limit, offset, search, view, source, minDR, hideRivals).Scan(&data)
 	if s.coverageError(w, r, err) {
 		return
 	}

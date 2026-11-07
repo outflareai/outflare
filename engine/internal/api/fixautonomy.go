@@ -24,9 +24,13 @@ func (s *Server) routesFixAutonomy(mux *http.ServeMux) {
 	read, manage := auth.ScopeSEORead, auth.ScopeSEOManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/fix-autonomy", s.inWorkspace(read, s.getFixAutonomy))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/fix-autonomy", s.inWorkspace(manage, s.putFixAutonomy))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/fix-autonomy", s.onBrand(read, s.getFixAutonomy))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", s.inBrand(read, s.getFixAutonomy))
+	mux.HandleFunc("PUT /v1/brands/{brand}/seo-sites/{site}/fix-autonomy", s.onBrand(manage, s.putFixAutonomy))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", s.inBrand(manage, s.putFixAutonomy))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/seo-sites/{site}/fix-autonomy", s.onBrand(manage, s.resetFixAutonomy))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/seo-sites/{site}/fix-autonomy", s.inBrand(manage, s.resetFixAutonomy))
+	mux.HandleFunc("POST /v1/brands/{brand}/fixes/{fix}/start", s.onBrand(manage, s.startFix))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/fixes/{fix}/start", s.inBrand(manage, s.startFix))
 }
 
@@ -232,8 +236,8 @@ func (s *Server) startFix(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	fixStartPath    = regexp.MustCompile(`^/v1/workspaces/[^/]+/fixes/([0-9a-fA-F-]{36})/start/?$`)
-	fixAutonomyPath = regexp.MustCompile(`^/v1/workspaces/[^/]+/(seo-sites/[^/]+/)?fix-autonomy/?$`)
+	fixStartPath    = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/fixes/([0-9a-fA-F-]{36})/start/?$`)
+	fixAutonomyPath = regexp.MustCompile(`^/v1/(?:workspaces/[^/]+/|brands/[^/]+/seo-sites/[^/]+/)(?:seo-sites/[^/]+/)?fix-autonomy/?$`)
 )
 
 // fixHold says whether a write the mission would run waits for a person

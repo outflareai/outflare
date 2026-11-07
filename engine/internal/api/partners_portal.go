@@ -443,7 +443,7 @@ func (s *Server) setPartnerPortal(w http.ResponseWriter, r *http.Request) {
 			// brand when it has one.
 			var ok bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM site_keys WHERE workspace_id = $1 AND id = $2 AND revoked_at IS NULL
-				AND ($3::uuid IS NULL OR brand_id IS NULL OR brand_id = $3))`, a.WorkspaceID, settings.SiteKeyID, cur.BrandID).Scan(&ok); err != nil {
+				AND ($3::uuid IS NULL OR brand_id = $3))`, a.WorkspaceID, settings.SiteKeyID, cur.BrandID).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {

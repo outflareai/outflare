@@ -290,10 +290,20 @@ cohort is tracked on it (source `ai_visibility`), and Reddit actions write
 the competitors they name as it names them.
 
 - **Their numbers come from your connection.** Each week the snapshot takes
-  an overview of up to 50 tracked competitors a site (domain rating, organic
-  traffic and keywords, referring domains), priced like one of your own
-  domains and within the connection's budget. `numbers` on a competitor is
-  the latest one.
+  an overview of every tracked competitor (domain rating, organic traffic
+  and keywords, referring domains), priced like one of your own domains and
+  within the connection's budget. The ones never read, then the ones read
+  longest ago, go first, so a run the budget stops is picked up by the next.
+  A competitor the provider can't read is skipped, not the rest. `numbers`
+  on a competitor is the latest one.
+- **Each competitor is read at most once a month.** A competitor the
+  connection read in the last `competitor_read_days` (30 by default, 1 to
+  365; set it with `PUT /seo/{id}/settings` or **Read each competitor at most
+  once every** in the SEO tool's settings) is skipped, however the read is
+  asked for: the weekly snapshot, **Refresh all competitors**, or one
+  competitor's **Read their search data**. So hundreds of tracked
+  competitors cost one read each a month, not one a week, and pressing
+  refresh again costs nothing.
 - **A light public look.** OutflareBot reads a tracked competitor's
   robots.txt, its sitemaps and its home page once a week (or now, with
   `POST /seo-competitors/{id}/check`), obeying robots.txt: no other pages
@@ -606,37 +616,37 @@ The events that start them:
 
 ```sh
 # SEO connections, their domains, budget and snapshot status
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo"
 
 # Is each brand growing in search: free
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/overview?brand=repocket"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo/overview?brand=repocket"
 
 # Stored snapshots: free, never calls the provider
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/history?report=overview&host=example.com"
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/history?report=keywords&host=example.com&limit=50"
 
 # Backlinks merged from both tools, and what changed: free
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/backlinks?status=live&order=rating"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/backlinks/events?kind=lost&days=30"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/backlinks?status=live&order=rating"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/backlinks/events?kind=lost&days=30"
 
 # Track a competitor, then read what changed at them
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"site_id": "'$SITE'", "host": "rival.example"}' "$URL/v1/workspaces/$WS/seo-competitors"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-competitors/events?days=30"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/backlinks/summary"
+  -d '{"site_id": "'$SITE'", "host": "rival.example"}' "$URL/v1/brands/$BRAND/seo-competitors"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-competitors/events?days=30"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/backlinks/summary"
 
 # Who links to a competitor's page: estimate, then read; then the free reports
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"target": "https://rival.example/guide", "estimate_only": true}' "$URL/v1/workspaces/$WS/link-reads"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/link-reads/dead-pages?site_id=$SITE"
+  -d '{"target": "https://rival.example/guide", "estimate_only": true}' "$URL/v1/brands/$BRAND/link-reads"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/link-reads/dead-pages?site_id=$SITE"
 
 # Link prospects: add pages, list the best, pitch one
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"site_id": "'$SITE'", "prospects": [{"page_url": "https://blog.example.org/best-tools", "method": "broken_link"}]}' \
-  "$URL/v1/workspaces/$WS/link-prospects"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/link-prospects?min_score=40"
+  "$URL/v1/brands/$BRAND/link-prospects"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/link-prospects?min_score=40"
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"stage": "pitched"}' "$URL/v1/workspaces/$WS/link-prospects/$PROSPECT"
+  -d '{"stage": "pitched"}' "$URL/v1/brands/$BRAND/link-prospects/$PROSPECT"
 
 # A live report: costs money within the budget, cached for a day
 curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo/$ID/reports/backlinks?target=example.com&limit=100"

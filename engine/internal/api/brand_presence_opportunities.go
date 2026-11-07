@@ -133,12 +133,64 @@ func coverageRefreshOpportunities(ctx context.Context, tx pgx.Tx, ws, brand stri
 	if err != nil {
 		return 0, 0, err
 	}
+	// A page in another language is a copy of its English page: the
+	// competitor gaps on all of a page's translations become one
+	// opportunity on the English page.
+	merged := make([]row, 0, len(list))
+	at := map[string]int{}
+	translated := map[string]bool{}
+	for _, x := range list {
+		if x.reason != "competitor_gap" {
+			merged = append(merged, x)
+			continue
+		}
+		english, lang := coverage.EnglishURL(x.url)
+		if lang != "" {
+			translated[english] = true
+		}
+		i, seen := at[english]
+		if !seen {
+			at[english] = len(merged)
+			if lang != "" {
+				x.title, x.host = "", ""
+			}
+			x.url = english
+			merged = append(merged, x)
+			continue
+		}
+		m := &merged[i]
+		if lang == "" && x.title != "" {
+			m.title, m.kind = x.title, x.kind
+		}
+		seenIDs := map[string]bool{}
+		for _, id := range m.competitors {
+			seenIDs[id] = true
+		}
+		for _, id := range x.competitors {
+			if !seenIDs[id] {
+				m.competitors = append(m.competitors, id)
+			}
+		}
+		m.paid = m.paid || x.paid
+		m.rating, m.traffic = maxPtr(m.rating, x.rating), maxPtr(m.traffic, x.traffic)
+		m.rivals, m.cited = max(m.rivals, x.rivals), max(m.cited, x.cited)
+	}
+	list = merged
+	// Open suggestions made on a translation before are replaced by the
+	// English page's.
+	if _, err := coverageDropTranslations(ctx, tx, ws, brand); err != nil {
+		return 0, 0, err
+	}
 	added := 0
 	for _, x := range list {
 		evidence := map[string]any{}
 		if x.reason == "competitor_gap" {
 			evidence["competitor_ids"] = x.competitors
 			evidence["likely_paid"] = x.paid
+			if translated[x.url] {
+				// Competitors were found on a translation of this page.
+				evidence["translations"] = true
+			}
 		} else {
 			evidence["placement_id"] = x.placement
 		}
@@ -165,6 +217,42 @@ func coverageRefreshOpportunities(ctx context.Context, tx pgx.Tx, ws, brand stri
 	}
 	metrics.CoverageOpportunities(added, int(tag.RowsAffected()))
 	return added, int(tag.RowsAffected()), nil
+}
+
+// coverageDropTranslations deletes the brand's open Presence gaps whose page
+// is a translation (/fr/..., fr.site..., ?lang=fr); the refresh suggests the
+// English page instead. Picked, won and dismissed ones stay as people left
+// them. It returns how many it deleted.
+func coverageDropTranslations(ctx context.Context, tx pgx.Tx, ws, brand string) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text, url FROM placement_opportunities
+ WHERE workspace_id=$1 AND brand_id=$2 AND state='open' AND source='presence' AND reason='competitor_gap'`, ws, brand)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id, u string
+		if err := rows.Scan(&id, &u); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if _, lang := coverage.EnglishURL(u); lang != "" {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil || len(ids) == 0 {
+		return 0, err
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM placement_opportunities WHERE workspace_id=$1 AND brand_id=$2 AND id=ANY($3::uuid[])`, ws, brand, ids)
+	return int(tag.RowsAffected()), err
+}
+
+func maxPtr(a, b *float64) *float64 {
+	if a == nil || (b != nil && *b > *a) {
+		return b
+	}
+	return a
 }
 
 // coverageOpportunitiesRefresh suggests the brand's opportunities now. It
@@ -236,6 +324,43 @@ func (s *Server) coverageOpportunities(w http.ResponseWriter, r *http.Request) {
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		add("(o.host ILIKE '%%'||$%[1]d||'%%' OR o.title ILIKE '%%'||$%[1]d||'%%')", v)
 	}
+	if v := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(q.Get("host"))), "www."); v != "" {
+		add("o.host=$%d", v)
+	}
+	if v := q.Get("access"); v != "" {
+		if !oneOf(v, "cant_buy", "earned", "paid", "free", "unknown") {
+			writeError(w, r, 400, "invalid_request", "access is cant_buy, earned, paid, free or unknown")
+			return
+		}
+		add("coalesce(o.factors->>'access','unknown')=$%d", v)
+	}
+	if v := q.Get("min_domain_rating"); v != "" {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n < 0 || n > 100 {
+			writeError(w, r, 400, "invalid_request", "min_domain_rating is a number from 0 to 100")
+			return
+		}
+		add("coalesce((o.factors->>'domain_rating')::float8,0)>=$%d", n)
+	}
+	switch q.Get("exclude_competitors") {
+	case "", "false":
+	case "true":
+		// Competitors' own sites rarely link to a rival, so they can be hidden.
+		where += " AND NOT " + coverageCompetitorSite("o.host")
+	default:
+		writeError(w, r, 400, "invalid_request", "exclude_competitors is true or false")
+		return
+	}
+	order, ok := opportunitySorts[q.Get("sort")]
+	if !ok {
+		writeError(w, r, 400, "invalid_request", "sort is score, domain_rating, traffic, ai_citations, competitors or recent")
+		return
+	}
+	group := q.Get("group")
+	if group != "" && group != "domain" {
+		writeError(w, r, 400, "invalid_request", "group is domain")
+		return
+	}
 	limit := 50
 	if q.Has("limit") {
 		n, err := strconv.Atoi(q.Get("limit"))
@@ -249,16 +374,24 @@ func (s *Server) coverageOpportunities(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Each row says how many opportunities its site has; grouped by
+	// domain, a site is one row, its best opportunity.
+	from := `(SELECT o.*, count(*) OVER (PARTITION BY o.host) AS site_opportunities,
+ row_number() OVER (PARTITION BY o.host ORDER BY ` + order + `) AS site_rank FROM placement_opportunities o WHERE ` + where + `) o`
+	if group == "domain" {
+		from += " WHERE o.site_rank=1"
+	}
 	var total int
-	if err := s.pool.QueryRow(r.Context(), "SELECT count(*) FROM placement_opportunities o WHERE "+where, args...).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(r.Context(), "SELECT count(*) FROM "+from, args...).Scan(&total); err != nil {
 		s.internal(w, r, err)
 		return
 	}
 	args = append(args, limit, offset)
-	rows, err := s.pool.Query(r.Context(), fmt.Sprintf(`SELECT to_jsonb(o)-'workspace_id' || jsonb_build_object('publisher_id',
+	rows, err := s.pool.Query(r.Context(), fmt.Sprintf(`SELECT to_jsonb(o)-'workspace_id'-'site_rank' || jsonb_build_object('publisher_id',
  (SELECT pub.id FROM coverage_publishers pub WHERE pub.workspace_id=o.workspace_id AND pub.brand_id=o.brand_id
-  AND (o.host=regexp_replace(lower(pub.domain),'^www\.','') OR o.host LIKE '%%.'||regexp_replace(lower(pub.domain),'^www\.','')) ORDER BY pub.created_at LIMIT 1))
- FROM placement_opportunities o WHERE %s ORDER BY o.score DESC, o.last_seen_at DESC, o.id LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args)), args...)
+  AND (o.host=regexp_replace(lower(pub.domain),'^www\.','') OR o.host LIKE '%%.'||regexp_replace(lower(pub.domain),'^www\.','')) ORDER BY pub.created_at LIMIT 1),
+ 'competitor_site', %s)
+ FROM %s ORDER BY %s LIMIT $%d OFFSET $%d`, coverageCompetitorSite("o.host"), from, order, len(args)-1, len(args)), args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -338,6 +471,24 @@ func (s *Server) coverageOpportunityUpdate(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// opportunitySorts orders opportunities; the default is leverage.
+var opportunitySorts = map[string]string{
+	"":              "o.score DESC, o.last_seen_at DESC, o.id",
+	"score":         "o.score DESC, o.last_seen_at DESC, o.id",
+	"domain_rating": "(o.factors->>'domain_rating')::float8 DESC NULLS LAST, o.score DESC, o.id",
+	"traffic":       "(o.factors->>'domain_traffic')::float8 DESC NULLS LAST, o.score DESC, o.id",
+	"ai_citations":  "coalesce((o.factors->>'ai_citations')::int,0) DESC, o.score DESC, o.id",
+	"competitors":   "coalesce((o.factors->>'competitors')::int,0) DESC, o.score DESC, o.id",
+	"recent":        "o.first_seen_at DESC, o.id",
+}
+
+// coverageCompetitorSite is SQL that is true when the site in hostExpr is
+// one of the brand's tracked competitors ($1 workspace, $2 brand).
+func coverageCompetitorSite(hostExpr string) string {
+	return `EXISTS (SELECT 1 FROM seo_competitors sc WHERE sc.workspace_id=$1 AND sc.brand_id=$2 AND sc.status='tracked'
+ AND (` + hostExpr + `=sc.host OR ` + hostExpr + ` LIKE '%.'||sc.host))`
 }
 
 func oneOf(v string, list ...string) bool {

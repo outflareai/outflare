@@ -478,17 +478,18 @@ test("reddit tools: guide, campaign prompt, actions and the report; read-only le
   assert.match(p.messages[0].content.text, /geonode.*300 Engain credits/);
 
   const thread = "https://www.reddit.com/r/proxies/comments/1abc2d/best_residential_proxies/";
-  await client.callTool({ name: "place_reddit_action", arguments: { brand: "geonode", kind: "comment", target_url: thread, content: "Geonode held up for me", brand_mentioned: true } });
+  await client.callTool({ name: "place_reddit_action", arguments: { brand: BRAND, kind: "comment", target_url: thread, content: "Geonode held up for me", brand_mentioned: true } });
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/reddit/actions`);
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/reddit/actions`);
   assert.equal(JSON.parse(calls[0].body).kind, "comment");
-  await client.callTool({ name: "get_reddit_report", arguments: { brand: "geonode", group_by: "strategy" } });
-  assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/reddit/report`);
-  assert.equal(calls[1].url.search, "?brand=geonode&group_by=strategy");
-  await client.callTool({ name: "get_reddit_subreddit", arguments: { brand: "geonode", subreddit: "r/proxies" } });
-  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/reddit/subreddits/proxies`);
-  await client.callTool({ name: "close_reddit_experiment", arguments: { experiment: SEQ, conclusion: "Plain recommendations last a week." } });
+  await client.callTool({ name: "get_reddit_report", arguments: { brand: BRAND, group_by: "strategy" } });
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/reddit/report`);
+  assert.equal(calls[1].url.search, "?group_by=strategy");
+  await client.callTool({ name: "get_reddit_subreddit", arguments: { brand: BRAND, subreddit: "r/proxies" } });
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/reddit/subreddits/proxies`);
+  await client.callTool({ name: "close_reddit_experiment", arguments: { brand: BRAND, experiment: SEQ, conclusion: "Plain recommendations last a week." } });
   assert.equal(calls[3].method, "PATCH");
+  assert.equal(calls[3].url.pathname, `/v1/brands/${BRAND}/reddit/experiments/${SEQ}`);
   assert.deepEqual(JSON.parse(calls[3].body), { status: "closed", conclusion: "Plain recommendations last a week." });
 
   const ro = await connect(() => [200, {}], { readOnly: true });

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/outflareai/outflare/engine/internal/aivis"
 )
 
 // Placements: the pages AI assistants cite, or read before answering,
@@ -48,6 +50,7 @@ type aiVisPlacement struct {
 	// Value is relative: the top placement is 100.
 	Value       float64               `json:"value"`
 	Competitors []aiVisPlacementBrand `json:"competitors"`
+	FirstSeen   time.Time             `json:"first_seen_at"`
 	LastSeen    time.Time             `json:"last_seen_at"`
 
 	raw       float64
@@ -91,14 +94,14 @@ func (s *Server) getAIVisibilityPlacements(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if r.URL.Query().Get("format") == "csv" {
-		header := []string{"url", "host", "title", "source_type", "value", "answers", "named", "reads", "questions", "competitors", "last_seen_at"}
+		header := []string{"url", "host", "title", "source_type", "value", "answers", "named", "reads", "questions", "competitors", "first_seen_at", "last_seen_at"}
 		rows := make([][]string, 0, len(places))
 		for _, p := range places {
 			comps := make([]string, 0, len(p.Competitors))
 			for _, c := range p.Competitors {
 				comps = append(comps, c.Name)
 			}
-			rows = append(rows, []string{p.URL, p.Host, p.Title, p.SourceType, strconv.FormatFloat(p.Value, 'f', 1, 64), strconv.Itoa(p.Answers), strconv.Itoa(p.Named), strconv.Itoa(p.Reads), strconv.Itoa(p.Questions), strings.Join(comps, "; "), p.LastSeen.UTC().Format(time.RFC3339)})
+			rows = append(rows, []string{p.URL, p.Host, p.Title, p.SourceType, strconv.FormatFloat(p.Value, 'f', 1, 64), strconv.Itoa(p.Answers), strconv.Itoa(p.Named), strconv.Itoa(p.Reads), strconv.Itoa(p.Questions), strings.Join(comps, "; "), p.FirstSeen.UTC().Format(time.RFC3339), p.LastSeen.UTC().Format(time.RFC3339)})
 		}
 		writeCSV(w, "ai-visibility-placements", header, rows)
 		return
@@ -152,7 +155,7 @@ func (s *Server) aiVisibilityPlacements(ctx context.Context, ws, brand, cohort s
 		SELECT c.url, c.host, c.title, c.source_type, s.prompt_id, c.sampled_at,
 		       EXISTS (SELECT 1 FROM ai_mentions m WHERE m.sample_id = s.id AND m.entity = 'brand')
 		FROM ai_citations c JOIN ai_samples s ON s.id = c.sample_id
-		WHERE c.workspace_id = $1 AND s.brand_id = $2 AND c.owner = 'other' AND s.status = 'ok' AND s.sampled_at >= $3`+where+`
+		WHERE c.workspace_id = $1 AND s.brand_id = $2 AND c.owner = 'other' AND s.status = 'ok' AND s.sampled_at >= $3 AND `+aivis.NotAssetSQL("c.host")+where+`
 		ORDER BY c.sampled_at`, args...)
 	if err != nil {
 		return nil, nil, err
@@ -170,6 +173,9 @@ func (s *Server) aiVisibilityPlacements(ctx context.Context, ws, brand, cohort s
 		}
 		p.raw += weight[pid] * share
 		p.questions[pid] = true
+		if p.FirstSeen.IsZero() || at.Before(p.FirstSeen) {
+			p.FirstSeen = at
+		}
 		p.LastSeen = at
 		return nil
 	}); err != nil {
@@ -180,7 +186,7 @@ func (s *Server) aiVisibilityPlacements(ctx context.Context, ws, brand, cohort s
 		SELECT r.url, r.host, r.title, s.prompt_id, r.sampled_at,
 		       EXISTS (SELECT 1 FROM ai_mentions m WHERE m.sample_id = s.id AND m.entity = 'brand')
 		FROM ai_pages_read r JOIN ai_samples s ON s.id = r.sample_id
-		WHERE r.workspace_id = $1 AND s.brand_id = $2 AND r.owner = 'other' AND NOT r.cited AND s.status = 'ok' AND s.sampled_at >= $3`+where+`
+		WHERE r.workspace_id = $1 AND s.brand_id = $2 AND r.owner = 'other' AND NOT r.cited AND s.status = 'ok' AND s.sampled_at >= $3 AND `+aivis.NotAssetSQL("r.host")+where+`
 		ORDER BY r.sampled_at`, args...)
 	if err != nil {
 		return nil, nil, err
@@ -196,6 +202,9 @@ func (s *Server) aiVisibilityPlacements(ctx context.Context, ws, brand, cohort s
 		p.questions[pid] = true
 		if at.After(p.LastSeen) {
 			p.LastSeen = at
+		}
+		if p.FirstSeen.IsZero() || at.Before(p.FirstSeen) {
+			p.FirstSeen = at
 		}
 		return nil
 	}); err != nil {

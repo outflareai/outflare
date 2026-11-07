@@ -45,7 +45,7 @@ func TestCannibalisation(t *testing.T) {
 		t.Fatalf("competing search: %v", q)
 	}
 	fixFor := func(rule string) map[string]any {
-		for _, f := range owner.must(200, "GET", base+"/fixes?source=seo_keywords&subject_id="+site, nil)["data"].([]any) {
+		for _, f := range owner.must(200, "GET", base+"/fixes?brand="+brand+"&source=seo_keywords&subject_id="+site, nil)["data"].([]any) {
 			if f := f.(map[string]any); f["rule"].(map[string]any)["id"] == rule {
 				return f
 			}

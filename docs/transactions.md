@@ -39,6 +39,8 @@ Revenue, [attribution](attribution.md) and the [conversions sent back to ad netw
 1. **They share an id.** The event's `order_id` (or `transaction_id`, or `payment_id`) is the transaction's `source_id`, or a connector's charge id. This is the reliable way: **send the same id in both.**
 2. **Or, with no shared id,** the same person paid the same amount in the same currency within 15 minutes.
 
+The two can arrive at the same moment: each way takes turns on the payment's id, so the second waits for the first and is kept as it, with its person. A guess (2) can miss, when the amounts or currencies differ or the two come more than 15 minutes apart, or join two real payments of the same amount, so [Developer setup](developer-setup.md#payments-sent-from-your-server) shows every payment matched by a guess, and every one whose two copies disagree on the amount.
+
 The one that arrives second is answered as the first: the API returns the transaction already saved (`200`), a billing sync skips the charge, and the order event gets the property `outflare_payment`, the message id of the `payment.succeeded` it is counted as. A transaction sent without a person learns it from its order event, and counts from then on.
 
 So that each payment counts once in your reports and ad networks, count **`payment.succeeded`** (valued at `amount_minor`, in minor units) in [conversion definitions](conversions.md) and ad conversion rules, not `order_completed`. Attribution already leaves out an order that was counted as a payment whenever it counts `payment.succeeded`.

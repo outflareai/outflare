@@ -24,9 +24,8 @@ import (
 )
 
 // Where competitors appear: each competitor the brand tracks (its SEO
-// competitors) is scanned on a schedule, the brand's top competitors
-// weekly and the rest monthly unless the brand or the competitor says
-// otherwise. A scan reads search results for the competitor's name and
+// competitors) is scanned on a schedule, once a month unless the brand
+// (for its top competitors or the rest) or the competitor says otherwise. A scan reads search results for the competitor's name and
 // who links to its site, on the workspace's own connections and within
 // their budgets, and the pages AI answers cite when they name it. Each
 // page is kept with its type, whether it looks paid for (only with
@@ -41,6 +40,11 @@ const (
 	competitorLinkRows = 100
 	// competitorSearchDepth is how many search results one scan reads.
 	competitorSearchDepth = 50
+	// presenceDefaultEveryDays is how often a new brand scans its top
+	// competitors (the rest already default to monthly): once a month.
+	// It is written on insert rather than as the column's default, so
+	// the previous version's own default still holds after a rollback.
+	presenceDefaultEveryDays = 30
 )
 
 func (s *Server) routesPresenceCompetitors(mux *http.ServeMux) {
@@ -325,6 +329,15 @@ func (s *Server) coverageCompetitorScanJob(ctx context.Context, j jobs.Job) erro
 				added[arrangement]++
 			}
 		}
+		// What each page is worth to the brand, now that this competitor's
+		// finds (and the count of competitors on each page) are in.
+		urls := make([]string, 0, len(finds))
+		for _, f := range finds {
+			urls = append(urls, f.url)
+		}
+		if _, err := valueCompetitorPlacements(ctx, tx, ws, req.Brand, urls); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE seo_competitors SET presence_scanned_at=now(), presence_outcome=$3 WHERE workspace_id=$1 AND id=$2`, ws, req.Competitor, outcome); err != nil {
 			return err
 		}
@@ -547,6 +560,24 @@ func (s *Server) coverageCompetitorPlacements(w http.ResponseWriter, r *http.Req
 		}
 		add("p.arrangement=$%d", v)
 	}
+	if v := q.Get("access"); v != "" {
+		if !slices.Contains(coverage.Accesses, v) {
+			writeError(w, r, 400, "invalid_request", "access is cant_buy, earned, paid, free or unknown")
+			return
+		}
+		add("p.access=$%d", v)
+	}
+	order := "p.value DESC NULLS LAST, p.domain_rating DESC NULLS LAST"
+	switch q.Get("order") {
+	case "", "value":
+	case "domain_rating":
+		order = "p.domain_rating DESC NULLS LAST, p.value DESC NULLS LAST"
+	case "recent":
+		order = "p.first_seen_at DESC"
+	default:
+		writeError(w, r, 400, "invalid_request", "order is value, domain_rating or recent")
+		return
+	}
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		add("(p.host ILIKE '%%'||$%[1]d||'%%' OR p.title ILIKE '%%'||$%[1]d||'%%')", v)
 	}
@@ -578,6 +609,11 @@ func (s *Server) coverageCompetitorPlacements(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	// Placements found before values existed are valued on first read.
+	if _, err := valueCompetitorPlacements(r.Context(), s.pool, a.WorkspaceID, a.Brand, nil); err != nil {
+		s.internal(w, r, err)
+		return
+	}
 	var total int
 	if err := s.pool.QueryRow(r.Context(), "SELECT count(*) FROM coverage_competitor_placements p WHERE "+where, args...).Scan(&total); err != nil {
 		s.internal(w, r, err)
@@ -586,7 +622,7 @@ func (s *Server) coverageCompetitorPlacements(w http.ResponseWriter, r *http.Req
 	args = append(args, limit, offset)
 	rows, err := s.pool.Query(r.Context(), fmt.Sprintf(`SELECT to_jsonb(p)-'workspace_id' || jsonb_build_object('competitor_host',c.host,'competitor_name',c.name,'brand_present',`+strings.ReplaceAll(brandHere, "%", "%%")+`)
  FROM coverage_competitor_placements p JOIN seo_competitors c ON c.id=p.competitor_id AND c.workspace_id=p.workspace_id
- WHERE %s ORDER BY p.domain_rating DESC NULLS LAST, p.last_seen_at DESC, p.id LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args)), args...)
+ WHERE %s ORDER BY `+order+`, p.last_seen_at DESC, p.id LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args)), args...)
 	if err != nil {
 		s.internal(w, r, err)
 		return

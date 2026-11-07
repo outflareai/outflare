@@ -51,7 +51,7 @@ async function approvalLink(ws: string, brand: string, g: { subject: Group["subj
   const query = { return: ret };
   switch (g.subject) {
     case "seo_site":
-      return api.GET("/v1/workspaces/{ws}/seo-sites/{site}/dns/approval", { params: { path: { ws, site: g.id }, query } });
+      return api.GET("/v1/brands/{brand}/seo-sites/{site}/dns/approval", { params: { path: { brand, site: g.id }, query } });
     case "tracking_domain":
       return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand, id: g.id }, query } });
     case "email_domain":
@@ -62,7 +62,7 @@ async function approvalLink(ws: string, brand: string, g: { subject: Group["subj
 async function reportApproval(ws: string, brand: string, g: { subject: Group["subject"]; id: string }, body: { error?: string; provider?: string }) {
   switch (g.subject) {
     case "seo_site":
-      return api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns/approved", { params: { path: { ws, site: g.id } }, body });
+      return api.POST("/v1/brands/{brand}/seo-sites/{site}/dns/approved", { params: { path: { brand, site: g.id } }, body });
     case "tracking_domain":
       return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand, id: g.id } }, body });
     case "email_domain":

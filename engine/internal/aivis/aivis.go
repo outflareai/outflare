@@ -159,8 +159,11 @@ type Service struct {
 	Now func() time.Time
 }
 
-// Register handles run jobs.
-func (s *Service) Register(q *jobs.Queue) { q.Handle(JobStep, s.job) }
+// Register handles run jobs and finding competitors' websites.
+func (s *Service) Register(q *jobs.Queue) {
+	q.Handle(JobStep, s.job)
+	q.Handle(JobWebsites, s.websitesJob)
+}
 
 func (s *Service) now() time.Time {
 	if s.Now != nil {
@@ -289,8 +292,10 @@ func (s *Service) job(ctx context.Context, j jobs.Job) error {
 }
 
 // Run starts scheduled runs until ctx ends: daily and weekly cohorts whose
-// last run is that old.
+// last run is that old. Once a day it also queues finding the websites of
+// brands the answers name.
 func (s *Service) Run(ctx context.Context) {
+	websitesDay := "" // the day finding websites was last queued
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -301,6 +306,15 @@ func (s *Service) Run(ctx context.Context) {
 		}
 		if err := s.Schedule(ctx); err != nil && ctx.Err() == nil {
 			track.Fail(ctx, s.Log, track.Event{Name: "ai_run.schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
+		}
+		if day := s.now().UTC().Format(time.DateOnly); day != websitesDay {
+			if err := s.scheduleWebsites(ctx); err != nil {
+				if ctx.Err() == nil {
+					track.Fail(ctx, s.Log, track.Event{Name: "ai_visibility.websites_schedule_failed", ActorType: "system", Surface: "system"}, "internal", err)
+				}
+			} else {
+				websitesDay = day
+			}
 		}
 	}
 }

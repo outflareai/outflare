@@ -56,6 +56,8 @@ export const tabNames: Record<Tab, string> = {
   paths: "Paths",
   dashboards: "Dashboards",
   channels: "Channels",
+  live: "Right now",
+  "page-speed": "Page speed",
   tracking: "Website tracking",
   flags: "Feature flags",
   "ab-tests": "A/B tests",
@@ -71,6 +73,7 @@ export const tabNames: Record<Tab, string> = {
   "ai-questions": "Questions",
   "ai-competitors": "Competitors",
   "ai-sources": "Sources",
+  "ai-pages": "Your pages",
   "ai-perception": "How AI describes you",
   "ai-traffic": "Traffic",
   "ai-visibility-settings": "Settings",
@@ -187,6 +190,8 @@ export const tabBlurbs: Record<Tab, string> = {
   outcomes: "Meetings and deals your outreach produced, what they cost, and the cost of each.",
   reports: "Sends, bounces, replies and opt-outs by day, sequence, step, mailbox or domain.",
   analytics: "Visitors, top pages, traffic sources and conversions from the analytics tools on your website.",
+  live: "Who is on your website this minute, where they came from and what they are doing.",
+  "page-speed": "How fast your pages are for real visitors, and which ones got slower.",
   tracking: "Outflare's own snippet for your websites: the script tag to paste, and whether each site is sending visits.",
   flags: "Turn things on for some visitors, or split them between versions to see which works better.",
   "ab-tests": "See which version of a flag wins at a goal, with numbers that stay honest however often you check.",
@@ -210,6 +215,7 @@ export const tabBlurbs: Record<Tab, string> = {
   "ai-questions": "The questions your buyers ask AI, by topic, awareness and question type, and what each assistant answered.",
   "ai-competitors": "Who AI assistants name and recommend for your questions, and brands they name that you don't count yet.",
   "ai-sources": "The sites and pages AI answers cite, and the ones to get onto.",
+  "ai-pages": "Whether AI assistants can read, quote and trust your own pages, cited pages first.",
   "ai-perception": "How AI answers treat your brand: recommended, listed or warned against, with their words, plus your facts and the answers that get them wrong.",
   "ai-traffic": "Visits, conversions and revenue from AI assistants, and the AI crawlers that read your site.",
   "ai-visibility-settings": "Which assistants answer your questions, how often, and the monthly limit, on your own accounts.",
@@ -304,6 +310,7 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   "ai-questions": "/docs/guides/ai-visibility/",
   "ai-competitors": "/docs/guides/ai-visibility/",
   "ai-sources": "/docs/guides/ai-visibility/",
+  "ai-pages": "/docs/guides/ai-visibility/",
   "ai-perception": "/docs/guides/ai-visibility/",
   "ai-traffic": "/docs/guides/ai-visibility/",
   "ai-visibility-settings": "/docs/guides/ai-visibility/",
@@ -332,7 +339,7 @@ export type NavGroup = { label?: string; tabs: Tab[] };
 // The sidebar: the everyday pages, then one item per module, then the
 // company hub. A module's pages show beneath it while you are in it. A new
 // tool joins its module; a new module is one more entry here, in this
-// order: CRM, Visitors, Outreach, Deliverability, Lifecycle, SEO, AI visibility, Competitors, Social, Reviews, Paid ads,
+// order: CRM, Visitors, Outreach, Presence, Deliverability, Lifecycle, SEO, AI visibility, Competitors, Social, Reviews, Paid ads,
 // Partners, Analytics, Playbooks. A module with no pages yet is left out.
 export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
@@ -340,12 +347,15 @@ export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
   { id: "crm", label: "CRM", icon: "leads", tabs: ["crm", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
-  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "allocation", "reports"] },
+  { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
+  // Presence: everywhere the brand appears, what to go after next, and the
+  // publishers behind it.
+  { id: "presence", label: "Presence", icon: "coverage", tabs: ["coverage"] },
   { id: "deliverability", label: "Deliverability", icon: "mailboxes", tabs: ["infrastructure", "mailboxes", "domains", "warmup", "servers", "senders"] },
   { id: "lifecycle", label: "Lifecycle", icon: "lifecycle", tabs: ["lifecycle", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "emails", "providers"] },
   { id: "seo", label: "SEO", icon: "seo", tabs: ["seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "seo", "backlinks"] },
   // AI visibility: how AI assistants answer the questions buyers ask, against competitors.
-  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
+  { id: "ai-visibility", label: "AI visibility", icon: "ai-visibility", tabs: ["ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings"] },
   // Competitors: how the brand stands against everyone it competes with,
   // across search, AI answers, Presence and, as they arrive, social and reviews.
   { id: "competitors", label: "Competitors", icon: "competitors", tabs: ["competition", "competitors"] },
@@ -353,7 +363,7 @@ export const modules: Module[] = [
   { id: "reviews", label: "Reviews", icon: "reviews", tabs: ["reviews"] },
   { id: "ads", label: "Paid ads", icon: "ads", tabs: ["ads"] },
   { id: "partners", label: "Partners", icon: "partners", tabs: ["partners"] },
-  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "tracking", "flags", "ab-tests", "links"] },
+  { id: "analytics", label: "Analytics", icon: "reports", tabs: ["dashboards", "funnels", "trends", "retention", "paths", "channels", "outcomes", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links"] },
   // Playbooks: recipes that use every module above, from playbooks/ in the repository.
   { id: "playbooks", label: "Playbooks", icon: "playbooks", tabs: ["playbooks"] },
   // Answering customers: the support inbox.
@@ -370,7 +380,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -573,7 +583,7 @@ export function Sidebar(p: SidebarProps) {
       <SidebarContent className="gap-0">
         <SidebarGroup className="py-1">
           <SidebarMenu className="gap-px">
-            {everyday.filter(shown).map((t) => <NavItem key={t} tab={t} active={p.tab === t} unread={t === "inbox" ? p.unread : 0} onClick={() => { p.onTab(t); close(); }} />)}
+            {everyday.filter(shown).map((t) => <NavItem key={t} tab={t} active={p.tab === t} unread={t === "inbox" ? p.unread : p.counts?.[t] ?? 0} unreadLabel={t === "inbox" ? "unread" : "waiting for you"} onClick={() => { p.onTab(t); close(); }} />)}
           </SidebarMenu>
         </SidebarGroup>
         {pins.length > 0 && (
@@ -691,7 +701,7 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
-function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, pin, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; pin?: "pinned" | "sidebar"; onClick: () => void }) {
+function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, unread = 0, unreadLabel = "unread", pin, onClick }: { tab: Tab; label?: string; icon?: IconName; active: boolean; unread?: number; unreadLabel?: string; pin?: "pinned" | "sidebar"; onClick: () => void }) {
   return (
     <SidebarMenuItem className={cn(pin && "flex items-center")}>
       <SidebarMenuButton
@@ -707,7 +717,7 @@ function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, u
       </SidebarMenuButton>
       {pin && <PinButton tab={tab} from={pin} className={cn("ml-0.5 group-hover/menu-item:opacity-100", pin === "pinned" && "opacity-0")} />}
       {unread > 0 && (
-        <SidebarMenuBadge className="rounded bg-brand-strong px-1.5 font-mono text-[11px] text-white peer-hover/menu-button:text-white md:top-1 dark:bg-brand dark:text-neutral-950 dark:peer-hover/menu-button:text-neutral-950" aria-label={`${unread} unread`}>
+        <SidebarMenuBadge className="rounded bg-brand-strong px-1.5 font-mono text-[11px] text-white peer-hover/menu-button:text-white md:top-1 dark:bg-brand dark:text-neutral-950 dark:peer-hover/menu-button:text-neutral-950" aria-label={`${unread} ${unreadLabel}`}>
           {unread}
         </SidebarMenuBadge>
       )}
@@ -923,7 +933,7 @@ export function TopBar({ ws, tab, item, itemName, onTab, onApi, apiOpen, onAgent
     window.addEventListener("outflare:item-name", on);
     return () => window.removeEventListener("outflare:item-name", on);
   }, []);
-  const itemLabel = item && (itemName ?? (tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : item));
+  const itemLabel = item && (itemName ?? (item === "new" ? "New" : tab === "domains" ? item : named?.id === item ? named.name : uuidish.test(item) ? "…" : item));
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur">
       <SidebarTrigger className="-ml-1 size-7 text-muted-foreground" />
@@ -1000,56 +1010,58 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "tools":
       return { title: "What this server can do", path: "/v1/meta", params: {}, ask: "What can Outflare do for my outreach, and what should I set up first?", scope: "none (public)" };
     case "seo":
-      return { title: "SEO tools", path: "/v1/workspaces/{ws}/seo", params: base, mcp: "list_seo", ask: "How did my domain rating and rankings move this month, and which keywords dropped?", scope: "analytics.read" };
+      return { title: "SEO tools", path: "/v1/brands/{brand}/seo", params: brandBase, mcp: "list_seo", ask: "How did my domain rating and rankings move this month, and which keywords dropped?", scope: "analytics.read" };
     case "seo-overview":
-      return { title: "Is each brand growing in search", path: "/v1/workspaces/{ws}/seo/overview", params: base, mcp: "get_seo_overview", ask: "Is our branded search growing, and how did domain rating and backlinks move this month?", scope: "analytics.read" };
+      return { title: "Is each brand growing in search", path: "/v1/brands/{brand}/seo/overview", params: brandBase, mcp: "get_seo_overview", ask: "Is our branded search growing, and how did domain rating and backlinks move this month?", scope: "analytics.read" };
     case "experiments":
       return { title: "SEO experiments", path: "/v1/brands/{brand}/experiments", params: brandBase, mcp: "list_experiments", ask: "Did shortening the blog titles help, or is it too early to tell?", scope: "seo.read" };
     case "audits":
       return item
-        ? { title: "One site and its latest crawl", path: "/v1/workspaces/{ws}/seo-sites/{site}", params: { ...base, site: item }, ask: "What are the worst issues on this site, and which URL templates cause them?", scope: "seo.read" }
-        : { title: "Sites OutflareBot audits", path: "/v1/workspaces/{ws}/seo-sites", params: base, mcp: "list_seo_sites", ask: "Which of my sites has the lowest health score, and what should I fix first?", scope: "seo.read" };
+        ? { title: "One site and its latest crawl", path: "/v1/brands/{brand}/seo-sites/{site}", params: { ...brandBase, site: item }, ask: "What are the worst issues on this site, and which URL templates cause them?", scope: "seo.read" }
+        : { title: "Sites OutflareBot audits", path: "/v1/brands/{brand}/seo-sites", params: brandBase, mcp: "list_seo_sites", ask: "Which of my sites has the lowest health score, and what should I fix first?", scope: "seo.read" };
     case "search-insights":
       return { title: "Search workspace", path: "/v1/brands/{brand}/seo-sites/{site}/insights/workspace", params: { brand: "{brand}", site: item ?? "{site}" }, mcp: "get_search_workspace", ask: "Which search findings should we act on, and did the latest collections succeed?", scope: "seo.read" };
     case "keywords":
-      return { title: "Sites, then GET .../seo-sites/{site}/search for each one's pages and queries", path: "/v1/workspaces/{ws}/seo-sites", params: base, mcp: "get_site_search", ask: "Which pages get the most search impressions but few clicks, and what should I change on them?", scope: "seo.read" };
+      return { title: "Sites, then GET .../seo-sites/{site}/search for each one's pages and queries", path: "/v1/brands/{brand}/seo-sites", params: brandBase, mcp: "get_site_search", ask: "Which pages get the most search impressions but few clicks, and what should I change on them?", scope: "seo.read" };
     case "ai-visibility":
     case "ai-competitors":
     case "ai-sources":
     case "ai-traffic":
-      return { title: "AI visibility for each question set", path: "/v1/workspaces/{ws}/ai-visibility", params: base, mcp: "get_ai_visibility", ask: "How often do AI answers name us against our competitors, and what do they get wrong about us?", scope: "seo.read" };
+      return { title: "AI visibility for each question set", path: "/v1/brands/{brand}/ai-visibility", params: brandBase, mcp: "get_ai_visibility", ask: "How often do AI answers name us against our competitors, and what do they get wrong about us?", scope: "seo.read" };
     case "ai-questions":
-      return { title: "Question sets, then GET .../ai-cohorts/{cohort}/prompts for each one's questions", path: "/v1/workspaces/{ws}/ai-cohorts", params: base, mcp: "list_ai_cohorts", ask: "Which of our tracked questions never name us, and which competitor wins them?", scope: "seo.read" };
+      return { title: "Question sets, then GET .../ai-cohorts/{cohort}/prompts for each one's questions", path: "/v1/brands/{brand}/ai-cohorts", params: brandBase, mcp: "list_ai_cohorts", ask: "Which of our tracked questions never name us, and which competitor wins them?", scope: "seo.read" };
     case "ai-perception":
-      return { title: "The brand's facts and how often AI answers get them right", path: "/v1/workspaces/{ws}/ai-facts", params: base, mcp: "list_ai_facts", ask: "Which of our facts do AI answers get wrong, and what do they say instead?", scope: "seo.read" };
+      return { title: "The brand's facts and how often AI answers get them right", path: "/v1/brands/{brand}/ai-facts", params: brandBase, mcp: "list_ai_facts", ask: "Which of our facts do AI answers get wrong, and what do they say instead?", scope: "seo.read" };
+    case "ai-pages":
+      return { title: "How ready the brand's own pages are for AI answers", path: "/v1/brands/{brand}/ai-visibility/pages", params: { brand: "{brand}" }, mcp: "get_ai_visibility_pages", ask: "Which of our pages can't AI answers quote or trust, and which of those do they cite?", scope: "seo.read" };
     case "ai-visibility-settings":
       return { title: "Which assistants answer the brand's questions", path: "/v1/brands/{brand}/ai-visibility/settings", params: { brand: "{brand}" }, mcp: "get_ai_visibility_settings", ask: "Which assistants do we ask, and how much have we spent this month?", scope: "seo.read" };
     case "fixes":
-      return { title: "Fix tickets", path: "/v1/workspaces/{ws}/fix-tickets", params: base, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
+      return { title: "Fix tickets", path: "/v1/brands/{brand}/fix-tickets", params: brandBase, query: { status: "todo" }, mcp: "list_fix_tickets", ask: "Take the three worst fix tickets, read each with get_fix_ticket, and tell me which to approve and why.", scope: "seo.read" };
     case "competition":
       return { title: "Who is dominating", path: "/v1/brands/{brand}/competition", params: { brand: "{brand}" }, mcp: "get_competition", ask: "Who is dominating our market, where are we behind, and are we closing the gap?", scope: "seo.read" };
     case "competitors":
-      return { title: "Sites you compete with", path: "/v1/workspaces/{ws}/seo-competitors", params: base, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
+      return { title: "Sites you compete with", path: "/v1/brands/{brand}/seo-competitors", params: brandBase, query: { status: "tracked" }, mcp: "list_seo_competitors", ask: "What did my tracked competitors publish this month, and whose domain rating is rising?", scope: "seo.read" };
     case "link-building":
-      return { title: "Pages that could link to you", path: "/v1/workspaces/{ws}/link-prospects", params: base, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
+      return { title: "Pages that could link to you", path: "/v1/brands/{brand}/link-prospects", params: brandBase, mcp: "list_link_prospects", ask: "Which competitor pages died this month, who links to them, and which of those sites should we ask first?", scope: "seo.read" };
     case "coverage":
       return { title: "Brand presence", path: "/v1/workspaces/{ws}/brands", params: base, scope: "coverage.read", ask: "Find this brand, then use its coverage API to review placements, outstanding work and publisher relationships." };
     case "news":
-      return { title: "Coverage of your brands", path: "/v1/workspaces/{ws}/coverage", params: base, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
+      return { title: "Coverage of your brands", path: "/v1/brands/{brand}/coverage", params: brandBase, mcp: "list_coverage", ask: "What was written about us this week, which outlets covered us without a link, and which topics should we comment on?", scope: "seo.read" };
     case "pr-autopilot":
       return { title: "Reactive PR autopilots", path: "/v1/workspaces/{ws}/cloud/pr-autopilot", params: base, ask: "Set up the reactive PR autopilot for our brand, at most 3 stories a week.", scope: "agents.read" };
     case "stories":
-      return { title: "Your stories", path: "/v1/workspaces/{ws}/stories", params: base, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
+      return { title: "Your stories", path: "/v1/brands/{brand}/stories", params: brandBase, mcp: "list_stories", ask: "Suggest three stories we could pitch this week from our coverage and the news, and draft the best one from facts we can source.", scope: "seo.read" };
     case "backlinks":
-      return { title: "Links to your sites", path: "/v1/workspaces/{ws}/backlinks", params: base, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
+      return { title: "Links to your sites", path: "/v1/brands/{brand}/backlinks", params: brandBase, query: { status: "live" }, mcp: "list_backlinks", ask: "Which strong links did we lose this month, and where did our new links come from?", scope: "seo.read" };
     case "reddit":
-      return { title: "Reddit drafts waiting for approval", path: "/v1/workspaces/{ws}/social/actions", params: base, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
+      return { title: "Reddit drafts waiting for approval", path: "/v1/brands/{brand}/social/actions", params: brandBase, query: { channel: "reddit", status: "draft" }, mcp: "list_social_replies", ask: "Find Reddit threads this week where we can genuinely help, and draft replies that disclose we work here.", scope: "social.read" };
     case "reddit-campaigns":
-      return { title: "Reddit mentions, links, cost and lifespan", path: "/v1/workspaces/{ws}/reddit/report", params: base, query: { group_by: "strategy" }, mcp: "get_reddit_report", ask: "Run Reddit marketing for our brand within this month's budget: read get_reddit_guide, test one idea, and report what stayed live.", scope: "social.read" };
+      return { title: "Reddit mentions, links, cost and lifespan", path: "/v1/brands/{brand}/reddit/report", params: brandBase, query: { group_by: "strategy" }, mcp: "get_reddit_report", ask: "Run Reddit marketing for our brand within this month's budget: read get_reddit_guide, test one idea, and report what stayed live.", scope: "social.read" };
     case "social":
-      return { title: "Social growth by channel", path: "/v1/workspaces/{ws}/social/growth", params: base, mcp: "get_social_growth", ask: "How did our followers and engagement on X and LinkedIn move this month, and which posts did best?", scope: "social.read" };
+      return { title: "Social growth by channel", path: "/v1/brands/{brand}/social/growth", params: brandBase, mcp: "get_social_growth", ask: "How did our followers and engagement on X and LinkedIn move this month, and which posts did best?", scope: "social.read" };
     case "reviews":
-      return { title: "Your review score and its direction", path: "/v1/workspaces/{ws}/reviews/summary", params: base, mcp: "get_reviews_summary", ask: "How are our reviews trending this month, and which unhappy reviews still need an answer?", scope: "social.read" };
+      return { title: "Your review score and its direction", path: "/v1/brands/{brand}/reviews/summary", params: brandBase, mcp: "get_reviews_summary", ask: "How are our reviews trending this month, and which unhappy reviews still need an answer?", scope: "social.read" };
     case "visitors":
       return { title: "Companies on your website", path: "/v1/brands/{brand}/visitors", params: brandBase, query: { view: "companies" }, mcp: "list_website_visitors", ask: "Which companies looked at our pricing this week, and who there should we follow up with?", scope: "customers.read" };
     case "ads":
@@ -1060,6 +1072,10 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Report by day", path: "/v1/workspaces/{ws}/reports", params: base, query: { group_by: "day" }, mcp: "get_report", ask: "Which sequence and step get the most replies this month, and which mailboxes bounce most?", scope: "sequences.read" };
     case "analytics":
       return { title: "Traffic from every analytics tool", path: "/v1/brands/{brand}/analytics/summary", params: brandBase, mcp: "get_analytics_summary", ask: "How did the website do over the last 28 days, and which pages and searches bring people in?", scope: "analytics.read" };
+    case "live":
+      return { title: "Who is on the website right now", path: "/v1/brands/{brand}/analytics/live", params: brandBase, mcp: "get_site_live", ask: "How many people are on our website right now, where did they come from, and did anyone sign up in the last hour?", scope: "analytics.read" };
+    case "page-speed":
+      return { title: "Page speed from real visits", path: "/v1/brands/{brand}/analytics/page-speed", params: brandBase, mcp: "get_page_speed", ask: "Which of our pages got slower this week, and how slow is the pricing page on phones?", scope: "analytics.read" };
     case "tracking":
       return { title: "Website tracking keys and their snippets", path: "/v1/brands/{brand}/site-keys", params: brandBase, mcp: "list_site_keys", ask: "Is our website snippet installed and sending visits on every site?", scope: "customers.read" };
     case "flags":
@@ -1079,7 +1095,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "channels":
       return { title: "Visits, conversions, revenue and cost per channel", path: "/v1/brands/{brand}/attribution/channels", params: brandBase, mcp: "get_attribution_channels", ask: "Which channel brought the most revenue this month, and what did each sign-up cost us per channel?", scope: "analytics.read" };
     case "partners":
-      return { title: "Partners and what they earned", path: "/v1/brands/{brand}/partners", params: base, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
+      return { title: "Partners and what they earned", path: "/v1/brands/{brand}/partners", params: brandBase, mcp: "list_partners", ask: "Which partners brought the most sales this month, and whose payouts are due?", scope: "partners.read" };
     case "links":
       return { title: "Campaign links", path: "/v1/brands/{brand}/tracking-campaigns", params: brandBase, query: { status: "active" }, mcp: "list_tracking_campaigns", ask: "Make a tagged link for our spring launch on LinkedIn ads, pointing at the pricing page.", scope: "analytics.read" };
     case "inbox":

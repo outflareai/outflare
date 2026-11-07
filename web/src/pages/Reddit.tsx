@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { SocialAction, SocialItem, SocialOverview, SocialWatch } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -22,7 +23,13 @@ type Connection = SocialOverview["channels"][number]["connections"][number];
 const actionLabel: Record<SocialAction["status"], string> = { drafting: "Drafting", draft: "Waiting for approval", approved: "Posting", done: "Posted", rejected: "Rejected", failed: "Failed" };
 const actionTone: Record<SocialAction["status"], Tone> = { drafting: "grey", draft: "amber", approved: "blue", done: "green", rejected: "grey", failed: "red" };
 
-export function Reddit({ ws, canManage, go }: Props) {
+export function Reddit(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Reddit" brands={active.length} />;
+  return <RedditPage key={brand.id} {...props} />;
+}
+
+function RedditPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const brandKey = brand.query.brand ?? "";
   const [overview, setOverview] = useState<SocialOverview | null>(null);
@@ -34,13 +41,13 @@ export function Reddit({ ws, canManage, go }: Props) {
   const [replying, setReplying] = useState<SocialItem | null>(null);
 
   const load = useCallback(async () => {
-    const query = { ...(brandKey ? { brand: brandKey } : {}), channel: "reddit" as const };
-    const path = { ws };
+    const query = { channel: "reddit" as const };
+    const path = { ws, brand: pickedBrandId() };
     const [o, w, i, a] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/social", { params: { path, query: brandKey ? { brand: brandKey } : {} } }),
-      api.GET("/v1/workspaces/{ws}/social/watches", { params: { path, query } }),
-      api.GET("/v1/workspaces/{ws}/social/items", { params: { path, query: { ...query, status: "new" } } }),
-      api.GET("/v1/workspaces/{ws}/social/actions", { params: { path, query: { ...query, limit: 100 } } }),
+      api.GET("/v1/brands/{brand}/social", { params: { path } }),
+      api.GET("/v1/brands/{brand}/social/watches", { params: { path, query } }),
+      api.GET("/v1/brands/{brand}/social/items", { params: { path, query: { ...query, status: "new" } } }),
+      api.GET("/v1/brands/{brand}/social/actions", { params: { path, query: { ...query, limit: 100 } } }),
     ]);
     if (o.error || !o.data) return setError(errorMessage(o.error));
     setError("");
@@ -234,20 +241,20 @@ export function Reddit({ ws, canManage, go }: Props) {
   );
 }
 
-async function draft(ws: string, i: SocialItem, done: () => void) {
-  const { data, error } = await api.POST("/v1/workspaces/{ws}/social/items/{id}/draft", { params: { path: { ws, id: i.id } } });
+async function draft(_ws: string, i: SocialItem, done: () => void) {
+  const { data, error } = await api.POST("/v1/brands/{brand}/social/items/{id}/draft", { params: { path: { brand: pickedBrandId(), id: i.id } } });
   if (error || !data) return toast(errorMessage(error), "error");
   toast("Drafting. It shows up under Waiting for approval.");
   done();
 }
 
-async function ignore(ws: string, i: SocialItem, done: () => void) {
-  const { error } = await api.PATCH("/v1/workspaces/{ws}/social/items/{id}", { params: { path: { ws, id: i.id } }, body: { status: "ignored" } });
+async function ignore(_ws: string, i: SocialItem, done: () => void) {
+  const { error } = await api.PATCH("/v1/brands/{brand}/social/items/{id}", { params: { path: { brand: pickedBrandId(), id: i.id } }, body: { status: "ignored" } });
   if (error) return toast(errorMessage(error), "error");
   done();
 }
 
-function DraftRow({ ws, action, canManage, canPost, onChange }: { ws: string; action: SocialAction; canManage: boolean; canPost: boolean; onChange: () => void }) {
+function DraftRow({ ws: _ws, action, canManage, canPost, onChange }: { ws: string; action: SocialAction; canManage: boolean; canPost: boolean; onChange: () => void }) {
   const [body, setBody] = useState(action.body);
   const [busy, setBusy] = useState(false);
   useEffect(() => setBody(action.body), [action.id, action.body]);
@@ -261,17 +268,17 @@ function DraftRow({ ws, action, canManage, canPost, onChange }: { ws: string; ac
     toast(done);
     onChange();
   }
-  const path = { params: { path: { ws, id: action.id } } };
-  const save = () => run(() => api.PATCH("/v1/workspaces/{ws}/social/actions/{id}", { ...path, body: { body } }), "Saved.");
+  const path = { params: { path: { brand: pickedBrandId(), id: action.id } } };
+  const save = () => run(() => api.PATCH("/v1/brands/{brand}/social/actions/{id}", { ...path, body: { body } }), "Saved.");
   const approve = () =>
     run(async () => {
       if (changed) {
-        const r = await api.PATCH("/v1/workspaces/{ws}/social/actions/{id}", { ...path, body: { body } });
+        const r = await api.PATCH("/v1/brands/{brand}/social/actions/{id}", { ...path, body: { body } });
         if (r.error) return r;
       }
-      return api.POST("/v1/workspaces/{ws}/social/actions/{id}/approve", path);
+      return api.POST("/v1/brands/{brand}/social/actions/{id}/approve", path);
     }, "Approved. It posts in a moment.");
-  const reject = () => run(() => api.POST("/v1/workspaces/{ws}/social/actions/{id}/reject", { ...path, body: {} }), "Rejected. The post is open again.");
+  const reject = () => run(() => api.POST("/v1/brands/{brand}/social/actions/{id}/reject", { ...path, body: {} }), "Rejected. The post is open again.");
 
   return (
     <div className="space-y-2 rounded-md border p-3 text-[13px]">
@@ -302,13 +309,13 @@ function DraftRow({ ws, action, canManage, canPost, onChange }: { ws: string; ac
   );
 }
 
-function ReplySheet({ ws, item, disclosure, onClose, onSaved }: { ws: string; item: SocialItem; disclosure: string; onClose: () => void; onSaved: () => void }) {
+function ReplySheet({ ws: _ws, item, disclosure, onClose, onSaved }: { ws: string; item: SocialItem; disclosure: string; onClose: () => void; onSaved: () => void }) {
   const [body, setBody] = useState(`\n\n${disclosure}`);
   const [busy, setBusy] = useState(false);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/social/actions", { params: { path: { ws } }, body: { type: "reply", item_id: item.id, body } });
+    const { error } = await api.POST("/v1/brands/{brand}/social/actions", { params: { path: { brand: pickedBrandId() } }, body: { type: "reply", item_id: item.id, body } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast("Saved as a draft to approve.");
@@ -334,7 +341,7 @@ function ReplySheet({ ws, item, disclosure, onClose, onSaved }: { ws: string; it
 
 const lines = (s: string) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
 
-function WatchSheet({ ws, watch, brandID, onClose, onSaved }: { ws: string; watch: SocialWatch | null; brandID: string | null; onClose: () => void; onSaved: () => void }) {
+function WatchSheet({ ws: _ws, watch, brandID, onClose, onSaved }: { ws: string; watch: SocialWatch | null; brandID: string | null; onClose: () => void; onSaved: () => void }) {
   const [f, setF] = useState({
     name: watch?.name ?? "",
     keywords: watch?.keywords.join("\n") ?? "",
@@ -357,8 +364,8 @@ function WatchSheet({ ws, watch, brandID, onClose, onSaved }: { ws: string; watc
       guidance: f.guidance, auto_draft: f.autoDraft, daily_limit: Number(f.limit) || 5, ...(f.disclosure ? { disclosure: f.disclosure } : {}),
     };
     const { error } = watch
-      ? await api.PATCH("/v1/workspaces/{ws}/social/watches/{id}", { params: { path: { ws, id: watch.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/social/watches", { params: { path: { ws } }, body: { ...body, channel: "reddit", brand_id: brandID } });
+      ? await api.PATCH("/v1/brands/{brand}/social/watches/{id}", { params: { path: { brand: pickedBrandId(), id: watch.id } }, body })
+      : await api.POST("/v1/brands/{brand}/social/watches", { params: { path: { brand: pickedBrandId() } }, body: { ...body, channel: "reddit", brand_id: brandID } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(watch ? "Saved." : "Watching. The first check runs now.");
@@ -366,19 +373,19 @@ function WatchSheet({ ws, watch, brandID, onClose, onSaved }: { ws: string; watc
   }
   async function pause() {
     if (!watch) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/social/watches/{id}", { params: { path: { ws, id: watch.id } }, body: { status: watch.status === "active" ? "paused" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/social/watches/{id}", { params: { path: { brand: pickedBrandId(), id: watch.id } }, body: { status: watch.status === "active" ? "paused" : "active" } });
     if (error) return toast(errorMessage(error), "error");
     onSaved();
   }
   async function check() {
     if (!watch) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/social/watches/{id}/check", { params: { path: { ws, id: watch.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/social/watches/{id}/check", { params: { path: { brand: pickedBrandId(), id: watch.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Checking now.");
   }
   async function remove() {
     if (!watch) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/social/watches/{id}", { params: { path: { ws, id: watch.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/social/watches/{id}", { params: { path: { brand: pickedBrandId(), id: watch.id } } });
     if (error) return toast(errorMessage(error), "error");
     onSaved();
   }

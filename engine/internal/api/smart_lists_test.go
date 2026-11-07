@@ -31,8 +31,9 @@ func TestSmartLists(t *testing.T) {
 	}
 	event := func(rec, name, ago string) {
 		t.Helper()
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, occurred_at, source)
-			VALUES ($1, $2, 'track', $3, now() - $4::interval, 'api')`, ws, rec, name, ago); err != nil {
+		// An event is its person's brand's, as the app saves it.
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, brand_id, kind, name, occurred_at, source)
+			VALUES ($1, $2, (SELECT brand_id FROM records WHERE id = $2), 'track', $3, now() - $4::interval, 'api')`, ws, rec, name, ago); err != nil {
 			t.Fatal(err)
 		}
 	}

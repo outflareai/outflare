@@ -16,6 +16,7 @@ import (
 // up like any new sequence for a person to give mailboxes and activate.
 
 func (s *Server) routesStoryPitchSequence(mux *http.ServeMux) {
+	mux.HandleFunc("POST /v1/brands/{brand}/stories/pitch-sequence", s.onBrand(auth.ScopeSequencesManage, s.createStoryPitchSequence))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/stories/pitch-sequence", s.inBrand(auth.ScopeSequencesManage, s.createStoryPitchSequence))
 }
 
@@ -40,6 +41,9 @@ func (s *Server) createStoryPitchSequence(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ctx := r.Context()
+	if in.BrandID == "" {
+		in.BrandID = a.Brand
+	}
 	brand, err := s.brandIDFor(ctx, a.WorkspaceID, in.BrandID)
 	if errors.Is(err, errNotFound) || (err == nil && !a.sees(&brand)) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id: brand not found")

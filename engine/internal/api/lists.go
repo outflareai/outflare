@@ -150,7 +150,7 @@ func listScope(a *access, alias string, args *[]any) string {
 	if a.Brands == nil {
 		return ""
 	}
-	return brandSel{in: a.Brands}.sql(col, args)
+	return brandSel{in: a.seenBrands()}.sql(col, args)
 }
 
 func (s *Server) listLeadLists(w http.ResponseWriter, r *http.Request) {

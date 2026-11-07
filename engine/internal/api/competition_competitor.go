@@ -24,7 +24,9 @@ import (
 func (s *Server) routesCompetitionCompetitor(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/brands/{brand}/competition/{competitor}/search", s.onBrand(auth.ScopeSEORead, s.competitorSearch))
 	mux.HandleFunc("POST /v1/brands/{brand}/competition/{competitor}/read", s.onBrand(auth.ScopeSEOManage, s.readCompetitorNow))
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-competitors/gaps/links", s.onBrand(auth.ScopeSEORead, s.linkGapPages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-competitors/gaps/links", s.inBrand(auth.ScopeSEORead, s.linkGapPages))
+	mux.HandleFunc("POST /v1/brands/{brand}/seo-competitors/gaps/links", s.onBrand(auth.ScopeSEOManage, s.readLinkGapPages))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/seo-competitors/gaps/links", s.inBrand(auth.ScopeSEOManage, s.readLinkGapPages))
 }
 
@@ -386,7 +388,7 @@ func (s *Server) linkGapSite(w http.ResponseWriter, r *http.Request, a *access, 
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "site_id is an SEO site's id")
 		return seoSite{}, false
 	}
-	sites, err := s.loadSEOSites(r.Context(), a.WorkspaceID, &siteID, brandSel{in: a.Brands})
+	sites, err := s.loadSEOSites(r.Context(), a.WorkspaceID, &siteID, brandSel{in: a.seenBrands()})
 	if err != nil {
 		s.internal(w, r, err)
 		return seoSite{}, false

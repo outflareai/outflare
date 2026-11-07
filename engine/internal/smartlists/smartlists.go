@@ -273,15 +273,15 @@ func Seen(in []string, args []any) (string, []any) {
 		return "", args
 	}
 	args = append(args, in)
-	return ` AND (r.brand_id IS NULL OR r.brand_id = ANY($` + strconv.Itoa(len(args)) + `::uuid[]))`, args
+	return ` AND r.brand_id = ANY($` + strconv.Itoa(len(args)) + `::uuid[])`, args
 }
 
 func (b *builder) where(where string, rules []Rule, match string, brandID *string) (string, []any) {
 	eventBrand := ""
 	if brandID != nil {
 		p := b.arg(*brandID)
-		where += ` AND (r.brand_id = ` + p + ` OR r.brand_id IS NULL)`
-		eventBrand = ` AND (e.brand_id = ` + p + ` OR e.brand_id IS NULL)`
+		where += ` AND r.brand_id = ` + p
+		eventBrand = ` AND e.brand_id = ` + p
 	}
 	if len(rules) == 0 {
 		return where, b.args
@@ -575,7 +575,7 @@ func RefreshWith(ctx context.Context, tx pgx.Tx, ws, listID string, ids []string
 		// The query's records, kept to the list's kind and brand, live.
 		args = []any{ws, ids, recordType, brandID}
 		where = `r.workspace_id = $1 AND r.id = ANY ($2::uuid[]) AND r.record_type = $3 AND r.merged_into IS NULL AND r.archived_at IS NULL
-			AND r.deleted_at IS NULL AND ($4::uuid IS NULL OR r.brand_id IS NULL OR r.brand_id = $4)`
+			AND r.deleted_at IS NULL AND ($4::uuid IS NULL OR r.brand_id = $4)`
 	}
 	args = append(args, listID)
 	l := "$" + strconv.Itoa(len(args))

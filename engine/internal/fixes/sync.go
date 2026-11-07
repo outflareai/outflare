@@ -63,7 +63,7 @@ func Sync(ctx context.Context, tx pgx.Tx, run Run, found []Found) (Changes, erro
 		WITH prev AS (SELECT id, status FROM fixes WHERE workspace_id = $1 AND source = $2 AND subject_id = $4),
 		up AS (
 			INSERT INTO fixes (workspace_id, brand_id, source, subject_type, subject_id, rule, severity, group_key, count, unit, found_by, last_found_by)
-			SELECT $1, $5::uuid, $2, $3, $4, f.rule, f.severity, f.grp, f.count, f.unit, $6, $6
+			SELECT $1, COALESCE($5::uuid, outflare_first_brand($1)), $2, $3, $4, f.rule, f.severity, f.grp, f.count, f.unit, $6, $6
 			FROM unnest($7::text[], $8::text[], $9::text[], $10::int[], $11::text[]) AS f(rule, severity, grp, count, unit)
 			ON CONFLICT (workspace_id, source, subject_id, rule, group_key) DO UPDATE SET
 				count = EXCLUDED.count, severity = EXCLUDED.severity, unit = EXCLUDED.unit, last_found_by = EXCLUDED.last_found_by, brand_id = EXCLUDED.brand_id,

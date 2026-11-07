@@ -6,6 +6,7 @@ import { api, errorMessage } from "../api";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
 import { Badge, Button, Card, Empty, ErrorText, Input, Loading, PageHeader, type tones } from "../ui";
 import type { Tab } from "../App";
+import { AccessBadge, AccessSelect, Reasons, ValueCell, type Access } from "./brand-coverage/linkvalue";
 
 // Competitors → Overview: who is dominating. A leaderboard of the brand and
 // every competitor it tracks with an overall score, where the brand leads
@@ -146,11 +147,25 @@ function CompetitionBrand({ go, item, brand }: Props & { brand: string }) {
   const missing = data.areas.filter((a) => !a.measured);
   const ranked = [...data.entries].sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9));
   const you = data.entries.find((e) => e.kind === "brand")!;
+  // How much of every competitor has been read, so a refresh shows its
+  // progress and gaps say what is missing.
+  const rivals = data.entries.filter((e) => e.kind === "competitor");
+  const readCount = {
+    search: rivals.filter((e) => e.seo_read_on).length,
+    age: rivals.filter((e) => e.registered_on).length,
+    site: rivals.filter((e) => e.looked_at).length,
+  };
 
   return (
     <div className="space-y-8">
       {header}
       {editing && <Weights areas={data.areas} weights={weights} set={setWeight} />}
+      {rivals.length > 0 && (readCount.search < rivals.length || readCount.age < rivals.length || readCount.site < rivals.length) && (
+        <p className="text-[13px] text-muted-foreground">
+          Read so far: search numbers for {readCount.search} of {rivals.length} competitors, domain age for {readCount.age}, their sites for {readCount.site}.
+          {readCount.search < rivals.length && " Search numbers are read on your SEO connection while its monthly budget lasts; the rest carry on at the next read."}
+        </p>
+      )}
       {refreshed && (
         <div className="space-y-2 rounded-md border bg-muted/40 px-4 py-3 text-[13px]">
           <p>
@@ -465,10 +480,14 @@ function PlacementsCard({ brand, them }: { brand: string; them: Entry }) {
   const [rows, setRows] = useState<Placement[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [gapsOnly, setGapsOnly] = useState(false);
+  const [access, setAccess] = useState<Access | "">("");
   const [error, setError] = useState("");
   const load = async (after: string | null, gaps: boolean) => {
     const { data, error } = await api.GET("/v1/brands/{brand}/coverage/competitor_placements", {
-      params: { path: { brand }, query: { competitor_id: them.id, limit: 200, ...(gaps ? { gap: "true" as const } : {}), ...(after ? { cursor: after } : {}) } },
+      params: {
+        path: { brand },
+        query: { competitor_id: them.id, limit: 200, ...(gaps ? { gap: "true" as const } : {}), ...(access ? { access } : {}), ...(after ? { cursor: after } : {}) },
+      },
     });
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -479,16 +498,19 @@ function PlacementsCard({ brand, them }: { brand: string; them: Entry }) {
     setRows(null);
     load(null, gapsOnly);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brand, them.id, gapsOnly]);
+  }, [brand, them.id, gapsOnly, access]);
   const total = them.areas["placements"]?.value;
   return (
     <Card
       title={`Their placements${total != null ? ` · ${num(total)}` : ""}`}
-      description="The pages Presence found them on: from web searches for their name, who links to them and the pages AI answers cite. Strongest sites first."
+      description="The pages Presence found them on: from web searches for their name, who links to them and the pages AI answers cite. Most valuable to you first: the page's authority, readers, trust and relevance to your topic, and whether it's earned or something anyone can get."
       action={
-        <Button variant="ghost" onClick={() => setGapsOnly((v) => !v)}>
-          {gapsOnly ? "Show all" : "Only sites you're not on"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <AccessSelect className="h-8 rounded-md border bg-background px-2 text-[13px]" value={access} onChange={setAccess} />
+          <Button variant="ghost" onClick={() => setGapsOnly((v) => !v)}>
+            {gapsOnly ? "Show all" : "Only sites you're not on"}
+          </Button>
+        </div>
       }
     >
       <div className="space-y-2">
@@ -501,6 +523,8 @@ function PlacementsCard({ brand, them }: { brand: string; them: Entry }) {
               <thead>
                 <tr className="border-b text-left font-mono text-[11px] uppercase tracking-wide text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Page</th>
+                  <th className="px-2 py-2 text-right font-medium" title="What the link is worth to you, 0 to 100">Value</th>
+                  <th className="px-2 py-2 font-medium">How it's got</th>
                   <th className="px-2 py-2 text-right font-medium">DR</th>
                   <th className="px-2 py-2 font-medium">Paid?</th>
                   <th className="px-4 py-2 font-medium">You there</th>
@@ -512,6 +536,13 @@ function PlacementsCard({ brand, them }: { brand: string; them: Entry }) {
                     <td className="max-w-[420px] px-4 py-2">
                       <a href={p.url} target="_blank" rel="noreferrer noopener nofollow" className="font-medium break-words underline-offset-2 hover:underline">{p.title || p.host}</a>
                       <div className="truncate text-[11px] text-muted-foreground" title={p.url}>{p.host}{urlPath(p.url) !== "/" ? urlPath(p.url) : ""}</div>
+                      <Reasons reasons={p.value_reasons} />
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <ValueCell value={p.value} reasons={p.value_reasons} />
+                    </td>
+                    <td className="px-2 py-2">
+                      <AccessBadge access={p.access} />
                     </td>
                     <td className="px-2 py-2 text-right">{num(p.domain_rating)}</td>
                     <td className="px-2 py-2">{p.arrangement === "likely_paid" ? <Badge tone="amber">Likely paid</Badge> : <span className="text-muted-foreground">–</span>}</td>
@@ -610,12 +641,12 @@ function SearchCard({ brand, them, go }: { brand: string; them: Entry; go: Props
         {plan && (
           <div className="space-y-2 rounded-md border p-3 text-[13px]">
             {plan.reports.length === 0 ? (
-              <p>Everything was read in the last six days, so there's nothing new to read.</p>
+              <p>Everything was read recently (each competitor is read at most once a month unless you change it in the SEO tool's settings), so there's nothing new to read.</p>
             ) : (
               <p>
                 Reads their {plan.reports.map((r) => reportName[r] ?? r).join(", ")} on your {plan.connector === "ahrefs" ? "Ahrefs" : "DataForSEO"} account, for about {amount(plan.estimate, plan.unit)}
                 {left(plan) !== null ? ` (${amount(left(plan)!, plan.unit)} left this month)` : ""}.
-                {plan.fresh.length > 0 ? ` Their ${plan.fresh.map((r) => reportName[r] ?? r).join(", ")} were read in the last six days and are skipped.` : ""}
+                {plan.fresh.length > 0 ? ` Their ${plan.fresh.map((r) => reportName[r] ?? r).join(", ")} were read recently and are skipped.` : ""}
               </p>
             )}
             <div className="flex gap-2">

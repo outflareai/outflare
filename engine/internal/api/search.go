@@ -159,7 +159,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			WHERE $3 AND r.workspace_id = $1 AND r.merged_into IS NULL AND r.archived_at IS NULL
 				AND NOT ($7 AND r.record_type = 'deal') -- a deal comes once, as a deal
 				AND search_vector_record(r.name, r.attributes) @@ q.t
-				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR r.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -168,7 +168,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			WHERE $3 AND i.workspace_id = $1 AND r.workspace_id = $1 AND i.valid_to IS NULL AND r.merged_into IS NULL AND r.archived_at IS NULL
 				AND NOT ($7 AND r.record_type = 'deal')
 				AND search_vector_identity(i.value) @@ q.t
-				AND ($9::uuid[] IS NULL OR r.brand_id IS NULL OR r.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR r.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR r.brand_id = $12) AND (NOT $13 OR r.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -176,7 +176,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_message(m.subject, NULL), q.t), NULL
 			FROM q, messages m LEFT JOIN sequences x ON x.id = m.sequence_id
 			WHERE $4 AND m.workspace_id = $1 AND search_vector_message(m.subject, NULL) @@ q.t
-				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR x.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -184,7 +184,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_message(n.subject, n.body), q.t), left(coalesce(n.body, ''), 20000)
 			FROM q, inbound_messages n LEFT JOIN mailboxes x ON x.id = n.mailbox_id
 			WHERE $5 AND n.workspace_id = $1 AND search_vector_message(n.subject, n.body) @@ q.t
-				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR x.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -192,7 +192,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_title(g.title, g.notes), q.t), left(coalesce(g.notes, ''), 20000)
 			FROM q, meetings g LEFT JOIN sequences x ON x.id = g.sequence_id
 			WHERE $6 AND g.workspace_id = $1 AND search_vector_title(g.title, g.notes) @@ q.t
-				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR x.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -200,7 +200,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_title(d.name, d.stage), q.t), NULL
 			FROM q, deals d LEFT JOIN sequences x ON x.id = d.sequence_id
 			WHERE $7 AND d.workspace_id = $1 AND search_vector_title(d.name, d.stage) @@ q.t
-				AND ($9::uuid[] IS NULL OR x.brand_id IS NULL OR x.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR x.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR x.brand_id = $12) AND (NOT $13 OR x.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 			UNION ALL
@@ -208,7 +208,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 				ts_rank(search_vector_title(e.subject, NULL), q.t), NULL
 			FROM q, emails e
 			WHERE $8 AND e.workspace_id = $1 AND search_vector_title(e.subject, NULL) @@ q.t
-				AND ($9::uuid[] IS NULL OR e.brand_id IS NULL OR e.brand_id = ANY ($9))
+				AND ($9::uuid[] IS NULL OR e.brand_id = ANY ($9))
 				AND ($12::uuid IS NULL OR e.brand_id = $12) AND (NOT $13 OR e.brand_id IS NULL)
 			ORDER BY 7 DESC, 6 DESC LIMIT 200)
 		),
@@ -221,7 +221,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		FROM best b CROSS JOIN q
 		-- The record's name, for a caller who may read records and its brand.
 		LEFT JOIN records rr ON rr.id = b.record_id AND rr.workspace_id = $1 AND $10
-			AND ($9::uuid[] IS NULL OR rr.brand_id IS NULL OR rr.brand_id = ANY ($9))
+			AND ($9::uuid[] IS NULL OR rr.brand_id = ANY ($9))
 		ORDER BY b.rank DESC, b.at DESC LIMIT $11`,
 		a.WorkspaceID, tsq,
 		may[auth.ScopeCustomersRead] && (len(want) == 0 || want["record"]),

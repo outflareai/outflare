@@ -35,21 +35,21 @@ inputs:
     optional: true
 steps:
   - say: Find the site and its tracked competitors, and read the sites that link to competitors but not to you.
-    tools: [listSEOSites, listSEOCompetitors, getSEOCompetitorGaps]
+    tools: [listBrandSEOSites, listBrandSEOCompetitors, getBrandSEOCompetitorGaps]
   - say: For the strongest gap sites, read which of their pages link to each competitor, after showing the cost and the budget.
-    tools: [readLinks, getLinkRead]
+    tools: [readBrandLinks, getBrandLinkRead]
   - say: Add those pages as competitor gap prospects, with the competitor they link to as evidence. Sites that already link to you, competitors and opted-out sites are kept out on their own.
-    tools: [addLinkProspects]
+    tools: [addBrandLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.
-    tools: [checkLinkProspects, listLinkProspects]
+    tools: [checkBrandLinkProspects, listBrandLinkProspects]
   - say: Keep the ones that fit and choose your page to offer for each.
-    tools: [updateLinkProspect, deleteLinkProspect]
+    tools: [updateBrandLinkProspect, deleteBrandLinkProspect]
   - say: Pick a sequence for the pitches whose first step uses {{custom.opener}}, or create the starter sequence (a draft with the opener and one follow-up) if none does.
-    tools: [listLinkSequences, createLinkSequence, previewBrandSequence]
+    tools: [listBrandLinkSequences, createBrandLinkSequence, previewBrandSequence]
   - say: Start a pitch for each prospect worth asking, to its best contact. The workspace's AI writes an opener about their page, and each pitch waits for a person to approve it.
-    tools: [startLinkPitch, listLinkPitches]
+    tools: [startBrandLinkPitch, listBrandLinkPitches]
   - say: Report what was pitched and, later, what replied, agreed and went live.
-    tools: [getLinkResults, listLinkProspects]
+    tools: [getBrandLinkResults, listBrandLinkProspects]
 automation:
   schedule: monthly
   events: [competitor_link.new]

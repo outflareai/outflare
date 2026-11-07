@@ -38,6 +38,24 @@ func answerABTestAI(w http.ResponseWriter, body string) {
 			// A key the flag already has is renamed.
 			map[string]any{"key": "control", "content": map[string]any{"headline": "Built for agencies"}, "rationale": "Names the audience."},
 		}}
+	case strings.Contains(body, "You change a company's own web page for an A/B test"):
+		kind = "page_versions"
+		answer = map[string]any{"versions": []any{
+			map[string]any{"key": "premium", "summary": "Adds a premium line and button under the header", "rationale": "Shows the paid option.", "changes": []any{
+				map[string]any{"element": "e1", "action": "text", "text": "Free proxies, and **premium** ones", "href": "", "where": "", "target": "", "style_property": "", "style_value": ""},
+				map[string]any{"element": "e1", "action": "insert_button", "text": "Try Premium Proxies for $1", "href": "/sign-up", "where": "after", "target": "", "style_property": "", "style_value": ""},
+				map[string]any{"element": "e3", "action": "style", "text": "", "href": "", "where": "", "target": "", "style_property": "background-color", "style_value": "#0f766e"},
+				// Dropped: a part that isn't on the page, a style that
+				// loads something, a link that runs script.
+				map[string]any{"element": "e99", "action": "hide", "text": "", "href": "", "where": "", "target": "", "style_property": "", "style_value": ""},
+				map[string]any{"element": "e3", "action": "style", "text": "", "href": "", "where": "", "target": "", "style_property": "background", "style_value": "url(https://x.example/a.png)"},
+				map[string]any{"element": "e3", "action": "link", "text": "", "href": "javascript:alert(1)", "where": "", "target": "", "style_property": "", "style_value": ""},
+			}},
+			// A version whose every change is dropped is dropped too.
+			map[string]any{"key": "broken", "summary": "x", "rationale": "x", "changes": []any{
+				map[string]any{"element": "e42", "action": "hide", "text": "", "href": "", "where": "", "target": "", "style_property": "", "style_value": ""},
+			}},
+		}}
 	case strings.Contains(body, "You write the learning of a finished A/B test"):
 		kind = "learning"
 		answer = map[string]any{"headline": "Shorter headlines lift signups", "learning": "A five-word headline beat the long one on signups.",

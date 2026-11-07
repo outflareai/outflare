@@ -91,6 +91,10 @@ var (
 		Namespace: namespace, Subsystem: "redirect", Name: "clicks_total",
 		Help: "Clicks on campaign redirect links (/l/{code}), by outcome (counted, bot for a link scanner or preview, unknown for a code that isn't a link, error when the click couldn't be stored but the person was still sent on).",
 	}, []string{"outcome"})
+	pageVitals = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "ingest", Name: "page_vitals_total",
+		Help: "Page speed readings from visitors' browsers, by outcome (stored, rejected for their shape or a site key with no brand, pruned after 90 days).",
+	}, []string{"outcome"})
 	redirectLandings = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "landings_total",
 		Help: "Page views on a site that carried a redirect click's key (ofclk), by outcome (claimed when the visit took the click, unmatched when the click was already claimed, as on a reload, or isn't the site's workspace's).",
@@ -949,7 +953,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, inboxEvents, inboxBatch, redirectClicks, redirectLandings, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1089,6 +1093,10 @@ func RedirectClick(outcome string) { redirectClicks.WithLabelValues(outcome).Inc
 // RedirectLanding counts one page view carrying a redirect click's key, by
 // outcome: claimed or unmatched.
 func RedirectLanding(outcome string) { redirectLandings.WithLabelValues(outcome).Inc() }
+
+// PageVitals counts page speed readings by outcome: stored, rejected or
+// pruned.
+func PageVitals(outcome string, n int) { pageVitals.WithLabelValues(outcome).Add(float64(n)) }
 
 // SiteEventsCapped counts browser events turned away by a daily limit.
 func SiteEventsCapped(n int) { siteEvents.WithLabelValues("capped").Add(float64(n)) }

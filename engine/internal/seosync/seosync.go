@@ -74,6 +74,24 @@ type Settings struct {
 	// takes of a tracked competitor, for the gaps. Unset is
 	// DefaultGapRows; 0 turns gaps off.
 	GapRows *int `json:"gap_rows,omitempty"`
+	// CompetitorDays is the fewest days between two reads of the same
+	// competitor's site on this connection, however they are asked for
+	// (the weekly snapshot, Refresh all competitors, a competitor's Read).
+	// Unset is DefaultCompetitorDays.
+	CompetitorDays *int `json:"competitor_read_days,omitempty"`
+}
+
+// DefaultCompetitorDays reads each competitor's site at most once a
+// month, so hundreds of tracked competitors don't spend a connection's
+// budget every week.
+const DefaultCompetitorDays = 30
+
+// CompetitorDaysOrDefault is how many days a competitor's read stays fresh.
+func (s Settings) CompetitorDaysOrDefault() int {
+	if s.CompetitorDays != nil && *s.CompetitorDays >= 1 {
+		return *s.CompetitorDays
+	}
+	return DefaultCompetitorDays
 }
 
 // SettingsOf reads a connection's settings with the defaults filled in.
@@ -555,7 +573,7 @@ func (s *Syncer) refreshBrand(ctx context.Context, ws, integrationID, brandID st
 			continue
 		}
 		run, err := s.RefreshSiteCompetitors(ctx, o, r, site, set.Country, time.Now())
-		props := map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "checked": run.Checked, "gaps": run.Gaps, "events": run.Events, "refresh": true}
+		props := map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "checked": run.Checked, "failed": run.Failed, "gaps": run.Gaps, "events": run.Events, "refresh": true}
 		if err != nil {
 			code := "provider_error"
 			var be *BudgetError
@@ -806,7 +824,7 @@ func (s *Syncer) sync(ctx context.Context, ws, integrationID string, newOnly, re
 				Props: map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "kind": connectors.KindOf(err)}}, code, err)
 		} else {
 			track.Emit(ctx, track.Event{Name: "seo_competitors.synced", WorkspaceID: ws, ActorType: "system", Surface: "job", Outcome: track.Success,
-				Props: map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "suggested": run.Suggested, "checked": run.Checked, "gaps": run.Gaps, "events": run.Events}})
+				Props: map[string]any{"connector": o.Connector.Definition().ID, "site_id": site.ID, "suggested": run.Suggested, "checked": run.Checked, "failed": run.Failed, "gaps": run.Gaps, "events": run.Events}})
 		}
 		if connectors.KindOf(err) == connectors.ErrAuth && firstErr == nil {
 			firstErr = err

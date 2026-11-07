@@ -39,7 +39,7 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
   const query = { return: ret };
   switch (f.kind) {
     case "seo_site":
-      return api.GET("/v1/workspaces/{ws}/seo-sites/{site}/dns/approval", { params: { path: { ws, site: f.id }, query } });
+      return api.GET("/v1/brands/{brand}/seo-sites/{site}/dns/approval", { params: { path: { brand: f.brand || pickedBrandId(), site: f.id }, query } });
     case "tracking_domain":
       // A tracking domain is its brand's, so it is under the brand's route.
       return api.GET("/v1/brands/{brand}/tracking-domains/{id}/dns/approval", { params: { path: { brand: f.brand || pickedBrandId(), id: f.id }, query } });
@@ -53,7 +53,7 @@ async function approvalLink(ws: string, f: DNSApprovalFor, ret: string) {
 async function reportApproval(ws: string, f: DNSApprovalFor, body: { error?: string; provider?: string }) {
   switch (f.kind) {
     case "seo_site":
-      return api.POST("/v1/workspaces/{ws}/seo-sites/{site}/dns/approved", { params: { path: { ws, site: f.id } }, body });
+      return api.POST("/v1/brands/{brand}/seo-sites/{site}/dns/approved", { params: { path: { brand: f.brand || pickedBrandId(), site: f.id } }, body });
     case "tracking_domain":
       return api.POST("/v1/brands/{brand}/tracking-domains/{id}/dns/approved", { params: { path: { brand: f.brand || pickedBrandId(), id: f.id } }, body });
     case "email_domain":

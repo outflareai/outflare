@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -63,11 +64,11 @@ func TestJournalistAddedByHand(t *testing.T) {
 	}
 
 	for q, want := range map[string]float64{"": 2, "?beat=privacy": 1, "?beat=Other": 0, "?tier=national": 1, "?tier=trade,national": 2, "?tier=local": 0} {
-		if n := owner.must(200, "GET", base+"/journalists"+q, nil)["total"]; n != want {
+		if n := owner.must(200, "GET", base+"/journalists?brand=northpeak"+strings.Replace(q, "?", "&", 1), nil)["total"]; n != want {
 			t.Fatalf("%q: %v", q, n)
 		}
 	}
-	owner.must(400, "GET", base+"/journalists?tier=tabloid", nil)
+	owner.must(400, "GET", base+"/journalists?brand=northpeak&tier=tabloid", nil)
 	for _, bad := range []map[string]any{
 		{"name": "No Email"},
 		{"email": "x@news.example.org"},
@@ -116,7 +117,7 @@ func TestJournalistAddedByHand(t *testing.T) {
 	if off["journalist"] != false {
 		t.Fatalf("unmarked: %v", off)
 	}
-	if n := owner.must(200, "GET", base+"/journalists", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/journalists?brand=northpeak", nil)["total"]; n != 1.0 {
 		t.Fatalf("after unmarking: %v", n)
 	}
 	owner.must(200, "GET", base+"/records/"+id, nil)
@@ -213,7 +214,7 @@ func TestJournalistsKeepToTheirBrand(t *testing.T) {
 		t.Fatalf("brand-limited list: %v", list)
 	}
 	agent.must(404, "PATCH", base+"/journalists/"+theirs, map[string]any{"beats": []string{"AI"}})
-	if n := owner.must(200, "GET", base+"/journalists", nil)["total"]; n != 2.0 {
+	if n := owner.must(200, "GET", base+"/journalists?brand=acme", nil)["total"]; n != 1.0 {
 		t.Fatalf("owner's list: %v", n)
 	}
 	if n := owner.must(200, "GET", base+"/journalists?brand=northpeak", nil)["total"]; n != 1.0 {

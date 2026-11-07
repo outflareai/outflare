@@ -25,6 +25,10 @@ const (
 	// same amount and currency, from two different sources, can be and
 	// still be taken as one payment when they share no id.
 	paymentWindow = 15 * time.Minute
+	// resentAfter is how far apart the same payment id can arrive again
+	// from the same source and still be a retry, not another payment
+	// sent under an id that was already used.
+	resentAfter = 24 * time.Hour
 	// paymentLink is the property an order event carries once it is
 	// counted as a payment: that payment.succeeded event's message id.
 	paymentLink = "outflare_payment"
@@ -61,11 +65,26 @@ func paymentMessageID(brand, source, kind, sourceID string) string {
 	return "payment:" + brand + ":" + sourceID
 }
 
+// lockTransaction makes the saves of one payment or refund id take turns until tx ends.
+func lockTransaction(ctx context.Context, tx pgx.Tx, brand, kind, sourceID string) error {
+	if brand == "" || sourceID == "" {
+		return nil
+	}
+	if kind == "chargeback" {
+		kind = "refund"
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('transaction:' || $1::uuid::text || ':' || $2 || ':' || $3, 0))`,
+		brand, kind, sourceID)
+	return err
+}
+
 // knownPayment is a brand's payment transaction that another source's
 // payment turned out to be.
 type knownPayment struct {
-	id, source, sourceID string
-	recordID             *string
+	id, source, sourceID, currency string
+	recordID                       *string
+	amountMinor                    int64
+	occurredAt                     time.Time
 }
 
 // samePayment finds the brand's payment transaction that is the payment
@@ -75,17 +94,49 @@ type knownPayment struct {
 func samePayment(ctx context.Context, tx pgx.Tx, brand, source, sourceID, recordID string, amountMinor int64, currency string, at time.Time) (knownPayment, bool, error) {
 	var k knownPayment
 	err := tx.QueryRow(ctx, `
-		SELECT id::text, source, source_id, record_id::text FROM transactions
+		SELECT id::text, source, source_id, record_id::text, amount_minor, currency, occurred_at FROM transactions
 		WHERE brand_id = $1 AND kind = 'payment' AND (
 			($2 <> '' AND source_id = $2 AND source <> $3)
 			OR ($4 <> '' AND record_id = NULLIF($4, '')::uuid AND source <> $3 AND amount_minor = $5 AND currency = $6
 				AND occurred_at BETWEEN $7::timestamptz - $8::interval AND $7::timestamptz + $8::interval))
 		ORDER BY source_id = $2 DESC, abs(extract(epoch FROM occurred_at - $7::timestamptz)), id LIMIT 1`,
-		brand, sourceID, source, recordID, amountMinor, currency, at, paymentWindow.String()).Scan(&k.id, &k.source, &k.sourceID, &k.recordID)
+		brand, sourceID, source, recordID, amountMinor, currency, at, paymentWindow.String()).Scan(&k.id, &k.source, &k.sourceID, &k.recordID, &k.amountMinor, &k.currency, &k.occurredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return k, false, nil
 	}
 	return k, err == nil, err
+}
+
+// paymentMerged records that a payment sent one way (source, sourceID)
+// was kept as one already in (known) as transaction.merged, so Developer
+// setup can show the ones joined by a guess instead of a shared id, and
+// the ones whose two copies disagree on the amount (docs/developer-setup.md).
+// The same id a day or more after the payment it names is recorded as
+// transaction.resent instead (paymentResent).
+func paymentMerged(ctx context.Context, tx pgx.Tx, p *principal, ws, brand, source, sourceID string, amountMinor int64, currency string, at time.Time, known knownPayment) error {
+	matched := "id"
+	if sourceID == "" || sourceID != known.sourceID {
+		matched = "guess"
+	} else if at.Sub(known.occurredAt).Abs() >= resentAfter {
+		return record(ctx, tx, p, ws, "transaction.resent", "transaction", known.id, map[string]any{"brand_id": brand, "kind": "payment",
+			"source": source, "source_id": sourceID, "first_at": known.occurredAt, "sent_at": at})
+	}
+	return record(ctx, tx, p, ws, "transaction.merged", "transaction", known.id, map[string]any{"brand_id": brand, "kind": "payment",
+		"matched_by": matched, "source": source, "source_id": sourceID, "amount_minor": amountMinor, "currency": currency,
+		"kept_source": known.source, "kept_source_id": known.sourceID, "kept_amount_minor": known.amountMinor, "kept_currency": known.currency,
+		"amounts_differ": amountMinor != known.amountMinor || currency != known.currency})
+}
+
+// paymentResent records a payment id sent again from the same source at
+// least resentAfter after the first, as transaction.resent: usually a
+// subscription's id sent for each renewal instead of each charge's own,
+// which keeps every renewal after the first out (docs/developer-setup.md).
+func paymentResent(ctx context.Context, tx pgx.Tx, p *principal, ws string, v transactionView, at time.Time) error {
+	if v.Kind != "payment" || at.Sub(v.OccurredAt).Abs() < resentAfter {
+		return nil
+	}
+	return record(ctx, tx, p, ws, "transaction.resent", "transaction", v.ID, map[string]any{"brand_id": v.BrandID, "kind": v.Kind,
+		"source": v.Source, "source_id": v.SourceID, "first_at": v.OccurredAt, "sent_at": at})
 }
 
 // countPayment records the payment.succeeded or payment.refunded event of a
@@ -299,11 +350,17 @@ func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props m
 		return "", nil
 	}
 	key := orderKey(props, messageID)
+	if err := lockTransaction(ctx, tx, brand, "payment", key); err != nil {
+		return "", err
+	}
 	known, found, err := samePayment(ctx, tx, brand, orderSource, key, rec, amount, cur, at)
 	if err != nil {
 		return "", err
 	}
 	if found {
+		if err := paymentMerged(ctx, tx, nil, ws, brand, orderSource, key, amount, cur, at, known); err != nil {
+			return "", err
+		}
 		if known.recordID != nil {
 			return paymentMessageID(brand, known.source, "payment", known.sourceID), nil
 		}
@@ -323,13 +380,18 @@ func orderPayment(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props m
 			return "", err
 		}
 	}
-	t, _, err := saveTransaction(ctx, tx, nil, ws, brand, newTransaction{RecordID: rec, Kind: "payment", Status: "succeeded", AmountMinor: amount,
+	t, created, err := saveTransaction(ctx, tx, nil, ws, brand, newTransaction{RecordID: rec, Kind: "payment", Status: "succeeded", AmountMinor: amount,
 		Currency: cur, Source: orderSource, SourceID: key, Description: "Order Completed", OccurredAt: at})
 	if errors.Is(err, errTransactionDeleted) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if !created {
+		if err := paymentResent(ctx, tx, nil, ws, t, at); err != nil {
+			return "", err
+		}
 	}
 	return countPayment(ctx, tx, ws, t)
 }
@@ -372,6 +434,9 @@ func orderRefund(ctx context.Context, tx pgx.Tx, ws, brand, rec string, props ma
 	}
 	if key == "" {
 		key = messageID
+	}
+	if err := lockTransaction(ctx, tx, brand, "refund", key); err != nil {
+		return "", err
 	}
 	if key == "" {
 		if err := tx.QueryRow(ctx, `SELECT 'event:' || gen_random_uuid()::text`).Scan(&key); err != nil {

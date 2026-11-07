@@ -1,6 +1,8 @@
 package api_test
 
 import (
+	"context"
+	"net/http"
 	"testing"
 
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -135,4 +137,187 @@ func TestIngestMergesOnVerifiedEmail(t *testing.T) {
 	if len(dups) != 1 || dups[0].(map[string]any)["status"] != "blocked" {
 		t.Fatalf("blocked pair: %v", dups)
 	}
+}
+
+// proofs sends identify calls with an email the person proved they own,
+// and reads back who it went to.
+type proofs struct {
+	t     *testing.T
+	owner *client
+	base  string
+}
+
+func newProofs(t *testing.T, h http.Handler) proofs {
+	owner, ws := setupOwner(t, h)
+	return proofs{t, owner, "/v1/workspaces/" + ws}
+}
+
+func (p proofs) send(event map[string]any) map[string]any {
+	p.t.Helper()
+	return p.owner.must(200, "POST", p.base+"/customer-events", event)["results"].([]any)[0].(map[string]any)
+}
+
+func (p proofs) identify(userID, email string) map[string]any {
+	return map[string]any{"type": "identify", "userId": userID, "traits": map[string]any{"email": email, "email_verified": true}}
+}
+
+// typed adds a person holding email unverified, as an import does.
+func (p proofs) typed(email string, ids ...map[string]any) string {
+	p.t.Helper()
+	ids = append(ids, map[string]any{"namespace": "email", "value": email})
+	return p.owner.must(201, "POST", p.base+"/records", map[string]any{"type": "person", "name": "Imported", "identities": ids})["id"].(string)
+}
+
+// pairs lists rec's possible duplicates in its brand.
+func (p proofs) pairs(rec string) []any {
+	p.t.Helper()
+	brand := p.owner.must(200, "GET", p.base+"/records/"+rec, nil)["brand_id"].(string)
+	return p.owner.must(200, "GET", "/v1/brands/"+brand+"/records/duplicates?record="+rec, nil)["data"].([]any)
+}
+
+// mergedOnly checks an event merged from into its person, left no
+// possible duplicate, and returns the person.
+func (p proofs) mergedOnly(r map[string]any, from string) string {
+	p.t.Helper()
+	if m, _ := r["merged"].([]any); len(m) != 1 || m[0] != from {
+		p.t.Fatalf("want %s merged in: %v", from, r)
+	}
+	person := r["record_id"].(string)
+	if l := p.pairs(person); len(l) != 0 {
+		p.t.Fatalf("possible duplicates left: %v", l)
+	}
+	if gone := p.owner.must(200, "GET", p.base+"/records/"+from, nil); gone["merged_into"] != person {
+		p.t.Fatalf("merged record: %v", gone)
+	}
+	return person
+}
+
+// A verified email that no record holds verified belongs to the only
+// record holding it unverified, when that record has no user id of its
+// own: it is merged in, never left as a possible duplicate.
+func TestIngestMergesTheOnlyUnverifiedCopy(t *testing.T) {
+	p := newProofs(t, freshServer(t))
+
+	// A new user: the import is merged into the person their userId makes.
+	imported := p.typed("ada@example.com")
+	ada := p.mergedOnly(p.send(p.identify("u1", "ada@example.com")), imported)
+	if l := p.owner.must(200, "GET", p.base+"/records/lookup?namespace=email&value=ada@example.com", nil); l["owner"] != ada {
+		t.Fatalf("owner: %v", l)
+	}
+	if rec := p.owner.must(200, "GET", p.base+"/records/"+ada, nil); rec["name"] != "Imported" || rec["origin"] != "first_party" {
+		t.Fatalf("person: %v", rec)
+	}
+
+	// A known user: a track with only their userId made their record first.
+	grace := p.send(map[string]any{"type": "track", "userId": "u2", "event": "Signed Up"})["record_id"].(string)
+	imported = p.typed("grace@example.com")
+	if p.mergedOnly(p.send(p.identify("u2", "grace@example.com")), imported) != grace {
+		t.Fatal("the known user's record should be kept")
+	}
+
+	// A cold lead who signs up is a customer now, not a third-party lead.
+	lead := p.owner.must(201, "POST", p.base+"/leads", map[string]any{"email": "noor@example.com"})
+	noor := p.mergedOnly(p.send(p.identify("u3", "noor@example.com")), lead["record_id"].(string))
+	if c := p.owner.must(200, "GET", p.base+"/records/"+noor, nil)["contactability"].(map[string]any); c["basis"] != "customer" {
+		t.Fatalf("contact basis: %v", c)
+	}
+	if l := p.owner.must(200, "GET", p.base+"/leads/"+lead["id"].(string), nil); l["record_id"] != noor {
+		t.Fatalf("lead's person: %v", l)
+	}
+
+	// In the brand the event is for.
+	bravo := p.owner.must(201, "POST", p.base+"/brands", map[string]any{"name": "Bravo", "handle": "bravo"})["id"].(string)
+	other := p.owner.must(201, "POST", "/v1/brands/"+bravo+"/records", map[string]any{"type": "person", "identities": []map[string]any{
+		{"namespace": "email", "value": "ines@example.com"}}})["id"].(string)
+	event := p.identify("u4", "ines@example.com")
+	event["brand_id"] = bravo
+	p.mergedOnly(p.send(event), other)
+}
+
+// A copy that may be someone else's is left where it is and listed as a
+// possible duplicate, as before.
+func TestIngestPairsACopyThatMayBeSomeoneElses(t *testing.T) {
+	p := newProofs(t, freshServer(t))
+
+	// Two unverified copies: someone typed another person's address.
+	p.typed("lin@example.com")
+	p.typed("lin@example.com")
+	if r := p.send(p.identify("u1", "lin@example.com")); r["merged"] != nil || len(p.pairs(r["record_id"].(string))) != 2 {
+		t.Fatalf("two copies: %v", r)
+	}
+
+	// A copy on another user is another account in the product.
+	p.typed("max@example.com", map[string]any{"namespace": "user_id", "value": "u2-other"})
+	r := p.send(p.identify("u2", "max@example.com"))
+	if l := p.pairs(r["record_id"].(string)); r["merged"] != nil || len(l) != 1 || l[0].(map[string]any)["status"] != "blocked" {
+		t.Fatalf("another user's copy: %v %v", r, l)
+	}
+
+	// A record holding other emails too may be a shared browser or a form
+	// someone filled in for others.
+	p.typed("noor@example.com", map[string]any{"namespace": "email", "value": "noor.work@example.com"})
+	if r := p.send(p.identify("u5", "noor@example.com")); r["merged"] != nil || len(p.pairs(r["record_id"].(string))) != 1 {
+		t.Fatalf("a copy beside another email: %v", r)
+	}
+
+	// Someone already said these two are different people.
+	kai := p.send(map[string]any{"type": "identify", "userId": "u3", "traits": map[string]any{"email": "kai@example.com"}})["record_id"].(string)
+	form := p.typed("kai@example.com")
+	l := p.pairs(kai)
+	if len(l) != 1 {
+		t.Fatalf("typed twice: %v", l)
+	}
+	p.owner.must(200, "POST", p.base+"/records/duplicates/"+l[0].(map[string]any)["id"].(string)+"/dismiss", nil)
+	if r := p.send(p.identify("u3", "kai@example.com")); r["record_id"] != kai || r["merged"] != nil {
+		t.Fatalf("dismissed pair: %v", r)
+	}
+	if rec := p.owner.must(200, "GET", p.base+"/records/"+form, nil); rec["merged_into"] != nil {
+		t.Fatalf("dismissed record merged: %v", rec)
+	}
+
+	// Another brand's person is someone else there.
+	bravo := p.owner.must(201, "POST", p.base+"/brands", map[string]any{"name": "Bravo", "handle": "bravo"})["id"].(string)
+	other := p.owner.must(201, "POST", "/v1/brands/"+bravo+"/records", map[string]any{"type": "person", "identities": []map[string]any{
+		{"namespace": "email", "value": "ines@example.com"}}})["id"].(string)
+	if r := p.send(p.identify("u4", "ines@example.com")); r["merged"] != nil || len(p.pairs(r["record_id"].(string))) != 0 || len(p.pairs(other)) != 0 {
+		t.Fatalf("another brand's copy: %v", r)
+	}
+}
+
+// An opt-out stays with the person when its record is merged into them.
+func TestIngestMergeKeepsAnOptOut(t *testing.T) {
+	e := freshEnv(t)
+	p := newProofs(t, e.h)
+	optedOut := func(person, email string) {
+		t.Helper()
+		c := p.owner.must(200, "GET", p.base+"/records/"+person, nil)["contactability"].(map[string]any)
+		if c["basis"] != "opted_out" || c["allowed"].(map[string]any)["marketing"] != false {
+			t.Fatalf("contactability: %v", c)
+		}
+		var holder string
+		if err := e.pool.QueryRow(context.Background(), `SELECT record_id::text FROM suppressions WHERE value = $1`, email).Scan(&holder); err != nil || holder != person {
+			t.Fatalf("suppression's person: %s %v", holder, err)
+		}
+		check := p.owner.must(200, "POST", p.base+"/recipients/check", map[string]any{"emails": []string{email}})["data"].([]any)[0].(map[string]any)
+		if check["allowed"] != false {
+			t.Fatalf("recipients check: %v", check)
+		}
+	}
+
+	// Unsubscribed before signing up.
+	p.owner.must(200, "POST", p.base+"/suppressions", map[string]any{"values": []string{"ada@example.com"}, "reason": "unsubscribed"})
+	r := p.send(p.identify("u1", "ada@example.com"))
+	if m, _ := r["merged"].([]any); len(m) != 1 {
+		t.Fatalf("sign-up: %v", r)
+	}
+	optedOut(r["record_id"].(string), "ada@example.com")
+
+	// Unsubscribed while known only by their userId.
+	grace := p.send(map[string]any{"type": "track", "userId": "u2", "event": "Signed Up"})["record_id"].(string)
+	p.owner.must(200, "POST", p.base+"/suppressions", map[string]any{"values": []string{"grace@example.com"}, "reason": "unsubscribed"})
+	r = p.send(p.identify("u2", "grace@example.com"))
+	if m, _ := r["merged"].([]any); r["record_id"] != grace || len(m) != 1 {
+		t.Fatalf("known user: %v", r)
+	}
+	optedOut(grace, "grace@example.com")
 }

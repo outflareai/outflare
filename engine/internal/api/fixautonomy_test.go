@@ -24,14 +24,14 @@ func TestFixAutonomy(t *testing.T) {
 	ctx := context.Background()
 
 	var site string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, host, start_url, verify_token) VALUES ($1, 'acme.example', 'https://acme.example/', 'tok')
+	if err := e.pool.QueryRow(ctx, `INSERT INTO seo_sites (workspace_id, brand_id, host, start_url, verify_token) VALUES ($1, outflare_first_brand($1), 'acme.example', 'https://acme.example/', 'tok')
 		RETURNING id::text`, ws).Scan(&site); err != nil {
 		t.Fatal(err)
 	}
 	fix := func(rule, sev string) string {
 		var id string
-		if err := e.pool.QueryRow(ctx, `INSERT INTO fixes (workspace_id, source, subject_type, subject_id, rule, severity, group_key, count, unit)
-			VALUES ($1, 'seo_audit', 'seo_site', $2, $3, $4, '/blog/*', 12, 'pages') RETURNING id::text`, ws, site, rule, sev).Scan(&id); err != nil {
+		if err := e.pool.QueryRow(ctx, `INSERT INTO fixes (workspace_id, brand_id, source, subject_type, subject_id, rule, severity, group_key, count, unit)
+			VALUES ($1, outflare_first_brand($1), 'seo_audit', 'seo_site', $2, $3, $4, '/blog/*', 12, 'pages') RETURNING id::text`, ws, site, rule, sev).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api";
 import { Badge, Button, Loading, field, toast } from "../../ui";
 import { Frame, NotSetUp, RunBar, Section, Trend, awarenessLevels, awarenessName, delta, downloadCSV, pct, questionTypes, th, typeName, useQuestionResults, type AIData, type Cohort, type Go, type Prompt, type QuestionResult, type Sample } from "./shared";
+import { pickedBrandId } from "@/lib/brand";
 
 // usePrompts loads a question set's questions.
 export function usePrompts(ws: string, cohort: Cohort | null) {
@@ -9,14 +10,14 @@ export function usePrompts(ws: string, cohort: Cohort | null) {
   const [n, setN] = useState(0);
   useEffect(() => {
     if (!cohort) return setList([]);
-    api.GET("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", { params: { path: { ws, cohort: cohort.id } } }).then(({ data }) => setList(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/ai-cohorts/{cohort}/prompts", { params: { path: { brand: pickedBrandId(), cohort: cohort.id } } }).then(({ data }) => setList(data?.data ?? []));
   }, [ws, cohort, n]);
   return { list, reload: () => setN((x) => x + 1) };
 }
 
 // Drafting asks the workspace's AI for questions; they arrive as suggestions.
-export async function draftQuestions(ws: string, cohort: Cohort, personas: string[] = []) {
-  const { data, error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/draft", { params: { path: { ws, cohort: cohort.id } }, body: { personas } });
+export async function draftQuestions(_ws: string, cohort: Cohort, personas: string[] = []) {
+  const { data, error } = await api.POST("/v1/brands/{brand}/ai-cohorts/{cohort}/prompts/draft", { params: { path: { brand: pickedBrandId(), cohort: cohort.id } }, body: { personas } });
   if (error || !data) {
     toast(errorMessage(error), "error");
     return false;
@@ -28,19 +29,19 @@ export async function draftQuestions(ws: string, cohort: Cohort, personas: strin
   return true;
 }
 
-export async function addQuestions(ws: string, cohort: Cohort, texts: string[]) {
+export async function addQuestions(_ws: string, cohort: Cohort, texts: string[]) {
   const prompts = texts.map((t) => t.trim()).filter((t) => t.length >= 3).map((text) => ({ text }));
   if (prompts.length === 0) return true;
-  const { error } = await api.POST("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts", { params: { path: { ws, cohort: cohort.id } }, body: { prompts } });
+  const { error } = await api.POST("/v1/brands/{brand}/ai-cohorts/{cohort}/prompts", { params: { path: { brand: pickedBrandId(), cohort: cohort.id } }, body: { prompts } });
   if (error) toast(errorMessage(error), "error");
   return !error;
 }
 
-export async function setPrompt(ws: string, cohort: Cohort, p: Prompt, status: "active" | "paused" | null) {
-  const path = { ws, cohort: cohort.id, prompt: p.id };
+export async function setPrompt(_ws: string, cohort: Cohort, p: Prompt, status: "active" | "paused" | null) {
+  const path = { brand: pickedBrandId(), cohort: cohort.id, prompt: p.id };
   const { error } = status
-    ? await api.PATCH("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", { params: { path }, body: { status } })
-    : await api.DELETE("/v1/workspaces/{ws}/ai-cohorts/{cohort}/prompts/{prompt}", { params: { path } });
+    ? await api.PATCH("/v1/brands/{brand}/ai-cohorts/{cohort}/prompts/{prompt}", { params: { path }, body: { status } })
+    : await api.DELETE("/v1/brands/{brand}/ai-cohorts/{cohort}/prompts/{prompt}", { params: { path } });
   if (error) toast(errorMessage(error), "error");
   return !error;
 }
@@ -289,7 +290,7 @@ export function WhatChanged({ d, go }: { d: AIData; go: Go }) {
 function Question({ ws, d, p, r, back }: { ws: string; d: AIData; p: Prompt; r?: QuestionResult; back: () => void }) {
   const [samples, setSamples] = useState<Sample[] | null>(null);
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/ai-samples", { params: { path: { ws }, query: { prompt_id: p.id, status: "ok", limit: 40 } } }).then(({ data }) => setSamples(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/ai-samples", { params: { path: { brand: pickedBrandId() }, query: { prompt_id: p.id, status: "ok", limit: 40 } } }).then(({ data }) => setSamples(data?.data ?? []));
   }, [ws, p.id]);
   // The newest answer from each assistant.
   const latest = (samples ?? []).filter((s, i, all) => all.findIndex((x) => x.provider === s.provider && x.model === s.model && x.surface === s.surface) === i);

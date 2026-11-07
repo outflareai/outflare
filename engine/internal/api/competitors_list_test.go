@@ -37,7 +37,7 @@ func TestCompetitorsOneList(t *testing.T) {
 	for i := range 25 {
 		owner.must(201, "POST", base+"/seo-competitors", map[string]any{"site_id": site, "host": fmt.Sprintf("rival%d.example", i)})
 	}
-	if l := owner.must(200, "GET", base+"/seo-competitors?status=tracked&site_id="+site, nil); l["total"] != 25.0 {
+	if l := owner.must(200, "GET", base+"/seo-competitors?status=tracked&brand=acme&site_id="+site, nil); l["total"] != 25.0 {
 		t.Fatalf("tracked: %v", l["total"])
 	}
 
@@ -80,7 +80,7 @@ func TestCompetitorsOneList(t *testing.T) {
 	if err := seosync.SuggestFromRankings(ctx, e.pool, log); err != nil {
 		t.Fatal(err)
 	}
-	sugg := owner.must(200, "GET", base+"/seo-competitors?status=suggested&site_id="+site, nil)["data"].([]any)
+	sugg := owner.must(200, "GET", base+"/seo-competitors?status=suggested&brand=acme&site_id="+site, nil)["data"].([]any)
 	if len(sugg) != 1 || sugg[0].(map[string]any)["host"] != "beside.example" || sugg[0].(map[string]any)["source"] != "rankings" || sugg[0].(map[string]any)["common_keywords"] != 2.0 {
 		t.Fatalf("from rankings: %v", sugg)
 	}

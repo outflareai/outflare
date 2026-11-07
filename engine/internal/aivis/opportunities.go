@@ -57,6 +57,7 @@ func syncOpportunities(ctx context.Context, tx pgx.Tx, ws, cohortID, runID strin
 		        WHERE c2.workspace_id = $1 AND c2.cohort_id = $2 AND c2.url = c.url AND m.entity = 'competitor' AND c2.sampled_at >= now() - make_interval(days => $3))
 		FROM ai_citations c JOIN ai_samples s ON s.id = c.sample_id
 		WHERE c.workspace_id = $1 AND c.cohort_id = $2 AND c.owner = 'other' AND s.status = 'ok' AND c.sampled_at >= now() - make_interval(days => $3)
+		  AND `+NotAssetSQL("c.host")+`
 		GROUP BY c.url
 		ORDER BY count(DISTINCT c.sample_id) DESC, c.url LIMIT $4`, ws, cohortID, opportunityDays, maxCitedOpportunities*2)
 	if err != nil {
@@ -74,7 +75,7 @@ func syncOpportunities(ctx context.Context, tx pgx.Tx, ws, cohortID, runID strin
 		SELECT r.url, max(r.title), count(DISTINCT r.sample_id)
 		FROM ai_pages_read r JOIN ai_samples s ON s.id = r.sample_id
 		WHERE r.workspace_id = $1 AND s.cohort_id = $2 AND r.owner = 'other' AND s.status = 'ok' AND s.sampled_at >= now() - make_interval(days => $3)
-		  AND NOT EXISTS (SELECT 1 FROM ai_citations c WHERE c.workspace_id = $1 AND c.cohort_id = $2 AND c.url = r.url)
+		  AND `+NotAssetSQL("r.host")+` AND NOT EXISTS (SELECT 1 FROM ai_citations c WHERE c.workspace_id = $1 AND c.cohort_id = $2 AND c.url = r.url)
 		GROUP BY r.url HAVING count(DISTINCT r.sample_id) >= $4
 		ORDER BY count(DISTINCT r.sample_id) DESC, r.url LIMIT $5`, ws, cohortID, opportunityDays, minReads, maxReadOpportunities)
 	if err != nil {

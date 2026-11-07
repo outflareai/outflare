@@ -209,7 +209,7 @@ export function registerCoverageTools(
     {
       title: "List where competitors appear",
       description:
-        "Pages where the brand's competitors appear, strongest sites first, with each page's type, whether it looks paid for (likely_paid only with evidence) and the site's domain rating and traffic. gap='true' keeps the sites where the brand has no publisher yet: the places to go after.",
+        "Pages where the brand's competitors appear, most valuable to the brand first: value (0 to 100, from the page's authority, readers, trust and how close it is to what the brand is about), access (how the link is got: cant_buy, earned, paid, free or unknown; a free profile on a big platform ranks low) and value_reasons, plus each page's type, whether it looks paid for (likely_paid only with evidence) and the site's domain rating and traffic. access filters by how it's got; order is value (default), domain_rating or recent. gap='true' keeps the sites where the brand has no publisher yet: the places to go after.",
       inputSchema: {
         brand,
         competitor_id: z.string().uuid().optional(),
@@ -217,6 +217,8 @@ export function registerCoverageTools(
         arrangement: z.enum(["likely_paid", "unknown"]).optional(),
         gap: z.enum(["true", "false"]).optional(),
         include_gone: z.enum(["true", "false"]).optional(),
+        access: z.enum(["cant_buy", "earned", "paid", "free", "unknown"]).optional(),
+        order: z.enum(["value", "domain_rating", "recent"]).optional(),
         q: z.string().optional(),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
@@ -235,11 +237,15 @@ export function registerCoverageTools(
     {
       title: "List everywhere the brand was found",
       description:
-        "Every page discovery found that links to or names the brand, grouped by site, with what reading the page showed: links (links to the brand), mentions (names its website), name_only (only its name, which another product may share), absent, unreachable or unchecked. view about (default) is the pages about the brand not yet reviewed, maybe the uncertain ones, not the dismissed or off-topic ones, confirmed the ones made placements.",
+        "Every page discovery found that links to or names the brand, grouped by site with its numbers (domain rating, traffic, AI citations, competitors there), with what reading the page showed: links (links to the brand), mentions (names its website), name_only (only its name, which another product may share), absent, unreachable or unchecked. view about (default) is the pages about the brand not yet reviewed, maybe the uncertain ones, not the dismissed or off-topic ones, confirmed the ones made placements.",
       inputSchema: {
         brand,
         view: z.enum(["about", "maybe", "not", "confirmed"]).optional(),
         q: z.string().max(200).optional(),
+        source: z.string().max(40).optional(),
+        min_domain_rating: z.number().min(0).max(100).optional(),
+        exclude_competitors: z.boolean().optional(),
+        sort: z.enum(["best", "pages", "domain_rating", "traffic", "ai_citations", "competitors", "latest"]).optional(),
         limit: z.number().int().min(1).max(100).optional(),
         cursor: z.string().optional(),
       },
@@ -281,7 +287,7 @@ export function registerCoverageTools(
     {
       title: "List Presence opportunities by leverage",
       description:
-        "Places worth the team's effort, highest leverage first (0 to 100: SEO and AI answers together, plus how many competitors are there). Each says why (competitor_gap, ai_cited, unlinked_mention, link_removed), what to do next (pitch, request_link, reclaim_link), and the evidence and factors behind its score. Use it to pick the next outreach; drafting and sending still go through the normal outreach tools and approvals.",
+        "Places worth the team's effort, highest leverage first (0 to 100: SEO and AI answers together, plus how many competitors are there). Each says why (competitor_gap, ai_cited, unlinked_mention, link_removed), what to do next (pitch, request_link, reclaim_link), and the evidence and factors behind its score. group domain gives one row per site; exclude_competitors hides competitors' own sites. Use it to pick the next outreach; drafting and sending still go through the normal outreach tools and approvals.",
       inputSchema: {
         brand,
         state: z.enum(["open", "picked", "dismissed", "won", "all"]).optional(),
@@ -290,6 +296,12 @@ export function registerCoverageTools(
         kind: z.string().optional(),
         min_score: z.number().min(0).max(100).optional(),
         q: z.string().optional(),
+        host: z.string().optional(),
+        min_domain_rating: z.number().min(0).max(100).optional(),
+        exclude_competitors: z.boolean().optional(),
+        access: z.enum(["cant_buy", "earned", "paid", "free", "unknown"]).optional(),
+        group: z.enum(["domain"]).optional(),
+        sort: z.enum(["score", "domain_rating", "traffic", "ai_citations", "competitors", "recent"]).optional(),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional(),
       },

@@ -36,9 +36,23 @@ Reconciliation imports the brand's existing news coverage, backlink and link-pro
 
 **Found** (`GET /coverage/found`, MCP `list_coverage_found`) lists every find grouped by site. OutflareBot reads each new find once (a bounded, robots-aware page read; backlinks need none) and records its `verdict`: `links` (links to one of the brand's domains), `mentions` (names its website), `name_only` (only its name, which another product can share), `absent` or `unreachable`. The **About you** view shows the unreviewed `links` and `mentions` pages, sites with a link first; **Maybe** shows `name_only`, unread and still-unchecked ones; **Not about you** the dismissed and `absent` ones. `POST /coverage/found/review` (MCP `review_coverage_found`) answers `about_us` or `not_us` for pages by id or every page of a site: `about_us` makes each a live placement under the site's publisher, adding the publisher and its company record when there is none. The report's `found` counts every page and site found, reviewed or not. Search results that come back as Google redirect links (`google.com/goto?url=...`) are resolved to the page they lead to, or left out when they can't be.
 
+Found is a table, one row per site, with the site's numbers: its domain rating and traffic (from competitor scans), how often AI answers cited it in the last 90 days, how many competitors are on it, which sources found it, and when. It sorts by any of them (`sort`), filters by source, minimum domain rating and text, and can hide the brand's tracked competitors' own sites (`exclude_competitors`). More sites load as you scroll.
+
+**Opportunities** (`GET /coverage/opportunities`, MCP `list_coverage_opportunities`) is the same kind of table: one row per page, or one per site with `group=domain` (its best opportunity, and `site_opportunities` says how many it has; `host` lists one site's). It sorts by leverage or by any number, filters by minimum domain rating, and `exclude_competitors=true` hides competitors' own sites, which rarely link to a rival (on by default in the app). A page's translations (`/fr/...`, `fr.site...`, `?lang=fr`) count as its English page: competitors found on any of them make one opportunity on the English address (`coverage.EnglishURL`), with `evidence.translations` set. Presence has its own item in the app's menu.
+
 Reports distinguish discovery, claimed publication, first verified presence and imported baseline inventory. Page availability/loss history, retention evidence windows and unknown observations have explicit definitions. Commercial delivery reports remain source claims; overlapping submissions can overlap. The attribution endpoint reads actual recorded referrer sessions and attribution credits, deduplicated by publisher website, with model/window and currency labels. It requires analytics permission and does not infer causal lift.
 
 Report snapshots are immutable server-computed results. They exclude live privileged finance and attribution panels. Exports preserve the displayed snapshot instead of silently replacing it with current figures.
+
+## Link value
+
+Where competitors appear (`GET /coverage/competitor_placements`, the competitor page's placements and Presence's **Where competitors appear**) is sorted by what each link is worth to the brand, not by the site's Domain Rating alone (`engine/internal/coverage/value.go`). Each page gets:
+
+- `access`, how the link is got: `cant_buy` (an editorial review, roundup or comparison that only being good gets you into), `earned` (an article, guide or mention someone chose to write), `paid` (looks paid for, with evidence), `free` (a profile, directory, listing, forum post, video or social post anyone can make) or `unknown`.
+- `value`, 0 to 100: the page's authority (its own URL rating, and the domain's rating, except on big platforms such as YouTube or Google where anyone can post, so their domain counts for nothing), its readers (domain traffic), trust (followed, not paid, rating backed by real traffic) and relevance (how many of the brand's search topics the page's title and anchor share, from the keywords its own sites rank for, else its competitors'; brand and competitor names don't count; and how many competitors the same page features). The total is weighted by `access`, so a free profile on a DR 100 platform ranks below an earned review on a DR 50 site.
+- `value_reasons`, the short reasons behind the score.
+
+Values are worked out when a scan saves pages, and for older rows on the next list read. `access=` filters by how the link is got, `order=` sorts by `value` (default), `domain_rating` or `recent`. Opportunities use the same classification: a free-to-get link scores lower and platforms get no SEO points (`factors.access`).
 
 ## Validation
 

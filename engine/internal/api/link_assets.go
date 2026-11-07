@@ -19,7 +19,9 @@ import (
 // connector could mark them later; today a person or an agent does.
 
 func (s *Server) routesLinkAssets(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/brands/{brand}/link-building/assets", s.onBrand(auth.ScopeSEORead, s.listLinkAssets))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/link-building/assets", s.inBrand(auth.ScopeSEORead, s.listLinkAssets))
+	mux.HandleFunc("POST /v1/brands/{brand}/link-building/assets", s.onBrand(auth.ScopeSEOManage, s.publishLinkAsset))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/link-building/assets", s.inBrand(auth.ScopeSEOManage, s.publishLinkAsset))
 }
 
@@ -94,9 +96,13 @@ func (s *Server) publishLinkAsset(w http.ResponseWriter, r *http.Request) {
 		var site, brand *string
 		err := tx.QueryRow(ctx, `SELECT id::text, brand_id::text FROM seo_sites
 			WHERE workspace_id = $1 AND (regexp_replace(lower(host), '^www\.', '') = $2 OR $2 LIKE '%.' || regexp_replace(lower(host), '^www\.', ''))
-			ORDER BY length(host) DESC LIMIT 1`, a.WorkspaceID, host).Scan(&site, &brand)
+			  AND ($3::uuid IS NULL OR brand_id = $3::uuid)
+			ORDER BY length(host) DESC LIMIT 1`, a.WorkspaceID, host, a.orRoute(nil)).Scan(&site, &brand)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if brand == nil {
+			brand = a.orRoute(nil)
 		}
 		if !a.writes(brand) {
 			return errDenied("this page isn't on one of your brands' sites")

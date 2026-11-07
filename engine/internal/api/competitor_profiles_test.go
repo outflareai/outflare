@@ -79,7 +79,7 @@ func TestCompetitorProfiles(t *testing.T) {
 	if err := e.srv.ReadReviewPages(ctx, ws, gn); err != nil {
 		t.Fatal(err)
 	}
-	pages := owner.must(200, "GET", base+"/reviews/pages", nil)["data"].([]any)
+	pages := owner.must(200, "GET", base+"/reviews/pages?brand="+brand, nil)["data"].([]any)
 	if len(pages) != 1 || pages[0].(map[string]any)["platform"] != "trustpilot" {
 		t.Fatalf("brand review pages: %v", pages)
 	}

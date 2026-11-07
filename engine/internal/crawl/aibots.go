@@ -20,27 +20,49 @@ type AIBot struct {
 	// Purpose: search (finds pages AI answers cite), user (fetches a page
 	// a person asked about) or training (collects pages to train models).
 	Purpose string `json:"purpose"`
+	// Feeds names the AI answers the crawler reads pages for, in plain
+	// words, such as "Google AI Overviews and AI Mode".
+	Feeds string `json:"feeds"`
+	// MayIgnoreRobots: its company says it may not follow robots.txt,
+	// because a person asked for the page. Blocking it there may not work.
+	MayIgnoreRobots bool `json:"may_ignore_robots"`
+	// SearchEngine marks a search engine's own crawler (Googlebot,
+	// Bingbot): AI answers are built from its index, but most of its
+	// visits are for ordinary search, so request logs don't count it as
+	// an AI crawler.
+	SearchEngine bool `json:"search_engine"`
 }
 
-// AIBots are the AI crawlers checked, search and user agents first. Tokens
-// are a promise: add new ones, never remove one.
+// AIBots are the AI crawlers checked, search and user agents first, each
+// as its company documents it. Tokens are a promise: add new ones, never
+// remove one.
 var AIBots = []AIBot{
-	{"OAI-SearchBot", "OpenAI", "search"},
-	{"ChatGPT-User", "OpenAI", "user"},
-	{"Claude-SearchBot", "Anthropic", "search"},
-	{"Claude-User", "Anthropic", "user"},
-	{"PerplexityBot", "Perplexity", "search"},
-	{"Perplexity-User", "Perplexity", "user"},
-	{"DuckAssistBot", "DuckDuckGo", "search"},
-	{"MistralAI-User", "Mistral", "user"},
-	{"Amazonbot", "Amazon", "search"},
-	{"GPTBot", "OpenAI", "training"},
-	{"ClaudeBot", "Anthropic", "training"},
-	{"Google-Extended", "Google", "training"},
-	{"Applebot-Extended", "Apple", "training"},
-	{"Meta-ExternalAgent", "Meta", "training"},
-	{"CCBot", "Common Crawl", "training"},
-	{"Bytespider", "ByteDance", "training"},
+	{Token: "Googlebot", Vendor: "Google", Purpose: "search", Feeds: "Google AI Overviews and AI Mode (Google-Extended doesn't control these)", SearchEngine: true},
+	{Token: "Bingbot", Vendor: "Microsoft", Purpose: "search", Feeds: "Microsoft Copilot and Bing's AI answers, and other assistants that search Bing", SearchEngine: true},
+	{Token: "OAI-SearchBot", Vendor: "OpenAI", Purpose: "search", Feeds: "ChatGPT search"},
+	{Token: "ChatGPT-User", Vendor: "OpenAI", Purpose: "user", Feeds: "ChatGPT, when a person asks about a page", MayIgnoreRobots: true},
+	{Token: "Claude-SearchBot", Vendor: "Anthropic", Purpose: "search", Feeds: "Claude's web search"},
+	{Token: "Claude-User", Vendor: "Anthropic", Purpose: "user", Feeds: "Claude, when a person asks about a page"},
+	{Token: "PerplexityBot", Vendor: "Perplexity", Purpose: "search", Feeds: "Perplexity answers"},
+	{Token: "Perplexity-User", Vendor: "Perplexity", Purpose: "user", Feeds: "Perplexity, when a person asks about a page", MayIgnoreRobots: true},
+	{Token: "DuckAssistBot", Vendor: "DuckDuckGo", Purpose: "search", Feeds: "DuckDuckGo's AI-assisted answers"},
+	{Token: "MistralAI-User", Vendor: "Mistral", Purpose: "user", Feeds: "Mistral's assistant, when a person asks about a page"},
+	{Token: "Amazonbot", Vendor: "Amazon", Purpose: "training", Feeds: "Amazon's products and AI models"},
+	{Token: "GPTBot", Vendor: "OpenAI", Purpose: "training", Feeds: "Training OpenAI's models"},
+	{Token: "ClaudeBot", Vendor: "Anthropic", Purpose: "training", Feeds: "Training Anthropic's models"},
+	{Token: "Google-Extended", Vendor: "Google", Purpose: "training", Feeds: "Training Gemini, and grounding in Gemini apps"},
+	{Token: "Applebot-Extended", Vendor: "Apple", Purpose: "training", Feeds: "Training Apple's models"},
+	{Token: "Meta-ExternalAgent", Vendor: "Meta", Purpose: "training", Feeds: "Training Meta's models"},
+	{Token: "CCBot", Vendor: "Common Crawl", Purpose: "training", Feeds: "Common Crawl's open dataset, used to train many models"},
+	{Token: "Bytespider", Vendor: "ByteDance", Purpose: "training", Feeds: "Training ByteDance's models"},
+	// Added later, grouped as above.
+	{Token: "Applebot", Vendor: "Apple", Purpose: "search", Feeds: "Siri, Spotlight and Safari answers"},
+	{Token: "meta-webindexer", Vendor: "Meta", Purpose: "search", Feeds: "Meta AI's answers and citations"},
+	{Token: "Amzn-SearchBot", Vendor: "Amazon", Purpose: "search", Feeds: "Alexa and Amazon's search"},
+	{Token: "MistralAI-Index", Vendor: "Mistral", Purpose: "search", Feeds: "Mistral's search"},
+	{Token: "Meta-ExternalFetcher", Vendor: "Meta", Purpose: "user", Feeds: "Meta AI, when a person asks about a page", MayIgnoreRobots: true},
+	{Token: "Amzn-User", Vendor: "Amazon", Purpose: "user", Feeds: "Alexa, when a person asks something live", MayIgnoreRobots: true},
+	{Token: "MistralAI-Training", Vendor: "Mistral", Purpose: "training", Feeds: "Training Mistral's models"},
 }
 
 // aiAccess returns, per page id, the search and user AI crawlers that
@@ -135,3 +157,35 @@ func loadRobotsFiles(ctx context.Context, tx pgx.Tx, runID string) (map[string]r
 // maxLLMSTxtBytes is how much of an llms.txt is read: only its size and
 // whether it is there matter.
 const maxLLMSTxtBytes = 256 << 10
+
+// UsageSignals are the lines of a robots.txt that state how content may
+// be used once read, rather than what may be crawled: Cloudflare's
+// Content-Signal (search=yes, ai-train=no, ai-input=yes) and the IETF AI
+// Preferences draft's Content-Usage. Crawlers that support them treat
+// them as the site's wishes, such as "find me in AI search, don't train
+// on me". At most maxUsageSignals, each clipped.
+func UsageSignals(body string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSpace(line)
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(k)) {
+		case "content-signal", "content-usage":
+			l := clip(strings.TrimSpace(k)+": "+strings.TrimSpace(v), 300)
+			if !seen[l] && len(out) < maxUsageSignals {
+				seen[l] = true
+				out = append(out, l)
+			}
+		}
+	}
+	return out
+}
+
+const maxUsageSignals = 5

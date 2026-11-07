@@ -1,7 +1,8 @@
+import { PickBrand } from "@/components/pick-brand";
 import { ReviewRequests } from "./ReviewRequests";
 import { useCallback, useEffect, useState } from "react";
 import type { Brand, BrandLinkSuggestion, Review, ReviewGuide, ReviewMomentum, ReviewPage, ReviewPlatform, ReviewsSummary } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { ConnectFor, geonodeWhy } from "@/components/connect-for";
 import { PlatformIcon } from "@/components/platform-icon";
 import { api, errorMessage } from "../api";
@@ -41,7 +42,14 @@ const pct = (v: number | null) => (v === null ? "" : `${Math.round(Math.abs(v) *
 const share = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${Math.round(v * 100)}%`);
 const stars = (r: number) => "★★★★★".slice(0, Math.round(r)) + "☆☆☆☆☆".slice(0, 5 - Math.round(r));
 
-export function Reviews({ ws, canManage, go }: Props) {
+// Reviews belong to one brand.
+export function Reviews(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Reviews" brands={active.length} />;
+  return <ReviewsPage key={brand.id} {...props} />;
+}
+
+function ReviewsPage({ ws, canManage, go }: Props) {
   const brand = useBrand(ws);
   const [screen, setScreen] = useState<"requests" | "reviews">("requests");
   const brandKey = brand.query.brand ?? "";
@@ -51,11 +59,10 @@ export function Reviews({ ws, canManage, go }: Props) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const path = { ws };
-    const query = brandKey ? { brand: brandKey } : {};
+    const path = { brand: pickedBrandId() };
     const [s, p] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/reviews/summary", { params: { path, query: { ...query, weeks: 26 } } }),
-      api.GET("/v1/workspaces/{ws}/reviews/pages", { params: { path, query } }),
+      api.GET("/v1/brands/{brand}/reviews/summary", { params: { path, query: { weeks: 26 } } }),
+      api.GET("/v1/brands/{brand}/reviews/pages", { params: { path } }),
     ]);
     if (s.error || !s.data) return setError(errorMessage(s.error));
     setError("");
@@ -68,7 +75,7 @@ export function Reviews({ ws, canManage, go }: Props) {
 
   async function readNow() {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/reviews/pages/sync", { params: { path: { ws } } });
+    const { error } = await api.POST("/v1/brands/{brand}/reviews/pages/sync", { params: { path: { brand: pickedBrandId() } } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast("Reading your review pages now. New reviews show in a minute.");
@@ -267,14 +274,14 @@ function YourPages({ ws, brands, pages, canRead, canManage, go, onChange }: {
   }
 
   async function pause(p: ReviewPage) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/reviews/pages/{id}", { params: { path: { ws, id: p.id } }, body: { status: p.status === "paused" ? "active" : "paused" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/reviews/pages/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { status: p.status === "paused" ? "active" : "paused" } });
     if (error) return toast(errorMessage(error), "error");
     onChange();
   }
 
   async function retry(p: ReviewPage) {
     setBusy(p.id);
-    const { error } = await api.POST("/v1/workspaces/{ws}/reviews/pages/{id}/read", { params: { path: { ws, id: p.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/reviews/pages/{id}/read", { params: { path: { brand: pickedBrandId(), id: p.id } } });
     setBusy("");
     if (error) return toast(errorMessage(error), "error");
     toast("Reading it again now. This takes a minute.");
@@ -398,7 +405,7 @@ function Feed({ ws, pages, brandKey, canDraft, canManage, go, onChange }: {
     return q;
   }, [brandKey, filter]);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/reviews", { params: { path: { ws }, query: query() } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/reviews", { params: { path: { brand: pickedBrandId() }, query: query() } });
     if (error) return toast(errorMessage(error), "error");
     setList(data?.data ?? []);
     setNext(data?.next_cursor ?? null);
@@ -409,7 +416,7 @@ function Feed({ ws, pages, brandKey, canDraft, canManage, go, onChange }: {
 
   async function more() {
     if (!next) return;
-    const { data } = await api.GET("/v1/workspaces/{ws}/reviews", { params: { path: { ws }, query: query(next) } });
+    const { data } = await api.GET("/v1/brands/{brand}/reviews", { params: { path: { brand: pickedBrandId() }, query: query(next) } });
     setList([...(list ?? []), ...(data?.data ?? [])]);
     setNext(data?.next_cursor ?? null);
   }
@@ -452,7 +459,7 @@ function Feed({ ws, pages, brandKey, canDraft, canManage, go, onChange }: {
   );
 }
 
-function ReviewItem({ ws, r, canDraft, canManage, go, onChange }: { ws: string; r: Review; canDraft: boolean; canManage: boolean; go: (tab: Tab, item?: string) => void; onChange: (r: Review) => void }) {
+function ReviewItem({ r, canDraft, canManage, go, onChange }: { ws: string; r: Review; canDraft: boolean; canManage: boolean; go: (tab: Tab, item?: string) => void; onChange: (r: Review) => void }) {
   const [text, setText] = useState(r.draft?.status === "draft" ? r.draft.body : "");
   const [hint, setHint] = useState("");
   const [open, setOpen] = useState(r.draft?.status === "draft" || r.draft?.status === "drafting");
@@ -464,7 +471,7 @@ function ReviewItem({ ws, r, canDraft, canManage, go, onChange }: { ws: string; 
   async function waitForDraft() {
     for (let i = 0; i < 20; i++) {
       await new Promise((ok) => setTimeout(ok, 2000));
-      const { data } = await api.GET("/v1/workspaces/{ws}/reviews/{id}", { params: { path: { ws, id: r.id } } });
+      const { data } = await api.GET("/v1/brands/{brand}/reviews/{id}", { params: { path: { brand: pickedBrandId(), id: r.id } } });
       if (data && data.draft?.status !== "drafting") {
         if (data.draft?.status === "draft") setText(data.draft.body);
         onChange(data);
@@ -476,7 +483,7 @@ function ReviewItem({ ws, r, canDraft, canManage, go, onChange }: { ws: string; 
   async function draft() {
     setBusy(true);
     setOpen(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/reviews/{id}/draft", { params: { path: { ws, id: r.id } }, body: hint.trim() ? { hint: hint.trim() } : {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/reviews/{id}/draft", { params: { path: { brand: pickedBrandId(), id: r.id } }, body: hint.trim() ? { hint: hint.trim() } : {} });
     if (error || !data) {
       setBusy(false);
       return toast(errorMessage(error), "error");
@@ -499,7 +506,7 @@ function ReviewItem({ ws, r, canDraft, canManage, go, onChange }: { ws: string; 
 
   async function markAnswered() {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/reviews/{id}/replied", { params: { path: { ws, id: r.id } }, body: text.trim() ? { body: text.trim() } : {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/reviews/{id}/replied", { params: { path: { brand: pickedBrandId(), id: r.id } }, body: text.trim() ? { body: text.trim() } : {} });
     setBusy(false);
     if (error || !data) return toast(errorMessage(error), "error");
     toast("Marked as answered.");

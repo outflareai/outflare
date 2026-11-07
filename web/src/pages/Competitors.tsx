@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useMemo, useState } from "react";
 import type { SEOCompetitor, SEOCompetitorEvent, SEOKeywordGap, SEOKeywordResults, SEOLinkGap, SEOLinkGapPages, SEOSite } from "@outflare/sdk";
 import { pickedBrandId, useBrand } from "@/lib/brand";
@@ -46,7 +47,14 @@ const path = (u: string) => {
   }
 };
 
-export function Competitors({ ws, go }: Props) {
+// Competitors belong to one brand.
+export function Competitors(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Competitors" brands={active.length} />;
+  return <CompetitorsPage key={brand.id} {...props} />;
+}
+
+function CompetitorsPage({ ws, go }: Props) {
   const [sites, setSites] = useState<SEOSite[] | null>(null);
   const [site, setSite] = useState("");
   const [section, setSection] = useState<Section>("competitors");
@@ -67,7 +75,7 @@ export function Competitors({ ws, go }: Props) {
 
   useEffect(() => {
     setSites(null);
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setSites(data.data);
@@ -78,7 +86,7 @@ export function Competitors({ ws, go }: Props) {
 
   useEffect(() => {
     if (!site) return;
-    api.GET("/v1/workspaces/{ws}/seo-competitors", { params: { path: { ws }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-competitors", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -88,7 +96,7 @@ export function Competitors({ ws, go }: Props) {
   useEffect(() => {
     if (!site || section !== "changes") return;
     setEvents(null);
-    api.GET("/v1/workspaces/{ws}/seo-competitors/events", { params: { path: { ws }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-competitors/events", { params: { path: { brand: pickedBrandId() }, query: { ...brand, site_id: site, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setEvents(data.data);
     });
@@ -99,7 +107,7 @@ export function Competitors({ ws, go }: Props) {
     if (!site || (section !== "keywords" && section !== "links")) return;
     const kind = section;
     (kind === "keywords" ? setKeywordGaps : setLinkGaps)(null);
-    api.GET("/v1/workspaces/{ws}/seo-competitors/gaps", { params: { path: { ws }, query: { site_id: site, kind, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-competitors/gaps", { params: { path: { brand: pickedBrandId() }, query: { site_id: site, kind, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       const base = { total: data.total, competitors: data.competitors };
       if (kind === "keywords") setKeywordGaps({ ...base, data: data.data as SEOKeywordGap[], mine: data.your_keywords ?? 0 });
@@ -117,7 +125,7 @@ export function Competitors({ ws, go }: Props) {
     const failed: string[] = [];
     let lastError = "";
     for (const h of hosts) {
-      const { error } = await api.POST("/v1/workspaces/{ws}/seo-competitors", { params: { path: { ws } }, body: { site_id: site, host: h } });
+      const { error } = await api.POST("/v1/brands/{brand}/seo-competitors", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site, host: h } });
       if (error) {
         failed.push(h);
         lastError = errorMessage(error);
@@ -131,7 +139,7 @@ export function Competitors({ ws, go }: Props) {
   };
   const setStatus = async (c: SEOCompetitor, status: "tracked" | "dismissed") => {
     setList((l) => l?.map((x) => (x.id === c.id ? { ...x, status } : x)) ?? l);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-competitors/{competitor}", { params: { path: { ws, competitor: c.id } }, body: { status } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-competitors/{competitor}", { params: { path: { brand: pickedBrandId(), competitor: c.id } }, body: { status } });
     if (error) {
       setError(errorMessage(error));
       return setReload((n) => n + 1);
@@ -146,7 +154,7 @@ export function Competitors({ ws, go }: Props) {
     setReload((n) => n + 1);
   };
   const check = async (c: SEOCompetitor) => {
-    const { error } = await api.POST("/v1/workspaces/{ws}/seo-competitors/{competitor}/check", { params: { path: { ws, competitor: c.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/seo-competitors/{competitor}/check", { params: { path: { brand: pickedBrandId(), competitor: c.id } } });
     if (error) return setError(errorMessage(error));
     toast(`Looking at ${c.host} now.`);
   };
@@ -159,14 +167,23 @@ export function Competitors({ ws, go }: Props) {
     });
     if (r?.choice !== "ok") return;
     const [name = "", ...aliases] = r.value.split(",").map((v) => v.trim()).filter(Boolean);
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/seo-competitors/{competitor}", { params: { path: { ws, competitor: c.id } }, body: { name, aliases: aliases.slice(0, 10) } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-competitors/{competitor}", { params: { path: { brand: pickedBrandId(), competitor: c.id } }, body: { name, aliases: aliases.slice(0, 10) } });
     if (error) return setError(errorMessage(error));
     setError("");
     setReload((n) => n + 1);
   };
+  // A website AI visibility only guessed is wrong: say No to that website
+  // and drop the name, so the brand waits for its real website instead.
+  const wrongSite = async (c: SEOCompetitor) => {
+    const { error } = await api.PATCH("/v1/brands/{brand}/seo-competitors/{competitor}", { params: { path: { brand: pickedBrandId(), competitor: c.id } }, body: { status: "dismissed", name: "" } });
+    if (error) return setError(errorMessage(error));
+    setError("");
+    toast(`${c.host} won't be suggested again.`);
+    setReload((n) => n + 1);
+  };
   const remove = async (c: SEOCompetitor) => {
     if (!(await confirmAction(`Remove ${c.host}?`, "Its pages and changes go with it. Your SEO connection may suggest it again; dismiss it instead to keep it away.", "Remove"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/seo-competitors/{competitor}", { params: { path: { ws, competitor: c.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/seo-competitors/{competitor}", { params: { path: { brand: pickedBrandId(), competitor: c.id } } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };
@@ -186,7 +203,7 @@ export function Competitors({ ws, go }: Props) {
     for (const ms of [45000, 120000]) setTimeout(() => setReload((n) => n + 1), ms);
   };
   const track = async (host: string) => {
-    const { error } = await api.POST("/v1/workspaces/{ws}/seo-competitors", { params: { path: { ws } }, body: { site_id: site, host } });
+    const { error } = await api.POST("/v1/brands/{brand}/seo-competitors", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site, host } });
     if (error) return setError(errorMessage(error));
     setError("");
     toast(`Tracking ${host}.`);
@@ -253,7 +270,7 @@ export function Competitors({ ws, go }: Props) {
           </Button>
         )}
       </form>
-      <Suggestions list={suggested} busy={busy} onStatus={setStatus} onTrackAll={() => trackAll(suggested)} />
+      <Suggestions list={suggested} busy={busy} onStatus={setStatus} onTrackAll={() => trackAll(suggested)} onWrongSite={wrongSite} />
       {list.length === 0 ? (
         <Empty title="No competitors yet" action={<Button variant="ghost" onClick={() => go("connectors")}>Connect Ahrefs or DataForSEO</Button>}>
           Add some above, or connect Ahrefs or DataForSEO with your own account: each day it suggests the domains that rank for the same keywords as {current.host}.
@@ -539,16 +556,24 @@ function LinkGaps({ gaps, host, onOpen }: { gaps: Gaps<SEOLinkGap> | null; host:
 }
 
 // Suggestions to say yes or no to: from the SEO connection (sharing
-// keywords) or from rankings (ranking beside the site).
-function Suggestions({ list, busy, onStatus, onTrackAll }: {
+// keywords), from rankings (ranking beside the site) or from AI
+// visibility (named next to the brand in AI answers).
+function Suggestions({ list, busy, onStatus, onTrackAll, onWrongSite }: {
   list: SEOCompetitor[];
   busy: string;
   onStatus: (c: SEOCompetitor, s: "tracked" | "dismissed") => void;
   onTrackAll: () => void;
+  // onWrongSite takes off a suggestion whose website AI visibility only
+  // guessed, so the brand waits on the AI competitors page for its real one.
+  onWrongSite?: (c: SEOCompetitor) => void;
 }) {
   if (!list.length) return null;
   const why = (c: SEOCompetitor) =>
-    c.source === "rankings"
+    c.source === "ai_visibility"
+      ? "Named next to you in AI answers"
+      : c.source === "ai_visibility_unsure"
+      ? `Named next to you in AI answers. Is ${c.host} their website?`
+      : c.source === "rankings"
       ? `Ranks beside you for ${num(c.common_keywords)} of your keywords`
       : c.source === "keyword_gaps"
         ? `Ranks for ${num(c.common_keywords)} of your keyword gaps`
@@ -567,6 +592,9 @@ function Suggestions({ list, busy, onStatus, onTrackAll }: {
             <div className="flex shrink-0 gap-1">
               <Button disabled={busy === "all"} onClick={() => onStatus(c, "tracked")} aria-label={`Yes, track ${c.host}`}>Yes</Button>
               <Button variant="ghost" disabled={busy === "all"} onClick={() => onStatus(c, "dismissed")} aria-label={`No, ${c.host} is not a competitor`}>No</Button>
+              {c.source === "ai_visibility_unsure" && onWrongSite && (
+                <Button variant="ghost" disabled={busy === "all"} onClick={() => onWrongSite(c)} aria-label={`${c.host} is not ${c.name || "their"} website`}>Wrong website</Button>
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <a className="font-medium underline-offset-2 hover:underline" href={`https://${c.host}/`} target="_blank" rel="noreferrer noopener nofollow">{c.name || c.host}</a>
@@ -597,14 +625,14 @@ function LinkGapPages({ ws, site, domain, onClose }: { ws: string; site: string;
     setCost(null);
     setError("");
     if (!domain) return;
-    api.GET("/v1/workspaces/{ws}/seo-competitors/gaps/links", { params: { path: { ws }, query: { site_id: site, domain } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-competitors/gaps/links", { params: { path: { brand: pickedBrandId() }, query: { site_id: site, domain } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setData(data);
     });
   }, [ws, site, domain]);
   const estimate = async () => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-competitors/gaps/links", { params: { path: { ws } }, body: { site_id: site, domain, estimate_only: true } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-competitors/gaps/links", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site, domain, estimate_only: true } });
     setBusy(false);
     if (error || !data || !("estimate" in data)) return setError(errorMessage(error));
     setError("");
@@ -613,7 +641,7 @@ function LinkGapPages({ ws, site, domain, onClose }: { ws: string; site: string;
   };
   const read = async () => {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/seo-competitors/gaps/links", { params: { path: { ws } }, body: { site_id: site, domain } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/seo-competitors/gaps/links", { params: { path: { brand: pickedBrandId() } }, body: { site_id: site, domain } });
     setBusy(false);
     setCost(null);
     if (error || !data || !("site_id" in data)) return setError(errorMessage(error));
@@ -695,7 +723,7 @@ function KeywordResults({ ws, site, keyword, reload, busy, onClose, onRead, onTr
   const [error, setError] = useState("");
   useEffect(() => {
     if (!keyword) return;
-    api.GET("/v1/workspaces/{ws}/seo-competitors/results", { params: { path: { ws }, query: { site_id: site, keyword } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-competitors/results", { params: { path: { brand: pickedBrandId() }, query: { site_id: site, keyword } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setError("");
       setPage(data);

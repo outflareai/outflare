@@ -39,15 +39,15 @@ off on the Analytics page deletes what was stored for it.
 
 ```sh
 # Pages by clicks over the 28 days Search Console last sent
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/search"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/search"
 # Queries, or the pages Google shows for one query
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/search?group=query&sort=impressions"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/search?group=page_query&keyword=proxy%20pricing"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/search?group=query&sort=impressions"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/search?group=page_query&keyword=proxy%20pricing"
 # One page day by day
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/search/history?page=https%3A%2F%2Fwww.example.com%2Fpricing"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/search/history?page=https%3A%2F%2Fwww.example.com%2Fpricing"
 # Pages Google has not indexed, and the sitemaps
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/indexing?state=not_indexed"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/sitemaps"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/indexing?state=not_indexed"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/sitemaps"
 ```
 
 Every answer has `source`, the property the numbers come from, or `null` when
@@ -89,11 +89,11 @@ impressions and average position.
 
 ```sh
 # Targets, then suggestions
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/targets"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/targets"
 # Set one, or accept every suggestion
 curl -X PUT -H "Authorization: Bearer $TOKEN" -d '{"url": "https://www.example.com/pricing", "keyword": "proxy pricing"}' \
-  "$URL/v1/workspaces/$WS/seo-sites/$SITE/targets"
-curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/targets/accept"
+  "$URL/v1/brands/$BRAND/seo-sites/$SITE/targets"
+curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/targets/accept"
 ```
 
 Changing targets needs `seo.manage`; each change is an audit event
@@ -118,7 +118,7 @@ it; the prompt lists the pages to link from. Target pages the latest crawl
 did not read are left as they are, and listed in `not_crawled`.
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/internal-links"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/internal-links"
 ```
 
 The MCP tool is `get_site_internal_links`.
@@ -144,7 +144,7 @@ checked whenever a target changes. The fix prompt lists the pages with their
 share of impressions and the page to keep.
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/cannibalisation"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/cannibalisation"
 ```
 
 The MCP tool is `get_site_cannibalisation`. When the check after a sync
@@ -224,12 +224,12 @@ top 10 results, so you can see who outranks you.
 # Track keywords, and every target keyword, on mobile
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"keywords": ["proxy pricing"], "from_targets": true, "device": "mobile"}' \
-  "$URL/v1/workspaces/$WS/seo-sites/$SITE/rankings"
+  "$URL/v1/brands/$BRAND/seo-sites/$SITE/rankings"
 # Where each one ranks, and one keyword's history
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/rankings"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/rankings/$TRACKED/history"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/rankings"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/rankings/$TRACKED/history"
 # Check now instead of waiting for the schedule
-curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/rankings/check"
+curl -X POST -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/rankings/check"
 ```
 
 `PATCH .../rankings/{tracked}` pauses, resumes or changes how often a keyword
@@ -267,7 +267,7 @@ does not add to production's.
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"conversion_events": ["signed_up", "purchase"]}' "$URL/v1/workspaces/$WS/analytics/$POSTHOG/sites/1"
 # Pages by conversions from search over the last 28 days stored
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/conversions?sort=search_conversions"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/conversions?sort=search_conversions"
 ```
 
 The MCP tool is `get_site_conversions`; `update_analytics_site` sets the
@@ -297,8 +297,8 @@ again after it was marked done opens it again. Kinds a check cannot judge
 are. Resolved regressions stay listed with `status=resolved`.
 
 ```sh
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/regressions"
-curl -H "Authorization: Bearer $TOKEN" "$URL/v1/workspaces/$WS/seo-sites/$SITE/regressions?status=resolved&kind=rank_dropped"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/regressions"
+curl -H "Authorization: Bearer $TOKEN" "$URL/v1/brands/$BRAND/seo-sites/$SITE/regressions?status=resolved&kind=rank_dropped"
 ```
 
 The MCP tool is `get_site_regressions`.

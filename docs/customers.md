@@ -188,7 +188,7 @@ Records of one brand that share an email or phone may be the same human; records
 
 Two records that both have their own `user_id` are two accounts in your product. They are listed as `blocked` and are never merged (`merge_refused`); link them instead.
 
-Outflare merges on its own in one case only: when your product sends a verified email (identify with `email_verified: true`) that a record with no user id of its own holds verified, such as one from an import or a CRM sync. That record is merged into the person, and the event's result lists it in `merged`.
+Outflare merges on its own in one case only: when your product sends a verified email (identify with `email_verified: true`) that belongs to a record with no user id of its own. The email belongs to the record holding it verified, such as one from an import or a CRM sync. When no record holds it verified, it belongs to the only record holding it at all, such as a lead or someone who unsubscribed, as long as that record holds no other email. That record is merged into the person, with its consent and opt-outs, and the event's result lists it in `merged`. When several records hold it unverified, or the only one has its own user id or another email, they are listed as possible duplicates instead, and a pair someone dismissed or linked stays as it is.
 
 ## Timeline
 

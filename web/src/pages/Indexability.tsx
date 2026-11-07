@@ -9,6 +9,7 @@ import { Badge, Button, Card, ErrorText, field, Loading, Stat, Stats, type tones
 import { ago, plural } from "../format";
 import type { Tab } from "../App";
 import { severityLabel, severityTone } from "./SiteAudits";
+import { pickedBrandId } from "@/lib/brand";
 
 // The indexability report of a site: every page the crawl, its sitemaps,
 // Search Console and an SEO tool know, whether each can be indexed, whether
@@ -48,14 +49,6 @@ const reasons: Record<string, string> = {
 const connectorNames: Record<string, string> = { google_search_console: "Google Search Console", ahrefs: "Ahrefs", dataforseo: "DataForSEO" };
 
 const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : "–");
-const path = (u: string) => {
-  try {
-    const x = new URL(u);
-    return x.pathname + x.search;
-  } catch {
-    return u;
-  }
-};
 
 export function Indexability({ ws, site, go }: { ws: string; site: string; go: (tab: Tab, item?: string) => void }) {
   const [report, setReport] = useState<Report | null>(null);
@@ -66,10 +59,10 @@ export function Indexability({ ws, site, go }: { ws: string; site: string; go: (
   const [issue, setIssue] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<IndexabilityPage | null>(null);
-  const p = { path: { ws, site } };
+  const p = { path: { brand: pickedBrandId(), site } };
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/seo-sites/{site}/indexability", { params: p }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/seo-sites/{site}/indexability", { params: p }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setReport(data as Report);
     });
@@ -77,7 +70,7 @@ export function Indexability({ ws, site, go }: { ws: string; site: string; go: (
 
   const loadPages = useCallback(async () => {
     const query = { verdict: verdict || undefined, issue: (issue || undefined) as never, q: q.trim() || undefined, limit: 1000 };
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/seo-sites/{site}/indexability/pages", { params: { ...p, query } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/seo-sites/{site}/indexability/pages", { params: { ...p, query } });
     if (error || !data) return setError(errorMessage(error));
     setPages(data.data);
     setTotal(data.total);
@@ -104,7 +97,7 @@ export function Indexability({ ws, site, go }: { ws: string; site: string; go: (
       id: "url",
       header: "Page",
       accessorFn: (r) => r.url,
-      cell: ({ row: { original: r } }) => <span className="font-mono text-[12px] break-all">{path(r.url)}</span>,
+      cell: ({ row: { original: r } }) => <PageLink url={r.url} />,
     },
     {
       id: "verdict",
@@ -195,13 +188,14 @@ export function Indexability({ ws, site, go }: { ws: string; site: string; go: (
             {issue && <Button variant="ghost" onClick={() => filter("issue", "")}>✕ {report.issues.find((i) => i.id === issue)?.title}</Button>}
             <input className={`${field} ml-auto w-full sm:w-56`} placeholder="Search URLs" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search URLs" />
           </div>
+          <p className="mb-2 text-[12px] text-muted-foreground">Open a page from its address, or click its row to see what each source says about it.</p>
           {pages === null ? <Loading /> : (
             <>
               <DataTable columns={columns} data={pages} rowId={(r) => r.url} onRowClick={setOpen} hidden={["clicks", "keywords"]}
                 empty={<p className="py-6 text-center text-[13px] text-muted-foreground">No pages match.</p>}
                 mobile={(r) => (
                   <div className="space-y-1">
-                    <div className="font-mono text-[12px] break-all">{path(r.url)}</div>
+                    <PageLink url={r.url} />
                     <div className="flex flex-wrap gap-1"><Badge tone={verdictOf[r.verdict].tone}>{verdictOf[r.verdict].label}</Badge>{r.issues.length > 0 && <Badge tone="amber">{plural(r.issues.length, "issue")}</Badge>}</div>
                   </div>
                 )} />
@@ -262,6 +256,15 @@ function History({ days }: { days: Report["history"] }) {
 }
 
 // Everything every source says about one page.
+// PageLink is a page's full address, opening the page itself in a new tab;
+// clicking the rest of the row opens its details.
+function PageLink({ url }: { url: string }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer noopener" onClick={(e) => e.stopPropagation()}
+      className="font-mono text-[12px] break-all hover:underline" title="Open the page">{url}</a>
+  );
+}
+
 function PageSheet({ page, issues, onClose }: { page: IndexabilityPage; issues: Report["issues"]; onClose: () => void }) {
   const v = verdictOf[page.verdict];
   const ins = page.inspection;
@@ -272,7 +275,7 @@ function PageSheet({ page, issues, onClose }: { page: IndexabilityPage; issues: 
     <Sheet open onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle className="font-mono text-[13px] break-all">{page.url}</SheetTitle>
+          <SheetTitle className="font-mono text-[13px] break-all"><a href={page.url} target="_blank" rel="noreferrer noopener" className="hover:underline">{page.url} ↗</a></SheetTitle>
           <SheetDescription><Badge tone={v.tone}>{v.label}</Badge> {v.help}</SheetDescription>
         </SheetHeader>
         <div className="space-y-5 px-4 pb-6 text-[13px]">
@@ -291,7 +294,7 @@ function PageSheet({ page, issues, onClose }: { page: IndexabilityPage; issues: 
             <h3 className="font-semibold">The crawl</h3>
             <dl className="divide-y">
               {row("Found", page.crawled ? `Yes, ${plural(page.depth ?? 0, "click")} from the start` : "No")}
-              {page.crawled && row("Answered", page.http_status ?? page.crawl_status)}
+              {page.crawled && row("Answered", page.crawl_status === "skipped" ? "Not read in the last crawl (it stopped at the page limit)" : page.http_status ?? page.crawl_status)}
               {row("Can be indexed", page.indexable === null ? "Not read" : page.indexable ? "Yes" : reasons[page.not_indexable_reason] ?? "No")}
               {row("In a sitemap", page.in_sitemap ? "Yes" : "No")}
               {page.crawled && row("Links to it", page.links_in.toLocaleString())}

@@ -17,6 +17,7 @@ import (
 // are fixes too; resolved ones stay for the history.
 
 func (s *Server) routesSEORegressions(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/brands/{brand}/seo-sites/{site}/regressions", s.onBrand(auth.ScopeSEORead, s.siteRegressions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/seo-sites/{site}/regressions", s.inBrand(auth.ScopeSEORead, s.siteRegressions))
 }
 

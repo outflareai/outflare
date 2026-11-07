@@ -291,6 +291,7 @@ func (s *Server) RegisterJobs(q *jobs.Queue) {
 	q.Handle(inbox.JobDeal, s.replyDealJob)
 	(&alerts.Service{Pool: s.pool, Log: s.log, Send: s.sendAccountEmail, PublicURL: s.publicURL, Store: s.integrations}).Register(q)
 	q.Handle(jobFixTicketWrite, s.fixTicketWriteJob)
+	q.Handle(jobAIPageReview, s.aiPageReviewJob)
 	q.Handle(indexability.JobSnapshot, indexability.Handler(s.pool))
 	q.Handle(jobPartnerTaskCheck, s.partnerTaskCheckJob)
 	s.registerSocialJobs(q)
@@ -1210,7 +1211,7 @@ func (r *crmRun) match(ctx context.Context, tx pgx.Tx, op *crmObjectPlan, rec co
 // add creates an empty record for a CRM record, with its CRM id.
 func (r *crmRun) add(ctx context.Context, tx pgx.Tx, recordType, crmID string) (string, error) {
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, acquired_via, created_by) VALUES ($1, $2, $5, 'import', $4, $3) RETURNING id::text`,
+	if err := tx.QueryRow(ctx, `INSERT INTO records (workspace_id, record_type, brand_id, origin, acquired_via, created_by) VALUES ($1, $2, COALESCE(NULLIF($5, '')::uuid, outflare_first_brand($1)), 'import', $4, $3) RETURNING id::text`,
 		r.a.WorkspaceID, recordType, nullIfEmpty(r.a.ActorID), r.o.Integration.Connector, r.brand).Scan(&id); err != nil {
 		return "", err
 	}

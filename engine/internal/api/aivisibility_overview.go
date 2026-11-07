@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/outflareai/outflare/engine/internal/aivis"
 )
 
 // The AI visibility overview: for each cohort, over the last days, how
@@ -72,6 +74,15 @@ type aiVisCount struct {
 	CompetitorID string `json:"competitor_id,omitempty"`
 }
 
+// aiVisOther is a company or tool the answers name that isn't a
+// competitor, what it is, and its website.
+type aiVisOther struct {
+	Name    string `json:"name"`
+	Label   string `json:"label"`
+	Host    string `json:"host"`
+	Answers int    `json:"answers"`
+}
+
 type aiVisWeek struct {
 	Week         string   `json:"week"`
 	Answers      int      `json:"answers"`
@@ -106,6 +117,7 @@ type aiVisCohort struct {
 	Competitors []aiVisEntity `json:"competitors"`
 	// Brands answers recommend or list that the cohort doesn't track.
 	Suggested   []aiVisCount `json:"suggested_competitors"`
+	Others      []aiVisOther `json:"named_others"`
 	SourceTypes []aiVisCount `json:"source_types"`
 	Models      []aiVisModel `json:"models"`
 	CitedHosts  []aiVisHost  `json:"cited_hosts"`
@@ -168,7 +180,7 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	var id, name, brandName string
 	var brand *string
 	if _, err := pgx.ForEachRow(rows, []any{&id, &name, &brand, &brandName}, func() error {
-		c := &aiVisCohort{Competitors: []aiVisEntity{}, Suggested: []aiVisCount{}, SourceTypes: []aiVisCount{}, Models: []aiVisModel{}, CitedHosts: []aiVisHost{}, Weeks: []aiVisWeek{}}
+		c := &aiVisCohort{Competitors: []aiVisEntity{}, Suggested: []aiVisCount{}, Others: []aiVisOther{}, SourceTypes: []aiVisCount{}, Models: []aiVisModel{}, CitedHosts: []aiVisHost{}, Weeks: []aiVisWeek{}}
 		c.Cohort.ID, c.Cohort.Name, c.Cohort.BrandID = id, name, brand
 		c.Brand.Name = brandName
 		list = append(list, c)
@@ -255,7 +267,7 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 			       count(DISTINCT c.sample_id) AS answers,
 			       row_number() OVER (PARTITION BY c.cohort_id ORDER BY count(DISTINCT c.sample_id) DESC, c.host) AS rank
 			FROM ai_citations c JOIN ai_samples s ON s.id = c.sample_id
-			WHERE c.workspace_id = $1 AND c.cohort_id = ANY($2) AND s.status = 'ok' AND c.sampled_at >= $3
+			WHERE c.workspace_id = $1 AND c.cohort_id = ANY($2) AND s.status = 'ok' AND c.sampled_at >= $3 AND `+aivis.NotAssetSQL("c.host")+`
 			GROUP BY c.cohort_id, c.host) t
 		WHERE rank <= 15 ORDER BY cohort_id, answers DESC, host`, ws, ids, from)
 	if err != nil {
@@ -268,28 +280,57 @@ func (s *Server) aiVisibilityOverview(ctx context.Context, ws string, sel brandS
 	}); err != nil {
 		return nil, err
 	}
-	// Brands the answers recommend or list that the cohort doesn't track.
+	// Brands the answers recommend or list that aren't on the brand's
+	// competitor list yet: one said Yes or No to on Competitors (by name or
+	// alias) is left out, and so is one AI visibility found is a listed
+	// competitor's product, not a competitor, or not a brand
+	// (ai_named_brands). The rest have their suggestion's row, or the
+	// website found for them.
 	rows, err = s.pool.Query(ctx, `
-		SELECT t.cohort_id, t.name, t.answers,
-		       COALESCE((SELECT x.host FROM seo_competitors x JOIN ai_cohorts c ON c.id = t.cohort_id
-		                 WHERE x.workspace_id = $1 AND x.brand_id = c.brand_id AND x.status = 'suggested' AND lower(x.name) = lower(t.name)
-		                 ORDER BY x.created_at LIMIT 1), ''),
-		       COALESCE((SELECT x.id::text FROM seo_competitors x JOIN ai_cohorts c ON c.id = t.cohort_id
-		                 WHERE x.workspace_id = $1 AND x.brand_id = c.brand_id AND x.status = 'suggested' AND lower(x.name) = lower(t.name)
-		                 ORDER BY x.created_at LIMIT 1), '')
+		SELECT t.cohort_id, t.name, t.answers, COALESCE(x.host, d.host, ''), COALESCE(x.id::text, '')
 		FROM (
-			SELECT s.cohort_id, min(b.name) AS name, count(DISTINCT s.id) AS answers,
-			       row_number() OVER (PARTITION BY s.cohort_id ORDER BY count(DISTINCT s.id) DESC, lower(b.name)) AS rank
+			SELECT s.cohort_id, s.brand_id, lower(b.name) AS k, min(b.name) AS name, count(DISTINCT s.id) AS answers
 			FROM ai_samples s CROSS JOIN LATERAL unnest(s.other_brands) AS b(name)
 			WHERE s.workspace_id = $1 AND s.cohort_id = ANY($2) AND s.status = 'ok' AND s.sampled_at >= $3
-			GROUP BY s.cohort_id, lower(b.name)) t
-		WHERE rank <= 15 ORDER BY t.cohort_id, t.answers DESC, t.name`, ws, ids, from)
+			GROUP BY s.cohort_id, s.brand_id, lower(b.name)) t
+		LEFT JOIN ai_named_brands d ON d.workspace_id = $1 AND d.brand_id = t.brand_id AND d.name_key = t.k
+		LEFT JOIN LATERAL (SELECT y.id, y.host, y.status FROM seo_competitors y
+			WHERE y.workspace_id = $1 AND y.brand_id = t.brand_id
+			  AND (lower(y.name) = t.k OR t.k = ANY(SELECT lower(a) FROM unnest(y.aliases) AS a) OR y.id = d.competitor_id)
+			ORDER BY y.status = 'suggested' DESC, y.created_at LIMIT 1) x ON true
+		WHERE COALESCE(x.status, 'suggested') = 'suggested' AND COALESCE(d.kind, '') NOT IN ('other', 'not_brand')
+		ORDER BY t.cohort_id, t.answers DESC, t.name`, ws, ids, from)
 	if err != nil {
 		return nil, err
 	}
 	var sc aiVisCount
 	if _, err := pgx.ForEachRow(rows, []any{&id, &sc.Name, &sc.Answers, &sc.Host, &sc.CompetitorID}, func() error {
-		byID[id].Suggested = append(byID[id].Suggested, sc)
+		if len(byID[id].Suggested) < 15 {
+			byID[id].Suggested = append(byID[id].Suggested, sc)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	// Companies and tools the answers name that aren't competitors: a
+	// library, a framework, a review site.
+	rows, err = s.pool.Query(ctx, `
+		SELECT s.cohort_id, min(d.name), d.label, d.host, count(DISTINCT s.id)::int
+		FROM ai_samples s CROSS JOIN LATERAL unnest(s.other_brands) AS b(name)
+		JOIN ai_named_brands d ON d.workspace_id = s.workspace_id AND d.brand_id = s.brand_id AND d.name_key = lower(b.name) AND d.kind = 'other'
+		WHERE s.workspace_id = $1 AND s.cohort_id = ANY($2) AND s.status = 'ok' AND s.sampled_at >= $3
+		  AND NOT EXISTS (SELECT 1 FROM seo_competitors y WHERE y.workspace_id = s.workspace_id AND y.brand_id = s.brand_id
+		                  AND (lower(y.name) = d.name_key OR d.name_key = ANY(SELECT lower(a) FROM unnest(y.aliases) AS a)))
+		GROUP BY s.cohort_id, d.name_key, d.label, d.host
+		ORDER BY s.cohort_id, count(DISTINCT s.id) DESC, d.name_key`, ws, ids, from)
+	if err != nil {
+		return nil, err
+	}
+	var on aiVisOther
+	if _, err := pgx.ForEachRow(rows, []any{&id, &on.Name, &on.Label, &on.Host, &on.Answers}, func() error {
+		if len(byID[id].Others) < 30 {
+			byID[id].Others = append(byID[id].Others, on)
+		}
 		return nil
 	}); err != nil {
 		return nil, err

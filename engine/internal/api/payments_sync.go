@@ -455,6 +455,9 @@ func (r *paymentRun) counted(ctx context.Context, tx pgx.Tx, rec string, ch conn
 	if err != nil || brand == "" {
 		return false, err
 	}
+	if err := lockTransaction(ctx, tx, brand, "payment", ch.ID); err != nil {
+		return false, err
+	}
 	known, found, err := samePayment(ctx, tx, brand, r.provider, ch.ID, rec, ch.AmountMinor, strings.ToUpper(ch.Currency), ch.Created)
 	if err != nil || !found {
 		return false, err

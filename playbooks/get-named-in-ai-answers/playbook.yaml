@@ -31,15 +31,15 @@ inputs:
     example: project planning software for small agencies
 steps:
   - say: Read the brand's score against competitors today, and what AI answers bring its site.
-    tools: [getAIVisibility, listAICohorts]
+    tools: [getBrandAIVisibility, listBrandAICohorts]
   - say: Add a set of buyer questions for the category if there isn't one, drafted with real demand.
-    tools: [createAICohort, draftAIPrompts, listAIPrompts]
+    tools: [createBrandAICohort, draftBrandAIPrompts, listBrandAIPrompts]
   - say: Track the competitors answers recommend that the cohort doesn't follow yet.
-    tools: [updateAICohort]
+    tools: [updateBrandAICohort]
   - say: Read the fixes for questions that leave the brand out or recommend a competitor, and the answers behind them.
-    tools: [listFixes, listAISamples, listAIFacts]
+    tools: [listBrandFixes, listBrandAISamples, listBrandAIFacts]
   - say: Read the cited pages worth being on, and compare with what competitors publish.
-    tools: [listCoverageOpportunities, getSEOCompetitorGaps]
+    tools: [listCoverageOpportunities, getBrandSEOCompetitorGaps]
   - say: Post a short list of pages to write, facts to correct and pages to get listed on.
     tools: [addAgentRunUpdate]
 guardrails:

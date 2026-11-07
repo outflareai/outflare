@@ -5,13 +5,21 @@ import { Button, ErrorText, field, Loading, Status, confirmAction, toast } from 
 import { ago, stamp } from "../format";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectorLogo } from "@/components/connector-logo";
+import { everyBrand, pickedBrandId } from "@/lib/brand";
 
 // A GitHub or Vercel connection's watched repositories and projects: pick
 // one, tie it to the SEO site it serves, and see its latest deploys.
 // Outflare only reads deploys, so fixes are re-checked and experiments
 // start when a change goes live.
 
-type Site = { id: string; host: string };
+type Site = { id: string; host: string; brand_id: string | null };
+
+// The picked brand's rows, or every brand's while all brands are picked:
+// deploys are kept per brand.
+function brandRows<T>(list: (brand: string) => Promise<{ data?: { data: T[] } }>): Promise<T[]> {
+  const b = pickedBrandId();
+  return b ? list(b).then((r) => r.data?.data ?? []) : everyBrand(list);
+}
 
 export function DeploysDialog({ ws, integration, canManage, onClose }: { ws: string; integration: Integration; canManage: boolean; onClose: () => void }) {
   const [targets, setTargets] = useState<DeployTarget[] | null>(null);
@@ -24,19 +32,22 @@ export function DeploysDialog({ ws, integration, canManage, onClose }: { ws: str
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const [t, d] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/deploy-targets", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/deploys", { params: { path: { ws } } }),
-    ]);
-    if (t.error || !t.data) return setError(errorMessage(t.error));
-    const mine = t.data.data.filter((x) => x.integration_id === integration.id);
-    setTargets(mine);
-    setRecent((d.data?.data ?? []).filter((x) => mine.some((m) => m.id === x.target_id)));
+    try {
+      const [t, d] = await Promise.all([
+        brandRows((brand) => api.GET("/v1/brands/{brand}/deploy-targets", { params: { path: { brand } } })),
+        brandRows((brand) => api.GET("/v1/brands/{brand}/deploys", { params: { path: { brand } } })),
+      ]);
+      const mine = t.filter((x) => x.integration_id === integration.id);
+      setTargets(mine);
+      setRecent(d.filter((x) => mine.some((m) => m.id === x.target_id)));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
   }, [ws, integration.id]);
 
   useEffect(() => {
     void load();
-    api.GET("/v1/workspaces/{ws}/seo-sites", { params: { path: { ws } } }).then(({ data }) => setSites((data?.data ?? []).map((s) => ({ id: s.id, host: s.host }))));
+    void brandRows((brand) => api.GET("/v1/brands/{brand}/seo-sites", { params: { path: { brand } } })).then((l) => setSites(l.map((s) => ({ id: s.id, host: s.host, brand_id: s.brand_id ?? null }))));
     if (canManage) {
       api.GET("/v1/workspaces/{ws}/integrations/{id}/deploy-options", { params: { path: { ws, id: integration.id } } }).then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
@@ -49,8 +60,14 @@ export function DeploysDialog({ ws, integration, canManage, onClose }: { ws: str
     if (!pick) return;
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/deploy-targets", {
-      params: { path: { ws } },
+    // A new target joins its site's brand, else the picked brand.
+    const brand = sites.find((x) => x.id === site)?.brand_id ?? pickedBrandId();
+    if (!brand) {
+      setBusy(false);
+      return setError("Pick its site, or pick a brand in the brand switcher: deploys belong to one brand.");
+    }
+    const { data, error } = await api.POST("/v1/brands/{brand}/deploy-targets", {
+      params: { path: { brand } },
       body: { integration_id: integration.id, target: pick, ...(site === "auto" ? {} : { site_id: site === "none" ? null : site }) },
     });
     setBusy(false);
@@ -63,26 +80,26 @@ export function DeploysDialog({ ws, integration, canManage, onClose }: { ws: str
   }
 
   async function setTargetSite(t: DeployTarget, value: string) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/deploy-targets/{target}", { params: { path: { ws, target: t.id } }, body: { site_id: value || null } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/deploy-targets/{target}", { params: { path: { brand: t.brand_id ?? pickedBrandId(), target: t.id } }, body: { site_id: value || null } });
     if (error) return toast(errorMessage(error), "error");
     void load();
   }
 
   async function toggle(t: DeployTarget) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/deploy-targets/{target}", { params: { path: { ws, target: t.id } }, body: { status: t.status === "active" ? "paused" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/deploy-targets/{target}", { params: { path: { brand: t.brand_id ?? pickedBrandId(), target: t.id } }, body: { status: t.status === "active" ? "paused" : "active" } });
     if (error) return toast(errorMessage(error), "error");
     void load();
   }
 
   async function checkNow(t: DeployTarget) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/deploy-targets/{target}/check", { params: { path: { ws, target: t.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/deploy-targets/{target}/check", { params: { path: { brand: t.brand_id ?? pickedBrandId(), target: t.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Checking ${t.name} for deploys.`);
   }
 
   async function remove(t: DeployTarget) {
     if (!(await confirmAction(`Stop watching ${t.name}?`, "Its recorded deploys are removed too. Fixes on its site are still re-checked by the next crawl.", "Stop watching"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/deploy-targets/{target}", { params: { path: { ws, target: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/deploy-targets/{target}", { params: { path: { brand: t.brand_id ?? pickedBrandId(), target: t.id } } });
     if (error) return toast(errorMessage(error), "error");
     setOptions((o) => o?.map((x) => (x.id === t.target ? { ...x, watched_by: null } : x)) ?? null);
     void load();

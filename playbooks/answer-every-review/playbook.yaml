@@ -30,15 +30,15 @@ inputs:
     example: Northpeak
 steps:
   - say: Read the brand's context and its review guide, and find its review pages.
-    tools: [getBrandContext, getReviewGuide, discoverReviewPages, listReviewPages]
+    tools: [getBrandContext, getReviewGuide, discoverReviewPages, listBrandReviewPages]
   - say: Read new reviews and draft a reply to each, held for a person.
-    tools: [listReviews, getReview, draftReviewReply]
+    tools: [listBrandReviews, getBrandReview, draftBrandReviewReply]
   - say: Mark each review replied once the person posts the answer.
-    tools: [markReviewReplied]
+    tools: [markBrandReviewReplied]
   - say: Set up a review request to customers with a recent good outcome, and preview it.
     tools: [createReviewRequestCampaign, previewReviewRequestCampaign]
   - say: Read the review score and volume each week.
-    tools: [getReviewsSummary]
+    tools: [getBrandReviewsSummary]
 guardrails:
   - Every reply and every review request waits for a person's approval.
   - Never offers anything in return for a review, and never asks only happy customers where a site's rules forbid it.

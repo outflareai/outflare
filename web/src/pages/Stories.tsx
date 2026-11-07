@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useEffect, useState } from "react";
 import type { Journalist, PRExpert, QuoteApprovalRequest, Story, StoryCheck, StoryPitch, StoryResult } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { DataTable } from "@/components/data-table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, errorMessage } from "../api";
@@ -77,7 +78,13 @@ function requestLine(r: QuoteApprovalRequest): string {
 // AI errors that need someone to set something up, worded for the button.
 const aiSetup = new Set(["connector_needed", "ai_model_needed"]);
 
-export function Stories({ ws, canManage, go }: Props) {
+export function Stories(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Stories" brands={active.length} />;
+  return <StoriesPage key={brand.id} {...props} />;
+}
+
+function StoriesPage({ ws, canManage, go }: Props) {
   const [section, setSection] = useState<Section>("stories");
   const [open, setOpen] = useState("");
   const brandKey = useBrand(ws).query.brand ?? "";
@@ -126,7 +133,7 @@ function StoryList({ ws, canManage, brand, open, go }: { ws: string; canManage: 
 
   useEffect(() => {
     setList(null);
-    api.GET("/v1/workspaces/{ws}/stories", { params: { path: { ws }, query: { ...brand, status: show === "open" ? "idea,draft,approved" : "archived", limit: 200 } } })
+    api.GET("/v1/brands/{brand}/stories", { params: { path: { brand: pickedBrandId() }, query: { ...brand, status: show === "open" ? "idea,draft,approved" : "archived", limit: 200 } } })
       .then(({ data, error }) => {
         if (error || !data) return setError(errorMessage(error));
         setList(data.data);
@@ -138,7 +145,7 @@ function StoryList({ ws, canManage, brand, open, go }: { ws: string; canManage: 
     e.preventDefault();
     if (!title.trim() || !forBrand) return;
     setBusy("add");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories", { params: { path: { ws } }, body: { brand_id: forBrand, title: title.trim() } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/stories", { params: { path: { brand: pickedBrandId() } }, body: { brand_id: forBrand, title: title.trim() } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -155,7 +162,7 @@ function StoryList({ ws, canManage, brand, open, go }: { ws: string; canManage: 
     });
     if (r?.choice !== "ok") return;
     setBusy("ideas");
-    const { error } = await api.POST("/v1/workspaces/{ws}/stories/ideas", { params: { path: { ws } }, body: { brand_id: forBrand, count: 5, brief: r.value.trim() } });
+    const { error } = await api.POST("/v1/brands/{brand}/stories/ideas", { params: { path: { brand: pickedBrandId() } }, body: { brand_id: forBrand, count: 5, brief: r.value.trim() } });
     setBusy("");
     if (error) return aiFailed(error, go, setError);
     setError("");
@@ -247,14 +254,14 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
-  const path = { ws, story: id };
+  const path = { brand: pickedBrandId(), story: id };
 
   const show = (s: Story) => {
     setStory(s);
     setEdit({ title: s.title, kind: s.kind, summary: s.summary, release: s.release });
   };
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/stories/{story}", { params: { path } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/stories/{story}", { params: { path } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       show(data);
     });
@@ -262,7 +269,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   }, [ws, id, reload]);
   useEffect(() => {
     if (!story) return;
-    api.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query: { brand: story.brand_id } } }).then(({ data }) => setExperts(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/pr-experts", { params: { path: { brand: story.brand_id ?? pickedBrandId() } } }).then(({ data }) => setExperts(data?.data ?? []));
     // Approval emails go out through one of the brand's own active sequences.
     if (canManage) {
       if (story.brand_id) api.GET("/v1/brands/{brand}/sequences", { params: { path: { brand: story.brand_id } } }).then(({ data }) =>
@@ -294,7 +301,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
 
   const save = async () => {
     setBusy("save");
-    done(await api.PATCH("/v1/workspaces/{ws}/stories/{story}", { params: { path }, body: edit }), "Saved.");
+    done(await api.PATCH("/v1/brands/{brand}/stories/{story}", { params: { path }, body: edit }), "Saved.");
   };
   const draft = async () => {
     if (changed && !(await confirmAction("Draft over your changes?", "Your AI model's draft replaces the release, and your unsaved changes are lost.", "Draft anyway"))) return;
@@ -306,7 +313,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
     });
     if (r?.choice !== "ok") return;
     setBusy("draft");
-    const { error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/draft", { params: { path }, body: { guidance: r.value.trim() } });
+    const { error } = await api.POST("/v1/brands/{brand}/stories/{story}/draft", { params: { path }, body: { guidance: r.value.trim() } });
     setBusy("");
     if (error) return aiFailed(error, go, setError);
     setError("");
@@ -314,7 +321,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   };
   const check = async () => {
     setBusy("check");
-    const { error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/check", { params: { path } });
+    const { error } = await api.POST("/v1/brands/{brand}/stories/{story}/check", { params: { path } });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
@@ -322,41 +329,41 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
   const approve = async () => {
     if (!(await confirmAction("Approve this release?", "It may be pitched as it stands. Any change to its headline, release, facts or quotes sends it back to draft.", "Approve", false))) return;
     setBusy("approve");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/approve", { params: { path } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/stories/{story}/approve", { params: { path } });
     if (error) setReload((n) => n + 1);
     done({ data: data as Story | undefined, error }, "Approved.");
   };
   const move = async (status: "idea" | "draft" | "archived") => {
     setBusy("move");
-    done(await api.PATCH("/v1/workspaces/{ws}/stories/{story}", { params: { path }, body: { status } }));
+    done(await api.PATCH("/v1/brands/{brand}/stories/{story}", { params: { path }, body: { status } }));
   };
   const remove = async () => {
     if (!(await confirmAction(`Delete "${story.title}"?`, "Its facts and quotes go too.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/stories/{story}", { params: { path } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/stories/{story}", { params: { path } });
     if (error) return setError(errorMessage(error));
     back();
   };
   const addFact = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy("fact");
-    const res = await api.POST("/v1/workspaces/{ws}/stories/{story}/facts", { params: { path }, body: { ...fact, statement: fact.statement.trim() } });
+    const res = await api.POST("/v1/brands/{brand}/stories/{story}/facts", { params: { path }, body: { ...fact, statement: fact.statement.trim() } });
     if (!res.error) setFact({ ...fact, statement: "", source_url: "", source_note: "" });
     done(res);
   };
   const removeFact = async (f: Fact) => {
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/stories/{story}/facts/{fact}", { params: { path: { ...path, fact: f.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/stories/{story}/facts/{fact}", { params: { path: { ...path, fact: f.id } } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };
   const addQuote = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy("quote");
-    const res = await api.POST("/v1/workspaces/{ws}/stories/{story}/quotes", { params: { path }, body: { body: quote.body.trim(), ...(quote.expert_id ? { expert_id: quote.expert_id } : {}) } });
+    const res = await api.POST("/v1/brands/{brand}/stories/{story}/quotes", { params: { path }, body: { body: quote.body.trim(), ...(quote.expert_id ? { expert_id: quote.expert_id } : {}) } });
     if (!res.error) setQuote({ ...quote, body: "" });
     done(res);
   };
   const patchQuote = async (q: Quote, body: { status: Quote["status"]; approval_note?: string }) => {
-    done(await api.PATCH("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}", { params: { path: { ...path, quote: q.id } }, body }));
+    done(await api.PATCH("/v1/brands/{brand}/stories/{story}/quotes/{quote}", { params: { path: { ...path, quote: q.id } }, body }));
   };
   const askExpert = async (q: Quote) => {
     const x = experts.find((e) => e.id === q.expert_id);
@@ -390,7 +397,7 @@ function StoryDetail({ ws, id, canManage, back, go }: { ws: string; id: string; 
     });
     if (r?.choice !== "link" && r?.choice !== "email") return;
     setBusy("ask");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/quotes/{quote}/approval-requests", {
+    const { data, error } = await api.POST("/v1/brands/{brand}/stories/{story}/quotes/{quote}/approval-requests", {
       params: { path: { ...path, quote: q.id } },
       body: r.choice === "email" ? { delivery: "email", sequence_id: sequence } : { delivery: "link" },
     });
@@ -629,11 +636,11 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
   const approved = story.status === "approved";
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/story-pitches", { params: { path: { ws }, query: { story_id: story.id, limit: 500 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/story-pitches", { params: { path: { brand: pickedBrandId() }, query: { story_id: story.id, limit: 500 } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
     });
-    api.GET("/v1/workspaces/{ws}/stories/results", { params: { path: { ws }, query: { story_id: story.id, days: 365 } } })
+    api.GET("/v1/brands/{brand}/stories/results", { params: { path: { brand: pickedBrandId() }, query: { story_id: story.id, days: 365 } } })
       .then(({ data }) => setResult(data?.data[0] ?? null));
   }, [ws, story.id, reload]);
   // While openers are written, look again every few seconds.
@@ -649,13 +656,13 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
       setSequences(open);
       setSequence((s) => s || open[0]?.id || "");
     });
-    api.GET("/v1/workspaces/{ws}/journalists", { params: { path: { ws }, query: { brand: story.brand_id, limit: 200 } } }).then(({ data }) => setJournalists(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/journalists", { params: { path: { brand: pickedBrandId() }, query: { brand: story.brand_id, limit: 200 } } }).then(({ data }) => setJournalists(data?.data ?? []));
   }, [ws, story.brand_id, approved, canManage]);
 
   const pitched = new Set((list ?? []).filter((p) => p.status !== "rejected").map((p) => p.record_id));
   const start = async () => {
     setBusy("start");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/{story}/pitches", { params: { path: { ws, story: story.id } }, body: { sequence_id: sequence, record_ids: picked } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/stories/{story}/pitches", { params: { path: { brand: pickedBrandId(), story: story.id } }, body: { sequence_id: sequence, record_ids: picked } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -669,7 +676,7 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
       `They're added to ${p.sequence_name}, and it writes to them once the embargo lifts.` : `They're added to ${p.sequence_name}, which writes to them in its next sending window.`, "Approve", false))) return;
     setBusy(p.id);
     const edited = edits[p.id];
-    const { error } = await api.POST("/v1/workspaces/{ws}/story-pitches/{pitch}/approve", { params: { path: { ws, pitch: p.id } }, body: edited !== undefined ? { opener: edited } : {} });
+    const { error } = await api.POST("/v1/brands/{brand}/story-pitches/{pitch}/approve", { params: { path: { brand: pickedBrandId(), pitch: p.id } }, body: edited !== undefined ? { opener: edited } : {} });
     setBusy("");
     if (error) return setError(errorMessage(error));
     setError("");
@@ -677,7 +684,7 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
   };
   const createSequence = async () => {
     setBusy("sequence");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/stories/pitch-sequence", { params: { path: { ws } }, body: { brand_id: story.brand_id } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/stories/pitch-sequence", { params: { path: { brand: pickedBrandId() } }, body: { brand_id: story.brand_id } });
     setBusy("");
     if (error || !data) return setError(errorMessage(error));
     setError("");
@@ -686,7 +693,7 @@ function Pitches({ ws, story, canManage, go }: { ws: string; story: Story; canMa
     toast(`Created ${data.name}, a draft. Give it mailboxes and activate it under Sequences before journalists get anything.`);
   };
   const reject = async (p: StoryPitch) => {
-    const { error } = await api.POST("/v1/workspaces/{ws}/story-pitches/{pitch}/reject", { params: { path: { ws, pitch: p.id } }, body: {} });
+    const { error } = await api.POST("/v1/brands/{brand}/story-pitches/{pitch}/reject", { params: { path: { brand: pickedBrandId(), pitch: p.id } }, body: {} });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };
@@ -792,7 +799,7 @@ function Experts({ ws, canManage, brand }: { ws: string; canManage: boolean; bra
   const forBrand = brand.brand ? active.find((b) => b.handle === brand.brand)?.id : draft.brand_id || active[0]?.id;
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/pr-experts", { params: { path: { ws }, query: brand } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/pr-experts", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error || !data) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -804,8 +811,8 @@ function Experts({ ws, canManage, brand }: { ws: string; canManage: boolean; bra
     if (!draft.name.trim() || !draft.email.trim() || !forBrand) return;
     setBusy("add");
     const topics = draft.topics.split(",").map((t) => t.trim()).filter(Boolean);
-    const { error } = await api.POST("/v1/workspaces/{ws}/pr-experts", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/pr-experts", {
+      params: { path: { brand: pickedBrandId() } },
       body: { brand_id: forBrand, name: draft.name.trim(), email: draft.email.trim(), title: draft.title.trim(), topics },
     });
     setBusy("");
@@ -815,13 +822,13 @@ function Experts({ ws, canManage, brand }: { ws: string; canManage: boolean; bra
     setReload((n) => n + 1);
   };
   const makeDefault = async (x: PRExpert) => {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/pr-experts/{expert}", { params: { path: { ws, expert: x.id } }, body: { is_default: true } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/pr-experts/{expert}", { params: { path: { brand: pickedBrandId(), expert: x.id } }, body: { is_default: true } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };
   const remove = async (x: PRExpert) => {
     if (!(await confirmAction(`Remove ${x.name} as an expert?`, "Their person record stays. Stories with their approved quotes go back to draft.", "Remove"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/pr-experts/{expert}", { params: { path: { ws, expert: x.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/pr-experts/{expert}", { params: { path: { brand: pickedBrandId(), expert: x.id } } });
     if (error) return setError(errorMessage(error));
     setReload((n) => n + 1);
   };

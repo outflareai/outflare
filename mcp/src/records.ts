@@ -563,9 +563,11 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
     {
       title: "Check a brand's developer setup",
       description:
-        "A live checklist of what the brand's developer sends: sign-ups and orders from the server, payments counted once with a person, refunds finding " +
-        "their payment, the website's copies matching the server's, and refunds reaching ad networks. Each check is ok, warning or missing, with what it " +
-        "found and what to send to fix it. unmatched_refunds are refunds whose payment isn't known: link them with link_refund.",
+        "A live checklist of what the brand's developer sends: sign-ups and orders from the server, payments counted once with a person, orders carrying " +
+        "their payment's id, payments sent two ways sharing an id and amount, payments saved twice, ids reused for renewals, retries under new ids, amounts " +
+        "in cents, refunds finding their payment, the website's copies matching the server's, and refunds reaching ad networks. Each check is ok, warning " +
+        "or missing, with what it found and what to send to fix it. unmatched_refunds are refunds whose payment isn't known: link them with link_refund. " +
+        "Payments saved twice are merged with merge_duplicate_payments.",
       inputSchema: { brand: brandRef },
       annotations: read,
     },
@@ -586,6 +588,19 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
       call(() =>
         onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/transactions/{transaction}/refund-of", { params: { path: { brand: b, transaction: transaction_id } }, body: { payment } })),
       ),
+  );
+
+  server.registerTool(
+    "merge_duplicate_payments",
+    {
+      title: "Merge payments saved twice",
+      description:
+        "Keeps once each payment or refund the brand has twice, from an order event and a transaction with the same id (get_developer_setup's duplicates " +
+        "check counts them). The copy already counted stays, with its person; the other goes to Recently deleted for 7 days.",
+      inputSchema: { brand: brandRef },
+      annotations: write,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/developer-setup/merge-duplicates", { params: { path: { brand: b } } }))),
   );
 
   server.registerTool(
