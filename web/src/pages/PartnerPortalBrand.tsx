@@ -60,7 +60,7 @@ export function PartnerPortalBrand({
         </p>
       </div>
       <Tabs className="min-w-0" defaultValue="navigation">
-        <TabsList className="grid h-auto w-full min-w-0 grid-cols-2 gap-1 sm:grid-cols-3">
+        <TabsList className="grid group-data-[orientation=horizontal]/tabs:h-auto w-full min-w-0 grid-cols-2 gap-1 sm:grid-cols-3">
           <TabsTrigger className="h-9 text-xs" value="navigation">Navigation</TabsTrigger>
           <TabsTrigger className="h-9 text-xs" value="help">Help center</TabsTrigger>
           <TabsTrigger className="h-9 text-xs" value="terms">Terms & payments</TabsTrigger>

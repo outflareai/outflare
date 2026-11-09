@@ -1,0 +1,46 @@
+id: partnerships-comparison-sites
+version: 1
+title: Comparison site listings
+summary: A pipeline for the sites that test and rank tools like yours, from giving them a trial account to being listed and ranked.
+
+option_sets:
+  - key: comparison_listing_stage
+    name: Comparison site stage
+    options:
+      - { key: prospect, label: Prospect }
+      - { key: contacted, label: Contacted }
+      - { key: trial_given, label: Trial account given }
+      - { key: testing, label: Testing }
+      - { key: listed, label: Listed }
+      - { key: ranked, label: Ranked }
+      - { key: declined, label: Declined }
+  - key: comparison_listing_type
+    name: Listing type
+    options:
+      - { key: free, label: Free }
+      - { key: paid, label: Paid }
+      - { key: affiliate, label: Affiliate }
+
+record_types:
+  - key: comparison_listing
+    name: Comparison listing
+    plural: Comparison listings
+    description: |
+      A site that tests, compares and ranks tools like yours: where you
+      stand on it, who else is listed, and what the listing costs.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: comparison_listing_stage, filterable: true }
+      - { key: company, label: Site, value_type: record_reference, target_type: account, filterable: true }
+      - { key: contact, label: Contact, value_type: record_reference, target_type: person }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: comparison_url, label: Comparison page, value_type: url }
+      - { key: our_rank, label: Our rank, value_type: number, filterable: true, description: "Where we are on the page: 1 is first." }
+      - { key: competitors_listed, label: Competitors listed, value_type: text, multiple: true }
+      - { key: listing_type, label: Listing type, value_type: select, option_set: comparison_listing_type, filterable: true }
+      - { key: price, label: Price, value_type: currency }
+      - { key: affiliate_link, label: Affiliate link, value_type: url }
+      - { key: their_score, label: Their score, value_type: text, description: "The score or rating they gave us, as they show it." }
+      - { key: test_account, label: Test account email, value_type: email }
+      - { key: next_review_on, label: Next review, value_type: date, filterable: true }
+      - { key: next_step, label: Next step, value_type: text }

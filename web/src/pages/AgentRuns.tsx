@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { Action, AgentRun, AgentRunCheckIn, AgentRunUpdate } from "@outflare/sdk";
-import { api, errorMessage } from "../api";
+import { errorMessage } from "../api";
 import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Input, Loading, Stat, Stats, toast } from "../ui";
 import { ago, plural, stamp, when } from "../format";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
+import { actionsAPI, runsAPI } from "@/lib/scoped";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,16 +35,19 @@ export const isAgentRun = (d: unknown): d is AgentRun => !!d && typeof d === "ob
 
 // ---- List ----
 
-export function AgentRuns({ ws, onOpen }: { ws: string; onOpen: (id: string) => void }) {
+// team shows the team's runs, for no brand (workspace Settings); otherwise
+// the picked brand's.
+export function AgentRuns({ ws, onOpen, team }: { ws: string; onOpen: (id: string) => void; team?: boolean }) {
   const [list, setList] = useState<AgentRun[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [filter, setFilter] = useState<"live" | "ended" | "all">("live");
   const [error, setError] = useState("");
-  const brand = useBrand(ws).brand?.handle;
+  const picked = useBrand(ws).brand?.id;
+  const brand = team ? undefined : picked;
 
   const load = useCallback(async (after?: string) => {
     const status = filter === "live" ? "running,paused" : filter === "ended" ? "completed,stopped,failed" : "";
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/agent-runs", { params: { path: { ws }, query: { limit: 50, ...(status ? { status } : {}), ...(after ? { cursor: after } : {}), ...(brand ? { brand } : {}) } } });
+    const { data, error } = await runsAPI(ws, brand).list({ limit: 50, ...(status ? { status } : {}), ...(after ? { cursor: after } : {}) });
     if (error) return setError(errorMessage(error));
     setError("");
     setList((l) => (after && l ? [...l, ...(data?.data ?? [])] : data?.data ?? []));
@@ -105,18 +109,20 @@ export function AgentRuns({ ws, onOpen }: { ws: string; onOpen: (id: string) => 
 
 // ---- One run ----
 
-export function AgentRunDetail({ ws, id, canRun, canApprove, onBack }: { ws: string; id: string; canRun: boolean; canApprove: boolean; onBack: () => void }) {
+export function AgentRunDetail({ ws, id, canRun, canApprove, onBack, team }: { ws: string; id: string; canRun: boolean; canApprove: boolean; onBack: () => void; team?: boolean }) {
   const [d, setD] = useState<AgentRunCheckIn | null>(null);
   const [missing, setMissing] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [tab, setTab] = useState("");
 
+  const picked = useBrand(ws).brand?.id;
+  const brand = team ? undefined : picked;
   const load = useCallback(async () => {
-    const { data, response } = await api.GET("/v1/workspaces/{ws}/agent-runs/{id}", { params: { path: { ws, id } } });
+    const { data, response } = await runsAPI(ws, brand).get(id);
     if (response.status === 404) return setMissing(true);
     if (data) setD(data);
     setRefresh((n) => n + 1);
-  }, [ws, id]);
+  }, [ws, id, brand]);
   useEffect(() => {
     load();
     const t = setInterval(load, 10000);
@@ -135,8 +141,7 @@ export function AgentRunDetail({ ws, id, canRun, canApprove, onBack }: { ws: str
 
   async function act(what: "pause" | "resume" | "stop") {
     if (what === "stop" && !(await confirmAction("Stop this run?", <p>It takes no more turns and nothing more can act as it. Its changes waiting for you stay until you decide them or they expire.</p>, "Stop"))) return;
-    const p = { params: { path: { ws, id } } };
-    const { error } = what === "pause" ? await api.POST("/v1/workspaces/{ws}/agent-runs/{id}/pause", p) : what === "resume" ? await api.POST("/v1/workspaces/{ws}/agent-runs/{id}/resume", p) : await api.POST("/v1/workspaces/{ws}/agent-runs/{id}/stop", p);
+    const { error } = await runsAPI(ws, brand).change(id, what);
     if (error) return toast(errorMessage(error), "error");
     track("ui.agent_run_acted", { action: what, mode: r.mode });
     toast(what === "pause" ? "Paused. It takes no more turns until you resume it." : what === "resume" ? "Resumed. Its next turn comes soon." : "Stopped.");
@@ -230,7 +235,7 @@ function Activity({ ws, r, updates, canWrite, onPosted }: { ws: string; r: Agent
     e.preventDefault();
     if (!body.trim()) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/agent-runs/{id}/updates", { params: { path: { ws, id: r.id } }, body: { kind: "instruction", body: body.trim() } });
+    const { error } = await runsAPI(ws, r.brand_id ?? undefined).update(r.id, { kind: "instruction", body: body.trim() });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setBody("");
@@ -276,11 +281,11 @@ function RunActions({ ws, r, held, refresh, canApprove, onDone }: { ws: string; 
   const token = r.token_id;
   const load = useCallback(async () => {
     if (!token) return setList([]);
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/actions", { params: { path: { ws }, query: { token_id: token, limit: held ? 200 : 100, ...(held ? { status: "held" } : {}) } } });
+    const { data, error } = await actionsAPI(ws, r.brand_id ?? undefined).list({ token_id: token, limit: held ? 200 : 100, ...(held ? { status: "held" } : {}) });
     if (error) return setError(errorMessage(error));
     setError("");
     setList(data?.data ?? []);
-  }, [ws, token, held]);
+  }, [ws, token, held, r.brand_id]);
   useEffect(() => {
     load();
   }, [load, refresh]);
@@ -292,8 +297,8 @@ function RunActions({ ws, r, held, refresh, canApprove, onDone }: { ws: string; 
       if (ans?.choice !== "ok") return;
       note = ans.value;
     }
-    const p = { params: { path: { ws, id: a.id } } };
-    const { data, error } = approve ? await api.POST("/v1/workspaces/{ws}/actions/{id}/approve", { ...p, body: { note } }) : await api.POST("/v1/workspaces/{ws}/actions/{id}/reject", { ...p, body: { note } });
+    const acts = actionsAPI(ws, a.brand_id ?? undefined);
+    const { data, error } = approve ? await acts.approve(a.id, { note }) : await acts.reject(a.id, { note });
     if (error) return toast(errorMessage(error), "error");
     track("ui.action_decided", { decision: approve ? "approve" : "reject", how: "single", count: 1, from: "run" });
     toast(approve ? (data?.status === "executed" ? "Approved and done." : "Approved, but it failed. See the change.") : "Rejected.", approve && data?.status !== "executed" ? "error" : "ok");

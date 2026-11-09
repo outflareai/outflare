@@ -14186,6 +14186,446 @@
           "sort": "desc"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "IP geolocation (DB-IP city and network files)",
+      "id": 952,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1109
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "City and network file age, and downloads",
+      "description": "How old the DB-IP City Lite and ASN Lite files each server uses are (DB-IP publishes a new month on the 1st, so up to about 31 days is normal), and download attempts in the last 6 hours. not_published is normal for a day or two at the start of a month. A server with no file shows no line: its visits get a country but no region, city or network.",
+      "id": 953,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1110,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (file) (outflare_geoip_file_age_seconds{job=\"$job\"}) / 86400",
+          "legendFormat": "{{file}} file age (days)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (file, outcome) (increase(outflare_geoip_downloads_total{job=\"$job\"}[6h]))",
+          "legendFormat": "{{file}} {{outcome}} (6h)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Company Telegram accounts",
+      "id": 954,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 1118
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Company Telegram accounts, by status",
+      "description": "Company Telegram accounts signed in to Outflare as a linked device, by status, across workspaces. Normal: almost all connected. signed_out climbs when someone ends Outflare's session from the account's phone or Telegram ends it; failed means a sign-in broke (the steps panel says why).",
+      "id": 955,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1119
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (outflare_telegram_accounts{job=\"$job\"})",
+          "legendFormat": "{{status}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram sign-ins and checks, by step and outcome",
+      "description": "Sign-in steps (login, password), six-hourly checks and sign-outs per hour, by how they ended. Normal: checks succeed. unreachable means Telegram or the workspace's proxy couldn't be reached; bad_app means Telegram refused a workspace's api_id or api_hash; signed_out means a session ended.",
+      "id": 956,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1119
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (step, outcome) (increase(outflare_telegram_steps_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{step}} {{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram messages synced into the CRM",
+      "description": "Messages copied from company Telegram accounts into brands' CRMs per hour, received (in) and sent (out). Normal: a burst while an account's history is imported, then a steady trickle in working hours. Zero for hours while accounts are live means the sync stopped (see the runs panel).",
+      "id": 957,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1127
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (direction) (increase(outflare_telegram_synced_messages_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{direction}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram syncs, by outcome",
+      "description": "Syncs of company Telegram accounts per hour, by how they ended. Normal: live (caught up) and importing (copying history). slowed_down means Telegram asked to wait (it carries on by itself); unreachable, signed_out, no_app or bad_app mean an account stopped syncing.",
+      "id": 958,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1127
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (increase(outflare_telegram_sync_runs_total{job=\"$job\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram sync lag",
+      "description": "How long ago the least recently synced company Telegram account finished a sync. Normal: under five minutes (accounts sync every two). Climbing means syncs are failing or the job queue is behind.",
+      "id": 959,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1127
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_telegram_sync_lag_seconds{job=\"$job\"})",
+          "legendFormat": "lag",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram chats matched",
+      "description": "Synced Telegram chats Outflare matched to a customer, by result: confirmed (a record already had its Telegram id), suggested (waits for the account's holder) or no_match. Normal: a burst when an account first syncs, then a trickle. Only no_match for a long time can mean a workspace's AI isn't connected.",
+      "id": 960,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1135
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (rate(outflare_telegram_matches_total{job=\"$job\"}[$__rate_interval]))",
+          "legendFormat": "{{result}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telegram chat summaries",
+      "description": "AI summaries of synced Telegram chats, by outcome: success, no_ai (the workspace has no AI model for Telegram summaries, so nothing is written) or failed (the AI call failed). Normal: mostly success, in bursts when someone asks or an account is handed over.",
+      "id": 961,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1143
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(outflare_telegram_summaries_total{job=\"$job\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Customers waiting on Telegram",
+      "description": "Customer chats on company Telegram accounts where the customer wrote last and has waited over four hours (and under three days), across workspaces. Each holder gets a telegram.waiting alert. This is how the team answers, not a fault in Outflare.",
+      "id": 962,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1143
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(outflare_telegram_waiting_chats{job=\"$job\"})",
+          "legendFormat": "waiting",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ]
 }

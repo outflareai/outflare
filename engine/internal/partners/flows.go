@@ -307,9 +307,9 @@ func within(v any) (Within, bool) {
 	return Within{}, false
 }
 
-// rate is the flow's rate for a conversion: a partner's override, else a
+// Rate is the flow's rate for a conversion: a partner's override, else a
 // product's, else its own.
-func (r Rule) rate(c Conversion) (bp *int, cents *int64) {
+func (r Rule) Rate(c Conversion) (bp *int, cents *int64) {
 	for _, o := range r.Overrides {
 		if o.PartnerID != nil && *o.PartnerID == c.PartnerID {
 			return o.PercentBP, o.AmountCents

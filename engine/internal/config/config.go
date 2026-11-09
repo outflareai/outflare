@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -134,6 +135,14 @@ type Config struct {
 	// events stay in Postgres. Older ones are archived to the bucket (when
 	// there is one) and removed. 0, the default, keeps them all.
 	EventRetentionDays int
+	// GeoIPDir is OUTFLARE_GEOIP_DIR: where DB-IP's City Lite and ASN Lite
+	// files are kept (docs/website-tracking.md). By default a folder in the
+	// user's cache directory.
+	GeoIPDir string
+	// GeoIPDownload is OUTFLARE_GEOIP_DOWNLOAD (on by default): whether the
+	// server downloads a new month's files itself. Off, it uses what is in
+	// GeoIPDir, for installs without internet access.
+	GeoIPDownload bool
 
 	// Role is OUTFLARE_ROLE: what this process does, so a large install
 	// runs the parts as separate services that deploy and scale apart.
@@ -248,6 +257,21 @@ func Load() (Config, error) {
 	}
 	if c.EventsWorkspace != "" && !uuidRe.MatchString(c.EventsWorkspace) {
 		return c, fmt.Errorf("OUTFLARE_EVENTS_WORKSPACE must be a workspace id (a UUID), got %q", c.EventsWorkspace)
+	}
+	c.GeoIPDir = strings.TrimSpace(os.Getenv("OUTFLARE_GEOIP_DIR"))
+	if c.GeoIPDir == "" {
+		if d, err := os.UserCacheDir(); err == nil {
+			c.GeoIPDir = filepath.Join(d, "outflare", "geoip")
+		} else {
+			c.GeoIPDir = filepath.Join(os.TempDir(), "outflare-geoip")
+		}
+	}
+	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_GEOIP_DOWNLOAD"))); v {
+	case "", "on", "true", "1":
+		c.GeoIPDownload = true
+	case "off", "false", "0":
+	default:
+		return c, fmt.Errorf("OUTFLARE_GEOIP_DOWNLOAD must be on or off, got %q", v)
 	}
 	switch v := strings.ToLower(strings.TrimSpace(os.Getenv("OUTFLARE_COMMUNITY_LINKS"))); v {
 	case "", "on", "true", "1":

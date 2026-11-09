@@ -38,6 +38,12 @@ var sealedColumns = []sealedColumn{
 	{"journey_signing_secrets", "workspace_id", "secret"},
 	{"journey_signing_secrets", "workspace_id", "previous_secret"},
 	{"journey_step_secrets", "id", "secret"},
+	{"telegram_sessions", "account_id", "session_sealed"},
+	{"telegram_sessions", "account_id", "password_sealed"},
+	{"telegram_chats", "id", "details_sealed"},
+	{"telegram_chats", "id", "match_note_sealed"},
+	{"telegram_chats", "id", "summary_sealed"},
+	{"telegram_messages", "id", "content_sealed"},
 }
 
 // ResealResult counts what ResealStored did.

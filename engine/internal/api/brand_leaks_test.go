@@ -30,6 +30,9 @@ var brandWide = map[string]string{
 	"/v1/workspaces/{ws}/api-tokens":      "tokens and the brand each is kept to",
 	"/v1/workspaces/{ws}/agent-apps":      "connected AI apps and the brand each is kept to",
 	"/v1/workspaces/{ws}/teams":           "teams are the workspace's; their counts are the picked brand's",
+	"/v1/workspaces/{ws}/staff":           "the team directory is the workspace's",
+	"/v1/workspaces/{ws}/departments":     "the team directory is the workspace's",
+	"/v1/workspaces/{ws}/staff-accounts":  "company work accounts are the workspace's",
 	"/v1/workspaces/{ws}/connectors":      "the connector catalog with every connection",
 	"/v1/workspaces/{ws}/spend":           "spend is the workspace's bill",
 	"/v1/workspaces/{ws}/spend-recurring": "spend is the workspace's bill",
@@ -125,12 +128,14 @@ func TestNoBrandLeaks(t *testing.T) {
 		}
 		return checked, found
 	}
-	// Under all brands Bravo's rows show up, so the sweep reaches them.
-	if _, found := sweep("all"); len(found) < 50 {
+	// Under all brands Bravo's rows show up, so the sweep reaches them. The
+	// count falls as areas move under /v1/brands/{brand}/, where the route
+	// itself names one brand.
+	if _, found := sweep("all"); len(found) < 25 {
 		t.Fatalf("only %d endpoints show Bravo's rows under all brands; the seeding is not reaching them", len(found))
 	}
 	checked, leaks := sweep("alpha")
-	if checked < 100 {
+	if checked < 75 {
 		t.Fatalf("only %d endpoints answered; the sweep is not reaching them", checked)
 	}
 	if len(leaks) > 0 {

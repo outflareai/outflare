@@ -4,6 +4,7 @@ import { api, errorMessage } from "../api";
 import { Button, CopyButton, ErrorText, field, Loading, toast } from "../ui";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
+import { pickedBrandId } from "@/lib/brand";
 
 // Chat on your website: a chat button for the business's site. Visitors'
 // messages land in the support inbox, the team's replies show in the chat.
@@ -41,7 +42,7 @@ export function SupportChat({ ws, canManage }: { ws: string; canManage: boolean 
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/support/chat-widgets", { params: { path: { ws } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/support/chat-widgets", { params: { path: { brand: pickedBrandId() } } });
     if (error) return setError(errorMessage(error));
     setList(data.data);
   }
@@ -55,8 +56,8 @@ export function SupportChat({ ws, canManage }: { ws: string; canManage: boolean 
     setBusy(true);
     setError("");
     const res = editing
-      ? await api.PATCH("/v1/workspaces/{ws}/support/chat-widgets/{id}", { params: { path: { ws, id: editing } }, body: body(draft) })
-      : await api.POST("/v1/workspaces/{ws}/support/chat-widgets", { params: { path: { ws } }, body: body(draft) });
+      ? await api.PATCH("/v1/brands/{brand}/support/chat-widgets/{id}", { params: { path: { brand: pickedBrandId(), id: editing } }, body: body(draft) })
+      : await api.POST("/v1/brands/{brand}/support/chat-widgets", { params: { path: { brand: pickedBrandId() } }, body: body(draft) });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
     track(editing ? "ui.support_chat_saved" : "ui.support_chat_made", { require_email: draft.require_email, show_articles: draft.show_articles });
@@ -67,14 +68,14 @@ export function SupportChat({ ws, canManage }: { ws: string; canManage: boolean 
   }
 
   async function toggle(w: SupportChatWidget) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/support/chat-widgets/{id}", { params: { path: { ws, id: w.id } }, body: { enabled: !w.enabled } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/support/chat-widgets/{id}", { params: { path: { brand: pickedBrandId(), id: w.id } }, body: { enabled: !w.enabled } });
     if (error) return toast(errorMessage(error), "error");
     toast(w.enabled ? "Chat turned off: it's gone from your site" : "Chat turned on");
     load();
   }
 
   async function rotate(w: SupportChatWidget) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/chat-widgets/{id}/identity-secret", { params: { path: { ws, id: w.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/support/chat-widgets/{id}/identity-secret", { params: { path: { brand: pickedBrandId(), id: w.id } } });
     if (error) return toast(errorMessage(error), "error");
     setSecret({ id: w.id, value: data.secret });
     load();

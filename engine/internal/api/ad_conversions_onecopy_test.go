@@ -30,8 +30,8 @@ func TestAdConversionsOneCopy(t *testing.T) {
 
 	add := func(msg, age string) {
 		t.Helper()
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, message_id, occurred_at, received_at)
-			VALUES ($1, 'track', 'signed_up', 'anon-1', $2, now() - $3::interval, now() - $3::interval)`, ws, msg, age); err != nil {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, kind, name, anonymous_id, message_id, occurred_at, received_at)
+			VALUES ($1, outflare_first_brand($1), 'track', 'signed_up', 'anon-1', $2, now() - $3::interval, now() - $3::interval)`, ws, msg, age); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -105,8 +105,8 @@ func TestAdConversionsOneCopyWithoutID(t *testing.T) {
 
 	add := func(source, anon, msg, at, age string) {
 		t.Helper()
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, source, message_id, occurred_at, received_at)
-			VALUES ($1, 'track', 'signed_up', $2, $3, NULLIF($4, ''), now() - $5::interval, now() - $6::interval)`, ws, anon, source, msg, at, age); err != nil {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, kind, name, anonymous_id, source, message_id, occurred_at, received_at)
+			VALUES ($1, outflare_first_brand($1), 'track', 'signed_up', $2, $3, NULLIF($4, ''), now() - $5::interval, now() - $6::interval)`, ws, anon, source, msg, at, age); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -169,8 +169,8 @@ func TestAdConversionsOneCopyByOrderID(t *testing.T) {
 	}
 	add := func(source, anon, msg, order, age string) {
 		t.Helper()
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, kind, name, anonymous_id, source, message_id, properties, occurred_at, received_at)
-			VALUES ($1, 'track', 'order_completed', $2, $3, $4, jsonb_build_object('order_id', $5::text), now() - $6::interval, now() - $6::interval)`,
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, kind, name, anonymous_id, source, message_id, properties, occurred_at, received_at)
+			VALUES ($1, outflare_first_brand($1), 'track', 'order_completed', $2, $3, $4, jsonb_build_object('order_id', $5::text), now() - $6::interval, now() - $6::interval)`,
 			ws, anon, source, msg, order, age); err != nil {
 			t.Fatal(err)
 		}

@@ -84,7 +84,7 @@ func (s *Server) coverageVerifyJob(ctx context.Context, j jobs.Job) error {
 	if n := strings.ToLower(strings.TrimSpace(name)); n != "" {
 		nameRe = regexp.MustCompile(`(^|[^\pL\pN])` + regexp.QuoteMeta(n) + `($|[^\pL\pN])`)
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id::text,url,source FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND status='new' AND verdict='unchecked' ORDER BY created_at LIMIT $3`, ws, req.Brand, coverageVerifyBatch)
+	rows, err := s.pool.Query(ctx, `SELECT id::text,url,source FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND status='new' AND verdict='unchecked' AND (recheck_at IS NULL OR recheck_at<=now()) ORDER BY created_at LIMIT $3`, ws, req.Brand, coverageVerifyBatch)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func (s *Server) coverageVerifyJob(ctx context.Context, j jobs.Job) error {
 	counts := map[string]int{}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		for _, f := range finds {
-			if _, err := tx.Exec(ctx, `UPDATE coverage_candidates SET verdict=$4,checked_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND verdict='unchecked'`, ws, req.Brand, f.id, f.verdict); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE coverage_candidates SET verdict=$4,checked_at=now(),recheck_at=NULL WHERE workspace_id=$1 AND brand_id=$2 AND id=$3 AND verdict='unchecked'`, ws, req.Brand, f.id, f.verdict); err != nil {
 				return err
 			}
 			counts[f.verdict]++

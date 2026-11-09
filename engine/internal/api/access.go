@@ -1709,9 +1709,15 @@ func createWorkspace(ctx context.Context, tx pgx.Tx, name, ownerID string) (stri
 }
 
 func createSession(ctx context.Context, tx pgx.Tx, userID string, r *http.Request) (string, error) {
+	return createSessionFor(ctx, tx, userID, r, "")
+}
+
+// createSessionFor is createSession for a named client: "" for a browser,
+// "app" for the Outflare desktop app (sessions.client).
+func createSessionFor(ctx context.Context, tx pgx.Tx, userID string, r *http.Request, client string) (string, error) {
 	secret, hash := auth.NewToken(auth.PrefixSession)
-	_, err := tx.Exec(ctx, `INSERT INTO sessions (token_hash, user_id, user_agent, ip, expires_at) VALUES ($1, $2, $3, $4, $5)`,
-		hash, userID, truncate(r.UserAgent(), 512), clientIP(r), time.Now().Add(sessionLifetime))
+	_, err := tx.Exec(ctx, `INSERT INTO sessions (token_hash, user_id, user_agent, ip, expires_at, client) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))`,
+		hash, userID, truncate(r.UserAgent(), 512), clientIP(r), time.Now().Add(sessionLifetime), client)
 	if err == nil {
 		emitUser(ctx, "user.signed_in", userID, map[string]any{"via": accountVia(ctx)})
 	}

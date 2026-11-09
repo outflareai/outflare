@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -10,9 +11,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/outflareai/outflare/engine/internal/audit"
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/inboundemail"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/track"
 )
 
 // Inbound email (package inboundemail): workspaces' addresses at the
@@ -75,6 +78,10 @@ func (s *Server) listInboundAddresses(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := s.ensureAutoAddresses(r.Context(), a.WorkspaceID); err != nil {
+		// The page still offers its button to make one.
+		track.Fail(r.Context(), s.log, track.Event{Name: "inbound_address.auto_create_failed", WorkspaceID: a.WorkspaceID, ActorType: "system", Surface: "system", RequestID: RequestID(r.Context())}, "internal", err)
+	}
 	list, err := s.inboundEmail.List(r.Context(), s.pool, a.WorkspaceID)
 	if err != nil {
 		s.internal(w, r, err)
@@ -93,6 +100,42 @@ func (s *Server) listInboundAddresses(w http.ResponseWriter, r *http.Request) {
 	}
 	out["domain"], out["purposes"], out["data"] = s.inboundEmail.Domain(), purposes, list
 	writeJSON(w, http.StatusOK, out)
+}
+
+// ensureAutoAddresses makes the workspace's address for each purpose that
+// has one made for it (Purpose.Auto) and is on, when there is none yet:
+// AI receipts get their address without anyone pressing a button.
+func (s *Server) ensureAutoAddresses(ctx context.Context, workspaceID string) error {
+	for _, name := range s.inboundEmail.Purposes() {
+		p, _ := s.inboundEmail.PurposeOf(name)
+		if !p.Auto || p.Suffix != "" && !p.Workspace {
+			continue
+		}
+		if p.On != nil {
+			if on, err := p.On(ctx, s.pool, workspaceID); err != nil || !on {
+				return err
+			}
+		}
+		if cur, err := s.inboundEmail.Current(ctx, s.pool, workspaceID, name, nil); err != nil || cur != nil {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			addr, made, err := s.inboundEmail.Ensure(ctx, tx, inboundemail.Want{WorkspaceID: workspaceID, Purpose: name})
+			if err != nil || !made {
+				return err
+			}
+			return audit.Record(ctx, tx, audit.Event{WorkspaceID: workspaceID, ActorType: "system", Action: "inbound_address.created",
+				TargetType: "inbound_address", TargetID: addr.ID, RequestID: RequestID(ctx),
+				Data: map[string]any{"purpose": addr.Purpose, "brand_id": addr.BrandID, "automatic": true}, Props: map[string]any{"purpose": addr.Purpose, "automatic": true}})
+		})
+		if err != nil && !errors.Is(err, inboundemail.ErrNameTaken) {
+			return err
+		}
+	}
+	return nil
 }
 
 // inboundPurposeOn reports whether a registered purpose is on for the
@@ -143,6 +186,10 @@ func (s *Server) createInboundAddress(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", req.Purpose+" addresses are one per workspace, with a name Outflare picks: leave out brand and name")
 		return
 	}
+	if p.Workspace && req.Brand != "" {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", req.Purpose+" addresses are one per workspace: leave out brand")
+		return
+	}
 	want := inboundemail.Want{WorkspaceID: a.WorkspaceID, Purpose: req.Purpose, Name: req.Name, Replace: req.Replace || req.Name != "", By: a.personID()}
 	if b := strings.TrimSpace(req.Brand); b != "" {
 		id, err := s.brandIDFor(r.Context(), a.WorkspaceID, b)
@@ -156,7 +203,7 @@ func (s *Server) createInboundAddress(w http.ResponseWriter, r *http.Request) {
 		}
 		want.BrandID = &id
 	}
-	if p.Suffix != "" && want.BrandID == nil {
+	if p.Suffix != "" && !p.Workspace && want.BrandID == nil {
 		// A brand's address: the caller's brand, else the first.
 		b, err := ownBrand(r.Context(), s.pool, a, nil)
 		if s.allocError(w, r, err) {

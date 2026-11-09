@@ -17,8 +17,11 @@ import (
 
 func (s *Server) routesKnowledgeInsights(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/stats", s.onBrand(read, s.getKnowledgeStats))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/stats", s.inBrand(read, s.getKnowledgeStats))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/gaps", s.onBrand(read, s.listKnowledgeGaps))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/gaps", s.inBrand(read, s.listKnowledgeGaps))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/gaps/dismiss", s.onBrand(manage, s.dismissKnowledgeGap))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/gaps/dismiss", s.inBrand(manage, s.dismissKnowledgeGap))
 }
 
@@ -158,7 +161,7 @@ func (s *Server) dismissKnowledgeGap(w http.ResponseWriter, r *http.Request) {
 		tag, err := tx.Exec(ctx, `
 			UPDATE knowledge_questions SET dismissed_at = now()
 			WHERE workspace_id = $1 AND NOT answered AND dismissed_at IS NULL AND lower(btrim(question)) = lower($2)
-			  AND ($3::uuid[] IS NULL OR brand_id = ANY($3::uuid[]))`, a.WorkspaceID, in.Question, a.Brands)
+			  AND ($3::uuid[] IS NULL OR brand_id = ANY($3::uuid[]))`, a.WorkspaceID, in.Question, a.seenBrands())
 		if err != nil {
 			return err
 		}

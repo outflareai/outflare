@@ -159,6 +159,8 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_inbound_email_raw_purged_total` | | Raw inbound messages deleted after 30 days. |
 | `outflare_exchange_rates_fetched_total` | `outcome` (`success`, `error`) | Fetches of the European Central Bank's daily exchange rates, every 6 hours on servers with inbound email. |
 | `outflare_exchange_rates_newest_age_seconds` | | Age of the newest exchange rate stored, set after each fetch. |
+| `outflare_geoip_downloads_total` | `file` (`City`, `ASN`), `outcome` (`success`, `not_published`, `error`) | Downloads of DB-IP's monthly City Lite and ASN Lite files, checked every 6 hours by each server that answers visitors ([website tracking](website-tracking.md#where-visitors-are)). |
+| `outflare_geoip_file_age_seconds` | `file` | Age of the DB-IP file a server uses, from the day it was built; absent while the server has none. |
 | `outflare_exchange_rates_receipts_converted_total` | | AI receipts in other currencies given their US dollar amount once a rate arrived. |
 | `outflare_desktop_links_total` | `step` (`asked`, `approved`, `linked`) | Computers linking to Outflare for desktop. |
 | `outflare_desktop_reports_total` | `outcome` (`ok`, `invalid`, `error`) | Reports from Outflare for desktop. |
@@ -223,11 +225,17 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
+- `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.
 - `OutflareJobKindTakesWorkers`: one job kind has held over half the job workers for 10 minutes, so other jobs and, through the shared database connections, page loads wait.
 - `OutflareJobsReaped`: jobs ran past their lease (their worker died mid-job) and were put back in the queue, so they may run twice.
 - `OutflareJobsReleasedAtShutdown`: jobs of one kind were still running when a shutdown's grace ended, so their handler ignores cancellation; make it return when its context ends.
 - `OutflareCoverageChecksOverdue`: Coverage checks have waited more than fifteen minutes.
 - `OutflareCoverageChecksFailing`: a Coverage check exhausted its retries.
+- `OutflareTelegramUnreachable`: most company Telegram account checks and sign-ins couldn't reach Telegram for an hour (Telegram down, the server's outbound network, or workspaces' proxies).
+- `OutflareTelegramSignedOut` (info): a company Telegram account's session ended; its workspace has to scan the QR code again.
+- `OutflareTelegramSyncBehind` (warning): a company Telegram account hasn't synced its chats into the CRM for over 30 minutes.
+- `OutflareTelegramSummariesFailing` (info): most AI summaries of Telegram chats are failing for an hour.
 - `OutflareCoveragePagesUnreachable`: most recent Coverage page reads could not reach their site.
 - `OutflarePresenceSearchesFailing`: Presence web searches fail with connector errors more often than they work.
 - `OutflarePresenceCompetitorScansFailing`: scans of where competitors appear fail with connector, provider or internal errors more often than they work.

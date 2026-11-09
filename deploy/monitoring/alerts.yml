@@ -1364,12 +1364,54 @@ groups:
         annotations:
           summary: "Most linked computers haven't reported for over 12 hours: check the Outflare for desktop release and GET /v1/desktop/config, or the apps can't reach the server."
 
+      - alert: OutflareTelegramUnreachable
+        expr: sum(increase(outflare_telegram_steps_total{outcome="unreachable"}[1h])) > 10 and sum(increase(outflare_telegram_steps_total{outcome="unreachable"}[1h])) > sum(increase(outflare_telegram_steps_total{outcome=~"success|connected|needs_password"}[1h]))
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Most company Telegram account checks and sign-ins can't reach Telegram: check the telegram.* jobs in the log (Telegram down, the server's outbound network, or workspaces' proxies)."
+
+      - alert: OutflareTelegramSignedOut
+        expr: sum(increase(outflare_telegram_steps_total{outcome="signed_out"}[6h])) > 0
+        for: 0m
+        labels: { severity: info }
+        annotations:
+          summary: "A company Telegram account's session ended (ended from its phone, or by Telegram): its workspace sees it as signed out in Settings, Team and has to scan the QR code again. Many at once can mean Telegram is ending sessions from this server."
+
+      - alert: OutflareTelegramSyncBehind
+        expr: max(outflare_telegram_sync_lag_seconds) > 1800
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "A company Telegram account hasn't synced its chats into the CRM for over 30 minutes: check telegram_account.sync_failed in the engine log and the Telegram syncs panel (Telegram unreachable, a session ended, or the job queue behind)."
+
+      - alert: OutflareTelegramSummariesFailing
+        expr: sum(rate(outflare_telegram_summaries_total{outcome="failed"}[1h])) > 0.002 and sum(rate(outflare_telegram_summaries_total{outcome="failed"}[1h])) > sum(rate(outflare_telegram_summaries_total{outcome="success"}[1h]))
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Most AI summaries of Telegram chats are failing: check telegram_chat.summary_failed in the engine log (a workspace's AI key or model broken, or the provider down)."
+
       - alert: OutflareExchangeRatesStale
         expr: max(outflare_exchange_rates_newest_age_seconds) > 6 * 86400
         for: 1h
         labels: { severity: warning }
         annotations:
           summary: "The newest exchange rate is over 6 days old, so receipts in other currencies wait for their dollar amount: check exchange_rates.fetch_failed in the engine log (the European Central Bank's feed down or blocked)."
+
+      - alert: OutflareGeoFilesStale
+        expr: max(outflare_geoip_file_age_seconds) > 40 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "A server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data: check geoip.download_failed in the engine log (download.db-ip.com blocked, or OUTFLARE_GEOIP_DIR not writable). See the IP geolocation row."
+
+      - alert: OutflareGeoDownloadsFailing
+        expr: sum(increase(outflare_geoip_downloads_total{outcome="error"}[1d])) >= 4
+        for: 5m
+        labels: { severity: info }
+        annotations:
+          summary: "DB-IP file downloads failed at every check for a day: the files in use stay until they're stale. Check geoip.download_failed in the engine log. See the IP geolocation row."
 
       - alert: OutflareReviewRequestsBehind
         expr: max(outflare_jobs_oldest_due_seconds{kind="reviews.dispatch"}) > 300

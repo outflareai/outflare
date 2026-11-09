@@ -13,7 +13,8 @@ import (
 
 func TestBrandsContextAndFilters(t *testing.T) {
 	got := track.Capture(t)
-	h := freshServer(t)
+	env := freshEnv(t)
+	h := env.h
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
@@ -107,8 +108,9 @@ func TestBrandsContextAndFilters(t *testing.T) {
 	}
 	owner.must(404, "GET", base+"/context?brand=nope", nil)
 	// Brands share no memories, so none is left without a brand.
-	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 0.0 {
-		t.Fatalf("company memories: %v", n)
+	var noBrand int
+	if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM memories WHERE workspace_id = (SELECT id FROM workspaces WHERE id::text = $1 OR slug = $1) AND brand_id IS NULL`, ws).Scan(&noBrand); err != nil || noBrand != 0 {
+		t.Fatalf("company memories: %d (%v)", noBrand, err)
 	}
 
 	// Moving records: lists filter by brand.

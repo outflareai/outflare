@@ -423,6 +423,8 @@ func accountVia(ctx context.Context) string {
 		return "invite"
 	case "/v1/auth/verify-email":
 		return "email_link"
+	case "/v1/auth/app/complete":
+		return "app"
 	}
 	if strings.Contains(i.path, "signup") {
 		return "signup"

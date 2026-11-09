@@ -2,9 +2,11 @@
 package api
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -140,6 +142,9 @@ type Server struct {
 	helpWriteLimit *rateLimiter
 	// The public quote approval page, per network.
 	quoteApprovalLimit *rateLimiter
+	// The free public tools (tools.go), per network, and their short cache.
+	toolsIPLimit *rateLimiter
+	domainChecks domainCheckCache
 	// Live chat: requests per visitor's network, new chats per network an
 	// hour, and messages per visitor and per network.
 	chatIPLimit, chatStartLimit, chatSendLimit, chatNetSendLimit *rateLimiter
@@ -387,6 +392,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
 		helpIPLimit:      &rateLimiter{name: "help_ip", limit: 300, window: time.Minute},
+		toolsIPLimit:     &rateLimiter{name: "tools_ip", limit: 20, window: time.Minute},
 		helpWriteLimit:   &rateLimiter{name: "help_write", limit: 30, window: time.Hour},
 		portalLimit:      &rateLimiter{name: "partner_portal", limit: 20, window: time.Minute},
 		chatIPLimit:      &rateLimiter{name: "chat_ip", limit: 240, window: time.Minute},
@@ -461,10 +467,11 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 	if s.seoSyncer != nil && s.seoSyncer.Store != nil {
 		s.seoSyncer.Watch()
 	}
-	// AI receipts: only members forward them, to one address per
-	// workspace, and only where AI Accounts is on.
+	// AI receipts: only members forward them, to one readable address per
+	// workspace (geonode-receipts@...), made as soon as anyone looks, and
+	// only where AI Accounts is on.
 	s.inboundEmail.Register(inboundemail.PurposeAIReceipts, inboundemail.Purpose{
-		Handler: s.handleAIReceipt,
+		Handler: s.handleAIReceipt, Suffix: "receipts", Workspace: true, Auto: true,
 		On: func(ctx context.Context, q inboundemail.Querier, workspaceID string) (bool, error) {
 			return features.Enabled(ctx, q, workspaceID, features.AIAccounts)
 		},
@@ -496,6 +503,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAccess(mux)
 	s.routesRoles(mux)
 	s.routesLogin(mux)
+	s.routesAppSignIn(mux)
 	s.routesAccountEmail(mux)
 	s.routesPasskeys(mux)
 	s.routesMailboxes(mux)
@@ -544,6 +552,9 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesBrandDNS(mux)
 	s.routesStatus(mux)
 	s.routesTeams(mux)
+	s.routesStaff(mux)
+	s.routesStaffTelegram(mux)
+	s.routesTelegramChats(mux)
 	s.routesAllocation(mux)
 	s.routesSandbox(mux)
 	s.routesPlatforms(mux)
@@ -673,6 +684,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesAgentRuns(mux)
 	s.routesActions(mux)
 	s.routesPlaybooks(mux)
+	s.routesTools(mux)
 	s.routesPlaybookAutomations(mux)
 	s.routesLinkAssets(mux)
 	s.routesKits(mux)
@@ -709,7 +721,7 @@ func (s *Server) buildHandler() http.Handler {
 		_, p := mux.Handler(r)
 		return p
 	}
-	return requestID(s.fromEdge(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(withFields(h)))))))
+	return requestID(s.fromEdge(s.securityHeaders(s.logRequests(pattern, s.recoverer(s.trackingHostsOnly(s.portalAddress(withFields(h))))))))
 }
 
 // testWrap, set only by this package's tests, wraps every handler the
@@ -760,18 +772,51 @@ func (s *Server) openapi(w http.ResponseWriter, r *http.Request) {
 // spaHandler serves the built web app, falling back to index.html for client-side routes.
 func spaHandler(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
+	assets := http.StripPrefix("/assets/", webAssets(filepath.Join(dir, "assets")))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/assets/") {
+			assets.ServeHTTP(w, r)
+			return
+		}
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
-		if st, err := os.Stat(p); err != nil || st.IsDir() {
-			// App routes can end in a dot-name (/{workspace}/domains/acme-com.example),
-			// so only short paths that look like files get a 404.
-			if strings.Count(r.URL.Path, "/") >= 3 || !strings.Contains(filepath.Base(r.URL.Path), ".") {
-				http.ServeFile(w, r, filepath.Join(dir, "index.html"))
-				return
-			}
+		st, err := os.Stat(p)
+		switch {
+		case err == nil && !st.IsDir() && strings.HasSuffix(p, ".html"):
+			serveWebEntry(w, r, p)
+		case err == nil && !st.IsDir():
+			files.ServeHTTP(w, r)
+		// App routes can end in a dot-name (/{workspace}/domains/acme-com.example),
+		// so only short paths that look like files get a 404.
+		case strings.Count(r.URL.Path, "/") >= 3 || !strings.Contains(filepath.Base(r.URL.Path), "."):
+			serveWebEntry(w, r, filepath.Join(dir, "index.html"))
+		default:
+			files.ServeHTTP(w, r)
+		}
+	})
+}
+
+// webAssets serves the build's content-hashed files, which never change under one name.
+func webAssets(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if st, err := os.Stat(filepath.Join(dir, filepath.Clean("/"+r.URL.Path))); err == nil && !st.IsDir() {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// serveWebEntry validates by content, not file time, because a rollback serves an older file than browsers hold.
+func serveWebEntry(w http.ResponseWriter, r *http.Request, path string) {
+	page, err := os.ReadFile(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	sum := sha256.Sum256(page)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:16])+`"`)
+	http.ServeContent(w, r, path, time.Time{}, bytes.NewReader(page))
 }
 
 type ctxKey int

@@ -1,0 +1,46 @@
+id: partnerships-integrations
+version: 1
+title: Integration partnerships
+summary: A pipeline for technology partners, from scoping an integration to its listing going live in their marketplace or directory.
+
+option_sets:
+  - key: integration_partnership_stage
+    name: Integration stage
+    options:
+      - { key: prospect, label: Prospect }
+      - { key: contacted, label: Contacted }
+      - { key: scoping, label: Scoping }
+      - { key: building, label: Building }
+      - { key: listing_submitted, label: Listing submitted }
+      - { key: live, label: Live }
+      - { key: paused, label: Paused }
+      - { key: declined, label: Declined }
+  - key: integration_kind
+    name: Integration type
+    options:
+      - { key: native, label: Native }
+      - { key: api, label: API }
+      - { key: automation, label: Automation platform }
+      - { key: mcp, label: MCP }
+
+record_types:
+  - key: integration_partnership
+    name: Integration partnership
+    plural: Integration partnerships
+    description: |
+      A technology partner: what is built, who builds it, and where the
+      listing appears once it is live.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: integration_partnership_stage, filterable: true }
+      - { key: company, label: Partner, value_type: record_reference, target_type: account, filterable: true }
+      - { key: contact, label: Technical contact, value_type: record_reference, target_type: person }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: technical_owner, label: Our technical owner, value_type: actor_reference }
+      - { key: their_product, label: Their product, value_type: text }
+      - { key: marketplace, label: Marketplace or directory, value_type: text }
+      - { key: listing_url, label: Listing, value_type: url }
+      - { key: integration_kind, label: Integration type, value_type: select, option_set: integration_kind, filterable: true }
+      - { key: launch_on, label: Target launch, value_type: date, filterable: true }
+      - { key: co_marketing, label: Co-marketing planned, value_type: checkbox }
+      - { key: next_step, label: Next step, value_type: text }

@@ -31,15 +31,15 @@ inputs:
     example: Northpeak
 steps:
   - say: Read what the brand says about itself, its offers and the words its customers use.
-    tools: [getBrandContext, findKnowledgePassages]
+    tools: [getBrandContext, findBrandKnowledgePassages]
   - say: Read the brand's campaigns, their ads, keywords and the searches people made, and the drafts already written, so nothing is written twice.
-    tools: [listAdCampaigns, listAdItems, listAdKeywords, listAdSearchTerms, listAdDrafts]
+    tools: [listBrandAdCampaigns, listBrandAdItems, listBrandAdKeywords, listBrandAdSearchTerms, listAdDrafts]
   - say: For an ad group whose ads are old or far behind the others, write a new ad in the brand's own words.
     tools: [createAdDraft]
   - say: For searches that convert with no ad group of their own, write a new ad group with those keywords and an ad for them.
     tools: [createAdDraft]
   - say: A few weeks after a person turns a draft on, compare it with the ads beside it.
-    tools: [listAdDrafts, listAdItems]
+    tools: [listAdDrafts, listBrandAdItems]
 automation:
   schedule: weekly
 guardrails:

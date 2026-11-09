@@ -96,6 +96,8 @@ var errorCodes = []errorCode{
 	{"send_failed", []int{502}, "The email could not be sent through the mailbox.", true},
 	{"bad_signature", []int{401}, "An inbound webhook's signature does not match.", false},
 	{"link_expired", []int{410}, "The link for Outflare for desktop expired or was already used. Start linking again in the app.", false},
+	{"app_signin_expired", []int{410}, "The sign-in to the Outflare desktop app expired or was already approved. Start again in the app.", false},
+	{"app_signin_mismatch", []int{400}, "The code verifier doesn't match the sign-in's challenge: the code reached another app, or the app restarted. Start again in the app.", false},
 	{"expired", []int{410}, "The connect link has expired. Ask for a new one.", false},
 	{"cancelled", []int{410}, "The connect link was cancelled. Ask for a new one.", false},
 	{"used", []int{410}, "The link was already used.", false},

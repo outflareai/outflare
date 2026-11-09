@@ -43,8 +43,8 @@ func TestAdConversionsEventCountry(t *testing.T) {
 		"order-de":   {de, `{"location": {"country": "DE"}, "ip": "8.8.8.8"}`},
 		"order-none": {none, `{}`},
 	} {
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, context, message_id, occurred_at)
-			VALUES ($1, $2, 'track', 'order_completed', $3::jsonb, $4, now())`, ws, ev.rec, ev.context, msg); err != nil {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, context, message_id, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', $3::jsonb, $4, now())`, ws, ev.rec, ev.context, msg); err != nil {
 			t.Fatal(err)
 		}
 	}

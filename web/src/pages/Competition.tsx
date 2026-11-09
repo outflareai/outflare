@@ -745,9 +745,9 @@ function SearchCard({ brand, them, go }: { brand: string; them: Entry; go: Props
 const channelName: Record<string, string> = {
   x: "X", linkedin: "LinkedIn", youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", reddit: "Reddit",
   github: "GitHub", discord: "Discord", bluesky: "Bluesky", threads: "Threads", mastodon: "Mastodon", dev_to: "DEV", docker_hub: "Docker Hub",
-  trustpilot: "Trustpilot", g2: "G2", capterra: "Capterra", google: "Google reviews",
+  trustpilot: "Trustpilot", g2: "G2", capterra: "Capterra", sourceforge: "SourceForge", google: "Google reviews",
 };
-const isReviews = (kind: string) => ["trustpilot", "g2", "capterra", "google"].includes(kind);
+const isReviews = (kind: string) => ["trustpilot", "g2", "capterra", "sourceforge", "google"].includes(kind);
 
 // ProfilesCard: the competitor's social profiles and review pages. Ones
 // linked from its home page are suggested for a yes or no; confirmed ones

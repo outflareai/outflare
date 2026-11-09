@@ -907,6 +907,15 @@ var (
 		Namespace: namespace, Subsystem: "exchange_rates", Name: "receipts_converted_total",
 		Help: "AI receipts charged in another currency given their amount in US dollars once a rate arrived.",
 	})
+
+	geoDownloads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "geoip", Name: "downloads_total",
+		Help: "Downloads of DB-IP's monthly City Lite and ASN Lite files, by file (City, ASN) and outcome (success, not_published when the month's release isn't out yet, error).",
+	}, []string{"file", "outcome"})
+	geoAge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "geoip", Name: "file_age_seconds",
+		Help: "Age of the DB-IP file in use, from the day it was built, by file (City, ASN). Absent while a server has no such file. Set every 6 hours.",
+	}, []string{"file"})
 	quotaChecks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "quota", Name: "checks_total",
 		Help: "Quota checks an extension answered (package quota), by resource and outcome: allowed, refused, or error (the checker failed and the work was allowed).",
@@ -932,6 +941,38 @@ var (
 		Namespace: namespace, Subsystem: "desktop", Name: "devices",
 		Help: "Linked computers by state: reporting (a report in the last hour) or silent.",
 	}, []string{"state"})
+	telegramSteps = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "steps_total",
+		Help: "Company Telegram account sign-ins and checks, by step (login, password, check, logout) and outcome (connected, needs_password, expired, success, or why it failed: wrong_password, signed_out, bad_app, no_app, unreachable).",
+	}, []string{"step", "outcome"})
+	telegramSynced = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "synced_messages_total",
+		Help: "Messages copied from company Telegram accounts into the CRM, by direction (in, out).",
+	}, []string{"direction"})
+	telegramSyncRuns = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "sync_runs_total",
+		Help: "Syncs of company Telegram accounts, by outcome (live, importing, or why it failed: signed_out, no_app, bad_app, slowed_down, unreachable).",
+	}, []string{"outcome"})
+	telegramMatches = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "matches_total",
+		Help: "Synced Telegram chats matched to customer records, by result (confirmed: a record already had its Telegram id; suggested: waits for its holder; no_match).",
+	}, []string{"result"})
+	telegramSummaries = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "summaries_total",
+		Help: "AI summaries of synced Telegram chats, by outcome (success, no_ai: the workspace has no AI for it, failed: the AI call failed).",
+	}, []string{"outcome"})
+	telegramWaiting = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "waiting_chats",
+		Help: "Customer chats on company Telegram accounts where the customer wrote last and has waited past the alert time, across workspaces, as of the last count.",
+	})
+	telegramSyncLag = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "sync_lag_seconds",
+		Help: "How long ago the least recently synced company Telegram account was synced, as of the last count. Normal is a few minutes.",
+	})
+	telegramAccounts = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "telegram", Name: "accounts",
+		Help: "Company Telegram accounts signed in to Outflare, by status (connected, signed_out, failed...), across workspaces, as of the last count.",
+	}, []string{"status"})
 	desktopPurged = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "desktop", Name: "readings_purged_total",
 		Help: "Usage readings deleted after 90 days.",
@@ -989,8 +1030,10 @@ var own = []prometheus.Collector{
 	undoUnmerges, undoBatches, undoRowsReverted, undoBatchSeconds,
 	bulkEdits, bulkEditRecords, bulkEditSeconds,
 	ratesFetched, ratesAge, receiptsConverted,
+	geoDownloads, geoAge,
 	quotaChecks,
 	desktopLinks, desktopReports, desktopReadings, desktopReadFailures, desktopDevices, desktopPurged,
+	telegramSteps, telegramAccounts, telegramSynced, telegramSyncRuns, telegramSyncLag, telegramMatches, telegramSummaries, telegramWaiting,
 	buildInfo,
 }
 
@@ -1898,6 +1941,19 @@ func RatesFetched(outcome string, newest time.Time) {
 	}
 }
 
+// GeoDownloaded counts one attempt to download a month's DB-IP file.
+func GeoDownloaded(file, outcome string) { geoDownloads.WithLabelValues(file, outcome).Inc() }
+
+// GeoFileBuilt reports the age of the DB-IP file in use; a zero built means
+// the server has none, and the file's age is dropped.
+func GeoFileBuilt(file string, built, now time.Time) {
+	if built.IsZero() {
+		geoAge.DeleteLabelValues(file)
+		return
+	}
+	geoAge.WithLabelValues(file).Set(now.Sub(built).Seconds())
+}
+
 // ReceiptsConverted counts receipts given their US dollar amount late.
 func ReceiptsConverted(n int64) { receiptsConverted.Add(float64(n)) }
 
@@ -1976,5 +2032,39 @@ func CoverageOpportunities(suggested, won int) {
 func CompetitorFound(arrangement string, n int) {
 	if n > 0 {
 		competitorFound.WithLabelValues(arrangement).Add(float64(n))
+	}
+}
+
+// TelegramStep counts one step of a company Telegram account's sign-in or
+// check, with how it ended.
+func TelegramStep(step, outcome string) { telegramSteps.WithLabelValues(step, outcome).Inc() }
+
+// TelegramSynced counts messages copied in (direction in) or out.
+func TelegramSynced(direction string, n int) {
+	telegramSynced.WithLabelValues(direction).Add(float64(n))
+}
+
+// TelegramSyncRun counts one sync of an account, with how it ended.
+func TelegramSyncRun(outcome string) { telegramSyncRuns.WithLabelValues(outcome).Inc() }
+
+// TelegramMatch counts one chat matched, with its result.
+func TelegramMatch(result string) { telegramMatches.WithLabelValues(result).Inc() }
+
+// TelegramSummary counts one chat summary, with how it ended.
+func TelegramSummary(outcome string) { telegramSummaries.WithLabelValues(outcome).Inc() }
+
+// TelegramWaiting sets how many customers are waiting past the alert time.
+func TelegramWaiting(n int) { telegramWaiting.Set(float64(n)) }
+
+// TelegramSyncLag sets how far behind the least recently synced account is.
+func TelegramSyncLag(d time.Duration) { telegramSyncLag.Set(d.Seconds()) }
+
+var telegramStatuses = []string{"starting", "waiting_scan", "needs_password", "checking_password", "connected", "expired", "disconnecting", "signed_out", "failed"}
+
+// TelegramAccounts sets how many company Telegram accounts are in each
+// status.
+func TelegramAccounts(counts map[string]int) {
+	for _, st := range telegramStatuses {
+		telegramAccounts.WithLabelValues(st).Set(float64(counts[st]))
 	}
 }

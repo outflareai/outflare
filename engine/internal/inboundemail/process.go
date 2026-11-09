@@ -19,6 +19,7 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -203,6 +204,35 @@ func (s *Service) forwarder(ctx context.Context, tx pgx.Tx, e *Email, h mail.Hea
 		}
 		e.ForwardedBy, e.ForwarderID = c, userID
 		_, err = tx.Exec(ctx, `UPDATE inbound_forwarders SET last_email_at = now() WHERE workspace_id = $1 AND email = $2`, e.WorkspaceID, c)
+		return true, err
+	}
+	if e.ForwardedBy != "" {
+		return false, nil
+	}
+	// A Google Workspace rule copies mail for everyone at the company, and
+	// says nothing about who forwarded it. Mail to a colleague at a domain
+	// a member's own or linked address is at counts too, credited to that
+	// member. Personal mail providers' domains never count.
+	for _, c := range candidates {
+		at := strings.LastIndexByte(c, '@')
+		if at < 0 || outcomes.IsFreeMail(c[at+1:]) {
+			continue
+		}
+		var userID, via string
+		err := tx.QueryRow(ctx, `
+			SELECT user_id, email FROM (
+				SELECT f.user_id::text AS user_id, f.email, f.created_at FROM inbound_forwarders f WHERE f.workspace_id = $1 AND split_part(f.email, '@', 2) = $2
+				UNION ALL
+				SELECT u.id::text, lower(u.email), m.created_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 AND split_part(lower(u.email), '@', 2) = $2
+			) x ORDER BY created_at LIMIT 1`, e.WorkspaceID, c[at+1:]).Scan(&userID, &via)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		e.ForwardedBy, e.ForwarderID = c, userID
+		_, err = tx.Exec(ctx, `UPDATE inbound_forwarders SET last_email_at = now() WHERE workspace_id = $1 AND email = $2`, e.WorkspaceID, via)
 		return true, err
 	}
 	return false, nil

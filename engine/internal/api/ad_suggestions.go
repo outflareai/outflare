@@ -26,10 +26,15 @@ import (
 
 func (s *Server) routesAdSuggestions(mux *http.ServeMux) {
 	manage := auth.ScopeAdsManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/suggestions", s.onBrand(auth.ScopeAnalyticsRead, s.listAdSuggestions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/suggestions", s.inBrand(auth.ScopeAnalyticsRead, s.listAdSuggestions))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/refresh", s.onBrand(manage, s.refreshAdSuggestions))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/refresh", s.inBrand(manage, s.refreshAdSuggestions))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/approve", s.onBrand(manage, s.approveAdSuggestion))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/approve", s.inBrand(manage, s.approveAdSuggestion))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/suggestions/{id}/dismiss", s.onBrand(manage, s.dismissAdSuggestion))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/suggestions/{id}/dismiss", s.inBrand(manage, s.dismissAdSuggestion))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/recommendations", s.onBrand(auth.ScopeAnalyticsRead, s.listAdRecommendations))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/recommendations", s.inBrand(auth.ScopeAnalyticsRead, s.listAdRecommendations))
 }
 

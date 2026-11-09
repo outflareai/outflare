@@ -40,17 +40,29 @@ var (
 
 func (s *Server) routesKnowledge(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/collections", s.onBrand(read, s.listKnowledgeCollections))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/collections", s.inBrand(read, s.listKnowledgeCollections))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/collections", s.onBrand(manage, s.createKnowledgeCollection))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/collections", s.inBrand(manage, s.createKnowledgeCollection))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/knowledge/collections/{id}", s.onBrand(manage, s.updateKnowledgeCollection))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/knowledge/collections/{id}", s.inBrand(manage, s.updateKnowledgeCollection))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/knowledge/collections/{id}", s.onBrand(manage, s.deleteKnowledgeCollection))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/knowledge/collections/{id}", s.inBrand(manage, s.deleteKnowledgeCollection))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/items", s.onBrand(read, s.listKnowledgeItems))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/items", s.inBrand(read, s.listKnowledgeItems))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/items", s.onBrand(manage, s.createKnowledgeItem))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/items", s.inBrand(manage, s.createKnowledgeItem))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/items/{id}", s.onBrand(read, s.getKnowledgeItem))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/items/{id}", s.inBrand(read, s.getKnowledgeItem))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/knowledge/items/{id}", s.onBrand(manage, s.updateKnowledgeItem))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/knowledge/items/{id}", s.inBrand(manage, s.updateKnowledgeItem))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/knowledge/items/{id}", s.onBrand(manage, s.deleteKnowledgeItem))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/knowledge/items/{id}", s.inBrand(manage, s.deleteKnowledgeItem))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/items/{id}/restore", s.onBrand(manage, s.restoreKnowledgeItem))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/items/{id}/restore", s.inBrand(manage, s.restoreKnowledgeItem))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/items/{id}/versions", s.onBrand(read, s.listKnowledgeVersions))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/items/{id}/versions", s.inBrand(read, s.listKnowledgeVersions))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/items/{id}/versions/{version}/restore", s.onBrand(manage, s.restoreKnowledgeVersion))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/items/{id}/versions/{version}/restore", s.inBrand(manage, s.restoreKnowledgeVersion))
 }
 
@@ -295,7 +307,7 @@ func (s *Server) updateKnowledgeCollection(w http.ResponseWriter, r *http.Reques
 			if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); err != nil {
 				return err
 			}
-			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
+			if a.seenBrands() != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move folders between your own brands")
 			}
 			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, brand); err != nil {
@@ -788,7 +800,7 @@ func (s *Server) updateKnowledgeItem(w http.ResponseWriter, r *http.Request) {
 			if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); err != nil {
 				return err
 			}
-			if a.Brands != nil && (brand == nil || !a.writes(brand)) {
+			if a.seenBrands() != nil && (brand == nil || !a.writes(brand)) {
 				return errInvalid("you can only move knowledge between your own brands")
 			}
 			if err := refuseNoBrand(ctx, tx, a.WorkspaceID, brand); err != nil {

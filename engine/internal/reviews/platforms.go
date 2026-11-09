@@ -1,5 +1,5 @@
 // Package reviews reads a brand's public review pages (Trustpilot, G2,
-// Capterra, Google) and works out the numbers Outflare keeps about them:
+// Capterra, SourceForge, Google) and works out the numbers Outflare keeps about them:
 // the platform's own score and count, each review with its rating, and
 // Outflare's own review score and momentum across platforms. Pages come
 // from the workspace's own page reader (Geonode); nothing here fetches
@@ -16,17 +16,18 @@ import (
 
 // The platforms Outflare reads, as brand link kinds.
 const (
-	Trustpilot = "trustpilot"
-	G2         = "g2"
-	Capterra   = "capterra"
-	Google     = "google_reviews"
+	Trustpilot  = "trustpilot"
+	G2          = "g2"
+	Capterra    = "capterra"
+	SourceForge = "sourceforge"
+	Google      = "google_reviews"
 )
 
 // Platforms are the review platforms Outflare reads, in display order.
-var Platforms = []string{Trustpilot, G2, Capterra, Google}
+var Platforms = []string{Trustpilot, G2, Capterra, SourceForge, Google}
 
 // Names are the platforms' names as people know them.
-var Names = map[string]string{Trustpilot: "Trustpilot", G2: "G2", Capterra: "Capterra", Google: "Google"}
+var Names = map[string]string{Trustpilot: "Trustpilot", G2: "G2", Capterra: "Capterra", SourceForge: "SourceForge", Google: "Google"}
 
 // IsPlatform says whether a brand link kind is a review page.
 func IsPlatform(kind string) bool {
@@ -52,6 +53,7 @@ var (
 	g2Slug           = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,150}$`)
 	capterraID       = regexp.MustCompile(`^[0-9]{1,12}$`)
 	capterraSlug     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,150}$`)
+	sourceForgeSlug  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,150}$`)
 )
 
 // host is a lowercase host without www.
@@ -70,6 +72,8 @@ func KindOf(u *url.URL) string {
 		return G2
 	case isCapterraHost(h):
 		return Capterra
+	case h == "sourceforge.net":
+		return SourceForge
 	case h == "maps.app.goo.gl" || h == "g.page" || (h == "goo.gl" && strings.HasPrefix(path, "/maps")):
 		return Google
 	case isGoogleHost(h) && (strings.HasPrefix(path, "/maps") || (h == "search.google.com" && strings.HasPrefix(path, "/local/"))):
@@ -136,8 +140,34 @@ func ParsePage(raw string) (Page, bool) {
 			return Page{}, false
 		}
 		return Page{Platform: Capterra, ID: parts[1], URL: "https://www.capterra.com/p/" + parts[1] + "/" + parts[2] + "/reviews/"}, true
+	case SourceForge:
+		return sourceForgePage(parts)
 	case Google:
 		return googlePage(u)
+	}
+	return Page{}, false
+}
+
+// sourceForgePage reads SourceForge's two kinds of listing: a business
+// software product (sourceforge.net/software/product/Northpeak/) and an
+// open source project (sourceforge.net/projects/northpeak/reviews/).
+// Their ids say which, so a product and a project with one name are two
+// pages.
+func sourceForgePage(parts []string) (Page, bool) {
+	switch {
+	case len(parts) >= 3 && parts[0] == "software" && parts[1] == "product":
+		// The product's own page carries its rating and its reviews.
+		slug, _ := url.PathUnescape(parts[2])
+		if !sourceForgeSlug.MatchString(slug) {
+			return Page{}, false
+		}
+		return Page{Platform: SourceForge, ID: "product:" + strings.ToLower(slug), URL: "https://sourceforge.net/software/product/" + slug + "/"}, true
+	case len(parts) >= 2 && parts[0] == "projects":
+		slug := strings.ToLower(parts[1])
+		if !sourceForgeSlug.MatchString(slug) {
+			return Page{}, false
+		}
+		return Page{Platform: SourceForge, ID: "project:" + slug, URL: "https://sourceforge.net/projects/" + slug + "/reviews/"}, true
 	}
 	return Page{}, false
 }
@@ -207,9 +237,10 @@ func PageURL(p Page, n int) string {
 			return p.URL + "?order=most_recent"
 		}
 		return p.URL + "?order=most_recent&page=" + strconv.Itoa(n)
-	case Capterra:
+	case Capterra, SourceForge:
 		// Capterra sorts in the browser and ignores a sort in the address,
-		// so pages are read in its own order (see NewestFirst).
+		// so pages are read in its own order (see NewestFirst). SourceForge
+		// lists its own way too; a read stops at a page it already read.
 		if n <= 1 {
 			return p.URL
 		}
@@ -220,18 +251,20 @@ func PageURL(p Page, n int) string {
 
 // RenderJS says whether a platform's page must be read in a browser that
 // runs its scripts: Google builds the page in the browser, and G2,
-// Trustpilot and Capterra answer anything else with a bot check. Reading
+// Trustpilot, Capterra and SourceForge answer anything else with a bot
+// check. Reading
 // them in a browser from the start sends each page to the reader once,
 // rather than once without and again in a browser. A platform without is
 // read again in a browser when a read shows no reviews.
 func RenderJS(platform string) bool {
-	return platform == Google || platform == G2 || platform == Trustpilot || platform == Capterra
+	return platform == Google || platform == G2 || platform == Trustpilot || platform == Capterra || platform == SourceForge
 }
 
 // NewestFirst says whether a platform's pages list reviews newest first,
 // so a daily read can stop at the first review it already has. Capterra's
-// pages list the most helpful first.
-func NewestFirst(platform string) bool { return platform != Capterra }
+// pages list the most helpful first, and SourceForge's aren't promised to
+// be newest first, so both are read in full each day.
+func NewestFirst(platform string) bool { return platform != Capterra && platform != SourceForge }
 
 // SearchQueries are the web searches that find a brand's page on each
 // platform it can be searched for. Google places are added by pasting
@@ -246,19 +279,20 @@ func SearchQueries(name, website string) map[string]string {
 	if name != "" {
 		out[G2] = `site:g2.com/products "` + name + `" reviews`
 		out[Capterra] = `site:capterra.com "` + name + `" reviews`
+		out[SourceForge] = `site:sourceforge.net "` + name + `" reviews`
 	}
 	return out
 }
 
 // Matches says whether a page found by a search is the brand's own: a
-// Trustpilot page for its website, or a G2 or Capterra page whose address
-// names the brand.
+// Trustpilot page for its website, or a G2, Capterra or SourceForge page
+// whose address names the brand.
 func Matches(p Page, name, website string) bool {
 	website = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(website)), "www.")
 	switch p.Platform {
 	case Trustpilot:
 		return website != "" && strings.TrimPrefix(p.ID, "www.") == website
-	case G2, Capterra:
+	case G2, Capterra, SourceForge:
 		key := slugOf(name)
 		if key == "" {
 			return false
@@ -272,8 +306,11 @@ func Matches(p Page, name, website string) bool {
 		if p.Platform == G2 && len(parts) > 1 {
 			slug = parts[1]
 		}
-		if p.Platform == Capterra && len(parts) > 2 {
+		if (p.Platform == Capterra || p.Platform == SourceForge) && len(parts) > 2 {
 			slug = parts[2]
+		}
+		if p.Platform == SourceForge && parts[0] == "projects" {
+			slug = parts[1]
 		}
 		s := slugOf(slug)
 		return s == key || strings.HasPrefix(s, key+"-") || strings.TrimSuffix(s, "-app") == key

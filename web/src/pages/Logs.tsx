@@ -7,6 +7,7 @@ import { ago, stamp } from "../format";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
+import { logsAPI, logsBase } from "@/lib/scoped";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { HookEvents } from "@/components/live-updates";
@@ -57,8 +58,8 @@ function writeURL(f: Filters, open: string | undefined, view: string, brand?: st
 }
 
 // The API query for the filters.
-function query(f: Filters, brand: { brand?: string }) {
-  const q: Record<string, string> = { ...brand };
+function query(f: Filters) {
+  const q: Record<string, string> = {};
   for (const k of keys) {
     const v = k === "level" ? f.level.join(",") : f[k].trim();
     if (v) q[k] = v;
@@ -89,9 +90,13 @@ const errorCatalog = () =>
 // The path with the workspace left out: /v1/workspaces/acme/leads is …/leads.
 const shortPath = (p: string) => p.replace(/^\/v1\/workspaces\/[^/]+/, "…");
 
-export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolean }) {
+// team shows the team's calls, about no brand (workspace Settings);
+// otherwise the picked brand's.
+export function Logs({ ws, canManage = false, team }: { ws: string; canManage?: boolean; team?: boolean }) {
   const start = useMemo(readURL, []);
-  const { query: brandQuery, brand, byId } = useBrand(ws);
+  const { brand: picked, byId } = useBrand(ws);
+  const brand = team ? undefined : picked;
+  const logs$ = useMemo(() => logsAPI(ws, brand?.id), [ws, brand?.id]);
   const [view, setView] = useState(start.view);
   const [f, setF] = useState<Filters>(start.f);
   const [q, setQ] = useState(start.f.q);
@@ -117,7 +122,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
     return () => removeEventListener("keydown", onKey);
   }, []);
 
-  const params = useMemo(() => query(f, brandQuery), [f, brandQuery]);
+  const params = useMemo(() => query(f), [f]);
 
   useEffect(() => writeURL(f, open, view, brand?.handle), [f, open, view, brand]);
 
@@ -130,9 +135,9 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
   const load = useCallback(async () => {
     setError("");
     const [list, chart, tail] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, limit: 100 } } }),
-      api.GET("/v1/workspaces/{ws}/logs/histogram", { params: { path: { ws }, query: params } }),
-      api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, start: "latest" as const } } }),
+      logs$.list({ ...params, limit: 100 }),
+      logs$.histogram(params),
+      logs$.list({ ...params, start: "latest" }),
     ]);
     if (list.error) {
       setError(errorMessage(list.error));
@@ -143,7 +148,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
     setNext(list.data.next_cursor ?? null);
     after.current = tail.data?.next_cursor ?? null;
     if (chart.data) setHist({ bucket: chart.data.bucket_seconds, since: chart.data.since, until: chart.data.until, data: chart.data.data });
-  }, [ws, params]);
+  }, [logs$, params]);
 
   useEffect(() => {
     if (view === "requests") void load();
@@ -151,7 +156,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
 
   const older = async () => {
     if (!next) return;
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, limit: 100, cursor: next } } });
+    const { data, error } = await logs$.list({ ...params, limit: 100, cursor: next });
     if (error) return toast(errorMessage(error), "error");
     setLogs((cur) => [...(cur ?? []), ...data.data]);
     setNext(data.next_cursor ?? null);
@@ -166,11 +171,11 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
     const tick = async () => {
       if (stop || document.hidden || !after.current) return;
       if (++n % 5 === 0) {
-        api.GET("/v1/workspaces/{ws}/logs/histogram", { params: { path: { ws }, query: params } }).then(({ data: c }) => {
+        logs$.histogram(params).then(({ data: c }) => {
           if (!stop && c) setHist({ bucket: c.bucket_seconds, since: c.since, until: c.until, data: c.data });
         });
       }
-      const { data } = await api.GET("/v1/workspaces/{ws}/logs", { params: { path: { ws }, query: { ...params, cursor: after.current, limit: 500 } } });
+      const { data } = await logs$.list({ ...params, cursor: after.current, limit: 500 });
       if (stop || !data) return;
       after.current = data.next_cursor ?? after.current;
       if (data.data.length === 0) return;
@@ -183,7 +188,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
       stop = true;
       clearInterval(t);
     };
-  }, [live, view, ws, params]);
+  }, [live, view, logs$, params]);
 
   const set = (patch: Partial<Filters>, what: string) => {
     setF((cur) => ({ ...cur, ...patch }));
@@ -193,7 +198,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
   const active = keys.filter((k) => k !== "since" && k !== "until" && (k === "level" ? f.level.length > 0 : f[k] !== ""));
   const index = logs?.findIndex((l) => l.id === open) ?? -1;
 
-  const exportURL = (format: "csv" | "ndjson") => `/v1/workspaces/${encodeURIComponent(ws)}/logs/export?${new URLSearchParams({ ...params, format })}`;
+  const exportURL = (format: "csv" | "ndjson") => `${logsBase(ws, brand?.id)}/logs/export?${new URLSearchParams({ ...params, format })}`;
   const download = (format: "csv" | "ndjson") => {
     track("ui.logs_exported", { format });
     const a = document.createElement("a");
@@ -365,6 +370,7 @@ export function Logs({ ws, canManage = false }: { ws: string; canManage?: boolea
 
       {open && (
         <LogSheet
+          brand={brand?.id}
           ws={ws}
           id={open}
           brandName={(id) => byId(id)?.name}
@@ -435,15 +441,15 @@ function Histogram({ data, bucket, since, until, onZoom }: { data: Bucket[]; buc
 
 // One call: what it was, who made it, why it failed and what it changed.
 // ↑ and ↓ (or k and j) step to the newer and older call.
-function LogSheet({ ws, id, brandName, onClose, onFilter, newer, older }: { ws: string; id: string; brandName: (id?: string | null) => string | undefined; onClose: () => void; onFilter: (patch: Partial<Filters>, what: string) => void; newer?: () => void; older?: () => void }) {
+function LogSheet({ ws, brand, id, brandName, onClose, onFilter, newer, older }: { ws: string; brand?: string; id: string; brandName: (id?: string | null) => string | undefined; onClose: () => void; onFilter: (patch: Partial<Filters>, what: string) => void; newer?: () => void; older?: () => void }) {
   const [data, setData] = useState<{ log: LogEntry; audit_events: AuditEvent[] } | null>(null);
   const [error, setError] = useState("");
   const [info, setInfo] = useState<ErrorInfo>();
   useEffect(() => {
     setData(null);
     setError("");
-    api.GET("/v1/workspaces/{ws}/logs/{id}", { params: { path: { ws, id } } }).then(({ data, error }) => (error ? setError(errorMessage(error)) : setData(data)));
-  }, [ws, id]);
+    logsAPI(ws, brand).get(id).then(({ data, error }) => (error ? setError(errorMessage(error)) : setData(data)));
+  }, [ws, brand, id]);
   const l = data?.log;
   useEffect(() => {
     setInfo(undefined);

@@ -16,6 +16,7 @@ func TestAgentsActThroughTheActionLayer(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	ctx := context.Background()
 
 	create := func(spec api.AgentSpec) (string, error) {
@@ -82,7 +83,7 @@ func TestAgentsActThroughTheActionLayer(t *testing.T) {
 		t.Fatalf("action: %v", act)
 	}
 	// A person approves it, and it runs as the agent.
-	if v := owner.must(200, "POST", base+"/actions/"+act["id"].(string)+"/approve", nil); v["status"] != "executed" {
+	if v := owner.must(200, "POST", bb+"/actions/"+act["id"].(string)+"/approve", nil); v["status"] != "executed" {
 		t.Fatalf("approved: %v", v)
 	}
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 1 {

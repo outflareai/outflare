@@ -48,7 +48,7 @@ func answer(ctx context.Context, pool *pgxpool.Pool, store *connectors.Store, o 
 	// What a refused or failed call cost is still spent.
 	if out.Cost.USD > 0 {
 		note := fmt.Sprintf("AI answer from %s (%s)", engine, q.Country)
-		if rerr := recordCostRef(ctx, pool, o, seosync.UnitUSD, "", note, ref, out.Cost); rerr != nil {
+		if rerr := recordCostRef(ctx, pool, o, seosync.UnitUSD, "", note, ref, "", out.Cost); rerr != nil {
 			return out, rerr
 		}
 	}

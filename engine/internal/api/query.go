@@ -117,7 +117,7 @@ var queryTables = []queryTable{
 	{"broadcasts", auth.ScopeEmailsRead, "Email broadcasts and how many they reached."},
 	{"visits", auth.ScopeAnalyticsRead, "Website visits from the Outflare site snippet, with UTM tags."},
 	{"social_posts", auth.ScopeSocialRead, "Posts on the workspace's own social accounts, with their numbers."},
-	{"reviews", auth.ScopeSocialRead, "Reviews on the brands' review pages (Trustpilot, G2, Capterra, Google); rating is 1 to 5."},
+	{"reviews", auth.ScopeSocialRead, "Reviews on the brands' review pages (Trustpilot, G2, Capterra, SourceForge, Google); rating is 1 to 5."},
 	{"review_page_days", auth.ScopeSocialRead, "Each review page's numbers by day: the platform's score and count, new reviews, stars and Outflare's review score."},
 	{"backlinks", auth.ScopeSEORead, "Links from other sites to the brands' websites: status live or lost, the linking domain's strength (source_rating, 0 to 100), traffic and spam score, and when each was found, lost or regained."},
 	{"link_prospects", auth.ScopeSEORead, "Pages that could link to a website (link building): how each was found (method), its score, and where its pitch stands (stage: prospect, excluded, pitched, replied, agreed, live, declined, removed) with when."},

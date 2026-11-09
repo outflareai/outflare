@@ -15,10 +15,13 @@ import (
 // Search results: one search engine results page for any query, on the
 // workspace's own SERP connection (DataForSEO or Geonode), paid within its
 // budget (package ranks). Link building playbooks use it to find resource
-// pages, the pages that rank for a topic and pages that name a brand.
+// pages, the pages that rank for a topic and pages that name a brand. A
+// search is for one brand (its route), so what it costs and, when an
+// agent asks, the change waiting for a person show in that brand alone.
 
 func (s *Server) routesSearchResults(mux *http.ServeMux) {
-	mux.HandleFunc("POST /v1/workspaces/{ws}/search-results", s.inWorkspace(auth.ScopeSEOManage, s.readSearchResults))
+	mux.HandleFunc("POST /v1/brands/{brand}/search-results", s.onBrand(auth.ScopeSEOManage, s.readSearchResults))
+	mux.HandleFunc("POST /v1/workspaces/{ws}/search-results", s.inBrand(auth.ScopeSEOManage, s.readSearchResults))
 }
 
 func (s *Server) readSearchResults(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +108,7 @@ func (s *Server) readSearchResults(w http.ResponseWriter, r *http.Request) {
 	}
 	props := map[string]any{"connector": connector, "engine": res.Engine, "country": in.Country, "device": in.Device, "depth": in.Depth,
 		"results": len(res.Items), "spent": res.Spent, "unit": res.Unit}
-	data := map[string]any{"query": in.Query}
+	data := map[string]any{"query": in.Query, "brand_id": a.orRoute(nil)}
 	for k, v := range props {
 		data[k] = v
 	}

@@ -100,11 +100,17 @@ func (s *Server) scanChatWidget(row pgx.Row) (supportChatWidgetView, error) {
 func (s *Server) routesSupportChat(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	base := "/v1/workspaces/{ws}/support/chat-widgets"
+	brandBase := "/v1/brands/{brand}/support/chat-widgets"
 	mux.HandleFunc("GET "+base, s.inBrand(read, s.listChatWidgets))
+	mux.HandleFunc("GET "+brandBase, s.onBrand(read, s.listChatWidgets))
 	mux.HandleFunc("POST "+base, s.inBrand(manage, s.createChatWidget))
+	mux.HandleFunc("POST "+brandBase, s.onBrand(manage, s.createChatWidget))
 	mux.HandleFunc("PATCH "+base+"/{id}", s.inBrand(manage, s.updateChatWidget))
+	mux.HandleFunc("PATCH "+brandBase+"/{id}", s.onBrand(manage, s.updateChatWidget))
 	mux.HandleFunc("DELETE "+base+"/{id}", s.inBrand(manage, s.deleteChatWidget))
+	mux.HandleFunc("DELETE "+brandBase+"/{id}", s.onBrand(manage, s.deleteChatWidget))
 	mux.HandleFunc("POST "+base+"/{id}/identity-secret", s.inBrand(manage, s.rotateChatSecret))
+	mux.HandleFunc("POST "+brandBase+"/{id}/identity-secret", s.onBrand(manage, s.rotateChatSecret))
 
 	// What the website loads: no account, the widget's key in the path.
 	mux.HandleFunc("GET /chat/{key}/widget.js", s.chatLoader)

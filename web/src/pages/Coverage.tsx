@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { CoverageExtraction, CoverageOutcomes } from "./brand-coverage/enrichment";
 import { PlacementParties } from "./brand-coverage/parties";
 import { PresenceMomentum } from "./brand-coverage/momentum";
-import { PresenceFound } from "./brand-coverage/found";
+import { PresenceFound, type FoundView } from "./brand-coverage/found";
+import { Partnerships } from "./brand-coverage/partnerships";
 import { WebSearches } from "./brand-coverage/web-searches";
 import { CompetitorPresence } from "./brand-coverage/competitors";
 import { Opportunities } from "./brand-coverage/opportunities";
@@ -68,7 +69,7 @@ type Props = {
   go: (tab: Tab, item?: string) => void;
 };
 type Section =
-  | "overview"
+  | "partnerships"
   | "tasks"
   | "placements"
   | "publishers"
@@ -81,9 +82,8 @@ type Section =
   | "settings"
   | "delivery_reports";
 const sections: [Section, string][] = [
-  ["overview", "Overview"],
   ["candidates", "Found"],
-  ["tasks", "Work queue"],
+  ["partnerships", "Partnerships"],
   ["placements", "Placements"],
   ["publishers", "Publishers"],
   ["commercial", "Commercial"],
@@ -106,7 +106,7 @@ const hints: Partial<Record<Resource, string>> = {
   tasks:
     "Evidence, ownership and follow-up in one place. Snoozing a task does not pause monitoring.",
   candidates:
-    "Everywhere your brand was found: pages that link to you or mention you, from your links, news, social, web searches and AI answers. Each page is read once to check it's about you. Say About us to make it a placement, or Not us to hide it.",
+    "Everywhere your brand was found: pages that link to you or mention you, from your links, news, social, web searches and AI answers. Each page is read once to check it's about you.",
   agreements:
     "One agreement can fund many placements. Its commitment is counted once.",
   rules:
@@ -184,6 +184,9 @@ function CoverageBrand({
   myId,
 }: Props & { brand: string }) {
   const initial = new URLSearchParams(location.search);
+  // Found is the first tab. The Overview tab was removed (it repeated
+  // Reports), so old ?view=overview links open Found, and the Work queue
+  // is Found's Follow-ups view, so ?view=tasks opens that.
   const [section, setSection] = useState<Section>(
     [
       ...sections.map(([s]) => s),
@@ -192,7 +195,10 @@ function CoverageBrand({
       "delivery_reports",
     ].includes(initial.get("view") as Section)
       ? (initial.get("view") as Section)
-      : "overview",
+      : "candidates",
+  );
+  const [foundView, setFoundView] = useState<FoundView>(
+    initial.get("view") === "tasks" ? "followups" : "about",
   );
   const [commercial, setCommercial] = useState<Resource>("agreements");
   const [placementView, setPlacementView] = useState<{
@@ -209,14 +215,15 @@ function CoverageBrand({
   const resource: Resource =
     section === "commercial"
       ? commercial
-      : section === "overview" ||
-          section === "reports" ||
+      : section === "reports" ||
+          section === "partnerships" ||
           section === "settings" ||
           section === "competitors" ||
           section === "opportunities"
         ? "placements"
         : section;
   const def = defs.find((d) => d.name === resource);
+  const tasksDef = defs.find((d) => d.name === "tasks");
   const manage = can(
     def?.finance ? "coverage.finance.manage" : "coverage.manage",
   );
@@ -331,20 +338,30 @@ function CoverageBrand({
       <ErrorText>{error}</ErrorText>
       {section === "settings" ? (
         <CoverageSettings go={go} can={can} />
+      ) : section === "partnerships" ? (
+        <Partnerships
+          ws={ws}
+          brand={brand}
+          can={can}
+          openRecord={(id) => go("people", id)}
+        />
       ) : section === "opportunities" ? (
         <Opportunities brand={brand} manage={can("coverage.manage")} myId={myId} />
       ) : section === "competitors" ? (
         <CompetitorPresence ws={ws} brand={brand} manage={can("coverage.manage")} />
-      ) : section === "overview" || section === "reports" ? (
+      ) : section === "reports" ? (
         <CoverageOverview
           brand={brand}
-          detailed={section === "reports"}
+          detailed
           definition={defs.find((d) => d.name === "placements")}
           manage={can("coverage.manage")}
           reload={reload}
           finance={can("coverage.finance.read")}
           analytics={can("analytics.read")}
-          onWork={() => navigate("tasks")}
+          onWork={() => {
+            setFoundView("followups");
+            navigate("candidates");
+          }}
           onFound={() => navigate("candidates")}
           onPlacements={(basic, advanced) => {
             setPlacementView({ basic, advanced });
@@ -410,14 +427,45 @@ function CoverageBrand({
                   {resource === "tasks"
                     ? "task"
                     : resource === "candidates"
-                      ? "candidate"
+                      ? "page"
                       : resource.replace(/s$/, "")}
                 </Button>
               )}
             </div>
           </div>
           {section === "candidates" && (
-            <PresenceFound key={reload} brand={brand} manage={manage} />
+            <PresenceFound
+              key={reload}
+              brand={brand}
+              manage={manage}
+              view={foundView}
+              setView={setFoundView}
+              followUps={
+                <>
+                  {manage && (
+                    <Button
+                      variant="ghost"
+                      onClick={() => setEditing({ resource: "tasks" })}
+                    >
+                      <Plus className="size-3.5" />
+                      Add follow-up
+                    </Button>
+                  )}
+                  {tasksDef && (
+                    <CoverageList
+                      myId={myId}
+                      ws={ws}
+                      manage={manage}
+                      canSaveViews={can("coverage.manage")}
+                      brand={brand}
+                      definition={tasksDef}
+                      reload={reload}
+                      open={(row) => open("tasks", row)}
+                    />
+                  )}
+                </>
+              }
+            />
           )}
           {section === "candidates" && (
             <WebSearches ws={ws} brand={brand} manage={manage} />

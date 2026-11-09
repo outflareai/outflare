@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -91,5 +92,62 @@ func TestAIReceipts(t *testing.T) {
 	emails := owner.must(200, "GET", base+"/inbound-emails", nil)["data"].([]any)
 	if emails[0].(map[string]any)["status"] != "ignored" || emails[0].(map[string]any)["reason"] != "not_a_receipt" {
 		t.Fatalf("not a receipt: %v", emails[0])
+	}
+}
+
+// The workspace's receipts address is made as soon as anyone opens the
+// addresses list, readable (<slug>-receipts), once, by the system; a name
+// the extension uses at the same domain is skipped.
+func TestAIReceiptsAddressIsAutomatic(t *testing.T) {
+	inbound := &inboundemail.Service{}
+	inbound.Enable("in.example.test", nil) // delivered by the extension only
+	e := freshEnvWith(t, func(o *api.Options) { o.InboundEmail = inbound })
+	inbound.Pool = e.pool
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+
+	// Off until AI Accounts is on.
+	if got := owner.must(200, "GET", base+"/inbound-addresses", nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("made with AI Accounts off: %v", got)
+	}
+	if err := pgx.BeginFunc(t.Context(), e.pool, func(tx pgx.Tx) error {
+		_, err := features.Set(t.Context(), tx, ws, features.AIAccounts, true, "")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var slug string
+	if err := e.pool.QueryRow(t.Context(), `SELECT slug FROM workspaces WHERE id::text = $1 OR slug = $1`, ws).Scan(&slug); err != nil {
+		t.Fatal(err)
+	}
+	// Something else at the domain already has <slug>-receipts.
+	inbound.SetTaken(func(_ context.Context, address string) (bool, error) {
+		return address == slug+"-receipts@in.example.test", nil
+	})
+	first := owner.must(200, "GET", base+"/inbound-addresses", nil)["data"].([]any)
+	again := owner.must(200, "GET", base+"/inbound-addresses", nil)["data"].([]any)
+	if len(first) != 1 || len(again) != 1 || first[0].(map[string]any)["id"] != again[0].(map[string]any)["id"] {
+		t.Fatalf("addresses: %v then %v", first, again)
+	}
+	a := first[0].(map[string]any)
+	if a["purpose"] != "ai_receipts" || a["email"] != slug+"-receipts-2@in.example.test" || a["brand_id"] != nil {
+		t.Fatalf("address: %v", a)
+	}
+	var actor string
+	if err := e.pool.QueryRow(t.Context(), `SELECT actor_type FROM audit_events WHERE target_id = $1 AND action = 'inbound_address.created'`, a["id"]).Scan(&actor); err != nil || actor != "system" {
+		t.Fatalf("audit: %q %v", actor, err)
+	}
+	// The engine knows its own names, for the extension's check.
+	if taken, err := inbound.TakenHere(t.Context(), e.pool, a["email"].(string)); err != nil || !taken {
+		t.Fatalf("taken here: %v %v", taken, err)
+	}
+	// Brands don't get their own: one per workspace.
+	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts", "brand": "x"})
+	// Without a secret, the signed POST is refused; Deliver still works.
+	if code, _ := deliver(e.h, a["email"].(string), []byte("Subject: hi\r\n\r\nhi\r\n"), inboundSecret); code != 401 {
+		t.Fatalf("signed delivery without a secret: %d", code)
+	}
+	if _, _, err := inbound.Deliver(t.Context(), a["email"].(string), []byte("Message-ID: <d1@example.test>\r\nSubject: hi\r\n\r\nhi\r\n")); err != nil {
+		t.Fatal(err)
 	}
 }

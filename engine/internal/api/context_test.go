@@ -6,7 +6,8 @@ import (
 )
 
 func TestCompanyContextAndMemories(t *testing.T) {
-	h := freshServer(t)
+	env := freshEnv(t)
+	h := env.h
 	owner, ws := setupOwner(t, h)
 	base := "/v1/workspaces/" + ws
 
@@ -80,19 +81,16 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	owner.must(201, "POST", base+"/memories", map[string]any{"text": "Only Series A and later", "kind": "decision", "brand_id": "fintech"})
 	owner.must(400, "POST", base+"/memories", map[string]any{"text": "Elsewhere", "brand_id": "00000000-0000-0000-0000-000000000000"})
 	list := owner.must(200, "GET", base+"/memories", nil)
-	if list["total"] != 2.0 || list["data"].([]any)[0].(map[string]any)["id"] != m1["id"] {
+	if list["total"] != 1.0 || list["data"].([]any)[0].(map[string]any)["id"] != m1["id"] {
 		t.Fatalf("list: %v", list)
 	}
-	if n := owner.must(200, "GET", base+"/memories?q=series", nil)["total"]; n != 1.0 {
+	if n := owner.must(200, "GET", base+"/memories?brand=fintech&q=series", nil)["total"]; n != 1.0 {
 		t.Fatalf("search: %v", n)
 	}
 	// Brands share no memories: one saved with no brand is the first brand's.
-	if n := owner.must(200, "GET", base+"/memories?brand=none", nil)["total"]; n != 0.0 {
-		t.Fatalf("workspace-wide: %v", n)
-	}
-	page := owner.must(200, "GET", base+"/memories?limit=1", nil)
-	if page["next_cursor"] == nil {
-		t.Fatalf("paging: %v", page)
+	var noBrand int
+	if err := env.pool.QueryRow(t.Context(), `SELECT count(*) FROM memories WHERE workspace_id = (SELECT id FROM workspaces WHERE id::text = $1 OR slug = $1) AND brand_id IS NULL`, ws).Scan(&noBrand); err != nil || noBrand != 0 {
+		t.Fatalf("workspace-wide: %d (%v)", noBrand, err)
 	}
 	owner.must(400, "GET", base+"/memories?kind=secret", nil)
 	c = owner.must(200, "GET", base+"/context", nil)
@@ -121,6 +119,9 @@ func TestCompanyContextAndMemories(t *testing.T) {
 	mine := agent.must(201, "POST", base+"/memories", map[string]any{"text": "CFOs reply on Tuesdays"})
 	if mine["brand_id"] != bid {
 		t.Fatalf("brand token saved outside its brand: %v", mine)
+	}
+	if page := owner.must(200, "GET", base+"/memories?brand=fintech&limit=1", nil); page["next_cursor"] == nil {
+		t.Fatalf("paging: %v", page)
 	}
 	agent.must(404, "DELETE", base+"/memories/"+id, nil) // another brand's
 	agent.must(403, "PATCH", base+"/context", map[string]any{"company": "Mine"})

@@ -237,10 +237,10 @@ export function registerCoverageTools(
     {
       title: "List everywhere the brand was found",
       description:
-        "Every page discovery found that links to or names the brand, grouped by site with its numbers (domain rating, traffic, AI citations, competitors there), with what reading the page showed: links (links to the brand), mentions (names its website), name_only (only its name, which another product may share), absent, unreachable or unchecked. view about (default) is the pages about the brand not yet reviewed, maybe the uncertain ones, not the dismissed or off-topic ones, confirmed the ones made placements.",
+        "Every page discovery found that links to or names the brand, grouped by site with its numbers (domain rating, traffic, AI citations, competitors there), with what reading the page showed: links (links to the brand), mentions (names its website), name_only (only its name, which another product may share), absent, unreachable or unchecked. spam_score (0 to 100, with spam_reasons) says how spammy a site's backlinks look, as a hint. view about (default) is the pages about the brand not yet reviewed, maybe the uncertain ones, later the ones waiting to be checked again, not the dismissed, spam or off-topic ones, confirmed the ones made placements.",
       inputSchema: {
         brand,
-        view: z.enum(["about", "maybe", "not", "confirmed"]).optional(),
+        view: z.enum(["about", "maybe", "later", "not", "confirmed"]).optional(),
         q: z.string().max(200).optional(),
         source: z.string().max(40).optional(),
         min_domain_rating: z.number().min(0).max(100).optional(),
@@ -264,10 +264,10 @@ export function registerCoverageTools(
       {
         title: "Say whether found pages are about the brand",
         description:
-          "about_us makes pages live placements (adding the site's publisher and company record when missing); not_us dismisses them. Give ids (up to 500) or one host for every page of a site. Nobody is contacted.",
+          "about_us makes pages live placements (adding the site's publisher and company record when missing); not_us dismisses them; spam marks every page on their sites as spam, and pages found on those sites later arrive as spam; recheck hides a page (one that is offline, say) for 7 days, then reads it again. Give ids (up to 500) or one host for every page of a site. Nobody is contacted.",
         inputSchema: {
           brand,
-          decision: z.enum(["about_us", "not_us"]),
+          decision: z.enum(["about_us", "not_us", "spam", "recheck"]),
           ids: z.array(z.string().uuid()).max(500).optional(),
           host: z.string().max(253).optional(),
         },

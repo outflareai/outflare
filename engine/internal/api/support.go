@@ -25,25 +25,42 @@ import (
 func (s *Server) routesSupport(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	base := "/v1/workspaces/{ws}/support"
+	brandBase := "/v1/brands/{brand}/support"
 	mux.HandleFunc("GET "+base+"/conversations", s.inBrand(read, s.listSupportConversations))
+	mux.HandleFunc("GET "+brandBase+"/conversations", s.onBrand(read, s.listSupportConversations))
 	mux.HandleFunc("GET "+base+"/conversations/{id}", s.inBrand(read, s.getSupportConversation))
+	mux.HandleFunc("GET "+brandBase+"/conversations/{id}", s.onBrand(read, s.getSupportConversation))
 	mux.HandleFunc("PATCH "+base+"/conversations/{id}", s.inBrand(manage, s.updateSupportConversation))
+	mux.HandleFunc("PATCH "+brandBase+"/conversations/{id}", s.onBrand(manage, s.updateSupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/replies", s.inBrand(manage, s.replySupportConversation))
+	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/replies", s.onBrand(manage, s.replySupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/notes", s.inBrand(manage, s.noteSupportConversation))
+	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/notes", s.onBrand(manage, s.noteSupportConversation))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/suggest-reply", s.inBrand(manage, s.suggestSupportReply))
+	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/suggest-reply", s.onBrand(manage, s.suggestSupportReply))
 	mux.HandleFunc("GET "+base+"/conversations/{id}/articles", s.inBrand(read, s.listSupportArticles))
+	mux.HandleFunc("GET "+brandBase+"/conversations/{id}/articles", s.onBrand(read, s.listSupportArticles))
 	mux.HandleFunc("GET "+base+"/conversations/{id}/assistant", s.inBrand(read, s.getConversationAssistant))
+	mux.HandleFunc("GET "+brandBase+"/conversations/{id}/assistant", s.onBrand(read, s.getConversationAssistant))
 	mux.HandleFunc("POST "+base+"/conversations/{id}/assistant", s.inBrand(manage, s.runConversationAssistant))
+	mux.HandleFunc("POST "+brandBase+"/conversations/{id}/assistant", s.onBrand(manage, s.runConversationAssistant))
 	mux.HandleFunc("POST "+base+"/assistant-runs/{id}/discard", s.inBrand(manage, s.discardAssistantRun))
+	mux.HandleFunc("POST "+brandBase+"/assistant-runs/{id}/discard", s.onBrand(manage, s.discardAssistantRun))
 	mux.HandleFunc("POST "+base+"/assistant-runs/{id}/stop", s.inBrand(manage, s.stopAssistantRun))
+	mux.HandleFunc("POST "+brandBase+"/assistant-runs/{id}/stop", s.onBrand(manage, s.stopAssistantRun))
 	mux.HandleFunc("GET "+base+"/assistant-settings", s.inBrand(read, s.listAssistantSettings))
+	mux.HandleFunc("GET "+brandBase+"/assistant-settings", s.onBrand(read, s.listAssistantSettings))
 	mux.HandleFunc("PUT "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.putAssistantSetting))
 	mux.HandleFunc("DELETE "+base+"/assistant-settings/{scope}", s.inWorkspace(manage, s.deleteAssistantSetting))
 	mux.HandleFunc("GET "+base+"/assistant/stats", s.inBrand(read, s.assistantStats))
+	mux.HandleFunc("GET "+brandBase+"/assistant/stats", s.onBrand(read, s.assistantStats))
 	mux.HandleFunc("POST "+base+"/assistant/test", s.inBrand(manage, s.testAssistant))
+	mux.HandleFunc("POST "+brandBase+"/assistant/test", s.onBrand(manage, s.testAssistant))
 	mux.HandleFunc("GET "+base+"/assistant/slack-channels", s.inWorkspace(manage, s.listAssistantSlackChannels))
 	mux.HandleFunc("GET "+base+"/stats", s.inBrand(read, s.supportStats))
+	mux.HandleFunc("GET "+brandBase+"/stats", s.onBrand(read, s.supportStats))
 	mux.HandleFunc("GET "+base+"/sla-policies", s.inBrand(read, s.listSupportSLAPolicies))
+	mux.HandleFunc("GET "+brandBase+"/sla-policies", s.onBrand(read, s.listSupportSLAPolicies))
 	mux.HandleFunc("PUT "+base+"/sla-policies/{scope}", s.inWorkspace(manage, s.putSupportSLAPolicy))
 	mux.HandleFunc("DELETE "+base+"/sla-policies/{scope}", s.inWorkspace(manage, s.deleteSupportSLAPolicy))
 	mux.HandleFunc("GET "+base+"/mailboxes", s.inWorkspace(auth.ScopeMailboxesRead, s.listSupportMailboxes))
@@ -149,10 +166,10 @@ func (s *Server) scanSupportConversation(row pgx.CollectableRow) (supportConvers
 // supportBrandFilter keeps a brand-limited caller to its brands'
 // conversations.
 func supportBrandFilter(a *access, args *[]any) string {
-	if a.Brands == nil {
+	if a.seenBrands() == nil {
 		return ""
 	}
-	*args = append(*args, a.Brands)
+	*args = append(*args, a.seenBrands())
 	return ` AND c.brand_id = ANY($` + itoa(len(*args)) + `::uuid[])`
 }
 
@@ -692,8 +709,8 @@ func (s *Server) suggestSupportReply(w http.ResponseWriter, r *http.Request) {
 		question = string([]rune(question)[:1000])
 	}
 	kq := knowledgeQuery{q: question, audience: audienceCustomers, brand: c.BrandID, limit: 8}
-	if kq.brand == nil && len(a.Brands) == 1 {
-		kq.brand = &a.Brands[0]
+	if kq.brand == nil && len(a.seenBrands()) == 1 {
+		kq.brand = &a.seenBrands()[0]
 	}
 	start := time.Now()
 	ev := track.Event{Name: "support.reply_suggested", WorkspaceID: a.WorkspaceID, UserID: a.personID(), ActorID: a.ActorID, ActorType: a.ActorType,

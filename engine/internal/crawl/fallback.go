@@ -48,7 +48,7 @@ func (f *FallbackFetcher) Fetch(ctx context.Context, raw string, renderJS bool) 
 		units, id := p.Cost.Units, f.open.ID
 		if _, _, berr := outcomes.Record(ctx, f.ledger, outcomes.Entry{WorkspaceID: f.open.WorkspaceID, Category: outcomes.CategoryData,
 			Provider: f.Connector, IntegrationID: &id, Units: &units, UnitName: "token", OccurredAt: time.Now(), Source: outcomes.SourceAuto,
-			Note: "Page read for a site crawl"}); berr != nil && err == nil {
+			Note: "Page read for a site crawl", Channel: outcomes.ChannelSEO}); berr != nil && err == nil {
 			err = berr
 		}
 	}

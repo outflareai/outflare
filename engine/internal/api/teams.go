@@ -54,6 +54,8 @@ type teamView struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	AllocationMode *string   `json:"allocation_mode"`
+	DepartmentID   *string   `json:"department_id"`
+	LeadID         *string   `json:"lead_id"`
 	MemberIDs      []string  `json:"member_ids"`
 	Senders        int       `json:"senders"`
 	Sequences      int       `json:"sequences"`
@@ -64,7 +66,7 @@ type teamView struct {
 // sender and sequence counts are one brand's when brand is set.
 func (s *Server) loadTeams(ctx context.Context, ws, brand string, id *string) ([]teamView, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT t.id, t.name, t.allocation_mode,
+		SELECT t.id, t.name, t.allocation_mode, t.department_id::text, t.lead_id::text,
 		       COALESCE((SELECT array_agg(user_id::text ORDER BY user_id) FROM team_members WHERE team_id = t.id), '{}'),
 		       (SELECT count(*) FROM sender_teams x JOIN senders sn ON sn.id = x.sender_id
 		        WHERE x.team_id = t.id AND ($3 = '' OR sn.brand_id::text = $3))::int,
@@ -98,6 +100,8 @@ type teamInput struct {
 	Name           *string          `json:"name"`
 	AllocationMode optional[string] `json:"allocation_mode"`
 	MemberIDs      []string         `json:"member_ids"`
+	DepartmentID   optional[string] `json:"department_id"`
+	LeadID         optional[string] `json:"lead_id"`
 }
 
 func (in *teamInput) validate() error {
@@ -110,12 +114,40 @@ func (in *teamInput) validate() error {
 	if v := in.AllocationMode.Value; v != nil && *v != allocation.ModeSuggest && *v != allocation.ModeAutomatic {
 		return errInvalid("allocation_mode is suggest, automatic, or null to follow the workspace")
 	}
+	if !optionalID(in.DepartmentID) || !optionalID(in.LeadID) {
+		return errInvalid("department_id and lead_id must be ids")
+	}
 	for _, id := range in.MemberIDs {
 		if !validUUID(id) {
 			return errInvalid("member_ids must be user ids")
 		}
 	}
 	return nil
+}
+
+// setTeamDirectory sets a team's department and lead from the team
+// directory, when the input names them.
+func setTeamDirectory(ctx context.Context, tx pgx.Tx, ws, team string, in *teamInput) error {
+	if !in.DepartmentID.Set && !in.LeadID.Set {
+		return nil
+	}
+	if in.DepartmentID.Value != nil {
+		var ok bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM departments WHERE id = $1 AND workspace_id = $2)`, *in.DepartmentID.Value, ws).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return errInvalid("department_id is not a department in this workspace")
+		}
+	}
+	if err := checkStaffID(ctx, tx, ws, in.LeadID.Value, "lead_id"); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE teams SET department_id = CASE WHEN $3 THEN $4::uuid ELSE department_id END,
+		                 lead_id = CASE WHEN $5 THEN $6::uuid ELSE lead_id END
+		WHERE id = $1 AND workspace_id = $2`, team, ws, in.DepartmentID.Set, in.DepartmentID.Value, in.LeadID.Set, in.LeadID.Value)
+	return err
 }
 
 // setMembers replaces a team's members with workspace members.
@@ -165,6 +197,9 @@ func (s *Server) createTeam(w http.ResponseWriter, r *http.Request) {
 		if err := setMembers(ctx, tx, a.WorkspaceID, id, req.MemberIDs); err != nil {
 			return err
 		}
+		if err := setTeamDirectory(ctx, tx, a.WorkspaceID, id, &req); err != nil {
+			return err
+		}
 		if err := allocation.Request(ctx, tx, a.WorkspaceID); err != nil {
 			return err
 		}
@@ -210,6 +245,9 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request) {
 			return errNotFound
 		}
 		if err := setMembers(ctx, tx, a.WorkspaceID, id, req.MemberIDs); err != nil {
+			return err
+		}
+		if err := setTeamDirectory(ctx, tx, a.WorkspaceID, id, &req); err != nil {
 			return err
 		}
 		if err := allocation.Request(ctx, tx, a.WorkspaceID); err != nil {

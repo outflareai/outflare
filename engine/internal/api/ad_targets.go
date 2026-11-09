@@ -16,6 +16,7 @@ import (
 // (bidding_strategy, platform_target_cpa_micros).
 
 func (s *Server) routesAdTargets(mux *http.ServeMux) {
+	mux.HandleFunc("PUT /v1/brands/{brand}/ads/campaigns/{id}/target", s.onBrand(auth.ScopeAnalyticsManage, s.setAdCampaignTarget))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/ads/campaigns/{id}/target", s.inBrand(auth.ScopeAnalyticsManage, s.setAdCampaignTarget))
 	mux.HandleFunc("PUT /v1/workspaces/{ws}/ads/accounts/{id}/target", s.inWorkspace(auth.ScopeAnalyticsManage, s.setAdAccountTarget))
 }

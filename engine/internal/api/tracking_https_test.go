@@ -223,3 +223,38 @@ func TestEdgeHeadersIgnoredWithoutASecret(t *testing.T) {
 		t.Fatalf("no edge configured: %d", rec.Code)
 	}
 }
+
+// With the server's own domain as the partners domain, the edge brings a
+// portal's <address>.<domain> to the app, and only the portal answers there.
+func TestPartnerPortalBehindAnEdge(t *testing.T) {
+	const secret = "edge-test-not-a-real-secret"
+	e := freshEnvWith(t, func(o *api.Options) { o.EdgeSecret = secret; o.PartnersDomain = "outflare.test" })
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	id := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Northpeak partners", "kind": "affiliate",
+		"landing_url": "https://northpeak.example/", "terms_url": "https://northpeak.example/partner-terms"})["id"].(string)
+	owner.must(400, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"subdomain": "app"})
+	p := owner.must(200, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"enabled": true, "subdomain": "northpeak"})
+	if p["portal_url"] != "https://northpeak.outflare.test/" {
+		t.Fatalf("portal_url = %v", p["portal_url"])
+	}
+	get := func(path, host string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Host = "app-origin.example"
+		req.Header.Set("X-Outflare-Edge-Secret", secret)
+		req.Header.Set("X-Outflare-Edge-Host", host)
+		req.Header.Set("X-Outflare-Edge-IP", "203.0.113.7")
+		rec := httptest.NewRecorder()
+		e.h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := get("/", "northpeak.outflare.test"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `var BASE = "/";`) {
+		t.Fatalf("portal through the edge: %d %.200s", rec.Code, rec.Body)
+	}
+	if rec := get("/v1/meta", "northpeak.outflare.test"); rec.Code != http.StatusNotFound {
+		t.Fatalf("app on the portal's host: %d", rec.Code)
+	}
+	if rec := get("/", "nothing-here.outflare.test"); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no partner portal") {
+		t.Fatalf("unknown address: %d", rec.Code)
+	}
+}

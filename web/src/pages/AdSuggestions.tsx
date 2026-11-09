@@ -6,6 +6,7 @@ import { Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
 import { ago } from "../format";
 import { money, platformName, scopeQuery, type AdScope } from "./Ads";
 import { testKinds } from "./AdTests";
+import { pickedBrandId } from "@/lib/brand";
 
 // Suggestions at the level the page shows: open ones wait for a person,
 // approved ones are measured over a window and then judged.
@@ -41,7 +42,7 @@ function Recommendations({ ws, account }: { ws: string; account: string }) {
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    api.GET("/v1/workspaces/{ws}/ads/recommendations", { params: { path: { ws }, query: { account_id: account } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ads/recommendations", { params: { path: { brand: pickedBrandId() }, query: { account_id: account } } }).then(({ data, error }) => {
       if (!live) return;
       setError(error ? errorMessage(error) : "");
       setRows(data?.supported ? data.data : null);
@@ -75,7 +76,7 @@ export function AdSuggestions({ ws, brand, scope, canManage }: { ws: string; bra
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ads/suggestions", { params: { path: { ws }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 300 } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/ads/suggestions", { params: { path: { brand: pickedBrandId() }, query: { ...scopeQuery(scope), limit: 300 } } });
     setError(error ? errorMessage(error) : "");
     setRows(data?.data ?? []);
   }, [ws, brand, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -85,10 +86,10 @@ export function AdSuggestions({ ws, brand, scope, canManage }: { ws: string; bra
 
   async function decide(s: AdSuggestion, approve: boolean, test = false) {
     setBusy(true);
-    const p = { params: { path: { ws, id: s.id } } };
+    const p = { params: { path: { brand: pickedBrandId(), id: s.id } } };
     const { error } = approve
-      ? await api.POST("/v1/workspaces/{ws}/ads/suggestions/{id}/approve", { ...p, body: test ? { test: true } : {} })
-      : await api.POST("/v1/workspaces/{ws}/ads/suggestions/{id}/dismiss", p);
+      ? await api.POST("/v1/brands/{brand}/ads/suggestions/{id}/approve", { ...p, body: test ? { test: true } : {} })
+      : await api.POST("/v1/brands/{brand}/ads/suggestions/{id}/dismiss", p);
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(test ? "Test queued: the platform tries the change on part of the audience first. Follow it on the Tests tab."
@@ -101,7 +102,7 @@ export function AdSuggestions({ ws, brand, scope, canManage }: { ws: string; bra
     ((s.kind === "budget_up" || s.kind === "budget_down") && testKinds[s.connector] === "budget") || (s.kind === "bidding_target" && testKinds[s.connector] === "bidding");
   async function refresh() {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ads/suggestions/refresh", { params: { path: { ws } } });
+    const { error } = await api.POST("/v1/brands/{brand}/ads/suggestions/refresh", { params: { path: { brand: pickedBrandId() } } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast("Reading your campaigns again. New suggestions show in a minute.");

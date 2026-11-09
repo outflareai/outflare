@@ -34,6 +34,10 @@ type siteVisitor struct {
 	// The visitor's country from the proxy or the IP database
 	// (siteKeyRow.country); "" falls back to the browser's time zone.
 	country, countrySource string
+	// The rest of where they are (visitorPlace) and their device's details.
+	region, city, isp string
+	asn               int64
+	detail            deviceDetail
 }
 
 // botUA matches the user agents of crawlers, previews, monitors and
@@ -268,9 +272,13 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		}
 		tz, _ := ctxObj["timezone"].(string)
 		country, countrySource := v.country, v.countrySource
+		region, city := v.region, v.city
 		if country == "" && zoneCountry[tz] != "" {
 			country, countrySource = zoneCountry[tz], "timezone"
+			// A city with no country it was found in isn't trusted.
+			region, city = "", ""
 		}
+		locale, _ := ctxObj["locale"].(string)
 		rec, _, err := ownerOf(ctx, tx, a, deref(v.brandID), "anonymous_id", anon)
 		if err != nil {
 			return false, err
@@ -293,11 +301,15 @@ func siteSession(ctx context.Context, tx pgx.Tx, a *access, v siteVisitor, m eve
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO site_sessions (workspace_id, key_id, brand_id, anonymous_id, record_id, started_at, last_seen_at, events, pageviews,
 				landing_url, landing_path, referrer, referrer_host, utm_source, utm_medium, utm_campaign, utm_term, utm_content, click_ids, ref, ofc,
-				country, timezone, device, browser, os, ad, country_source)
-			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) RETURNING id::text`,
+				country, timezone, device, browser, os, ad, country_source,
+				region, city, asn, isp, device_brand, device_model, os_version, browser_version, language)
+			VALUES ($1, $2, $3, $4, $5, $6, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+				$27, $28, $29, $30, $31, $32, $33, $34, $35) RETURNING id::text`,
 			a.WorkspaceID, v.keyID, v.brandID, anon, rec, now, boolInt(page), cutUTF8(str("url"), 2000), cutUTF8(str("path"), 2000),
 			cutUTF8(referrer, 2000), cutUTF8(refHost, 253), touch.source, touch.medium, touch.campaign, touch.term, touch.content, ids,
-			touch.ref, touch.ofc, country, cutUTF8(tz, 100), v.device, v.browser, v.os, ad, countrySource).Scan(&id); err != nil {
+			touch.ref, touch.ofc, country, cutUTF8(tz, 100), v.device, v.browser, v.os, ad, countrySource,
+			region, city, v.asn, v.isp, v.detail.brand, v.detail.model, cutUTF8(v.detail.osVersion, 20), cutUTF8(v.detail.browserVersion, 20),
+			visitLanguage(locale)).Scan(&id); err != nil {
 			return false, err
 		}
 

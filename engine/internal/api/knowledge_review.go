@@ -149,10 +149,15 @@ func fileKnowledgeSuggestion(ctx context.Context, tx pgx.Tx, s knowledgeSuggesti
 func (s *Server) routesKnowledgeReview(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
 	base := "/v1/workspaces/{ws}/knowledge/suggestions"
+	brandBase := "/v1/brands/{brand}/knowledge/suggestions"
 	mux.HandleFunc("GET "+base, s.inBrand(read, s.listKnowledgeSuggestions))
+	mux.HandleFunc("GET "+brandBase, s.onBrand(read, s.listKnowledgeSuggestions))
 	mux.HandleFunc("POST "+base, s.inBrand(manage, s.createKnowledgeSuggestion))
+	mux.HandleFunc("POST "+brandBase, s.onBrand(manage, s.createKnowledgeSuggestion))
 	mux.HandleFunc("POST "+base+"/{id}/approve", s.inBrand(manage, s.approveKnowledgeSuggestion))
+	mux.HandleFunc("POST "+brandBase+"/{id}/approve", s.onBrand(manage, s.approveKnowledgeSuggestion))
 	mux.HandleFunc("POST "+base+"/{id}/reject", s.inBrand(manage, s.rejectKnowledgeSuggestion))
+	mux.HandleFunc("POST "+brandBase+"/{id}/reject", s.onBrand(manage, s.rejectKnowledgeSuggestion))
 }
 
 func (s *Server) listKnowledgeSuggestions(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +298,7 @@ func (s *Server) createKnowledgeSuggestion(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		brand = &id
-	} else if a.Brands != nil {
+	} else if brand = a.orRoute(nil); brand == nil && a.seenBrands() != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "brand_id: name one of your brands")
 		return
 	}

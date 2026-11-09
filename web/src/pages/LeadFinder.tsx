@@ -176,6 +176,9 @@ const stateBadge = (r: Run) => {
 
 export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }: Props) {
   const base = `/v1/workspaces/${ws}/cloud/lead-finder`;
+  const { brand: picked, active: brands } = useBrand(ws);
+  const pickedId = picked?.id;
+  const brandsCount = brands.length;
   const [settings, setSettings] = useState<Settings | null>(null);
   const [profiles, setProfiles] = useState<CustomerProfile[]>([]);
   const [runs, setRuns] = useState<Run[] | null>(null);
@@ -198,8 +201,10 @@ export function LeadFinder({ ws, canManage, onConnectors, onProfiles, onRates }:
   }, [base, days]);
   useEffect(() => {
     load();
-    api.GET("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } } }).then(({ data }) => setProfiles(data?.data ?? []));
-  }, [load, ws]);
+    // Profiles are a brand's: the picked brand's, or every brand's.
+    const list = (brand: string) => api.GET("/v1/brands/{brand}/ideal-customer-profiles", { params: { path: { brand } } });
+    (pickedId ? list(pickedId).then(({ data }) => data?.data ?? []) : everyBrand(list)).then(setProfiles);
+  }, [load, ws, pickedId, brandsCount]);
   // Refresh while something is moving.
   const live = runs?.some((r) => r.status === "queued" || r.status === "running") || summary?.searches.some((s) => s.last_run?.pipeline?.state === "running");
   useEffect(() => {

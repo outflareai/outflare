@@ -388,18 +388,18 @@ test("get_context comes first and joins the context with the status and onboardi
 
 test("memory tools save, correct and forget, and stay out of read-only mode", async () => {
   const { client, calls } = await connect(() => [201, { id: SEQ, kind: "decision", text: "Only Series A and later", pinned: false }]);
-  await client.callTool({ name: "remember", arguments: { text: "Only Series A and later", kind: "decision" } });
+  await client.callTool({ name: "remember", arguments: { brand: BRAND, text: "Only Series A and later", kind: "decision" } });
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url.pathname, `/v1/workspaces/${WS}/memories`);
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/memories`);
   assert.deepEqual(JSON.parse(calls[0].body), { text: "Only Series A and later", kind: "decision" });
 
   await client.callTool({ name: "update_context", arguments: { goals: "20 demos a month", version: 2 } });
   assert.equal(calls[1].method, "PATCH");
   assert.equal(calls[1].url.pathname, `/v1/workspaces/${WS}/context`);
 
-  await client.callTool({ name: "forget", arguments: { memory_id: SEQ } });
+  await client.callTool({ name: "forget", arguments: { brand: BRAND, memory_id: SEQ } });
   assert.equal(calls[2].method, "DELETE");
-  assert.equal(calls[2].url.pathname, `/v1/workspaces/${WS}/memories/${SEQ}`);
+  assert.equal(calls[2].url.pathname, `/v1/brands/${BRAND}/memories/${SEQ}`);
 
   const ro = await connect(() => [200, {}], { readOnly: true });
   const names = (await ro.client.listTools()).tools.map((t) => t.name);
@@ -539,4 +539,19 @@ test("search insights retain brand routing, model assumptions and write permissi
   assert.ok(names.includes("get_search_insights") && names.includes("list_search_groups") && names.includes("get_search_workspace") && names.includes("get_search_report_run"));
   assert.ok(!names.includes("save_search_work") && !names.includes("save_search_schedule") && !names.includes("run_search_report"));
   assert.ok(!names.includes("save_search_group") && !names.includes("refresh_search_insights"));
+});
+
+test("partner proof tools: the proof, its json export, and the new list and bulk params", async () => {
+  const { client, calls } = await connect(() => [200, { data: [] }]);
+  await client.callTool({ name: "get_partner_reward_proof", arguments: { brand: BRAND, reward_id: SEQ } });
+  assert.equal(calls[0].url.pathname, `/v1/brands/${BRAND}/partner-rewards/${SEQ}/proof`);
+  await client.callTool({ name: "export_partner_proofs", arguments: { brand: BRAND, partner_id: SEQ, from: "2026-01-01T00:00:00Z" } });
+  assert.equal(calls[1].url.pathname, `/v1/brands/${BRAND}/partner-proofs/export`);
+  assert.deepEqual(Object.fromEntries(calls[1].url.searchParams), { partner_id: SEQ, from: "2026-01-01T00:00:00Z", format: "json" });
+  await client.callTool({ name: "list_partner_rewards", arguments: { brand: BRAND, q: "ana@", source: "held_at_source" } });
+  assert.deepEqual(Object.fromEntries(calls[2].url.searchParams), { q: "ana@", source: "held_at_source" });
+  await client.callTool({ name: "list_partner_conversions", arguments: { brand: BRAND, q: "ch_1" } });
+  assert.equal(calls[3].url.search, "?q=ch_1");
+  await client.callTool({ name: "bulk_partner_rewards", arguments: { brand: BRAND, action: "approve", program: "affiliates", dry_run: true } });
+  assert.deepEqual(JSON.parse(calls[4].body), { action: "approve", program: "affiliates", dry_run: true });
 });

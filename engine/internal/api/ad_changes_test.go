@@ -136,6 +136,7 @@ func TestAdCampaignChangesByAnAgent(t *testing.T) {
 	ctx := context.Background()
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	metaState.Lock()
 	metaState.campaigns, metaState.posts, metaState.refuse = nil, nil, false
 	metaState.Unlock()
@@ -208,14 +209,14 @@ func TestAdCampaignChangesByAnAgent(t *testing.T) {
 	apply(res)
 	// A person can still approve the held raise, and it is then queued as
 	// the agent's change, linked to the action.
-	held := owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any)
+	held := owner.must(200, "GET", bb+"/actions?status=held", nil)["data"].([]any)
 	var raise string
 	for _, h := range held {
 		if m := h.(map[string]any); m["method"] == "PATCH" {
 			raise = m["id"].(string)
 		}
 	}
-	done := owner.must(200, "POST", base+"/actions/"+raise+"/approve", nil)
+	done := owner.must(200, "POST", bb+"/actions/"+raise+"/approve", nil)
 	if done["status"] != "executed" {
 		t.Fatalf("approved raise: %v", done)
 	}

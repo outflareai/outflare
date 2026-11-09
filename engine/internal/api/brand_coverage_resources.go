@@ -136,7 +136,7 @@ var coverageResources = map[string]coverageResource{
 		"source":    {Kind: "enum", Required: false, Nullable: false, Default: "manual", Choices: []string{"manual", "news", "backlinks", "link_prospects", "import", "social", "ai_citations", "web_search"}},
 		"kind":      {Kind: "enum", Required: false, Nullable: false, Default: "", Choices: []string{"", "blog", "comparison", "news", "profile", "directory", "review", "roundup", "case_study", "partner", "integration", "resource", "interview", "podcast", "video", "community", "display_ad", "newsletter", "sponsorship", "custom", "influencer", "youtube", "forum", "mcp_directory", "app_listing"}},
 		"source_id": {Kind: "text", Required: false, Nullable: false, Default: ""},
-		"status":    {Kind: "enum", Required: false, Nullable: false, Default: "new", Choices: []string{"new", "confirmed", "dismissed"}},
+		"status":    {Kind: "enum", Required: false, Nullable: false, Default: "new", Choices: []string{"new", "confirmed", "dismissed", "spam"}},
 		"notes":     {Kind: "long", Required: false, Nullable: false, Default: ""},
 	}},
 	"searches": {Table: "coverage_searches", Finance: false, Fields: map[string]coverageField{

@@ -181,7 +181,7 @@ func TestKnowledgeRetrieval(t *testing.T) {
 		t.Fatalf("gaps = %v", gaps)
 	}
 	st := owner.must(200, "GET", kb+"/stats", nil)
-	if st["gaps"] != 2.0 || st["live"] != 4.0 || st["drafts"] != 1.0 || st["customers_ai"] != 2.0 || st["help_centre"] != 1.0 || st["questions_30d"] != 6.0 {
+	if st["gaps"] != 2.0 || st["live"] != 3.0 || st["drafts"] != 1.0 || st["customers_ai"] != 2.0 || st["help_centre"] != 1.0 || st["questions_30d"] != 6.0 {
 		t.Fatalf("stats = %v", st)
 	}
 	if d := owner.must(200, "POST", kb+"/gaps/dismiss", map[string]any{"question": "Do you have an office in Lisbon?", "reason": "answered"}); d["dismissed"] != 2.0 {

@@ -124,8 +124,8 @@ func TestAdTests(t *testing.T) {
 	}
 	active, _ := metaCampaigns(t, e, ws)
 	var sid string
-	if err := e.pool.QueryRow(ctx, `INSERT INTO ad_suggestions (workspace_id, ad_entity_id, kind, reason, proposed)
-		VALUES ($1, $2, 'budget_up', 'Spends its budget under target.', '{"daily_budget_micros": 36000000}') RETURNING id`, ws, active).Scan(&sid); err != nil {
+	if err := e.pool.QueryRow(ctx, `INSERT INTO ad_suggestions (workspace_id, brand_id, ad_entity_id, kind, reason, proposed)
+		VALUES ($1, outflare_first_brand($1), $2, 'budget_up', 'Spends its budget under target.', '{"daily_budget_micros": 36000000}') RETURNING id`, ws, active).Scan(&sid); err != nil {
 		t.Fatal(err)
 	}
 	s := owner.must(202, "POST", base+"/ads/suggestions/"+sid+"/approve", map[string]any{"test": true})

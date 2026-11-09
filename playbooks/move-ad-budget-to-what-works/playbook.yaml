@@ -32,15 +32,15 @@ inputs:
     example: 40 USD
 steps:
   - say: Read the brand's ad accounts, campaigns and the changes made recently, so nothing is changed twice in a week.
-    tools: [getAdsSummary, listAdCampaigns, listAdChanges]
+    tools: [getBrandAdsSummary, listBrandAdCampaigns, listBrandAdChanges]
   - say: For each campaign, compare its spend with the sign-ups and revenue Outflare's attribution traced to it.
     tools: [getBrandAttributionCampaigns, getBrandAttributionAds]
   - say: Pause campaigns well above the target with enough spend to judge.
-    tools: [pauseAdCampaign]
+    tools: [pauseBrandAdCampaign]
   - say: Raise the daily budget of campaigns under the target, within the spend grant.
-    tools: [updateAdCampaign]
+    tools: [updateBrandAdCampaign]
   - say: A week later, check each change against the platform and the results.
-    tools: [listAdChanges, getBrandAttributionCampaigns]
+    tools: [listBrandAdChanges, getBrandAttributionCampaigns]
 automation:
   schedule: weekly
 guardrails:

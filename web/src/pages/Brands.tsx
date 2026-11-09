@@ -31,7 +31,7 @@ const linkNames: Record<LinkKind, string> = {
   steam: "Steam", docs: "Docs", help: "Help centre", blog: "Blog", status: "Status page", x: "X", linkedin: "LinkedIn", youtube: "YouTube",
   instagram: "Instagram", tiktok: "TikTok", facebook: "Facebook", discord: "Discord", reddit: "Reddit", github: "GitHub",
   bluesky: "Bluesky", threads: "Threads", mastodon: "Mastodon", dev_to: "DEV", docker_hub: "Docker Hub", 
-  trustpilot: "Trustpilot", g2: "G2", capterra: "Capterra", google_reviews: "Google reviews", other: "Other",
+  trustpilot: "Trustpilot", g2: "G2", capterra: "Capterra", sourceforge: "SourceForge", google_reviews: "Google reviews", other: "Other",
 };
 const linkName = (l: Link) => l.label || linkNames[l.kind ?? "other"];
 

@@ -59,8 +59,8 @@ func TestAdConversionsSendBack(t *testing.T) {
 	person := func(name, email, country string) string {
 		id := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": name,
 			"identities": []any{map[string]any{"namespace": "email", "value": email}}})["id"].(string)
-		if _, err := e.pool.Exec(ctx, `INSERT INTO site_sessions (workspace_id, anonymous_id, record_id, click_ids, country, started_at, last_seen_at)
-			VALUES ($1, $2, $3, $4, $5, now() - interval '1 hour', now() - interval '1 hour')`,
+		if _, err := e.pool.Exec(ctx, `INSERT INTO site_sessions (workspace_id, brand_id, anonymous_id, record_id, click_ids, country, started_at, last_seen_at)
+			VALUES ($1, outflare_first_brand($1), $2, $3, $4, $5, now() - interval '1 hour', now() - interval '1 hour')`,
 			ws, "anon-"+name, id, map[string]string{"fbclid": "fb-" + name}, country); err != nil {
 			t.Fatal(err)
 		}
@@ -71,8 +71,8 @@ func TestAdConversionsSendBack(t *testing.T) {
 	ok := person("Cleo", "cleo@northpeak.example", "DE")
 	owner.must(201, "POST", base+"/records/"+ok+"/consents", map[string]any{"channel": "ads", "purpose": "ad_user_data", "status": "granted"})
 	for n, id := range []string{us, de, ok} {
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, properties, message_id, occurred_at)
-			VALUES ($1, $2, 'track', 'order_completed', '{"total": 1250}', $3, now())`, ws, id, "msg-"+string(rune('a'+n))); err != nil {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', '{"total": 1250}', $3, now())`, ws, id, "msg-"+string(rune('a'+n))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,8 +143,8 @@ func TestAdConversionsSendBack(t *testing.T) {
 	}
 	owner.must(400, "PUT", base+"/ads/settings", map[string]any{"consent_mode": "always"})
 	owner.must(200, "PUT", base+"/ads/settings", map[string]any{"consent_mode": "opt_in"})
-	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, properties, message_id, occurred_at)
-		VALUES ($1, $2, 'track', 'order_completed', '{}', 'msg-z', now())`, ws, us); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at)
+		VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', '{}', 'msg-z', now())`, ws, us); err != nil {
 		t.Fatal(err)
 	}
 	adconv.Match(ctx, e.pool, ws)
@@ -153,8 +153,8 @@ func TestAdConversionsSendBack(t *testing.T) {
 	}
 
 	// Switching a rule off skips what waits; deleting removes it.
-	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, message_id, occurred_at)
-		VALUES ($1, $2, 'track', 'order_completed', 'msg-y', now())`, ws, ok); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, message_id, occurred_at)
+		VALUES ($1, outflare_first_brand($1), $2, 'track', 'order_completed', 'msg-y', now())`, ws, ok); err != nil {
 		t.Fatal(err)
 	}
 	adconv.Match(ctx, e.pool, ws)

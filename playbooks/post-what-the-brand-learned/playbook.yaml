@@ -33,7 +33,7 @@ steps:
   - say: Read the brand's context and voice, and how recent posts did.
     tools: [getBrandContext, getBrandSocialOverview, listBrandSocialPosts, getBrandSocialGrowth]
   - say: Gather this week's material from the brand's knowledge and its customer questions.
-    tools: [listKnowledgeItems, findKnowledgePassages]
+    tools: [listBrandKnowledgeItems, findBrandKnowledgePassages]
   - say: Draft the week's posts as a series, each held for a person's approval.
     tools: [createBrandSocialSeries, draftBrandSocialPublication, createBrandSocialPublication]
   - say: The next week, read each post's numbers and note what to do more of.

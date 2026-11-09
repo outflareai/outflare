@@ -72,7 +72,7 @@ func coverageFound(ctx context.Context, q interface {
 }, a *access, data json.RawMessage) (json.RawMessage, error) {
 	var out json.RawMessage
 	err := q.QueryRow(ctx, `WITH c AS (SELECT source,kind,status,created_at,lower(regexp_replace(split_part(split_part(url,'://',2),'/',1),'^www\.','')) AS host
- FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND status<>'dismissed')
+ FROM coverage_candidates WHERE workspace_id=$1 AND brand_id=$2 AND status NOT IN ('dismissed','spam'))
  SELECT $3::jsonb || jsonb_build_object('found',jsonb_build_object(
  'pages',(SELECT count(*) FROM c),'sites',(SELECT count(DISTINCT host) FROM c),
  'new_28d',(SELECT count(*) FROM c WHERE created_at>now()-interval '28 days'),

@@ -88,7 +88,7 @@ The same suggestion waits at most once, and one a person rejected isn't made aga
 
 | What | API | MCP |
 | --- | --- | --- |
-| Search and list | `GET /v1/workspaces/{ws}/knowledge/items?q=` | `search_knowledge` |
+| Search and list | `GET /v1/brands/{brand}/knowledge/items?q=` | `search_knowledge` |
 | Read one | `GET .../knowledge/items/{id}` | `get_knowledge` |
 | Add | `POST .../knowledge/items` | `add_knowledge` |
 | Change | `PATCH .../knowledge/items/{id}` | `update_knowledge` |

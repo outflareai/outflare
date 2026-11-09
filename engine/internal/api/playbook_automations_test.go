@@ -85,6 +85,7 @@ func TestPlaybookAutomations(t *testing.T) {
 	}
 	sched = owner.must(200, "GET", auto+"/"+sid, nil)
 	next, err := time.Parse(time.RFC3339, sched["next_run_at"].(string))
+	next = next.UTC()
 	if sched["runs"] != float64(1) || sched["last_run_id"] != m["id"] || sched["last_mission_id"] != nil || err != nil || !next.After(time.Now()) || next.Day() != 1 || next.Hour() != 9 || next.Minute() != 0 {
 		t.Fatalf("after the run: %v", sched)
 	}

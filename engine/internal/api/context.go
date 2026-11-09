@@ -26,9 +26,13 @@ func (s *Server) routesContext(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
 	mux.HandleFunc("GET /v1/workspaces/{ws}/context", s.inBrand(read, s.getContext))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/context", s.inWorkspace(manage, s.updateContext))
+	mux.HandleFunc("GET /v1/brands/{brand}/memories", s.onBrand(read, s.listMemories))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/memories", s.inBrand(read, s.listMemories))
+	mux.HandleFunc("POST /v1/brands/{brand}/memories", s.onBrand(manage, s.createMemory))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/memories", s.inBrand(manage, s.createMemory))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/memories/{id}", s.onBrand(manage, s.updateMemory))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/memories/{id}", s.inBrand(manage, s.updateMemory))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/memories/{id}", s.onBrand(manage, s.deleteMemory))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/memories/{id}", s.inBrand(manage, s.deleteMemory))
 }
 
@@ -227,8 +231,8 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 	}
 	// Someone kept to one brand reads that brand's context, and anyone
 	// else the workspace's first brand's.
-	if brandID == "" && len(a.Brands) == 1 {
-		brandID = a.Brands[0]
+	if brandID == "" && len(a.seenBrands()) == 1 {
+		brandID = a.seenBrands()[0]
 	}
 	named := brandID != ""
 	if brandID == "" {
@@ -261,7 +265,7 @@ func (s *Server) getContext(w http.ResponseWriter, r *http.Request) {
 		FROM brands b LEFT JOIN brand_context c ON c.brand_id = b.id
 		WHERE b.workspace_id = $1 AND b.status = 'active'
 		  AND ($2::uuid[] IS NULL OR b.id = ANY($2)) AND (NOT $3 OR b.id::text = $4)
-		ORDER BY lower(b.name)`, a.WorkspaceID, a.Brands, named, brandID)
+		ORDER BY lower(b.name)`, a.WorkspaceID, a.seenBrands(), named, brandID)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -389,8 +393,8 @@ func (s *Server) updateContext(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brandID = id
-	} else if len(a.Brands) == 1 {
-		brandID = a.Brands[0]
+	} else if len(a.seenBrands()) == 1 {
+		brandID = a.seenBrands()[0]
 	} else if err := s.pool.QueryRow(ctx, `SELECT COALESCE(outflare_first_brand($1)::text, '')`, a.WorkspaceID).Scan(&brandID); err != nil {
 		s.internal(w, r, err)
 		return
@@ -495,7 +499,7 @@ func (s *Server) loadMemories(ctx context.Context, a *access, f memoryFilter) ([
 		  AND ($10::uuid[] IS NULL OR m.brand_id = ANY($10))
 		ORDER BY m.pinned DESC, m.updated_at DESC, m.id
 		LIMIT $6 OFFSET $7`,
-		a.WorkspaceID, likeEscape(q), f.kind, f.pinned, id, f.limit, f.offset, f.brand.id, f.layer, a.Brands)
+		a.WorkspaceID, likeEscape(q), f.kind, f.pinned, id, f.limit, f.offset, f.brand.id, f.layer, a.seenBrands())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -720,7 +724,7 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		// A move must land in one of a brand-limited caller's brands.
-		if a.Brands != nil && req.BrandID.Set {
+		if a.seenBrands() != nil && req.BrandID.Set {
 			if brand == nil {
 				return errInvalid("you can only keep memories in your brands")
 			}

@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, Loading, confirmAction, field, toast } from "../ui";
 import { Icon } from "../icons";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 
 // Hand-off topics, in Support settings: what conversations are about, for
 // the AI assistant to tag them, and who takes each one it hands over.
@@ -26,7 +26,7 @@ export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage:
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/support/handoff-topics", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/support/handoff-topics", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setTopics(data.data);
     });
@@ -52,8 +52,8 @@ export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage:
       assignee_id: draft.assignee_id || null, team_id: draft.team_id || null,
     };
     const res = editing === "new"
-      ? await api.POST("/v1/workspaces/{ws}/support/handoff-topics", { params: { path: { ws } }, body: { ...body, brand: draft.brand || null } })
-      : await api.PATCH("/v1/workspaces/{ws}/support/handoff-topics/{id}", { params: { path: { ws, id: editing! } }, body });
+      ? await api.POST("/v1/brands/{brand}/support/handoff-topics", { params: { path: { brand: pickedBrandId() } }, body: { ...body, brand: draft.brand || null } })
+      : await api.PATCH("/v1/brands/{brand}/support/handoff-topics/{id}", { params: { path: { brand: pickedBrandId(), id: editing! } }, body });
     setBusy(false);
     if (res.error) return setError(errorMessage(res.error));
     const saved = res.data as SupportHandoffTopic;
@@ -64,7 +64,7 @@ export function SupportHandoffTopics({ ws, canManage }: { ws: string; canManage:
 
   async function remove(t: SupportHandoffTopic) {
     if (!(await confirmAction(`Remove ${t.name}?`, "Conversations tagged with it lose the tag. Who has them doesn't change.", "Remove"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/support/handoff-topics/{id}", { params: { path: { ws, id: t.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/support/handoff-topics/{id}", { params: { path: { brand: pickedBrandId(), id: t.id } } });
     if (error) return toast(errorMessage(error), "error");
     setTopics((l) => (l ?? []).filter((x) => x.id !== t.id));
     setEditing(null);

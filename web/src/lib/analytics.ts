@@ -1,6 +1,7 @@
 import type { PostHog } from "posthog-js";
 import { api } from "../api";
 import { anonymousPath } from "./paths";
+import { isDesktopApp } from "./desktop";
 
 // Product analytics, only when the server operator set OUTFLARE_POSTHOG_KEY
 // (/v1/meta then has product_analytics). Self-hosted servers without it load
@@ -70,10 +71,17 @@ export function identify(user: { id?: string; name?: string; email?: string }, w
 
 let currentPage = "";
 
+// Where the person is: a browser, or the Outflare desktop app's window
+// (docs/desktop-app.md). Never "desktop", which is Outflare for desktop,
+// the AI usage agent.
+function surface(): "web" | "desktop_app" {
+  return isDesktopApp() ? "desktop_app" : "web";
+}
+
 // One pageview per page (tab), sent from the signed-in shell and the sign-in screens.
 export function page(name: string) {
   currentPage = name;
-  load().then((ph) => ph?.capture("$pageview", { page: name }));
+  load().then((ph) => ph?.capture("$pageview", { page: name, surface: surface() }));
 }
 
 // Events only the browser sees. Everything that calls the API is recorded
@@ -103,6 +111,7 @@ export type UiEvent =
   | "ui.account_takeover_handed_back"
   | "ui.accounts_offboarded"
   | "ui.coverage_view_opened"
+  | "ui.partnership_pipeline_set_up"
   | "ui.coverage_exported"
   | "ui.coverage_filters_changed"
 
@@ -122,8 +131,14 @@ export type UiEvent =
  | "ui.partner_opportunity_opened"
  | "ui.partner_profile_composer_opened"
   | "ui.partner_task_composer_opened"
+  | "ui.app_signin_started" // in the desktop app, the person sent sign-in to their browser
+  | "ui.app_external_link_opened" // in the desktop app, a link that leaves Outflare opened in the browser
+  | "ui.app_update_offered" // in the desktop app, the Update button appeared (version)
+  | "ui.app_update_started" // in the desktop app, the person clicked Update; the app installs it and reopens (version)
+  | "ui.app_update_failed" // in the desktop app, installing the update failed (error_code)
   | "ui.error_shown" // an error message was shown to the person (error_code)
   | "ui.crashed" // a script error or a page that failed to render
+  | "ui.stale_build_reloaded" // the page reloaded itself once because a script of the previous build was gone after a deploy (reason: entry or chunk)
   | "ui.dns_one_click_used" // a way to add DNS records outside Lifecycle (where: seo_site, tracking_domain, sending_domain, brand_setup, brand_dns; way: cloudflare, ai, developer, manual; how: sign_in, connected, added, approval, approved, approval_cancelled, copied, claude, chatgpt, email; groups for brand_dns)
   | "ui.request_failed" // a call never got an answer (offline, blocked)
   | "ui.command_run" // a command palette command
@@ -144,6 +159,19 @@ export type UiEvent =
   | "ui.data_network_join_cancelled" // the owner closed that preview without joining (addresses)
   | "ui.partner_install_viewed" // a tab of a partner program's install steps opened (step: script or conversions; way: html, nextjs, gtm, curl, node, postback, browser)
   | "ui.partners_filtered" // a program's partner list filtered (filter: payout_details, value: missing or all)
+  | "ui.partners_searched" // a search started on a program's partner list (sort); never the search text
+  | "ui.partners_sorted" // a program's partner list sorted (sort: newest, oldest, name, code, clicks, customers, sales, balance, paid)
+  | "ui.partner_opened" // a partner's page opened (from: list, record, search when a whole partner id is pasted in the list's search, rewards or conversions from a row's partner link, proof from a proof's Open payouts)
+  | "ui.partner_tab_opened" // a tab of a partner's page opened (tab: referrals, conversions, rewards, payouts, activity)
+  | "ui.partner_proof_opened" // a reward's proof trail opened in its drawer (from: program or partner)
+  | "ui.partner_proof_link_followed" // the proof drawer switched to another reward (to: reversed_by, reverses, or back)
+  | "ui.partner_proof_export_opened" // the date range for downloading a partner's proof opened
+  | "ui.partner_rewards_bulk_confirm_opened" // the bulk approve or reject confirmation opened after its dry run (action, scope: picked or all, native, imported, held_at_source counts)
+  | "ui.partner_rewards_held_included" // the bulk confirmation's choice to include imported rewards the old platform still pays (action)
+  | "ui.partner_rewards_searched" // a search started on a Rewards list (where: program or partner); never the search text
+  | "ui.partner_rewards_filtered" // a Rewards list filtered (filter: status or source, value, where)
+  | "ui.partner_conversions_searched" // a search started on a Conversions list (where: program or partner); never the search text
+  | "ui.partner_conversions_filtered" // a Conversions list filtered (filter: type with value, or partner with from: code or link)
   | "ui.journey_step_picker_opened" // the journey builder's step picker opened (from: start, link, rule)
   | "ui.journey_step_added" // a step put into a journey being built, before it is saved (kind, group, at: start or the link it went on)
   | "ui.journey_step_removed" // a step taken out of a journey being built (kind, also_removed: steps only it led to)
@@ -185,6 +213,7 @@ export type UiEvent =
   | "ui.knowledge_started" // the knowledge editor opened for something new (kind: article, snippet; template: none or a starter's id)
   | "ui.playbook_opened" // a playbook opened on the Playbooks page (playbook_id, ready)
   | "ui.agents_view_opened" // a view of the Agents page opened (view: waiting, runs, all, grants)
+  | "ui.team_activity_opened" // a view of Settings, Team activity opened (view: waiting, changes, runs, logs)
   | "ui.action_decided" // a person approved or rejected agents' held changes (decision: approve or reject; how: single, batch or remember; count; from: run when decided on a run's page)
   | "ui.agent_run_started" // a playbook started as an agent run from the Playbooks page (playbook_id, mode, has_budget)
   | "ui.agent_run_acted" // a person paused, resumed, stopped or wrote to an agent run on its page (action: pause, resume, stop or write; mode)
@@ -253,7 +282,7 @@ type Props = Record<string, string | number | boolean | undefined>;
 // labels only: never names, emails, domains, typed text or error text
 // that could quote them. The page is added for you.
 export function track(event: UiEvent, props?: Props) {
-  load().then((ph) => ph?.capture(event, { page: currentPage, surface: "web", ...props }));
+  load().then((ph) => ph?.capture(event, { page: currentPage, surface: surface(), ...props }));
 }
 
 // Script errors and promise rejections nobody caught. The message is a
@@ -261,6 +290,17 @@ export function track(event: UiEvent, props?: Props) {
 export function trackCrash(error: unknown, where: string) {
   const e = error instanceof Error ? error : new Error(String(error));
   track("ui.crashed", { outcome: "error", error_code: "crashed", where, name: e.name, message: e.message.slice(0, 200) });
+}
+
+// web/stale-build.js reloads the page once and leaves this note for the reloaded page to report.
+export function trackStaleBuildReload() {
+  try {
+    const key = "outflare:stale-build-reload";
+    const last = JSON.parse(sessionStorage.getItem(key) || "null") as { at: number; reason: string; tracked?: boolean } | null;
+    if (!last || last.tracked) return;
+    sessionStorage.setItem(key, JSON.stringify({ ...last, tracked: true }));
+    track("ui.stale_build_reloaded", { reason: last.reason });
+  } catch {}
 }
 
 if (typeof window !== "undefined") {

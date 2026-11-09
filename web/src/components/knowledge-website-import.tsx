@@ -4,13 +4,13 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, field, toast } from "../ui";
 import { ago } from "../format";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 
 // Importing the business's website into knowledge: up to max_pages pages,
 // one article each, in a Website folder, re-checked every day.
 export function KnowledgeWebsiteImportPanel({ ws, canManage, onDone }: { ws: string; canManage: boolean; onDone: () => void }) {
-  const { brand, query } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [list, setList] = useState<KnowledgeWebsiteImport[] | null>(null);
   const [url, setUrl] = useState("");
   const [max, setMax] = useState(100);
@@ -19,7 +19,7 @@ export function KnowledgeWebsiteImportPanel({ ws, canManage, onDone }: { ws: str
   const [error, setError] = useState("");
 
   const load = () =>
-    api.GET("/v1/workspaces/{ws}/knowledge/website-imports", { params: { path: { ws }, query } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/knowledge/website-imports", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -43,8 +43,8 @@ export function KnowledgeWebsiteImportPanel({ ws, canManage, onDone }: { ws: str
   async function start() {
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/knowledge/website-imports", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/knowledge/website-imports", {
+      params: { path: { brand: pickedBrandId() } },
       body: { url: url.trim(), brand: brand?.handle ?? null, max_pages: max, publish },
     });
     setBusy(false);

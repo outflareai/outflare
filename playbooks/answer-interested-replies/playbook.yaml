@@ -30,7 +30,7 @@ steps:
   - say: Read each conversation and keep the ones that are interested or ask a question.
     tools: [getBrandInboundMessage]
   - say: Tag them so the team sees them.
-    tools: [listInboxTags, updateBrandInboundMessage]
+    tools: [listBrandInboxTags, updateBrandInboundMessage]
   - say: Draft a short reply in the same thread that answers the question and offers the booking link.
     tools: [replyBrandToInboundMessage]
 guardrails:

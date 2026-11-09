@@ -53,4 +53,27 @@ func TestSearchResults(t *testing.T) {
 	if !found {
 		t.Error("no web_search.done event")
 	}
+
+	// A search is one brand's: an agent that works for every brand searches
+	// on the brand's route, and the change waiting for a person is that
+	// brand's alone, so another brand's Agents page never shows it.
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})
+	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})
+	brands := map[string]string{}
+	for _, b := range owner.must(200, "GET", base+"/brands", nil)["data"].([]any) {
+		m := b.(map[string]any)
+		brands[m["handle"].(string)] = m["id"].(string)
+	}
+	tok := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Claude", "scopes": []string{"seo.manage", "actions.read"}, "action_gate": true})
+	agent := &client{t: t, h: owner.h, bearer: tok["token"].(string)}
+	st, held := agent.do("POST", "/v1/brands/"+brands["geonode"]+"/search-results", map[string]any{"query": "residential proxies"})
+	if st != 202 || held["action"].(map[string]any)["brand_id"] != brands["geonode"] {
+		t.Fatalf("a search on the brand route waits as the brand's: %d %v", st, held)
+	}
+	if l := owner.must(200, "GET", "/v1/brands/"+brands["repocket"]+"/actions?status=held", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("another brand waits on it: %v", l)
+	}
+	if l := owner.must(200, "GET", "/v1/brands/"+brands["geonode"]+"/actions?status=held", nil)["data"].([]any); len(l) != 1 {
+		t.Fatalf("the brand waits on it: %v", l)
+	}
 }

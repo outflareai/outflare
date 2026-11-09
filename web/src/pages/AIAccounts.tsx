@@ -19,7 +19,7 @@ import { track } from "@/lib/analytics";
 import { binding, companyPaid, cycleWord, daysUntil, monthlyCents, owners, readAgo, resetsIn, shortDay, usd, usedTone, windowLabel } from "@/lib/aiAccounts";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PeopleView, SpendView, TimelineView, UsageView } from "./AIAccountsViews";
-import { ReceiptsView } from "./AIAccountsReceipts";
+import { ReceiptAddress, ReceiptsView } from "./AIAccountsReceipts";
 import { ComputersView } from "./AIAccountsComputers";
 import { DesktopDownloadLink } from "@/components/desktop-download";
 import { useVisibleRefresh } from "@/lib/useVisibleRefresh";
@@ -137,6 +137,7 @@ export function AIAccounts({ ws, me, canAdd, seeAll, manageAll, seeSpend, canSet
         action={<div className="flex flex-wrap gap-2"><DesktopDownloadLink location="ai_accounts" />{canAdd && <Button onClick={() => setEditing("new")}>Add account</Button>}</div>}
       />
       <ErrorText>{error}</ErrorText>
+      {view !== "receipts" && <ReceiptAddress ws={ws} canSetUp={canSetUp} setUp={() => { setView("receipts"); track("ui.ai_accounts_view_opened", { view: "receipts" }); }} />}
       {view !== "computers" && view !== "receipts" && <label className="flex items-center gap-3 text-[13px]">Report scope
         <select className={field} value={brandFilter} onChange={e => { const value = e.target.value; setBrandFilter(value); track("ui.ai_account_report_scope_changed", { scope: value === "all" ? "workspace" : value === "none" ? "unassigned" : "brand", ...(value !== "all" && value !== "none" ? { brand_id: value } : {}) }); }}>
           <option value="all">Workspace — all brands</option><option value="none">Needs brand assignment</option>

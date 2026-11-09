@@ -484,7 +484,7 @@ func TestConnectedAppChangesWaitForAPerson(t *testing.T) {
 		t.Fatalf("created %d sequences", n)
 	}
 	actionID := out["action"].(map[string]any)["id"].(string)
-	owner.must(200, "POST", base+"/actions/"+actionID+"/approve", nil)
+	owner.must(200, "POST", "/v1/brands/"+out["action"].(map[string]any)["brand_id"].(string)+"/actions/"+actionID+"/approve", nil)
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("after approval: %d sequences", n)
 	}

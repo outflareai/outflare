@@ -5,7 +5,7 @@ import { ask, Button, ErrorText, field, Loading, toast } from "../ui";
 import { Icon } from "../icons";
 import { ago } from "../format";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 
 // The review queue: answers Outflare found for questions the knowledge
@@ -38,13 +38,13 @@ export function KnowledgeReview({
   tick: number;
   onChanged: () => void;
 }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [list, setList] = useState<KnowledgeSuggestion[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     void api
-      .GET("/v1/workspaces/{ws}/knowledge/suggestions", {
-        params: { path: { ws }, query: brandQuery },
+      .GET("/v1/brands/{brand}/knowledge/suggestions", {
+        params: { path: { brand: pickedBrandId() } },
       })
       .then(({ data, error }) => {
         if (error) return setError(errorMessage(error));
@@ -113,7 +113,7 @@ function Header({ s }: { s: KnowledgeSuggestion }) {
   );
 }
 
-async function reject(ws: string, s: KnowledgeSuggestion, onDone: () => void) {
+async function reject(_ws: string, s: KnowledgeSuggestion, onDone: () => void) {
   const r = await ask({
     title:
       s.kind === "conflict" ? "Dismiss this conflict?" : "Reject this answer?",
@@ -135,8 +135,8 @@ async function reject(ws: string, s: KnowledgeSuggestion, onDone: () => void) {
   });
   if (!r || r.choice !== "ok") return;
   const { error } = await api.POST(
-    "/v1/workspaces/{ws}/knowledge/suggestions/{id}/reject",
-    { params: { path: { ws, id: s.id } }, body: { reason: r.value } },
+    "/v1/brands/{brand}/knowledge/suggestions/{id}/reject",
+    { params: { path: { brand: pickedBrandId(), id: s.id } }, body: { reason: r.value } },
   );
   if (error) return toast(errorMessage(error), "error");
   toast(
@@ -169,9 +169,9 @@ function AnswerCard({
   async function approve() {
     setBusy(true);
     const { error } = await api.POST(
-      "/v1/workspaces/{ws}/knowledge/suggestions/{id}/approve",
+      "/v1/brands/{brand}/knowledge/suggestions/{id}/approve",
       {
-        params: { path: { ws, id: s.id } },
+        params: { path: { brand: pickedBrandId(), id: s.id } },
         body: { title, body, visibility: use },
       },
     );
@@ -301,8 +301,8 @@ function ConflictCard({
   async function settle() {
     setBusy(true);
     const { error } = await api.POST(
-      "/v1/workspaces/{ws}/knowledge/suggestions/{id}/approve",
-      { params: { path: { ws, id: s.id } }, body: { keep_item_id: keep } },
+      "/v1/brands/{brand}/knowledge/suggestions/{id}/approve",
+      { params: { path: { brand: pickedBrandId(), id: s.id } }, body: { keep_item_id: keep } },
     );
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");

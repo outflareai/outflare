@@ -44,7 +44,7 @@ steps:
   - say: Read your page so the pitch can say what it adds. With no page given, take the page and topic from the published assets, newest first.
     tools: [listBrandSEOSites, listBrandCrawlPages, listBrandLinkAssets]
   - say: Search Google for the topic and keep the top pages that aren't yours, after showing the cost.
-    tools: [readSearchResults]
+    tools: [readBrandSearchResults]
   - say: Read who links to the top three to five of them, after showing the cost and the budget.
     tools: [readBrandLinks, getBrandLinkRead]
   - say: Add the linking pages as content prospects, with your new page as the page to offer.

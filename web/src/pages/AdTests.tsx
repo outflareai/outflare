@@ -5,6 +5,7 @@ import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
 import { ago } from "../format";
 import { money, platformName, scopeQuery, type AdScope } from "./Ads";
+import { pickedBrandId } from "@/lib/brand";
 
 // Tests inside the networks: the network splits a campaign between itself
 // and a trial that tries one thing differently, on the same days. Outflare
@@ -62,7 +63,7 @@ export function AdTests({ ws, brand, scope, campaigns, canManage }: { ws: string
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ads/tests", { params: { path: { ws }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 200 } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/ads/tests", { params: { path: { brand: pickedBrandId() }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 200 } } });
     setError(error ? errorMessage(error) : "");
     setRows(data?.data ?? []);
   }, [ws, brand, scope.network, scope.account]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -85,8 +86,8 @@ export function AdTests({ ws, brand, scope, campaigns, canManage }: { ws: string
     const v = Math.round(Number(r?.value) * 1e6);
     if (r?.choice !== "ok" || !(v > 0)) return;
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ads/tests", {
-      params: { path: { ws } },
+    const { error } = await api.POST("/v1/brands/{brand}/ads/tests", {
+      params: { path: { brand: pickedBrandId() } },
       body: { campaign_id: c.id, kind, ...(budget ? { daily_budget_micros: v } : { target_cpa_micros: v }) },
     });
     setBusy(false);
@@ -96,8 +97,8 @@ export function AdTests({ ws, brand, scope, campaigns, canManage }: { ws: string
   }
   async function end(t: AdTest, keep: boolean) {
     setBusy(true);
-    const p = { params: { path: { ws, id: t.id } } };
-    const { error } = keep ? await api.POST("/v1/workspaces/{ws}/ads/tests/{id}/keep", p) : await api.POST("/v1/workspaces/{ws}/ads/tests/{id}/roll-back", p);
+    const p = { params: { path: { brand: pickedBrandId(), id: t.id } } };
+    const { error } = keep ? await api.POST("/v1/brands/{brand}/ads/tests/{id}/keep", p) : await api.POST("/v1/brands/{brand}/ads/tests/{id}/roll-back", p);
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(keep ? "Keeping the trial's change. The platform shows it within a few minutes." : "Rolling back. The campaign stays as it was.");

@@ -59,8 +59,11 @@ const websiteImportSelect = `SELECT id::text, brand_id::text, url, max_pages, vi
 
 func (s *Server) routesWebsiteImport(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/website-imports", s.onBrand(read, s.listWebsiteImports))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/website-imports", s.inBrand(read, s.listWebsiteImports))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/website-imports", s.onBrand(manage, s.startWebsiteImport))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/website-imports", s.inBrand(manage, s.startWebsiteImport))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/website-imports/{id}", s.onBrand(read, s.getWebsiteImport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/website-imports/{id}", s.inBrand(read, s.getWebsiteImport))
 }
 
@@ -140,9 +143,9 @@ func (s *Server) startWebsiteImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brand = &id
-	} else if len(a.Brands) == 1 {
-		brand = &a.Brands[0]
-	} else if a.Brands != nil {
+	} else if len(a.seenBrands()) == 1 {
+		brand = &a.seenBrands()[0]
+	} else if a.seenBrands() != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "say which of your brands the website is for (brand)")
 		return
 	}

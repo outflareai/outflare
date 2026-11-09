@@ -34,7 +34,7 @@ Each brand can have its own help centre, or the workspace has one for everything
 
 | What | API | MCP |
 | --- | --- | --- |
-| List | `GET /v1/workspaces/{ws}/help-centres` | `list_help_centres` |
+| List | `GET /v1/brands/{brand}/help-centres` | `list_help_centres` |
 | Make one | `POST .../help-centres` | `create_help_centre` |
 | Read one | `GET .../help-centres/{id}` | `list_help_centres` |
 | Change one (settings merge) | `PATCH .../help-centres/{id}` | `update_help_centre` |

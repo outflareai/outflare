@@ -3,6 +3,7 @@ package outflare
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -113,6 +114,63 @@ func (h *Host) EnqueueJob(ctx context.Context, kind string, payload any, idempot
 func (h *Host) EnableInboundEmail(domain string, secret []byte) {
 	h.inboundEmail.Enable(domain, secret)
 	h.AddCapability("inbound_email")
+}
+
+// EnableInboundEmailAt turns inbound email on at domain for an extension
+// that receives the mail itself, in its own process, and hands each
+// message to DeliverInboundEmail: no edge, no signed POST. Use it when
+// the domain's mail already reaches the extension (Outflare Cloud's hosted
+// mailboxes). It lists the inbound_email capability like
+// EnableInboundEmail.
+func (h *Host) EnableInboundEmailAt(domain string) {
+	h.inboundEmail.Enable(domain, nil)
+	h.AddCapability("inbound_email")
+}
+
+// ErrNoInboundAddress means DeliverInboundEmail has no live address like
+// the recipient: refuse the message.
+var ErrNoInboundAddress = inboundemail.ErrUnknownAddress
+
+// DeliverInboundEmail stores a raw message sent to one of the engine's
+// inbound addresses and queues it, exactly as a signed POST to
+// /v1/inbound/email would. It returns ErrNoInboundAddress when to isn't a
+// live address; a message delivered twice (same Message-ID) is taken once.
+func (h *Host) DeliverInboundEmail(ctx context.Context, to string, raw []byte) error {
+	if !h.inboundEmail.Enabled() {
+		return ErrNoInboundAddress
+	}
+	_, purpose, err := h.inboundEmail.Deliver(ctx, to, raw)
+	switch {
+	case errors.Is(err, inboundemail.ErrUnknownAddress):
+		metrics.InboundReceived("", "unknown_address", 0)
+		return ErrNoInboundAddress
+	case errors.Is(err, inboundemail.ErrDuplicate):
+		metrics.InboundReceived(purpose, "duplicate", 0)
+		return nil
+	case errors.Is(err, inboundemail.ErrTooLarge):
+		metrics.InboundReceived("", "too_large", 0)
+		return err
+	case err != nil:
+		metrics.InboundReceived(purpose, "error", 0)
+		return err
+	}
+	metrics.InboundReceived(purpose, "accepted", len(raw))
+	return nil
+}
+
+// SetInboundAddressTaken tells the engine which addresses at the inbound
+// domain the extension already uses for something else (its own
+// mailboxes), so the engine never picks one of them. fn gets the full
+// address and is called while an address is made.
+func (h *Host) SetInboundAddressTaken(fn func(ctx context.Context, address string) (bool, error)) {
+	h.inboundEmail.SetTaken(fn)
+}
+
+// InboundAddressTaken reports whether address is one of the engine's
+// inbound addresses (live or retired), so an extension sharing the domain
+// doesn't hand it out.
+func (h *Host) InboundAddressTaken(ctx context.Context, address string) (bool, error) {
+	return h.inboundEmail.TakenHere(ctx, h.Pool, address)
 }
 
 // SignInboundEmail is the X-Outflare-Signature for a delivery made at

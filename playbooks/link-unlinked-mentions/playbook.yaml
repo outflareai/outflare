@@ -32,7 +32,7 @@ inputs:
     example: Northpeak
 steps:
   - say: Read coverage the news watch kept for the brand, and search Google for pages that name it, leaving out its own site, after showing the cost.
-    tools: [listBrandSEOSites, getBrandContext, listBrandCoverage, readSearchResults]
+    tools: [listBrandSEOSites, getBrandContext, listBrandCoverage, readBrandSearchResults]
   - say: Add those pages as mention prospects. Pages that already link to you are kept out when checked.
     tools: [addBrandLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.

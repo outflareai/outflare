@@ -204,11 +204,14 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   server.registerTool(
     "list_partners",
     {
-      title: "List partners",
+      title: "Find partners",
       description:
-        "Partners newest first, each with their program, ref code, short link, campaign link, promo codes and totals: clicks, referrals, " +
-        "customers, sales, and cash pending, approved, paid and in their balance.",
+        "Partners, each with their program, ref code, short link, campaign link, promo codes and totals: clicks, referrals, " +
+        "customers, sales, and cash pending, approved, paid and in their balance. q and sort cover every partner, not only one page.",
       inputSchema: { brand: brandRef,
+        q: z.string().max(200).optional().describe("Part of a partner's code, promo code, name or email, or a partner's or their record's whole id."),
+        sort: z.enum(["newest", "oldest", "name", "code", "clicks", "customers", "sales", "balance", "paid"]).optional()
+          .describe("newest (default) and oldest by when they joined; name and code A to Z; the totals largest first."),
         program: z.string().optional().describe("A program's id or slug."),
         status: z.enum(["pending", "active", "suspended", "rejected"]).optional(),
         record_id: id.optional().describe("The partner's customer record."),
@@ -227,11 +230,32 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
   );
 
   server.registerTool(
+    "list_partner_activity",
+    {
+      title: "List a partner's history",
+      description:
+        "What happened to one partner and their money, newest first, from the audit log: joining, status, group and payout detail changes " +
+        "(field names only, never the details), promo codes, referrals, rewards made, approved, rejected or reversed, and payouts made, paid " +
+        "or canceled, each with who did it. Use it to answer why a partner was paid what they were.",
+      inputSchema: { brand: brandRef, partner_id: partner, ...page },
+      annotations: read,
+    },
+    ({ brand, partner_id, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partners/{id}/activity", { params: { path: { brand: b, id: partner_id }, query } }))),
+  );
+
+  server.registerTool(
     "list_partner_conversions",
     {
       title: "List partner conversions",
-      description: "Sign-ups, sales, refunds and custom conversions credited to partners, newest first.",
-      inputSchema: { brand: brandRef, type: z.enum(["signup", "sale", "refund", "custom"]).optional(), partner_id: id.optional(), program: z.string().optional(), ...page },
+      description: "Sign-ups, sales, refunds and custom conversions credited to partners, newest first, each with the partner's code and name and the customer's name and email.",
+      inputSchema: { brand: brandRef,
+        q: z.string().max(200).optional().describe("Part of the partner's code or email, the customer's email, or the sale's external_id."),
+        type: z.enum(["signup", "sale", "refund", "custom"]).optional(),
+        partner_id: id.optional(),
+        program: z.string().optional(),
+        ...page,
+      },
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-conversions", { params: { path: { brand: b }, query } }))),
@@ -280,8 +304,12 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       title: "List the partner reward ledger",
       description:
         "Cash, fees, actions and adjustments, newest first. pending is on hold or waiting for a person; approved cash counts toward the next " +
-        "payout; an approved action waits for the workspace's system to carry it out.",
+        "payout; an approved action waits for the workspace's system to carry it out. Each has its partner, customer, sale, rule, source " +
+        "(native or imported, and held_at_source while the old platform still pays it), who decided it, the entries that reverse it " +
+        "(reversed_by) and net_cents after them.",
       inputSchema: { brand: brandRef,
+        q: z.string().max(200).optional().describe("Part of the partner's code or email, the customer's email, or the sale's external_id."),
+        source: z.enum(["native", "imported", "held_at_source"]).optional(),
         status: z.enum(["pending", "approved", "rejected", "paid", "fulfilled"]).optional(),
         kind: z.enum(["cash", "fee", "action", "adjustment"]).optional(),
         partner_id: id.optional(),
@@ -292,6 +320,40 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       annotations: read,
     },
     ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-rewards", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_partner_reward_proof",
+    {
+      title: "Show why a partner earned a reward",
+      description:
+        "The chain behind one reward: the click or website visit that credited the partner, the referral, the customer, the sale (with " +
+        "the brand's own id for it), the rule that priced it, who approved or rejected it, and the payout that paid it. A link with no " +
+        "record is null and gaps says why, such as credited by a promo code. Use it to answer a partner's question or check a reward before paying.",
+      inputSchema: { brand: brandRef, reward_id: id.describe("From list_partner_rewards.") },
+      annotations: read,
+    },
+    ({ brand, reward_id }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-rewards/{id}/proof", { params: { path: { brand: b, id: reward_id } } }))),
+  );
+
+  server.registerTool(
+    "export_partner_proofs",
+    {
+      title: "Export the proof behind a payout or a partner's rewards",
+      description:
+        "The proof of every reward in one payout (payout_id), or one partner's rewards made from `from` up to `to` (partner_id), as " +
+        "get_partner_reward_proof gives it, at most 10,000. It holds customers' names and emails but no payout details, and is recorded in the audit log.",
+      inputSchema: { brand: brandRef,
+        payout_id: id.optional(),
+        partner_id: id.optional(),
+        from: z.string().datetime({ offset: true }).optional().describe("With partner_id: rewards made at or after this time."),
+        to: z.string().datetime({ offset: true }).optional().describe("With partner_id: rewards made before this time."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/partner-proofs/export", { params: { path: { brand: b }, query: { ...query, format: "json" } } }))),
   );
 
   server.registerTool(
@@ -669,7 +731,9 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
       title: "Approve or reject many held partner rewards",
       description:
         "Approve or reject pending rewards: those in ids, or every pending one of a program or partner (optionally one kind). Each is " +
-        "recorded as if done alone. Up to 1,000 a call; more: true means call again. skipped lists any that weren't pending or visible, with why.",
+        "recorded as if done alone. Up to 1,000 a call; more: true means call again. skipped lists any that weren't pending or visible, with why. " +
+        "Approving leaves out imported rewards the old platform still pays (skipped as held_at_source) unless include_held_at_source. " +
+        "counts says what it touches by source; call with dry_run first to see that and what it would skip.",
       inputSchema: { brand: brandRef,
         action: z.enum(["approve", "reject"]),
         ids: z.array(z.string()).max(1000).optional().describe("Reward ids, from list_partner_rewards."),
@@ -677,6 +741,8 @@ export function registerPartnerTools(server: McpServer, gtm: MissionClient, work
         partner_id: id.optional().describe("A partner: all their pending rewards."),
         kind: z.enum(["cash", "fee", "action", "adjustment"]).optional(),
         note: z.string().max(2000).optional().describe("Reject only: why, for the partner."),
+        include_held_at_source: z.boolean().optional().describe("Also approve imported rewards the old platform still pays."),
+        dry_run: z.boolean().optional().describe("Change nothing; answer what would change."),
       },
       annotations: write,
     },

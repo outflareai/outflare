@@ -190,7 +190,8 @@ func TestInboxLabelsTagsAndViews(t *testing.T) {
 	}
 	mineN := owner.must(201, "POST", nb+"/inbox-tags", map[string]any{"name": "follow up", "color": "teal"})
 	owner.must(404, "PATCH", nb+"/inbox-tags/"+tags["follow up"]["id"].(string), map[string]any{"color": "red"})
-	owner.must(404, "DELETE", base+"/inbox-tags/"+mineN["id"].(string), nil)
+	first := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
+	owner.must(404, "DELETE", "/v1/brands/"+first+"/inbox-tags/"+mineN["id"].(string), nil)
 	if l := owner.must(200, "GET", base+"/inbox-tags?brand=northpeak", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["color"] != "teal" {
 		t.Fatalf("northpeak tags: %v", l)
 	}

@@ -1036,6 +1036,11 @@ func (s *Server) createRecord(w http.ResponseWriter, r *http.Request) {
 			map[string]any{"type": t.Key, "origin": origin, "identities": len(req.Identities)}); err != nil {
 			return err
 		}
+		if isPartnershipType(t.Key) {
+			if err := enqueuePartnershipSync(ctx, tx, a.WorkspaceID, id, "created"); err != nil {
+				return err
+			}
+		}
 		for _, in := range req.Identities {
 			if _, _, err := putIdentity(ctx, tx, a, &rec, in); err != nil {
 				return err
@@ -1151,6 +1156,12 @@ func (s *Server) updateRecord(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := record(ctx, tx, &a.principal, a.WorkspaceID, "record.updated", "record", rec.ID, data); err != nil {
 				return err
+			}
+			// A partnership's stage or page may call for its Presence placement.
+			if isPartnershipType(rec.Type) {
+				if err := enqueuePartnershipSync(ctx, tx, a.WorkspaceID, rec.ID, fmt.Sprint("v", rec.Version+1)); err != nil {
+					return err
+				}
 			}
 		}
 		if req.Archived != nil && *req.Archived != rec.Archived {

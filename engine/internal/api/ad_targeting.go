@@ -22,9 +22,13 @@ import (
 
 func (s *Server) routesAdTargeting(mux *http.ServeMux) {
 	manage := auth.ScopeAdsManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/campaigns/{id}/targeting", s.onBrand(auth.ScopeAnalyticsRead, s.getAdTargeting))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/campaigns/{id}/targeting", s.inBrand(auth.ScopeAnalyticsRead, s.getAdTargeting))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/bidding", s.onBrand(manage, s.setAdBidding))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/bidding", s.inBrand(manage, s.setAdBidding))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/audiences", s.onBrand(manage, s.setAdAudience))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/audiences", s.inBrand(manage, s.setAdAudience))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/countries", s.onBrand(manage, s.setAdCountry))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/countries", s.inBrand(manage, s.setAdCountry))
 }
 

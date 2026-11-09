@@ -166,8 +166,9 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 	if secret != "" {
 		s.setSessionCookie(w, secret)
 		// Signed in: into the app, unless an invite page started this and
-		// still has its invite to accept.
-		if !strings.HasPrefix(back, "/invite") {
+		// still has its invite to accept, or the desktop app's sign-in page
+		// is waiting for an approval.
+		if !strings.HasPrefix(back, "/invite") && !strings.HasPrefix(back, "/signin/app") {
 			back = "/"
 		}
 		finish(nil)

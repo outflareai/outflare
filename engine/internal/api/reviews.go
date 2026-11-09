@@ -17,7 +17,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/reviews"
 )
 
-// Reviews: each brand's review pages (Trustpilot, G2, Capterra, Google),
+// Reviews: each brand's review pages (Trustpilot, G2, Capterra, SourceForge, Google),
 // every review on them, the platforms' numbers day by day, and Outflare's
 // own review score and momentum across platforms. Review pages are brand
 // links; this is where they are read, summed up and answered. Reviews use

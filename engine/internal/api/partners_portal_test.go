@@ -249,3 +249,57 @@ func jsonString(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// Without a partners domain, the portal's address makes its link readable:
+// /p/<address>/ on this server instead of /p/<program id>/.
+func TestPartnerPortalAddress(t *testing.T) {
+	e := freshEnv(t)
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	prog := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Northpeak partners", "kind": "affiliate",
+		"landing_url": "https://northpeak.example/", "terms_url": "https://northpeak.example/partner-terms"})
+	id := prog["id"].(string)
+
+	owner.must(400, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"subdomain": id})
+	owner.must(400, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"subdomain": "grafana"})
+	p := owner.must(200, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"enabled": true, "subdomain": "northpeak", "settings": map[string]any{"signup_open": true}})
+	url := p["portal_url"].(string)
+	if !strings.HasSuffix(url, "/p/northpeak/") {
+		t.Fatalf("portal_url = %q", url)
+	}
+	origin := strings.TrimSuffix(url, "/p/northpeak/")
+
+	anon := &portalClient{t: t, h: e.h, base: origin + "/p/northpeak/"}
+	_, _, page := anon.do("GET", "", nil)
+	if page.Code != 200 || !strings.Contains(page.Body.String(), `var BASE = "/p/northpeak/";`) {
+		t.Fatalf("page = %d %.300s", page.Code, page.Body.String())
+	}
+	if info := anon.must(200, "GET", "api/program", nil); info["signup_open"] != true {
+		t.Fatalf("info = %v", info)
+	}
+	// The old link keeps working.
+	byID := &portalClient{t: t, h: e.h, base: origin + "/p/" + id + "/"}
+	if _, _, page := byID.do("GET", "", nil); page.Code != 200 || !strings.Contains(page.Body.String(), `var BASE = "/p/`+id+`/";`) {
+		t.Fatalf("page by id = %d", page.Code)
+	}
+	// Without the trailing slash, a redirect; an unknown address, nothing.
+	bare := &portalClient{t: t, h: e.h, base: origin + "/p/northpeak"}
+	if _, _, rec := bare.do("GET", "", nil); rec.Code != 301 || rec.Header().Get("Location") != "/p/northpeak/" {
+		t.Fatalf("bare = %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	none := &portalClient{t: t, h: e.h, base: origin + "/p/acme/"}
+	if code, _, _ := none.do("GET", "", nil); code != 404 {
+		t.Fatalf("unknown address = %d", code)
+	}
+
+	// A second program can't take the same address.
+	other := owner.must(201, "POST", base+"/partner-programs", map[string]any{"name": "Acme partners", "kind": "affiliate",
+		"landing_url": "https://acme.example/", "terms_url": "https://acme.example/terms"})
+	owner.must(409, "PUT", base+"/partner-programs/"+other["id"].(string)+"/portal", map[string]any{"subdomain": "northpeak"})
+
+	// Clearing the address goes back to the id.
+	p = owner.must(200, "PUT", base+"/partner-programs/"+id+"/portal", map[string]any{"subdomain": ""})
+	if !strings.HasSuffix(p["portal_url"].(string), "/p/"+id+"/") {
+		t.Fatalf("portal_url = %v", p["portal_url"])
+	}
+}

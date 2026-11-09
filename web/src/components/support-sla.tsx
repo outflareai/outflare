@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, Loading, toast } from "../ui";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 
 // Response times: the picked brand's SLA (brands share none). How fast the
 // team promises to reply and resolve, around the clock or in its working
@@ -60,7 +60,7 @@ export function SupportSLA({ ws, canManage, onChanged }: { ws: string; canManage
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/support/sla-policies", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/support/sla-policies", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       const p = data.data.find((x) => x.brand_id === (brand?.id ?? null)) ?? (brand ? null : data.data[0] ?? null);
       setPolicy(p);

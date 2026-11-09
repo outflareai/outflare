@@ -86,7 +86,7 @@ function KeywordsPage({ ws, go }: Props) {
     <div className="space-y-6">
       {header}
       <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-        <TabsList className="h-auto flex-wrap">
+        <TabsList className="flex-wrap group-data-[orientation=horizontal]/tabs:h-auto">
           {(Object.keys(sections) as Section[]).map((s) => <TabsTrigger key={s} value={s}>{sections[s]}</TabsTrigger>)}
         </TabsList>
       </Tabs>

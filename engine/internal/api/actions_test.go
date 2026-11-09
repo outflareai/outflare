@@ -24,6 +24,7 @@ func TestActionLayer(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	agent, agentID := gatedAgent(t, owner, base, "Agent", "sequences.read", "sequences.manage", "webhooks.read", "webhooks.manage", "actions.read", "actions.approve")
 	seq := map[string]any{"name": "Agent sequence", "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}}
 
@@ -49,15 +50,15 @@ func TestActionLayer(t *testing.T) {
 	// The agent can't approve its own change, even with the scope, and
 	// neither can another agent on the action layer: deciding is a
 	// person's, or an approver token's set up outside it.
-	agent.must(403, "POST", base+"/actions/"+held["id"].(string)+"/approve", nil)
+	agent.must(403, "POST", bb+"/actions/"+held["id"].(string)+"/approve", nil)
 	otherAgent, _ := gatedAgent(t, owner, base, "Other agent", "actions.read", "actions.approve")
-	otherAgent.must(403, "POST", base+"/actions/"+held["id"].(string)+"/approve", nil)
+	otherAgent.must(403, "POST", bb+"/actions/"+held["id"].(string)+"/approve", nil)
 	approverBot := agentToken(t, owner, base, "Approver bot", "actions.read", "actions.approve")
-	if v := approverBot.must(200, "GET", base+"/actions/"+held["id"].(string), nil); v["status"] != "held" || v["expires_at"] == nil {
+	if v := approverBot.must(200, "GET", bb+"/actions/"+held["id"].(string), nil); v["status"] != "held" || v["expires_at"] == nil {
 		t.Fatalf("held view: %v", v)
 	}
 	// A person approves: it runs as the agent, through the full handler.
-	done := owner.must(200, "POST", base+"/actions/"+held["id"].(string)+"/approve", map[string]any{"note": "looks good"})
+	done := owner.must(200, "POST", bb+"/actions/"+held["id"].(string)+"/approve", map[string]any{"note": "looks good"})
 	if done["status"] != "executed" || done["result_status"].(float64) != 201 || done["decision_note"] != "looks good" {
 		t.Fatalf("approved: %v", done)
 	}
@@ -67,7 +68,7 @@ func TestActionLayer(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("approved change made %d sequences", n)
 	}
-	owner.must(409, "POST", base+"/actions/"+held["id"].(string)+"/approve", nil)
+	owner.must(409, "POST", bb+"/actions/"+held["id"].(string)+"/approve", nil)
 
 	// Only a person sets grants; the agent can't widen its own room.
 	agent.must(403, "POST", base+"/action-grants", map[string]any{"token_id": agentID, "path": "**", "mode": "run"})
@@ -119,27 +120,44 @@ func TestActionLayer(t *testing.T) {
 	if code != 202 || res["action"].(map[string]any)["decided_by_rule"] != "always_person" {
 		t.Fatalf("always a person on the brand route: %d %v", code, res)
 	}
-	owner.must(200, "POST", base+"/actions/decide", map[string]any{"reject": []string{res["action"].(map[string]any)["id"].(string)}})
+	// The brand's own approvals: listed, read and decided on the brand route.
+	brandHeld := res["action"].(map[string]any)["id"].(string)
+	bbase := "/v1/brands/" + firstBrand
+	found := false
+	for _, a := range owner.must(200, "GET", bbase+"/actions?status=held", nil)["data"].([]any) {
+		if a.(map[string]any)["id"] == brandHeld {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("held change not on the brand's approvals")
+	}
+	if v := owner.must(200, "GET", bbase+"/actions/"+brandHeld, nil); v["status"] != "held" {
+		t.Fatalf("brand action view: %v", v)
+	}
+	if v := owner.must(200, "POST", bbase+"/actions/"+brandHeld+"/reject", nil); v["status"] != "rejected" {
+		t.Fatalf("brand reject: %v", v)
+	}
 
 	// A batch: approve one and reject one in one request.
-	b := owner.must(200, "POST", base+"/actions/decide", map[string]any{"approve": []string{third}, "reject": []string{hook}, "note": "batch"})
+	b := owner.must(200, "POST", bb+"/actions/decide", map[string]any{"approve": []string{third}, "reject": []string{hook}, "note": "batch"})
 	out := b["data"].([]any)
 	if len(out) != 2 || out[0].(map[string]any)["action"].(map[string]any)["status"] != "executed" ||
 		out[1].(map[string]any)["action"].(map[string]any)["status"] != "rejected" {
 		t.Fatalf("batch: %v", b)
 	}
 	// Deciding again reports an error per item.
-	again := owner.must(200, "POST", base+"/actions/decide", map[string]any{"reject": []string{third}})
+	again := owner.must(200, "POST", bb+"/actions/decide", map[string]any{"reject": []string{third}})
 	if e := again["data"].([]any)[0].(map[string]any)["error"].(map[string]any); e["code"] != "action_state" {
 		t.Fatalf("decided twice: %v", again)
 	}
 
 	// The list holds every change the agent made, newest first.
-	all := owner.must(200, "GET", base+"/actions?token_id="+agentID+"&limit=2", nil)
+	all := owner.must(200, "GET", bb+"/actions?token_id="+agentID+"&limit=2", nil)
 	if len(all["data"].([]any)) != 2 || all["next_cursor"] == nil {
 		t.Fatalf("list: %v", all)
 	}
-	heldNow := owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any)
+	heldNow := owner.must(200, "GET", bb+"/actions?status=held", nil)["data"].([]any)
 	if len(heldNow) != 0 {
 		t.Fatalf("still held: %v", heldNow)
 	}
@@ -184,6 +202,7 @@ func TestActionBigBodies(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	agent, agentID := gatedAgent(t, owner, base, "Agent", "sequences.manage", "actions.read")
 	big := map[string]any{"name": "Big", "steps": []map[string]any{{"subject": "Hi", "body": strings.Repeat("x", 1<<20+10)}}}
 
@@ -198,7 +217,7 @@ func TestActionBigBodies(t *testing.T) {
 	if code < 400 || code >= 500 || res["action"] != nil {
 		t.Fatalf("big run reached the handler: %d %v", code, res)
 	}
-	acts := owner.must(200, "GET", base+"/actions?token_id="+agentID, nil)["data"].([]any)
+	acts := owner.must(200, "GET", bb+"/actions?token_id="+agentID, nil)["data"].([]any)
 	if len(acts) != 1 {
 		t.Fatalf("actions: %v", acts)
 	}
@@ -216,6 +235,7 @@ func TestActionExpires(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	agent, _ := gatedAgent(t, owner, base, "Agent", "sequences.manage", "actions.read")
 	_, res := agent.do("POST", base+"/sequences", map[string]any{"name": "S", "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}})
 	id := res["action"].(map[string]any)["id"].(string)
@@ -223,16 +243,16 @@ func TestActionExpires(t *testing.T) {
 	if _, err := e.pool.Exec(context.Background(), `UPDATE actions SET expires_at = now() - interval '1 minute' WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
-	if v := agent.must(200, "GET", base+"/actions/"+id, nil); v["status"] != "expired" {
+	if v := agent.must(200, "GET", bb+"/actions/"+id, nil); v["status"] != "expired" {
 		t.Fatalf("expired view: %v", v)
 	}
-	if l := owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any); len(l) != 0 {
+	if l := owner.must(200, "GET", bb+"/actions?status=held", nil)["data"].([]any); len(l) != 0 {
 		t.Fatalf("expired change still listed as held: %v", l)
 	}
-	if l := owner.must(200, "GET", base+"/actions?status=expired", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", bb+"/actions?status=expired", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("expired change not listed: %v", l)
 	}
-	owner.must(409, "POST", base+"/actions/"+id+"/approve", nil)
+	owner.must(409, "POST", bb+"/actions/"+id+"/approve", nil)
 	if n := len(owner.must(200, "GET", base+"/sequences", nil)["data"].([]any)); n != 0 {
 		t.Fatalf("an expired change ran: %d sequences", n)
 	}
@@ -259,6 +279,7 @@ func TestActionTemplates(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	agent, agentID := gatedAgent(t, owner, base, "Agent", "sequences.read", "sequences.manage", "actions.read")
 	seq := func(name, tz string) map[string]any {
 		return map[string]any{"name": name, "timezone": tz, "steps": []map[string]any{{"subject": "Hi", "body": "Hello"}}}
@@ -267,10 +288,10 @@ func TestActionTemplates(t *testing.T) {
 	// A held change, approved as a template on one field of its body.
 	_, res := agent.do("POST", base+"/sequences", seq("One", "Europe/London"))
 	held := res["action"].(map[string]any)["id"].(string)
-	owner.must(400, "POST", base+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"nope"}}})
+	owner.must(400, "POST", bb+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"nope"}}})
 	approver := agentToken(t, owner, base, "Approver", "actions.read", "actions.approve")
-	approver.must(403, "POST", base+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"timezone"}}})
-	done := owner.must(200, "POST", base+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"timezone"}, "daily_limit": 10}})
+	approver.must(403, "POST", bb+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"timezone"}}})
+	done := owner.must(200, "POST", bb+"/actions/"+held+"/approve", map[string]any{"remember": map[string]any{"fields": []string{"timezone"}, "daily_limit": 10}})
 	if done["status"] != "executed" {
 		t.Fatalf("approved: %v", done)
 	}
@@ -307,8 +328,9 @@ func TestActionLayerEdges(t *testing.T) {
 	e := freshEnv(t)
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})
-	owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})
+	bb := brandBase(t, e, ws)
+	geoB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Geonode", "website": "https://www.geonode.com/"})["id"].(string)
+	rpB := "/v1/brands/" + owner.must(201, "POST", base+"/brands", map[string]any{"name": "Repocket", "website": "https://repocket.com/"})["id"].(string)
 	scopes := []string{"workspace.read", "context.manage", "actions.read"}
 	mk := func(name, brand string) (*client, string) {
 		t.Helper()
@@ -324,18 +346,24 @@ func TestActionLayerEdges(t *testing.T) {
 		t.Fatalf("brand agent's change: %d %v", st, res)
 	}
 	id := res["action"].(map[string]any)["id"].(string)
-	if v := rp.must(200, "GET", base+"/actions/"+id, nil); v["status"] != "held" || v["token_id"] != rpID {
+	if v := rp.must(200, "GET", rpB+"/actions/"+id, nil); v["status"] != "held" || v["token_id"] != rpID {
 		t.Fatalf("own held action: %v", v)
 	}
-	if l := rp.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any); len(l) != 1 {
+	if l := rp.must(200, "GET", rpB+"/actions?status=held", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("own held list: %v", l)
 	}
 	rp.must(200, "GET", base+"/action-grants", nil)
-	geo.must(404, "GET", base+"/actions/"+id, nil)
-	if l := geo.must(200, "GET", base+"/actions", nil)["data"].([]any); len(l) != 0 {
+	geo.must(404, "GET", geoB+"/actions/"+id, nil)
+	geo.must(404, "GET", rpB+"/actions/"+id, nil)
+	if l := geo.must(200, "GET", geoB+"/actions", nil)["data"].([]any); len(l) != 0 {
 		t.Fatalf("another brand's agent sees: %v", l)
 	}
-	geo.must(403, "POST", base+"/actions/"+id+"/approve", nil)
+	geo.must(403, "POST", geoB+"/actions/"+id+"/approve", nil)
+	// The workspace's own list is the team's: no brand's changes.
+	if l := owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("a brand's change on the workspace's list: %v", l)
+	}
+	owner.must(404, "GET", base+"/actions/"+id, nil)
 
 	// A mission header on a gated token still goes through the gate.
 	agent, agentID := gatedAgent(t, owner, base, "Agent", "sequences.manage", "leads.manage", "actions.read")
@@ -369,10 +397,13 @@ func TestActionLayerEdges(t *testing.T) {
 	}
 	geoApprover := owner.must(201, "POST", base+"/api-tokens", map[string]any{"name": "Geonode approver", "scopes": []string{"actions.read", "actions.approve"}, "brand": "geonode"})
 	limited := &client{t: t, h: owner.h, bearer: geoApprover["token"].(string)}
+	limited.must(404, "GET", geoB+"/actions/"+leadAction, nil)
+	limited.must(404, "POST", geoB+"/actions/"+leadAction+"/approve", nil)
 	limited.must(404, "GET", base+"/actions/"+leadAction, nil)
-	limited.must(404, "POST", base+"/actions/"+leadAction+"/approve", nil)
-	limited.must(200, "GET", base+"/actions/"+res["action"].(map[string]any)["id"].(string), nil)
-	for _, x := range limited.must(200, "GET", base+"/actions", nil)["data"].([]any) {
+	limited.must(200, "GET", geoB+"/actions/"+res["action"].(map[string]any)["id"].(string), nil)
+	// With no brand in the body, the change is the first brand's.
+	owner.must(200, "GET", bb+"/actions/"+leadAction, nil)
+	for _, x := range limited.must(200, "GET", geoB+"/actions", nil)["data"].([]any) {
 		if x.(map[string]any)["brand_id"] == nil {
 			t.Fatalf("a brand-limited approver sees a change about no brand: %v", x)
 		}
@@ -404,7 +435,7 @@ func TestActionLayerEdges(t *testing.T) {
 	if st != 400 {
 		t.Fatalf("bad body under a run grant: %d %v", st, res)
 	}
-	failed := owner.must(200, "GET", base+"/actions?status=failed", nil)["data"].([]any)
+	failed := owner.must(200, "GET", bb+"/actions?status=failed", nil)["data"].([]any)
 	if len(failed) != 1 || failed[0].(map[string]any)["result"] == nil {
 		t.Fatalf("failed run's result: %v", failed)
 	}
@@ -479,4 +510,15 @@ func TestAdsGrantsGetDefaultSpendCaps(t *testing.T) {
 	if g["daily_spend_cents"] != nil || g["monthly_spend_cents"] != nil {
 		t.Fatalf("a grant on everything keeps no ads caps: %v", g)
 	}
+}
+
+// brandBase is the routes of the workspace's first brand, where a change an
+// agent makes on the workspace's routes is kept.
+func brandBase(t *testing.T, e *env, ws string) string {
+	t.Helper()
+	var id string
+	if err := e.pool.QueryRow(context.Background(), `SELECT outflare_first_brand(w.id)::text FROM workspaces w WHERE w.id::text = $1 OR w.slug = $1`, ws).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return "/v1/brands/" + id
 }

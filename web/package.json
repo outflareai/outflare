@@ -9,7 +9,11 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test:ai-account-brands": "node tests/ai-account-brands.mjs"
+    "test:ai-account-brands": "node tests/ai-account-brands.mjs",
+    "test:app-signin": "node tests/app-signin.mjs",
+    "test:stale-build-reload": "node tests/stale-build-reload.mjs",
+    "test:partner-page": "node tests/partner-page.mjs",
+    "test:partner-settings": "node tests/partner-settings.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.4",

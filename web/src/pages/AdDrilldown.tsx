@@ -12,6 +12,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Card, ErrorText, Stat, Stats } from "../ui";
 import { deliveryColumns, metricColumns, money, n, platformName } from "./Ads";
 import { CampaignTargeting } from "./AdTargeting";
+import { pickedBrandId } from "@/lib/brand";
 
 const metrics = [
   { id: "spend", label: "Spend", value: (r: AdSummaryRow) => r.totals.spend_micros, format: (v: number, c: string) => money(v, c) },
@@ -108,7 +109,7 @@ export function ConversionActions({ ws, from, to, brand, entity, card }: { ws: s
   const [rows, setRows] = useState<AdConversionAction[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/ads/conversion-actions", { params: { path: { ws }, query: { from, to, ...(brand ? { brand } : {}), ...(entity ? { entity_id: entity } : {}) } } })
+    api.GET("/v1/brands/{brand}/ads/conversion-actions", { params: { path: { brand: pickedBrandId() }, query: { from, to, ...(entity ? { entity_id: entity } : {}) } } })
       .then(({ data, error }) => {
         setError(error ? errorMessage(error) : "");
         setRows(data?.data ?? []);
@@ -174,21 +175,21 @@ export function CampaignDetail({ ws, campaign, groupId, from, to, open, back }: 
   // The trend of the level open: the ad group's, else the campaign's.
   useEffect(() => {
     setTrend(null);
-    api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path: { ws }, query: { from, to, group: "day", entity_id: groupId ?? campaign.id } } }).then(({ data }) => setTrend(data?.data ?? []));
+    api.GET("/v1/brands/{brand}/ads/summary", { params: { path: { brand: pickedBrandId() }, query: { from, to, group: "day", entity_id: groupId ?? campaign.id } } }).then(({ data }) => setTrend(data?.data ?? []));
   }, [ws, campaign.id, groupId, from, to]);
 
   useEffect(() => {
-    const path = { ws };
+    const path = { brand: pickedBrandId() };
     const range = { from, to };
     const byId = (rows: AttributionAdRow[] | undefined) => Object.fromEntries((rows ?? []).map((r) => [r.id, r]));
     Promise.all([
-      below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad_group", campaign_id: campaign.id, limit: 500 } } }) : null,
-      below ? api.GET("/v1/workspaces/{ws}/ads/items", { params: { path, query: { ...range, level: "ad", campaign_id: campaign.id, limit: 1000 } } }) : null,
+      below ? api.GET("/v1/brands/{brand}/ads/items", { params: { path, query: { ...range, level: "ad_group", campaign_id: campaign.id, limit: 500 } } }) : null,
+      below ? api.GET("/v1/brands/{brand}/ads/items", { params: { path, query: { ...range, level: "ad", campaign_id: campaign.id, limit: 1000 } } }) : null,
       // What Outflare credits is the campaign's brand's.
       below && campaign.brand_id ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: campaign.brand_id }, query: { ...range, level: "adset" } } }) : null,
       below && campaign.brand_id ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: campaign.brand_id }, query: { ...range, level: "ad" } } }) : null,
-      google ? api.GET("/v1/workspaces/{ws}/ads/keywords", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 500 } } }) : null,
-      google ? api.GET("/v1/workspaces/{ws}/ads/search-terms", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 1000 } } }) : null,
+      google ? api.GET("/v1/brands/{brand}/ads/keywords", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 500 } } }) : null,
+      google ? api.GET("/v1/brands/{brand}/ads/search-terms", { params: { path, query: { ...range, campaign_id: campaign.id, limit: 1000 } } }) : null,
     ]).then(([g, a, os, oa, k, t]) => {
       const err = g?.error ?? a?.error ?? os?.error ?? oa?.error ?? k?.error ?? t?.error;
       setError(err ? errorMessage(err) : "");

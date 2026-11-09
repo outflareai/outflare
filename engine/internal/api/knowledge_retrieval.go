@@ -51,7 +51,9 @@ const (
 
 func (s *Server) routesKnowledgeRetrieval(mux *http.ServeMux) {
 	read := auth.ScopeWorkspaceRead
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/passages", s.onBrand(read, s.listKnowledgePassages))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/passages", s.inBrand(read, s.listKnowledgePassages))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/ask", s.onBrand(read, s.askKnowledge))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/ask", s.inBrand(read, s.askKnowledge))
 }
 
@@ -239,7 +241,7 @@ func knowledgeWords(q string) string {
 // meet: live, published, the audience may hear it, and the brand and the
 // caller's brands fit. Its arguments start at $2 ($1 is the workspace).
 func knowledgeChunkFilter(a *access, kq knowledgeQuery, args *[]any) string {
-	*args = append(*args, kq.audience == audienceCustomers, kq.brand, a.Brands)
+	*args = append(*args, kq.audience == audienceCustomers, kq.brand, a.seenBrands())
 	n := len(*args)
 	return fmt.Sprintf(` AND i.deleted_at IS NULL AND i.status = 'published'
 		AND (NOT $%d OR i.visibility IN ('public', 'customers_ai'))
@@ -421,8 +423,8 @@ func (s *Server) knowledgeQueryFrom(ctx context.Context, a *access, q, audience,
 			return kq, err
 		}
 		kq.brand = &id
-	} else if len(a.Brands) == 1 {
-		kq.brand = &a.Brands[0]
+	} else if len(a.seenBrands()) == 1 {
+		kq.brand = &a.seenBrands()[0]
 	}
 	return kq, nil
 }
@@ -686,7 +688,7 @@ func (s *Server) knowledgeSummary(ctx context.Context, a *access, brand string) 
 		FROM knowledge_items
 		WHERE workspace_id = $1 AND deleted_at IS NULL AND status = 'published'
 		  AND ($2 = '' OR brand_id::text = $2)
-		  AND ($3::uuid[] IS NULL OR brand_id = ANY($3))`, a.WorkspaceID, brand, a.Brands).Scan(&articles, &snippets, &updated)
+		  AND ($3::uuid[] IS NULL OR brand_id = ANY($3))`, a.WorkspaceID, brand, a.seenBrands()).Scan(&articles, &snippets, &updated)
 	if err != nil {
 		return nil, err
 	}

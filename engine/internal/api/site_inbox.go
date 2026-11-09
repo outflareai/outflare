@@ -99,7 +99,7 @@ func (s *Server) drainWorkspaceInbox(ctx context.Context, ws string) (int, error
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT i.id, i.key_id::text, k.brand_id::text, k.origins, k.excluded_params, i.user_agent, i.batch, i.received_at, i.attempts,
-				i.country, i.country_source
+				i.country, i.country_source, i.region, i.city, i.asn, i.isp
 			FROM site_event_inbox i JOIN site_keys k ON k.id = i.key_id
 			WHERE i.workspace_id = $1 AND i.failed_at IS NULL ORDER BY i.id LIMIT $2`, ws, inboxPass)
 		if err != nil {
@@ -118,7 +118,7 @@ func (s *Server) drainWorkspaceInbox(ctx context.Context, ws string) (int, error
 			var r row
 			r.key.workspaceID = ws
 			if err := rows.Scan(&r.id, &r.key.id, &r.key.brandID, &r.key.origins, &r.key.excludedParams, &r.ua, &r.batch, &r.at, &r.attempts,
-				&r.key.country, &r.key.countrySource); err != nil {
+				&r.key.country, &r.key.countrySource, &r.key.region, &r.key.city, &r.key.asn, &r.key.isp); err != nil {
 				rows.Close()
 				return err
 			}

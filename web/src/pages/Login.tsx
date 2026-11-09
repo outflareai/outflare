@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage } from "../api";
 import { Button, CenteredForm, ErrorText, Input } from "../ui";
 import { GoogleButton, OrDivider, clearGoogleReturn, googleReturn, useGoogleSignIn } from "./GoogleSignIn";
+import { AppSignInShell } from "./AppSignIn";
+import { isDesktopApp } from "../lib/desktop";
 import { ForgotPassword } from "./AccountEmail";
 import { getPasskey, passkeyError, passkeysSupported } from "../lib/passkeys";
 import { Icon } from "../icons";
@@ -39,6 +41,15 @@ function PasskeyButton({ onDone, onError }: { onDone: () => void; onError: (m: s
 }
 
 export function Login({ onDone }: { onDone: () => void }) {
+  // The desktop app never shows a form: signing in happens in the browser.
+  if (isDesktopApp()) return <AppSignInShell />;
+  return <LoginForm onDone={onDone} />;
+}
+
+// Paths that keep their query through a Google sign-in and come back.
+const keepReturn = ["/oauth/authorize", "/connect", "/signin/app"];
+
+function LoginForm({ onDone }: { onDone: () => void }) {
   const google = useGoogleSignIn();
   const [passkey, setPasskey] = useState(false);
   useEffect(() => {
@@ -82,7 +93,7 @@ export function Login({ onDone }: { onDone: () => void }) {
       {(google || passkey) && (
         <>
           {passkey && <PasskeyButton onDone={onDone} onError={setError} />}
-          {google && <GoogleButton returnTo={location.pathname === "/oauth/authorize" || location.pathname === "/connect" ? location.pathname + location.search : "/"} />}
+          {google && <GoogleButton returnTo={keepReturn.includes(location.pathname) ? location.pathname + location.search : "/"} />}
           <OrDivider />
         </>
       )}

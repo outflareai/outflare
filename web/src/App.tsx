@@ -13,10 +13,14 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiPanel, canOpen, CommandPalette, everyday, isSettings, modules, resetNav, SettingsFrame, settingsGroups, shortcuts, Sidebar, startNav, tabNames, TopBar, useTheme, type Command, type MenuLink } from "./shell";
 import { Setup } from "./pages/Setup";
 import { Login } from "./pages/Login";
+import { AppSignIn } from "./pages/AppSignIn";
+import { isDesktopApp } from "./lib/desktop";
 import { AcceptInvite } from "./pages/AcceptInvite";
 import { ConfirmEmailBanner, ConfirmEmailFirst, ResetPassword, VerifyEmail } from "./pages/AccountEmail";
 import { SupportViewBanner } from "./components/support-view-banner";
 import { Members } from "./pages/Members";
+import { TeamDirectory } from "./pages/Team";
+import { TelegramChats } from "./pages/Telegram";
 import { Tokens } from "./pages/Tokens";
 import { Webhooks } from "./pages/Webhooks";
 import { Alerts } from "./pages/Alerts";
@@ -28,6 +32,7 @@ import { AIAccounts } from "./pages/AIAccounts";
 import { Experiments } from "./pages/Experiments";
 import { Audit } from "./pages/Audit";
 import { Logs } from "./pages/Logs";
+import { TeamActivity } from "./pages/TeamActivity";
 import { Mailboxes } from "./pages/Mailboxes";
 import { Leads } from "./pages/Leads";
 import { People } from "./pages/People";
@@ -141,6 +146,7 @@ type State =
   | { kind: "confirm"; email: string; resendAfter: number }
   | { kind: "authorize"; me: Me }
   | { kind: "connectComputer"; me: Me }
+  | { kind: "appSignIn"; me: Me }
   | { kind: "app"; me: Me };
 export type { Tab };
 
@@ -178,6 +184,9 @@ export function App() {
       if (location.pathname === "/oauth/authorize") return setState({ kind: "authorize", me: me.data as Me });
       // Outflare for desktop sent the person here to link their computer.
       if (location.pathname === "/connect/computer") return setState({ kind: "connectComputer", me: me.data as Me });
+      // The Outflare desktop app opened this browser to approve its sign-in.
+      // Inside the app's own window the path is its sign-in screen (Login).
+      if (location.pathname === "/signin/app" && !isDesktopApp()) return setState({ kind: "appSignIn", me: me.data as Me });
       return setState({ kind: "app", me: me.data as Me });
     }
     setState({ kind: "login" });
@@ -199,6 +208,8 @@ export function App() {
       return <Setup onDone={boot} />;
     case "login":
       return <Login onDone={boot} />;
+    case "appSignIn":
+      return <AppSignIn me={state.me} />;
     case "invite":
       return <AcceptInvite token={state.token} onDone={boot} />;
     case "reset":
@@ -698,7 +709,7 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {ready && ws && tab === "social" && <Social key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reviews" && <Reviews key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "ads" && <Ads key={ws.id} ws={ws.id} canManage={writer} go={setTab} item={item} />}
-        {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} />}
+        {ready && ws && tab === "partners" && <Partners key={ws.id} ws={ws.id} canManage={writer} open={item ?? ""} onOpen={(id) => setItem(id || undefined)} go={setTab} />}
         {ready && ws && tab === "visitors" && <Visitors key={ws.id} ws={ws.id} canManage={writer} go={setTab} open={item} onOpen={(it) => setItem(it || undefined)} />}
         {ready && ws && tab === "reddit" && <Reddit key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
         {ready && ws && tab === "reddit-campaigns" && <RedditCampaigns key={ws.id} ws={ws.id} canManage={writer} go={setTab} />}
@@ -767,7 +778,10 @@ function Shell({ me, onSignOut, onReload }: { me: Me; onSignOut: () => void; onR
         {isSettings(tab) && (
           <SettingsFrame groups={settings} tab={tab} onTab={go}>
             {ready && ws && tab === "workspace" && <WorkspaceSettings key={ws.id} ws={ws} canManage={isAdmin} onSaved={onReload} />}
+            {ready && ws && tab === "team-activity" && <TeamActivity key={ws.id} ws={ws.id} canApprove={can("actions.approve")} canManage={can("actions.manage")} canRun={can("agents.run")} canLogs={can("audit.read")} />}
             {ready && ws && tab === "members" && <Members key={ws.id} ws={ws.id} myId={me.user.id ?? ""} myScopes={scopes} myRole={ws.role} />}
+            {ready && ws && tab === "telegram" && <TelegramChats key={ws.id} ws={ws.id} canManage={can("members.manage")} item={item} setItem={setItem} />}
+            {ready && ws && tab === "team" && <TeamDirectory key={ws.id} ws={ws.id} canManage={can("members.manage")} />}
             {ready && ws && tab === "alerts" && <Alerts key={ws.id} ws={ws.id} canManage={isAdmin} />}
             {ready && ws && tab === "digests" && <Digests key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}
             {ready && ws && tab === "ai-usage" && <AIUsage key={ws.id} ws={ws.id} canManage={isAdmin} go={setTab} />}

@@ -21,12 +21,12 @@ var unpagedLists = map[string]string{
 	"getAnalyticsHistory":         "a time series bounded by from and to",
 	"getBrandAnalyticsHistory":    "a time series bounded by from and to",
 	"getSEOHistory":               "a time series bounded by from and to",
-	"listAdCampaigns":             "a ranking by spend over from and to, capped at 1000",
-	"listAdItems":                 "a ranking by spend over from and to, capped at 1000",
-	"listAdKeywords":              "a ranking by spend over from and to, capped at 1000",
-	"listAdSearchTerms":           "a ranking by spend over from and to, capped at 1000",
-	"listAdSuggestions":           "a queue in status order, open ones first, at most 500",
-	"listAdTests":                 "live tests first, then finished ones, at most 500",
+	"listBrandAdCampaigns":        "a ranking by spend over from and to, capped at 1000",
+	"listBrandAdItems":            "a ranking by spend over from and to, capped at 1000",
+	"listBrandAdKeywords":         "a ranking by spend over from and to, capped at 1000",
+	"listBrandAdSearchTerms":      "a ranking by spend over from and to, capped at 1000",
+	"listBrandAdSuggestions":      "a queue in status order, open ones first, at most 500",
+	"listBrandAdTests":            "live tests first, then finished ones, at most 500",
 	"listAdDrafts":                "a queue in status order, those waiting for a person first, at most 500",
 	"listEmailBisonCompatCalls":   "mirrors the EmailBison API's own shape",
 	"getBrandSiteSearch":          "the top rows of a report bounded by from and to, with totals of every row",
@@ -38,7 +38,7 @@ var unpagedLists = map[string]string{
 	"listVisitors":                "a ranking by score over days, at most 200, with totals of every visitor",
 	"listBrandVisitors":           "a ranking by score over days, at most 200, with totals of every visitor",
 	"searchWorkspace":             "the best matches, at most 100, ranked: refine the words to find others",
-	"findKnowledgePassages":       "the best passages for a question, at most 20, ranked: ask in other words to find others",
+	"findBrandKnowledgePassages":  "the best passages for a question, at most 20, ranked: ask in other words to find others",
 }
 
 func TestDocumentFollowsConventions(t *testing.T) {

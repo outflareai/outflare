@@ -1,6 +1,7 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useState } from "react";
 import type { AdAccount, AdCampaign, AdChange, AdConnection, AdSummaryRow, AdTotals, AttributionAdRow } from "@outflare/sdk";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
@@ -120,7 +121,14 @@ function readScope(ws: string): AdScope {
 export const scopeQuery = (s: AdScope) => ({ ...(s.network ? { connector: s.network } : {}), ...(s.account ? { account_id: s.account } : {}) });
 type AdsTab = (typeof adsTabs)[number];
 
-export function Ads({ ws, canManage, go, item }: Props) {
+// Ads belong to one brand.
+export function Ads(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Ads" brands={active.length} />;
+  return <AdsPage key={brand.id} {...props} />;
+}
+
+function AdsPage({ ws, canManage, go, item }: Props) {
   // The item is a tab, or a campaign's id (and its ad group's) for its
   // own page.
   const tab: AdsTab = (adsTabs as readonly string[]).includes(item ?? "") ? (item as AdsTab) : "overview";
@@ -155,27 +163,27 @@ export function Ads({ ws, canManage, go, item }: Props) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const path = { ws };
-    const query = brandKey ? { brand: brandKey } : {};
-    const narrow = { ...query, ...scopeQuery(scope) };
+    const path = { brand: brandId };
+    const narrow = scopeQuery(scope);
     const to = new Date();
     const range = { from: day(new Date(to.getTime() - (days - 1) * 86_400_000)), to: day(to) };
-    const [c, a, all, cp, s, d, at, ba] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path } }),
-      api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query } }),
-      brandKey ? api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path, query: { brand: "all" } } }) : null,
-      api.GET("/v1/workspaces/{ws}/ads/campaigns", { params: { path, query: { ...narrow, ...range, limit: 200 } } }),
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "connector" } } }),
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "day" } } }),
+    // Every brand's accounts and those with none yet, for assigning.
+    const all = await api.GET("/v1/workspaces/{ws}/ads/accounts", { params: { path: { ws }, query: { brand: "all" } } });
+    const [c, a, cp, s, d, at, ba] = await Promise.all([
+      api.GET("/v1/workspaces/{ws}/ads/connections", { params: { path: { ws } } }),
+      api.GET("/v1/brands/{brand}/ads/accounts", { params: { path } }),
+      api.GET("/v1/brands/{brand}/ads/campaigns", { params: { path, query: { ...narrow, ...range, limit: 200 } } }),
+      api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "connector" } } }),
+      api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "day" } } }),
       // What Outflare credits is a brand's, so only with one picked.
-      brandId ? api.GET("/v1/brands/{brand}/attribution/ads", { params: { path: { brand: brandId }, query: range } }) : null,
-      api.GET("/v1/workspaces/{ws}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "account" } } }),
+      api.GET("/v1/brands/{brand}/attribution/ads", { params: { path, query: range } }),
+      api.GET("/v1/brands/{brand}/ads/summary", { params: { path, query: { ...narrow, ...range, group: "account" } } }),
     ]);
     if (c.error || !c.data) return setError(errorMessage(c.error));
     setError(a.error || cp.error || s.error ? errorMessage(a.error ?? cp.error ?? s.error) : "");
     setConns(c.data.data);
     setAccounts(a.data?.data ?? []);
-    setAllAccounts((all ? all.data?.data : a.data?.data) ?? []);
+    setAllAccounts(all.data?.data ?? []);
     setCampaigns(cp.data?.data ?? []);
     setByPlatform(s.data?.data ?? []);
     setTotals(s.data?.totals ?? []);
@@ -200,11 +208,11 @@ export function Ads({ ws, canManage, go, item }: Props) {
   // platform; the list follows the platform's answer at the next load.
   async function change(c: AdCampaign, kind: "pause" | "resume" | "budget", budget?: number) {
     setBusy(true);
-    const p = { params: { path: { ws, id: c.id } } };
+    const p = { params: { path: { brand: brandId, id: c.id } } };
     const { error } =
-      kind === "pause" ? await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/pause", p)
-      : kind === "resume" ? await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/resume", p)
-      : await api.PATCH("/v1/workspaces/{ws}/ads/campaigns/{id}", { ...p, body: { daily_budget_micros: budget ?? 0 } });
+      kind === "pause" ? await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/pause", p)
+      : kind === "resume" ? await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/resume", p)
+      : await api.PATCH("/v1/brands/{brand}/ads/campaigns/{id}", { ...p, body: { daily_budget_micros: budget ?? 0 } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     toast(kind === "budget" ? "Budget change sent to the platform. It shows here once the platform confirms it." : `${kind === "pause" ? "Pause" : "Resume"} sent to the platform. It shows here once the platform confirms it.`);
@@ -230,11 +238,10 @@ export function Ads({ ws, canManage, go, item }: Props) {
     const v = Number(r.value);
     if (r.choice === "ok" && !(v > 0)) return toast("Enter an amount above zero.", "error");
     const body = { cost_per_conversion_micros: r.choice === "clear" ? null : Math.round(v * 1e6) };
-    const path = { ws, id };
     const { error } =
       kind === "campaigns"
-        ? await api.PUT("/v1/workspaces/{ws}/ads/campaigns/{id}/target", { params: { path }, body })
-        : await api.PUT("/v1/workspaces/{ws}/ads/accounts/{id}/target", { params: { path }, body });
+        ? await api.PUT("/v1/brands/{brand}/ads/campaigns/{id}/target", { params: { path: { brand: brandId, id } }, body })
+        : await api.PUT("/v1/workspaces/{ws}/ads/accounts/{id}/target", { params: { path: { ws, id } }, body });
     if (error) return toast(errorMessage(error), "error");
     toast(r.choice === "clear" ? "Target cleared." : "Target set.");
     load();
@@ -710,7 +717,7 @@ function AdChanges({ ws, brand, scope }: { ws: string; brand: string; scope: AdS
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    api.GET("/v1/workspaces/{ws}/ads/changes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 200 } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ads/changes", { params: { path: { brand: pickedBrandId() }, query: { ...(brand ? { brand } : {}), ...scopeQuery(scope), limit: 200 } } }).then(({ data, error }) => {
       if (!live) return;
       if (error) setError(errorMessage(error));
       setRows(data?.data ?? []);

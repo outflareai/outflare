@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/partners"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -27,13 +28,37 @@ import (
 
 type rewardEntry struct {
 	program, membership, side, recipient, kind string
-	conversion, rule, reverses                 *string
+	conversion, reverses                       *string
+	rule                                       *rewardRule
 	amount                                     int64
 	currency, action, note                     string
 	actionData                                 map[string]any
 	hold                                       time.Time
 	// autoApprove is the flow's approval; nil follows the program.
 	autoApprove *bool
+}
+
+// rewardRule is the rule that priced a reward as it was then, kept on the
+// reward (partner_rewards.rule) because saving a program's rules replaces
+// them. PercentBP and AmountCents are the rate it paid, after overrides.
+type rewardRule struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Trigger     string  `json:"trigger"`
+	Side        string  `json:"side"`
+	Kind        string  `json:"kind"`
+	PercentBP   *int    `json:"percent_bp"`
+	AmountCents *int64  `json:"amount_cents"`
+	Recurrence  string  `json:"recurrence"`
+	Months      *int    `json:"months"`
+	GroupID     *string `json:"group_id"`
+	PartnerID   *string `json:"partner_id"`
+}
+
+func pricedBy(r partners.Rule, c partners.Conversion) *rewardRule {
+	bp, cents := r.Rate(c)
+	return &rewardRule{ID: r.ID, Name: r.Name, Trigger: r.Trigger, Side: r.Side, Kind: r.Kind, PercentBP: bp, AmountCents: cents,
+		Recurrence: r.Recurrence, Months: r.Months, GroupID: r.GroupID, PartnerID: r.PartnerID}
 }
 
 func insertPartnerReward(ctx context.Context, tx pgx.Tx, ws string, e rewardEntry) (string, error) {
@@ -44,12 +69,16 @@ func insertPartnerReward(ctx context.Context, tx pgx.Tx, ws string, e rewardEntr
 	if err != nil {
 		return "", err
 	}
+	var ruleID *string
+	if e.rule != nil {
+		ruleID = &e.rule.ID
+	}
 	var id string
 	err = tx.QueryRow(ctx, `INSERT INTO partner_rewards (workspace_id, program_id, membership_id, side, recipient_id, kind, conversion_id, rule_id,
-		reverses_id, amount_cents, currency, action, action_data, hold_until, note, auto_approve)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, GREATEST(now(), $14), $15, $16) RETURNING id::text`,
-		ws, e.program, e.membership, e.side, e.recipient, e.kind, e.conversion, e.rule, e.reverses, e.amount, e.currency, e.action,
-		string(data), e.hold, e.note, e.autoApprove).Scan(&id)
+		reverses_id, amount_cents, currency, action, action_data, hold_until, note, auto_approve, rule)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, GREATEST(now(), $14), $15, $16, $17) RETURNING id::text`,
+		ws, e.program, e.membership, e.side, e.recipient, e.kind, e.conversion, ruleID, e.reverses, e.amount, e.currency, e.action,
+		string(data), e.hold, e.note, e.autoApprove, e.rule).Scan(&id)
 	if err == nil {
 		metrics.PartnerRewards(e.kind, "created", 1)
 	}
@@ -178,8 +207,9 @@ func logRewardCost(ctx context.Context, tx pgx.Tx, ws string, w partnerRewardVie
 	return err
 }
 
-// rejectReward rejects a pending entry, with the reason.
-func rejectReward(ctx context.Context, tx pgx.Tx, p *principal, ws string, w partnerRewardView, note string) error {
+// rejectReward rejects a pending entry, with the reason; by is manual or
+// refund.
+func rejectReward(ctx context.Context, tx pgx.Tx, p *principal, ws string, w partnerRewardView, note, by string) error {
 	if w.Status != "pending" {
 		return errInvalid("only a pending reward can be rejected; reverse an approved one with an adjustment")
 	}
@@ -191,7 +221,7 @@ func rejectReward(ctx context.Context, tx pgx.Tx, p *principal, ws string, w par
 	if err != nil {
 		return err
 	}
-	d["reason"] = note
+	d["reason"], d["by"] = note, by
 	metrics.PartnerRewards(w.Kind, "rejected", 1)
 	return partnerRecord(ctx, tx, p, ws, "partner_reward.rejected", "partner_reward", w.ID, d)
 }
@@ -200,12 +230,20 @@ func (s *Server) listPartnerRewards(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
 	status, kind, partner, payout, program := q.Get("status"), q.Get("kind"), q.Get("partner_id"), q.Get("payout_id"), strings.ToLower(q.Get("program"))
+	source := q.Get("source")
+	pattern, ok := partnerSearch(w, r)
+	if !ok {
+		return
+	}
 	switch {
 	case status != "" && !slices.Contains([]string{"pending", "approved", "rejected", "paid", "fulfilled"}, status):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is pending, approved, rejected, paid or fulfilled")
 		return
 	case kind != "" && !slices.Contains([]string{"cash", "fee", "action", "adjustment"}, kind):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "kind is cash, fee, action or adjustment")
+		return
+	case source != "" && !slices.Contains([]string{"native", "imported", "held_at_source"}, source):
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "source is native, imported or held_at_source")
 		return
 	case (partner != "" && !validUUID(partner)) || (payout != "" && !validUUID(payout)):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "partner_id and payout_id are ids")
@@ -223,16 +261,14 @@ func (s *Server) listPartnerRewards(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, status, kind, partner, payout, program, before, limit + 1}
-	rows, err := s.pool.Query(r.Context(), partnerRewardSelect+` JOIN partner_programs p ON p.id = w.program_id
-		WHERE w.workspace_id = $1 AND ($2 = '' OR w.status = $2) AND ($3 = '' OR w.kind = $3) AND ($4 = '' OR w.membership_id::text = $4)
-		AND ($5 = '' OR w.payout_id::text = $5) AND ($6 = '' OR p.id::text = $6 OR p.slug = $6) AND ($7::timestamptz IS NULL OR w.created_at < $7)`+sel.sql("p.brand_id", &args)+`
-		ORDER BY w.created_at DESC LIMIT $8`, args...)
-	if err != nil {
-		s.internal(w, r, err)
-		return
-	}
-	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (partnerRewardView, error) { return scanPartnerReward(row) })
+	args := []any{a.WorkspaceID, status, kind, partner, payout, program, before, pattern, source}
+	where := `($2 = '' OR w.status = $2) AND ($3 = '' OR w.kind = $3) AND ($4 = '' OR w.membership_id::text = $4)
+		AND ($5 = '' OR w.payout_id::text = $5) AND ($6 = '' OR p.id::text = $6 OR p.slug = $6) AND ($7::timestamptz IS NULL OR w.created_at < $7)
+		AND ($8 = '' OR m.code ILIKE $8 OR v.external_id ILIKE $8 OR ` + emailMatches("m.record_id", "$8") + ` OR ` + emailMatches("v.record_id", "$8") + `)
+		AND ($9 = '' OR ($9 = 'native' AND imp.connector IS NULL) OR ($9 = 'imported' AND imp.connector IS NOT NULL)
+			OR ($9 = 'held_at_source' AND ` + heldAtSource + `))`
+	where += sel.sql("p.brand_id", &args)
+	list, err := rewardRows(r.Context(), s.pool, a.WorkspaceID, where, "w.created_at DESC", limit+1, args[1:]...)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -243,7 +279,7 @@ func (s *Server) listPartnerRewards(w http.ResponseWriter, r *http.Request) {
 		next = &list[limit-1].CreatedAt
 	}
 	if list == nil {
-		list = []partnerRewardView{}
+		list = []partnerRewardRow{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
 }
@@ -296,7 +332,7 @@ func (s *Server) rejectPartnerReward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.rewardChange(w, r, func(ctx context.Context, tx pgx.Tx, a *access, v partnerRewardView) error {
-		return rejectReward(ctx, tx, &a.principal, a.WorkspaceID, v, strings.TrimSpace(in.Note))
+		return rejectReward(ctx, tx, &a.principal, a.WorkspaceID, v, strings.TrimSpace(in.Note), "manual")
 	})
 }
 

@@ -682,6 +682,28 @@ export function registerRecordTools(server: McpServer, gtm: MissionClient, works
   );
 
   server.registerTool(
+    "add_partnership",
+    {
+      title: "Add a partnership prospect",
+      description:
+        "Add a partner to one of the brand's partnership pipelines from its website: link_partnership (SEO links), sponsorship, integration_partnership, " +
+        "affiliate_partnership or comparison_listing, once its kit is set up (apply_kit with partnerships-seo, partnerships-sponsorships, partnerships-integrations, " +
+        "partnerships-affiliates or partnerships-comparison-sites and the brand). It finds or adds the site's company and adds the partnership at the first stage, " +
+        "or stage. When the company is already in that pipeline it returns that one with created false. attributes sets the pipeline's other fields (get_catalog lists them).",
+      inputSchema: {
+        brand: brandRef,
+        type: z.string().min(1).max(40).describe("The pipeline's record type, such as link_partnership."),
+        website: z.string().min(1).max(2000).describe("The partner's site, such as acme.example."),
+        name: z.string().max(200).optional().describe("Defaults to the site's domain."),
+        stage: z.string().max(63).optional().describe("A stage option key; the first stage when left out."),
+        attributes: attributes.optional(),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/partnerships", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
     "update_record",
     {
       title: "Change or archive a customer record",

@@ -72,9 +72,17 @@ export function pageExtensions(entry = process.env.OUTFLARE_WEB_EXTENSION_ENTRY)
   };
 }
 
+function staleBuildReload(): Plugin {
+  const file = decodeURIComponent(new URL("./stale-build.js", import.meta.url).pathname);
+  return {
+    name: "outflare-stale-build-reload",
+    transformIndexHtml: () => [{ tag: "script", children: readFileSync(file, "utf8"), injectTo: "head" }],
+  };
+}
+
 // In development the engine runs on :8080; proxy API calls to it.
 export default defineConfig({
-  plugins: [react(), tailwindcss(), changelog(), pageExtensions()],
+  plugins: [react(), tailwindcss(), changelog(), pageExtensions(), staleBuildReload()],
   resolve: { dedupe: ["react", "react-dom"], alias: { "@": decodeURIComponent(new URL("./src", import.meta.url).pathname) } },
   build: { rolldownOptions: { input: { app: decodeURIComponent(new URL("./index.html",import.meta.url).pathname), portal: decodeURIComponent(new URL("./portal.html",import.meta.url).pathname) } } },
   server: {

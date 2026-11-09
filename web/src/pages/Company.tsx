@@ -41,14 +41,13 @@ function BrandCompany({ ws, brand, brandId, canManage }: { ws: string; brand: st
   const [data, setData] = useState<WorkspaceContext | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [q, setQ] = useState("");
-  const path = { params: { path: { ws } } };
 
   const load = useCallback(async () => {
     const { data } = await api.GET("/v1/workspaces/{ws}/context", { params: { path: { ws }, query: { brand } } });
     if (data) setData(data);
   }, [ws, brand]);
   const loadMemories = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/memories", { params: { path: { ws }, query: { limit: 200, brand, ...(q.trim() ? { q: q.trim() } : {}) } } });
+    const { data } = await api.GET("/v1/brands/{brand}/memories", { params: { path: { brand: brandId }, query: { limit: 200, ...(q.trim() ? { q: q.trim() } : {}) } } });
     if (data) setMemories(data.data);
   }, [ws, brand, q]);
   useEffect(() => void load(), [load]);
@@ -69,7 +68,7 @@ function BrandCompany({ ws, brand, brandId, canManage }: { ws: string; brand: st
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok", variant: "primary" }],
     });
     if (r?.choice !== "ok" || !r.value.trim()) return;
-    const { error } = await api.POST("/v1/workspaces/{ws}/memories", { ...path, body: { text: r.value.trim(), kind: "preference", brand_id: brandId } });
+    const { error } = await api.POST("/v1/brands/{brand}/memories", { params: { path: { brand: brandId } }, body: { text: r.value.trim(), kind: "preference", brand_id: brandId } });
     if (error) return toast(errorMessage(error), "error");
     toast("Saved. Agents will read it from now on.");
     loadMemories();
@@ -83,20 +82,20 @@ function BrandCompany({ ws, brand, brandId, canManage }: { ws: string; brand: st
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok", variant: "primary" }],
     });
     if (r?.choice !== "ok" || !r.value.trim() || r.value.trim() === m.text) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/memories/{id}", { params: { path: { ws, id: m.id } }, body: { text: r.value.trim() } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/memories/{id}", { params: { path: { brand: brandId, id: m.id } }, body: { text: r.value.trim() } });
     if (error) return toast(errorMessage(error), "error");
     loadMemories();
   }
 
   async function change(m: Memory, body: { pinned?: boolean; kind?: Memory["kind"] }) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/memories/{id}", { params: { path: { ws, id: m.id } }, body });
+    const { error } = await api.PATCH("/v1/brands/{brand}/memories/{id}", { params: { path: { brand: brandId, id: m.id } }, body });
     if (error) return toast(errorMessage(error), "error");
     loadMemories();
   }
 
   async function forget(m: Memory) {
     if (!(await confirmAction("Forget this memory?", <>Agents will no longer read “{m.text}”.</>, "Forget"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/memories/{id}", { params: { path: { ws, id: m.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/memories/{id}", { params: { path: { brand: brandId, id: m.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Forgotten.");
     loadMemories();

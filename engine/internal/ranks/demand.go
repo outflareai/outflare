@@ -64,7 +64,7 @@ func paidDemand(ctx context.Context, pool *pgxpool.Pool, store *connectors.Store
 	cost, err := call(cctx, r)
 	cancel()
 	if cost.USD > 0 {
-		if rerr := recordCostRef(ctx, pool, o, seosync.UnitUSD, "", fmt.Sprintf("%s (%s)", what, country), ref, cost); rerr != nil {
+		if rerr := recordCostRef(ctx, pool, o, seosync.UnitUSD, "", fmt.Sprintf("%s (%s)", what, country), ref, "", cost); rerr != nil {
 			return rerr
 		}
 	}

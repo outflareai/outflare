@@ -158,10 +158,18 @@ func portalFor(kind string, raw []byte) portalSettings {
 }
 
 var (
-	colorRE      = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	fieldKeyRE   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
-	subdomainRE  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	reservedSubs = []string{"www", "app", "api", "admin", "mail", "partners", "portal", "static", "assets"}
+	colorRE     = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	fieldKeyRE  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
+	subdomainRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	// reservedSubs can never be a portal's address: with a partners domain
+	// such as the server's own (portals at <address>.example.com), they are
+	// the operator's own hosts or would pass for one. The web app's
+	// reservedAddresses (PartnerSettings.tsx) mirrors it, and so does Cloud's edge.
+	reservedSubs = []string{"www", "app", "api", "admin", "mail", "partners", "portal", "static", "assets",
+		"account", "accounts", "auth", "beta", "billing", "blog", "cdn", "click", "clicks", "console", "dashboard", "demo", "dev",
+		"docs", "domains", "edge", "email", "ftp", "go", "grafana", "help", "id", "imap", "in", "inbound", "links", "login", "mx",
+		"ns1", "ns2", "outflare", "pop", "preview", "prometheus", "secure", "signin", "signup", "smtp", "sso", "staging",
+		"status", "support", "test", "track", "webmail"}
 )
 
 func (p *portalSettings) normalizeLists() {
@@ -316,7 +324,8 @@ func (p *portalSettings) check() error {
 }
 
 // portalBase is where a program's portal is: its verified own domain, its
-// subdomain of the partners domain, or /p/<id>/ on this server.
+// subdomain of the partners domain, or on this server at /p/<address>/ (the
+// subdomain doubles as a readable address) or /p/<id>/ without one.
 func (s *Server) portalBase(ctx context.Context, program string, subdomain *string) (string, error) {
 	var domain string
 	err := s.pool.QueryRow(ctx, `SELECT d.domain FROM partner_programs p JOIN tracking_domains d ON d.id = p.portal_domain_id
@@ -328,11 +337,50 @@ func (s *Server) portalBase(ctx context.Context, program string, subdomain *stri
 		return "", err
 	case subdomain != nil && s.partnersDomain != "":
 		return "https://" + *subdomain + "." + s.partnersDomain + "/", nil
+	case subdomain != nil && *subdomain != "":
+		return strings.TrimRight(s.publicURL, "/") + "/p/" + *subdomain + "/", nil
 	}
 	return strings.TrimRight(s.publicURL, "/") + "/p/" + program + "/", nil
 }
 
 // ---- Admin: the portal's settings, assets and impersonation ----
+
+// portalAddress serves /p/<address>/... on this server: a program's portal
+// by its readable address (its portal_subdomain, unique across the server)
+// instead of its id. The request is passed on as /p/<id>/..., with its pages,
+// links and session cookie kept under /p/<address>/.
+func (s *Server) portalAddress(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest, ok := strings.CutPrefix(r.URL.Path, "/p/")
+		if !ok || s.pool == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		addr, tail, _ := strings.Cut(rest, "/")
+		if addr == "" || validUUID(addr) || !subdomainRE.MatchString(addr) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var id string
+		err := s.pool.QueryRow(r.Context(), `SELECT id::text FROM partner_programs WHERE portal_subdomain = $1`, addr).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			s.internal(w, r, err)
+			return
+		}
+		if tail == "" && !strings.HasSuffix(r.URL.Path, "/") {
+			http.Redirect(w, r, "/p/"+addr+"/", http.StatusMovedPermanently)
+			return
+		}
+		r2 := r.Clone(context.WithValue(r.Context(), ctxPortalBaseKey{}, "/p/"+addr+"/"))
+		r2.URL.Path = "/p/" + id + "/" + tail
+		r2.URL.RawPath = ""
+		next.ServeHTTP(w, r2)
+	})
+}
 
 func (s *Server) routesPartnerPortal(mux *http.ServeMux) {
 	// Unknown portal paths must never reach the dashboard SPA fallback.
@@ -424,8 +472,11 @@ func (s *Server) setPartnerPortal(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case v == "":
 			sub = nil
-		case !subdomainRE.MatchString(v) || slices.Contains(reservedSubs, v):
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "subdomain is 1 to 63 lowercase letters, digits and hyphens, such as northpeak")
+		case !subdomainRE.MatchString(v) || validUUID(v):
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "the portal's address is 1 to 63 lowercase letters, digits and hyphens, such as northpeak")
+			return
+		case slices.Contains(reservedSubs, v):
+			writeError(w, r, http.StatusBadRequest, "invalid_request", v+" is reserved; pick another address for the portal")
 			return
 		default:
 			sub = &v
@@ -468,7 +519,7 @@ func (s *Server) setPartnerPortal(w http.ResponseWriter, r *http.Request) {
 				"signup_open": settings.SignupOpen})
 	})
 	if errors.Is(err, errConflict) {
-		writeError(w, r, http.StatusConflict, "conflict", "another program already uses that subdomain")
+		writeError(w, r, http.StatusConflict, "conflict", "another program already uses that address")
 		return
 	}
 	if s.allocError(w, r, err) {
@@ -756,10 +807,7 @@ func (s *Server) portalEmail(ctx context.Context, tx pgx.Tx, p *portalProgram, t
 
 // portalCookiePath keeps a portal's session to its own pages.
 func (s *Server) portalCookiePath(r *http.Request, program string) string {
-	if onPortalHost(r) {
-		return "/"
-	}
-	return "/p/" + program + "/"
+	return portalPathBase(r, program)
 }
 
 func (s *Server) portalPage(w http.ResponseWriter, r *http.Request) {
@@ -768,10 +816,7 @@ func (s *Server) portalPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	base := "/p/" + id + "/"
-	if onPortalHost(r) {
-		base = "/"
-	}
+	base := portalPathBase(r, id)
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
@@ -1615,10 +1660,7 @@ func (s *Server) portalEmbed(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	base := "/p/" + id + "/"
-	if onPortalHost(r) {
-		base = "/"
-	}
+	base := portalPathBase(r, id)
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")

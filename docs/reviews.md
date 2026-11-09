@@ -1,29 +1,30 @@
 # Reviews
 
-The Reviews page shows what customers say about each brand on Trustpilot, G2, Capterra and Google, in one place: every review with its stars, sentiment, date, link and the business's answer, each site's own score and count day by day, Outflare's review score, and whether reviews are heading in the right direction. **Draft answer** writes a public answer with your own AI model for a person to edit and post.
+The Reviews page shows what customers say about each brand on Trustpilot, G2, Capterra, SourceForge and Google, in one place: every review with its stars, sentiment, date, link and the business's answer, each site's own score and count day by day, Outflare's review score, and whether reviews are heading in the right direction. **Draft answer** writes a public answer with your own AI model for a person to edit and post.
 
 The Apple App Store and Google Play come next, through the same pages and reviews.
 
 ## Your review pages
 
-A brand's review pages are its links, like its social profiles. Add a Trustpilot, G2 or Capterra page, or a Google Maps place, under the brand's Links or in the "Your review pages" card on the Reviews page. Outflare recognises the address and keeps one page per site address, so pasting the same page twice (or a regional copy such as `uk.trustpilot.com`) is one page.
+A brand's review pages are its links, like its social profiles. Add a Trustpilot, G2, Capterra or SourceForge page, or a Google Maps place, under the brand's Links or in the "Your review pages" card on the Reviews page. Outflare recognises the address and keeps one page per site address, so pasting the same page twice (or a regional copy such as `uk.trustpilot.com`) is one page.
 
 | Site | The address to add |
 | --- | --- |
 | Trustpilot | `trustpilot.com/review/<your domain>` |
 | G2 | `g2.com/products/<product>/reviews` |
 | Capterra | `capterra.com/p/<id>/<product>/` |
+| SourceForge | `sourceforge.net/software/product/<product>/` (business software) or `sourceforge.net/projects/<project>/reviews/` (open source) |
 | Google | The place's Google Maps link (`google.com/maps/place/...`, `maps.app.goo.gl/...`, or a `placeid` link) |
 
-With [Geonode](connectors.md) connected, Outflare searches the web for the brand's Trustpilot, G2 and Capterra pages (three searches on your own Geonode account) when Geonode is first connected, when a brand is added with a website, and on **Find review pages**. Each page found is a suggestion: **Confirm** adds it to the brand's links, **Not ours** dismisses it for good. Nothing is added on its own. A page is only suggested when it matches the brand's website (Trustpilot) or name (G2, Capterra). Google places are added by pasting their link.
+With [Geonode](connectors.md) connected, Outflare searches the web for the brand's Trustpilot, G2, Capterra and SourceForge pages (four searches on your own Geonode account) when Geonode is first connected, when a brand is added with a website, and on **Find review pages**. Each page found is a suggestion: **Confirm** adds it to the brand's links, **Not ours** dismisses it for good. Nothing is added on its own. A page is only suggested when it matches the brand's website (Trustpilot) or name (G2, Capterra, SourceForge). Google places are added by pasting their link.
 
 ## Reading them every day
 
-Outflare reads each active page once a day through the workspace's own page reader (Geonode), and straight away when the page is added. The first read takes the page's history, up to 25 pages of reviews; later reads take the newest and stop at the first review already kept. Capterra lists its most helpful reviews first, so a daily Capterra read takes up to 5 pages instead. Each read costs Geonode tokens on your own account: one per page of reviews read, so about one a day per site once the history is in. With no page reader connected, nothing is read and the page says which connection to add.
+Outflare reads each active page once a day through the workspace's own page reader (Geonode), and straight away when the page is added. The first read takes the page's history, up to 25 pages of reviews; later reads take the newest and stop at the first review already kept. Capterra lists its most helpful reviews first, and SourceForge doesn't promise newest first, so a daily Capterra or SourceForge read takes up to 5 pages instead. Each read costs Geonode tokens on your own account: one per page of reviews read, so about one a day per site once the history is in. With no page reader connected, nothing is read and the page says which connection to add.
 
 When a read fails, Outflare says why on the Reviews page and tries again on its own:
 
-- Every review page (Trustpilot, G2, Capterra and Google) is read in a browser from the start, because the sites show anything else a bot check. A page in a browser behind a bot check takes Geonode 45 to 100 seconds, so it is read as a Geonode job (async): sent once, then checked every 5 seconds. A read still running after 2½ minutes is picked up by the next round 5 minutes later, still without sending the page again.
+- Every review page (Trustpilot, G2, Capterra, SourceForge and Google) is read in a browser from the start, because the sites show anything else a bot check. A page in a browser behind a bot check takes Geonode 45 to 100 seconds, so it is read as a Geonode job (async): sent once, then checked every 5 seconds. A read still running after 2½ minutes is picked up by the next round 5 minutes later, still without sending the page again.
 - A page Geonode couldn't read (a bot check, a login wall, the site failing) is that page's own failure, never a Geonode outage: it doesn't stop the other pages, and it is tried again on the page's own schedule below.
 - A first read that stops partway (a later page of the history fails) keeps what it read and reads the history again soon (after 15 minutes, then 1, 2 and 4 hours), so the older reviews aren't lost. After five tries, what was read is kept as the page's history.
 - After that, a failed read is tried again the same day, so the day's numbers still come in: after 15 minutes, then 1 and 2 hours, then every 4 hours until one works. Only a wrong address (`page_not_found`) waits for the next day's read, since a person has to fix it.

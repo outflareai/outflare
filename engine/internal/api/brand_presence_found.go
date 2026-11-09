@@ -16,9 +16,13 @@ import (
 
 // Found: every page discovery found that links to or names the brand,
 // grouped by site, with what reading it showed (verdict), so a person
-// answers "about us" or "not us" in one click, for one page or a whole
-// site. "About us" makes it a placement under the site's publisher, adding
-// the publisher and its company record when the workspace has none.
+// answers in one click, for one page or a whole site. "About us" makes it a
+// placement under the site's publisher, adding the publisher and its
+// company record when the workspace has none; "not us" dismisses it. "Spam"
+// marks the whole site as spam, so its pages leave the list and any page
+// found on it later arrives marked spam too. "Recheck" hides a page (one
+// that is offline, say) for a week, then reads it again: it comes back with
+// what that read found.
 
 func (s *Server) routesPresenceFound(m *http.ServeMux) {
 	base := "/v1/brands/{brand}/coverage"
@@ -26,13 +30,22 @@ func (s *Server) routesPresenceFound(m *http.ServeMux) {
 	m.HandleFunc("POST "+base+"/found/review", s.onBrand(auth.ScopeCoverageManage, s.coverageReviewFound))
 }
 
-// coverageFoundViews maps a view to the finds it shows.
+// coverageFoundViews maps a view to the finds it shows. A page waiting to
+// be checked again (recheck_at in the future) shows only in later.
 var coverageFoundViews = map[string]string{
-	"about":     "c.status='new' AND c.verdict IN ('links','mentions')",
-	"maybe":     "c.status='new' AND c.verdict IN ('name_only','unreachable','unchecked')",
-	"not":       "(c.status='dismissed' OR (c.status='new' AND c.verdict='absent'))",
+	"about":     "c.status='new' AND " + foundDue + " AND c.verdict IN ('links','mentions')",
+	"maybe":     "c.status='new' AND " + foundDue + " AND c.verdict IN ('name_only','unreachable','unchecked')",
+	"later":     "c.status='new' AND NOT " + foundDue,
+	"not":       "(c.status IN ('dismissed','spam') OR (c.status='new' AND " + foundDue + " AND c.verdict='absent'))",
 	"confirmed": "c.status='confirmed'",
 }
+
+// foundDue is true for a find that isn't waiting to be checked again.
+const foundDue = "(c.recheck_at IS NULL OR c.recheck_at<=now())"
+
+// foundRecheckAfter is how long "check again" hides a page before it is
+// read again.
+const foundRecheckAfter = "7 days"
 
 // foundSorts orders Found's sites; the default puts sites that link first.
 var foundSorts = map[string]string{
@@ -58,7 +71,7 @@ func (s *Server) coverageFound(w http.ResponseWriter, r *http.Request) {
 	}
 	where, ok := coverageFoundViews[view]
 	if !ok {
-		writeError(w, r, 400, "invalid_request", "view is about, maybe, not or confirmed")
+		writeError(w, r, 400, "invalid_request", "view is about, maybe, later, not or confirmed")
 		return
 	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
@@ -103,7 +116,7 @@ func (s *Server) coverageFound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data json.RawMessage
-	err := s.pool.QueryRow(r.Context(), `WITH c AS (SELECT c.id,c.url,c.title,c.source,c.kind,c.verdict,c.status,c.created_at,`+foundHost+` AS host
+	err := s.pool.QueryRow(r.Context(), `WITH c AS (SELECT c.id,c.url,c.title,c.source,c.kind,c.verdict,c.status,c.created_at,c.recheck_at,`+foundHost+` AS host
  FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+where+`
  AND ($5='' OR strpos(lower(c.url),$5)>0 OR strpos(lower(c.title),$5)>0) AND ($7='' OR c.source=$7)),
  grouped AS (SELECT host,count(*) AS pages,min(created_at) AS first,max(created_at) AS latest,array_agg(DISTINCT source) AS sources,
@@ -120,17 +133,25 @@ func (s *Server) coverageFound(w http.ResponseWriter, r *http.Request) {
  counts AS (SELECT
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["about"]+`) AS about,
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["maybe"]+`) AS maybe,
+  (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["later"]+`) AS later,
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["not"]+`) AS "not",
   (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND `+coverageFoundViews["confirmed"]+`) AS confirmed,
-  (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status='new' AND c.verdict='unchecked') AS checking)
+  (SELECT count(*) FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status='new' AND `+foundDue+` AND c.verdict='unchecked') AS checking)
  SELECT jsonb_build_object('view',$6::text,
   'counts',(SELECT to_jsonb(counts) FROM counts),
   'sites_total',(SELECT count(*) FROM kept),
   'pages_total',(SELECT coalesce(sum(pages),0) FROM kept),
   'data',coalesce((SELECT jsonb_agg(jsonb_build_object('host',s.host,'pages',s.pages,'best',s.best,'first',s.first,'latest',s.latest,
    'sources',s.sources,'domain_rating',s.dr,'domain_traffic',s.traffic,'ai_citations',s.cited,'competitors',s.rivals,'competitor_site',s.rival_site,
-   'items',(SELECT jsonb_agg(jsonb_build_object('id',c.id,'url',c.url,'title',c.title,'source',c.source,'kind',c.kind,'verdict',c.verdict,'status',c.status,'found_at',c.created_at) ORDER BY c.created_at DESC) FROM (SELECT * FROM c WHERE c.host=s.host ORDER BY created_at DESC LIMIT 20) c))
-   ORDER BY `+order+`) FROM sites s),'[]'))`,
+   'spam_score',sp.score,'spam_reasons',COALESCE(sp.reasons,'[]'::jsonb),
+   'items',(SELECT jsonb_agg(jsonb_build_object('id',c.id,'url',c.url,'title',c.title,'source',c.source,'kind',c.kind,'verdict',c.verdict,'status',c.status,'found_at',c.created_at,'recheck_at',c.recheck_at) ORDER BY c.created_at DESC) FROM (SELECT * FROM c WHERE c.host=s.host ORDER BY created_at DESC LIMIT 20) c))
+   ORDER BY `+order+`) FROM sites s
+   -- How spammy the site's links to the brand look (the providers' own
+   -- judgement, such as Ahrefs' spam flag, and Outflare's link checks):
+   -- the worst link's score and why. A hint for the person reviewing only.
+   LEFT JOIN LATERAL (SELECT b.spam_score AS score,(SELECT jsonb_agg(f->>'code') FROM jsonb_array_elements(b.spam_factors) f) AS reasons
+    FROM backlinks b WHERE b.workspace_id=$1 AND b.brand_id=$2 AND b.source_domain IN (s.host,'www.'||s.host) AND b.spam_score IS NOT NULL
+    ORDER BY b.spam_score DESC LIMIT 1) sp ON true),'[]'))`,
 		a.WorkspaceID, a.Brand, limit, offset, search, view, source, minDR, hideRivals).Scan(&data)
 	if s.coverageError(w, r, err) {
 		return
@@ -159,8 +180,10 @@ func (s *Server) coverageReviewFound(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Decision != "about_us" && req.Decision != "not_us" {
-		writeError(w, r, 400, "invalid_request", "decision is about_us or not_us")
+	switch req.Decision {
+	case "about_us", "not_us", "spam", "recheck":
+	default:
+		writeError(w, r, 400, "invalid_request", "decision is about_us, not_us, spam or recheck")
 		return
 	}
 	host := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(req.Host)), "www.")
@@ -196,8 +219,56 @@ func (s *Server) coverageReviewFound(w http.ResponseWriter, r *http.Request) {
 		if err = rows.Err(); err != nil {
 			return err
 		}
+		if req.Decision == "spam" {
+			// Spam is a site's: every page on the sites of the chosen pages
+			// that isn't a placement already.
+			hosts := map[string]bool{}
+			var list []string
+			for _, f := range finds {
+				if !hosts[f.host] {
+					hosts[f.host] = true
+					list = append(list, f.host)
+				}
+			}
+			rows, err := tx.Query(r.Context(), `UPDATE coverage_candidates c SET status='spam',recheck_at=NULL,version=version+1,updated_at=now()
+ WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status IN ('new','dismissed') AND `+foundHost+`=ANY($3::text[]) RETURNING c.id::text`, a.WorkspaceID, a.Brand, list)
+			if err != nil {
+				return err
+			}
+			var ids []string
+			for rows.Next() {
+				var id string
+				if err = rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				ids = append(ids, id)
+			}
+			rows.Close()
+			if err = rows.Err(); err != nil {
+				return err
+			}
+			for _, id := range ids {
+				if err := coverageHistory(r.Context(), tx, a, "candidates", id, "spam", map[string]any{"by_site": true}); err != nil {
+					return err
+				}
+			}
+			done = len(ids)
+			return recordWithProps(r.Context(), tx, &a.principal, a.WorkspaceID, "coverage_discovery.reviewed", "brand", a.Brand, nil,
+				map[string]any{"brand_id": a.Brand, "decision": req.Decision, "count": done, "sites": len(list), "by_site": host != ""})
+		}
 		publishers := map[string]string{}
 		for _, f := range finds {
+			if req.Decision == "recheck" {
+				if _, err := tx.Exec(r.Context(), "UPDATE coverage_candidates SET status='new',verdict='unchecked',checked_at=NULL,recheck_at=now()+interval '"+foundRecheckAfter+"',version=version+1,updated_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3", a.WorkspaceID, a.Brand, f.id); err != nil {
+					return err
+				}
+				if err := coverageHistory(r.Context(), tx, a, "candidates", f.id, "recheck_scheduled", map[string]any{"by_site": host != "", "after": foundRecheckAfter}); err != nil {
+					return err
+				}
+				done++
+				continue
+			}
 			if req.Decision == "not_us" {
 				if _, err := tx.Exec(r.Context(), "UPDATE coverage_candidates SET status='dismissed',version=version+1,updated_at=now() WHERE workspace_id=$1 AND brand_id=$2 AND id=$3", a.WorkspaceID, a.Brand, f.id); err != nil {
 					return err

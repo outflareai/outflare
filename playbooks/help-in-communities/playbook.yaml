@@ -38,7 +38,7 @@ steps:
   - say: Read recent threads in each community in a browser, without posting.
     tools: [createBrowserTask, getBrowserTask]
   - say: Pick the questions the brand can genuinely help with, and draft an answer from what the brand knows.
-    tools: [findKnowledgePassages, askKnowledge]
+    tools: [findBrandKnowledgePassages, askBrandKnowledge]
   - say: Post each answer a person approved, in a browser signed in as the brand's own account.
     tools: [createBrowserTask, getBrowserTask]
   - say: Keep each answer in Coverage and check it stays up.

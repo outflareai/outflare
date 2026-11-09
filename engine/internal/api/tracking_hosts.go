@@ -87,14 +87,19 @@ func (s *Server) trackingHostsOnly(next http.Handler) http.Handler {
 			// Compiled portal components and fonts share the dashboard's asset bundle.
 			// Serve only the asset directory here, never the app's API or HTML fallback.
 			if s.webDir != "" && strings.HasPrefix(r.URL.Path, "/assets/") {
-				http.StripPrefix("/assets/", http.FileServer(http.Dir(filepath.Join(s.webDir, "assets")))).ServeHTTP(w, r)
+				http.StripPrefix("/assets/", webAssets(filepath.Join(s.webDir, "assets"))).ServeHTTP(w, r)
 				return
 			}
 			// A partner portal's host serves only its portal, at its root.
-			r2 := r.Clone(context.WithValue(r.Context(), ctxPortalHostKey{}, true))
+			r2 := r.Clone(context.WithValue(r.Context(), ctxPortalBaseKey{}, "/"))
 			r2.URL.Path = "/p/" + e.program + r.URL.Path
 			r2.URL.RawPath = ""
 			next.ServeHTTP(w, r2)
+			return
+		}
+		if tracking && s.partnersDomain != "" && strings.HasSuffix(host, "."+s.partnersDomain) {
+			// An address of the partners domain no program has (yet).
+			writeError(w, r, http.StatusNotFound, "not_found", "there's no partner portal at this address")
 			return
 		}
 		if tracking {
@@ -105,13 +110,16 @@ func (s *Server) trackingHostsOnly(next http.Handler) http.Handler {
 	})
 }
 
-type ctxPortalHostKey struct{}
+// ctxPortalBaseKey holds where a partner portal's pages live when that is
+// not /p/<program id>/: "/" on its own host, /p/<address>/ on this server.
+type ctxPortalBaseKey struct{}
 
-// onPortalHost reports whether the request came to a partner portal's own
-// host, so its pages live at / rather than /p/<program>/.
-func onPortalHost(r *http.Request) bool {
-	v, _ := r.Context().Value(ctxPortalHostKey{}).(bool)
-	return v
+// portalPathBase is the path a portal's pages live under for this request.
+func portalPathBase(r *http.Request, program string) string {
+	if v, _ := r.Context().Value(ctxPortalBaseKey{}).(string); v != "" {
+		return v
+	}
+	return "/p/" + program + "/"
 }
 
 // isTrackingHost reports whether host is any workspace's tracking domain,

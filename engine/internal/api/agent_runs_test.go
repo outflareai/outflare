@@ -20,6 +20,7 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	e.integrations.Client.BaseURLs["openai"] = oa.URL
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	ctx := context.Background()
 	pb := "answer-interested-replies"
 	inputs := map[string]string{"booking_link": "https://cal.example/ana"}
@@ -49,6 +50,16 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	if n := len(owner.must(200, "GET", base+"/agent-runs", nil)["data"].([]any)); n != 1 {
 		t.Fatalf("list: %d", n)
 	}
+	// A run started for no brand is the team's: a brand's own routes
+	// don't show it.
+	var firstBrand string
+	if err := e.pool.QueryRow(ctx, `SELECT outflare_first_brand($1)::text`, ws).Scan(&firstBrand); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(owner.must(200, "GET", "/v1/brands/"+firstBrand+"/agent-runs", nil)["data"].([]any)); n != 0 {
+		t.Fatalf("brand list: %d", n)
+	}
+	owner.must(404, "GET", "/v1/brands/"+firstBrand+"/agent-runs/"+id, nil)
 	ci := owner.must(200, "GET", base+"/agent-runs/"+id, nil)
 	if !strings.Contains(ci["how_to_act"].(map[string]any)["changes"].(string), "waits for a person") || len(ci["updates"].([]any)) != 1 {
 		t.Fatalf("check-in: %v", ci)
@@ -63,7 +74,7 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	if run["turns"] != 1.0 || run["in_turn"] != false || run["held_actions"] != 2.0 || run["actions"] != 2.0 || !strings.Contains(run["turn_summary"].(string), "lead") {
 		t.Fatalf("after turn 1: %v", run)
 	}
-	held := owner.must(200, "GET", base+"/actions?status=held&token_id="+tokenID, nil)["data"].([]any)
+	held := owner.must(200, "GET", bb+"/actions?status=held&token_id="+tokenID, nil)["data"].([]any)
 	if len(held) != 2 {
 		t.Fatalf("held changes: %v", held)
 	}
@@ -121,7 +132,7 @@ func TestAgentRunsPlaybook(t *testing.T) {
 	if n, err := e.srv.RunDueAgentTurns(ctx); err != nil || n != 1 {
 		t.Fatalf("dry run turn = %d, %v", n, err)
 	}
-	if refused := owner.must(200, "GET", base+"/actions?status=refused&token_id="+dry["token_id"].(string), nil)["data"].([]any); len(refused) != 2 {
+	if refused := owner.must(200, "GET", bb+"/actions?status=refused&token_id="+dry["token_id"].(string), nil)["data"].([]any); len(refused) != 2 {
 		t.Fatalf("a dry run keeps what it would have done: %v", refused)
 	}
 

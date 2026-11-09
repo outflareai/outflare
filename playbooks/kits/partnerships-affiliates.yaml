@@ -1,0 +1,39 @@
+id: partnerships-affiliates
+version: 1
+title: Affiliate partnerships
+summary: A pipeline for recruiting affiliates, from first contact to joining your partner program and their first referred sale.
+
+option_sets:
+  - key: affiliate_partnership_stage
+    name: Affiliate stage
+    options:
+      - { key: prospect, label: Prospect }
+      - { key: contacted, label: Contacted }
+      - { key: interested, label: Interested }
+      - { key: terms_agreed, label: Terms agreed }
+      - { key: signed_up, label: Signed up }
+      - { key: active, label: Active }
+      - { key: inactive, label: Inactive }
+      - { key: declined, label: Declined }
+
+record_types:
+  - key: affiliate_partnership
+    name: Affiliate partnership
+    plural: Affiliate partnerships
+    description: |
+      An affiliate you are recruiting: their audience, the terms you
+      agree, and, once they join your partner program, the customers and
+      revenue they refer. Joining the program moves them to Signed up and
+      their first referred sale to Active by themselves.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: affiliate_partnership_stage, filterable: true }
+      - { key: company, label: Affiliate, value_type: record_reference, target_type: account, filterable: true, description: "The affiliate's company or site." }
+      - { key: contact, label: Contact, value_type: record_reference, target_type: person, description: "The person who joins the partner program; their email links the two." }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: channel, label: Audience or channel, value_type: text }
+      - { key: reach, label: Estimated reach, value_type: number, filterable: true }
+      - { key: commission, label: Commission, value_type: text, description: "Such as 20% recurring for 12 months." }
+      - { key: referred_customers, label: Referred customers, value_type: number, filterable: true, description: "Customers they referred who bought, from the partner program." }
+      - { key: referred_revenue, label: Referred revenue, value_type: currency, description: "What their referred customers paid, less refunds, from the partner program." }
+      - { key: next_step, label: Next step, value_type: text }

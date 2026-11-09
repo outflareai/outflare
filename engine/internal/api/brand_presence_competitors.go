@@ -18,6 +18,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/coverage"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/ranks"
 	"github.com/outflareai/outflare/engine/internal/seosync"
 	"github.com/outflareai/outflare/engine/internal/track"
@@ -131,6 +132,8 @@ func (s *Server) coverageCompetitorScanJob(ctx context.Context, j jobs.Job) erro
 		return fmt.Errorf("%w: invalid competitor scan job", jobs.ErrPermanent)
 	}
 	ws := *j.WorkspaceID
+	// What its searches cost is the brand's.
+	ctx = outcomes.WithBrand(ctx, req.Brand)
 	var host, name, siteID, website string
 	var aliases, domains []string
 	err := s.pool.QueryRow(ctx, `SELECT c.host, c.name, c.aliases, c.site_id::text, b.website, b.domains FROM seo_competitors c

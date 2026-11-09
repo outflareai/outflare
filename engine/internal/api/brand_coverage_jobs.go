@@ -38,6 +38,9 @@ func (s *Server) QueueDueCoverage(ctx context.Context) (int, error) {
 	if err := s.queueCompetitorScans(ctx); err != nil {
 		return 0, err
 	}
+	if err := s.queuePartnershipSyncs(ctx); err != nil {
+		return 0, err
+	}
 	n := 0
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `UPDATE coverage_placements SET next_check_at=now()+make_interval(hours=>least(8760,check_every_hours*(1+least(failure_count,6))))

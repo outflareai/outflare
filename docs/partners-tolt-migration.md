@@ -20,7 +20,7 @@ Tolt's API docs couldn't be fetched while this guide was written. The fields of 
 - **Create the programs.** Make one program per Tolt program, with its rewards, hold (Tolt's "commission delay") and minimum payout. The credit window replaces Tolt's cookie duration.
 - **Connect Tolt.** Connectors → Tolt, with your own Tolt API key (Tolt: Settings, Integrations). Outflare only reads it.
 - **Turn auto-approve off** on the program until the day, so Tolt's own decisions on commissions come over instead of Outflare approving them first.
-- **Import from Tolt.** Partners → program → Settings → Import from Tolt (or `POST .../partner-programs/{id}/imports`, or the `start_partner_import` MCP tool). Run it as often as you like before the day: see [the import](#the-import). When your Tolt account has more than one program, pick it from the list (`GET .../partner-programs/{id}/import-sources`, or `list_partner_import_sources`); with none chosen, the import takes the only active one.
+- **Import from Tolt.** Partners → Program settings → Import (or `POST .../partner-programs/{id}/imports`, or the `start_partner_import` MCP tool). Run it as often as you like before the day: see [the import](#the-import). When your Tolt account has more than one program, pick it from the list (`GET .../partner-programs/{id}/import-sources`, or `list_partner_import_sources`); with none chosen, the import takes the only active one.
 - **Make a backend token.** Make an API token with only the `partners.conversions` scope, for your backend.
 - **Add a tracking domain** (optional). With one such as `go.example.com` ([website tracking](website-tracking.md)), partner short links read `https://go.example.com/r/<code>`.
 
@@ -51,7 +51,7 @@ Each run lists what it couldn't bring over, by Tolt id and reason (never names o
 | `no_email` | Add the partner's email in Tolt and run again, or add the partner in Outflare. |
 | `code_changed` | The code was taken or has characters Outflare doesn't allow, so the partner got a new one. Send them their new link. |
 | `extra_link`, `link_param` | Old links with that value or parameter stop crediting. Tell the partner to share their Outflare link. |
-| `link_param_added` | The program now also reads that parameter on your website (Settings → Other link parameters), so those links keep crediting. Nothing to do. |
+| `link_param_added` | The program now also reads that parameter on your website (Program settings → General → Other link parameters), so those links keep crediting. Nothing to do. |
 | `partner_missing`, `customer_missing` | What it belongs to didn't come over (see its own issue). |
 | `partner_unavailable` | A partner a promo code, customer or commission names that Tolt's list left out, and that Tolt wouldn't give by id either (it refused, or failed on every attempt); the message has the HTTP status. |
 | `rejected` | Outflare couldn't store that object as Tolt sent it (for example a name with a character Postgres can't hold). The rest came over. The message names the check that refused it (never the values): send it to us. |
@@ -124,7 +124,7 @@ The fields of a commission event, one by one:
 
 Outflare answers `201` when a partner was credited and `200` with `credited: false` and a `reason` when not. Neither is an error, so report every sign-up and sale. Each one also lands on the customer's timeline for [attribution](attribution.md).
 
-Postbacks a partner's own tracker made to Tolt go to the program's postback URL instead (Partners → program → Settings).
+Postbacks a partner's own tracker made to Tolt go to the program's postback URL instead (Partners → Program settings → Tracking → Postback URL).
 
 ## The day
 

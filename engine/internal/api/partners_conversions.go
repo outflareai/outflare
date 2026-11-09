@@ -288,20 +288,24 @@ func scanPartnerReward(row pgx.Row) (partnerRewardView, error) {
 }
 
 type partnerConversionView struct {
-	ID          string  `json:"id"`
-	ProgramID   string  `json:"program_id"`
-	PartnerID   string  `json:"partner_id"`
-	ReferralID  string  `json:"referral_id"`
-	RecordID    string  `json:"record_id"`
-	Type        string  `json:"type"`
-	EventName   string  `json:"event_name"`
-	Recurring   bool    `json:"recurring"`
-	ExternalID  string  `json:"external_id"`
-	RefundOf    *string `json:"refund_of"`
-	AmountCents int64   `json:"amount_cents"`
-	Currency    string  `json:"currency"`
-	ProductID   string  `json:"product_id"`
-	Source      string  `json:"source"`
+	ID            string  `json:"id"`
+	ProgramID     string  `json:"program_id"`
+	PartnerID     string  `json:"partner_id"`
+	ReferralID    string  `json:"referral_id"`
+	RecordID      string  `json:"record_id"`
+	CustomerName  string  `json:"customer_name"`
+	CustomerEmail string  `json:"customer_email"`
+	PartnerCode   string  `json:"partner_code"`
+	PartnerName   string  `json:"partner_name"`
+	Type          string  `json:"type"`
+	EventName     string  `json:"event_name"`
+	Recurring     bool    `json:"recurring"`
+	ExternalID    string  `json:"external_id"`
+	RefundOf      *string `json:"refund_of"`
+	AmountCents   int64   `json:"amount_cents"`
+	Currency      string  `json:"currency"`
+	ProductID     string  `json:"product_id"`
+	Source        string  `json:"source"`
 	// PaymentSource and Interval are what the backend said: the payment
 	// provider and the billing interval, "" when it didn't.
 	PaymentSource string    `json:"payment_source"`
@@ -310,14 +314,41 @@ type partnerConversionView struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
-const partnerConversionSelect = `SELECT v.id::text, v.program_id::text, f.membership_id::text, v.referral_id::text, v.record_id::text, v.type,
+var partnerConversionSelect = `SELECT v.id::text, v.program_id::text, f.membership_id::text, v.referral_id::text, v.record_id::text,
+	COALESCE(vc.name, ''), ` + recordEmailSQL("v.record_id") + `, vm.code, COALESCE(vp.name, ''), v.type,
 	v.event_name, v.recurring, v.external_id, v.refund_of::text, v.amount_cents, v.currency, v.product_id, v.source, v.payment_source,
 	v.billing_interval, v.occurred_at, v.created_at
-	FROM partner_conversions v JOIN partner_referrals f ON f.id = v.referral_id`
+	FROM partner_conversions v JOIN partner_referrals f ON f.id = v.referral_id JOIN partner_memberships vm ON vm.id = f.membership_id
+	LEFT JOIN records vc ON vc.id = v.record_id LEFT JOIN records vp ON vp.id = vm.record_id`
+
+// partnerSearch is the q of the partner money lists as an ILIKE pattern.
+func partnerSearch(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) > 200 {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is at most 200 characters")
+		return "", false
+	}
+	if q == "" {
+		return "", true
+	}
+	return "%" + escapeLike(q) + "%", true
+}
+
+// emailMatches holds when one of a record's current emails matches pattern.
+func emailMatches(record, pattern string) string {
+	return `EXISTS (SELECT 1 FROM record_identities i WHERE i.record_id = ` + record + ` AND i.namespace = 'email' AND i.valid_to IS NULL
+		AND i.value ILIKE ` + pattern + `)`
+}
+
+// recordEmailSQL is a record's current email, verified first.
+func recordEmailSQL(record string) string {
+	return `COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = ` + record + ` AND i.namespace = 'email' AND i.valid_to IS NULL
+		ORDER BY i.verified DESC, i.valid_from LIMIT 1), '')`
+}
 
 func scanPartnerConversion(row pgx.Row) (partnerConversionView, error) {
 	var v partnerConversionView
-	err := row.Scan(&v.ID, &v.ProgramID, &v.PartnerID, &v.ReferralID, &v.RecordID, &v.Type, &v.EventName, &v.Recurring, &v.ExternalID, &v.RefundOf, &v.AmountCents,
+	err := row.Scan(&v.ID, &v.ProgramID, &v.PartnerID, &v.ReferralID, &v.RecordID, &v.CustomerName, &v.CustomerEmail, &v.PartnerCode, &v.PartnerName, &v.Type, &v.EventName, &v.Recurring, &v.ExternalID, &v.RefundOf, &v.AmountCents,
 		&v.Currency, &v.ProductID, &v.Source, &v.PaymentSource, &v.Interval, &v.OccurredAt, &v.CreatedAt)
 	return v, err
 }
@@ -538,9 +569,10 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 
 // visited finds the partner by the customer's own site visits with a ref
 // code, each program by its own window and first or last rule. When
-// several programs could take it, the latest credited visit wins.
-func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow, error) {
-	rows, err := c.tx.Query(ctx, `SELECT s.started_at, m.id::text, m.program_id::text, p.credit_window_days, p.credit_model,
+// several programs could take it, the latest credited visit wins; session
+// is that visit.
+func (c *conversionRun) visited(ctx context.Context, rec string) (m *membershipRow, session string, err error) {
+	rows, err := c.tx.Query(ctx, `SELECT s.id::text, s.started_at, m.id::text, m.program_id::text, p.credit_window_days, p.credit_model,
 		       p.block_ad_clicks, p.block_social_clicks, s.click_ids, s.referrer_host,
 		       s.country_source IN ('proxy', 'ip') AND s.country = ANY (p.blocked_countries)
 		FROM site_sessions s
@@ -551,7 +583,7 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		  AND s.started_at >= $4::timestamptz - interval '366 days' AND s.started_at <= $4::timestamptz + interval '1 hour'`,
 		c.ws, rec, c.program, c.in.at, c.in.AnonymousID, c.brand)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	type prog struct {
 		window int
@@ -561,13 +593,13 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 	progs := map[string]*prog{}
 	for rows.Next() {
 		var at time.Time
-		var mid, pid, model, refHost string
+		var sid, mid, pid, model, refHost string
 		var window int
 		var blockAds, blockSocial, blockedCountry bool
 		var clicks map[string]string
-		if err := rows.Scan(&at, &mid, &pid, &window, &model, &blockAds, &blockSocial, &clicks, &refHost, &blockedCountry); err != nil {
+		if err := rows.Scan(&sid, &at, &mid, &pid, &window, &model, &blockAds, &blockSocial, &clicks, &refHost, &blockedCountry); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, "", err
 		}
 		// A program can refuse visits from paid ads, social media or the
 		// countries it blocks.
@@ -577,10 +609,10 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		if progs[pid] == nil {
 			progs[pid] = &prog{window: window, model: model}
 		}
-		progs[pid].visits = append(progs[pid].visits, partners.Visit{At: at, MembershipID: mid})
+		progs[pid].visits = append(progs[pid].visits, partners.Visit{At: at, MembershipID: mid, SessionID: sid})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var best partners.Visit
 	found := false
@@ -590,9 +622,10 @@ func (c *conversionRun) visited(ctx context.Context, rec string) (*membershipRow
 		}
 	}
 	if !found {
-		return nil, nil
+		return nil, "", nil
 	}
-	return optMembership(c.tx.QueryRow(ctx, `SELECT `+membershipCols+` WHERE m.id = $1`, best.MembershipID))
+	m, err = optMembership(c.tx.QueryRow(ctx, `SELECT `+membershipCols+` WHERE m.id = $1`, best.MembershipID))
+	return m, best.SessionID, err
 }
 
 // clickSources reports whether a visit came from a paid ad click (an ad
@@ -650,6 +683,7 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		via = "manual" // a lead the partner submitted
 	}
 	var f *referralRow
+	var session *string
 	program := c.program
 	if m != nil {
 		program = m.programID
@@ -663,10 +697,14 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			return err
 		}
 	} else if m == nil {
-		if m, err = c.visited(ctx, rec); err != nil {
+		var sid string
+		if m, sid, err = c.visited(ctx, rec); err != nil {
 			return err
 		}
 		via = "visit"
+		if sid != "" {
+			session = &sid
+		}
 	}
 	if m != nil {
 		c.res.programID = m.programID
@@ -718,9 +756,18 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		if clickID != "" {
 			click = &clickID
 		}
-		err := tx.QueryRow(ctx, `INSERT INTO partner_referrals (workspace_id, program_id, membership_id, record_id, via, click_id, sub_id, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, LEAST(now(), $8)) ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
-			c.ws, m.programID, m.id, rec, via, click, cutUTF8(in.SubID, 100), in.at).Scan(&f.id)
+		promo := ""
+		if via == "promo_code" {
+			// The partner's own spelling of the code that matched.
+			if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT code FROM partner_promo_codes WHERE membership_id = $1 AND lower(code) = lower($2) LIMIT 1),
+				(SELECT code FROM partner_memberships WHERE id = $1 AND lower(code) = lower($2)), $2)`, m.id, in.PromoCode).Scan(&promo); err != nil {
+				return err
+			}
+		}
+		err := tx.QueryRow(ctx, `INSERT INTO partner_referrals (workspace_id, program_id, membership_id, record_id, via, click_id, sub_id, created_at,
+			session_id, promo_code)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, LEAST(now(), $8), $9, $10) ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
+			c.ws, m.programID, m.id, rec, via, click, cutUTF8(in.SubID, 100), in.at, session, promo).Scan(&f.id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict // another conversion bound them first; the caller retries
 		}
@@ -785,6 +832,11 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			return err
 		}
 	}
+	if in.Type == "sale" {
+		if err := enqueueAffiliateSync(ctx, tx, c.ws, m.id, "conversion:"+conv); err != nil {
+			return err
+		}
+	}
 	if err := c.audit(ctx, "partner_conversion.created", "partner_conversion", conv, map[string]any{"program_id": m.programID,
 		"partner_id": m.id, "referral_id": f.id, "record_id": rec, "type": in.Type, "event_name": in.EventName, "recurring": in.Recurring,
 		"amount_cents": amount, "currency": m.currency,
@@ -805,8 +857,9 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			return err
 		}
 	}
-	earned := partners.Rewards(rules, partners.Conversion{Trigger: trigger, AmountCents: amount, ProductID: in.ProductID,
-		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at, Facts: facts})
+	conversion := partners.Conversion{Trigger: trigger, AmountCents: amount, ProductID: in.ProductID,
+		PartnerID: m.id, GroupID: m.groupID, PriorSales: prior, FirstSaleAt: f.firstSaleAt, At: in.at, Facts: facts}
+	earned := partners.Rewards(rules, conversion)
 	if c.source == "browser" {
 		// Anyone can call outflare.signup(): it makes the lead, and pays
 		// only when the program trusts it to.
@@ -830,9 +883,8 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 		if e.Side == "referred" {
 			recipient = rec
 		}
-		ruleID := e.Rule.ID
 		id, err := insertPartnerReward(ctx, tx, c.ws, rewardEntry{program: m.programID, membership: m.id, side: e.Side, recipient: recipient,
-			kind: e.Kind, conversion: &conv, rule: &ruleID, amount: e.AmountCents, currency: m.currency, action: e.Rule.Action,
+			kind: e.Kind, conversion: &conv, rule: pricedBy(e.Rule, conversion), amount: e.AmountCents, currency: m.currency, action: e.Rule.Action,
 			actionData: e.Rule.ActionData, hold: hold, autoApprove: auto})
 		if err != nil {
 			return err
@@ -966,6 +1018,9 @@ func (c *conversionRun) refund(ctx context.Context) error {
 		c.ws, sale.ProgramID, sale.ReferralID, sale.RecordID, in.ExternalID, sale.ID, amount, sale.Currency, sale.ProductID, c.source, in.at).Scan(&conv); err != nil {
 		return err
 	}
+	if err := enqueueAffiliateSync(ctx, tx, c.ws, sale.PartnerID, "conversion:"+conv); err != nil {
+		return err
+	}
 	if err := c.audit(ctx, "partner_conversion.created", "partner_conversion", conv, map[string]any{"program_id": sale.ProgramID,
 		"partner_id": sale.PartnerID, "referral_id": sale.ReferralID, "record_id": sale.RecordID, "type": "refund", "amount_cents": amount,
 		"currency": sale.Currency, "refund_of": sale.ID, "source": c.source}); err != nil {
@@ -986,7 +1041,7 @@ func (c *conversionRun) refund(ctx context.Context) error {
 		switch {
 		case w.Status == "rejected":
 		case w.Status == "pending" && full && already == 0:
-			if err := rejectReward(ctx, tx, c.p, c.ws, w, "refunded"); err != nil {
+			if err := rejectReward(ctx, tx, c.p, c.ws, w, "refunded", "refund"); err != nil {
 				return err
 			}
 		case cash && share > 0:
@@ -1198,6 +1253,10 @@ func (s *Server) listPartnerConversions(w http.ResponseWriter, r *http.Request) 
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
 	typ, partner, program := q.Get("type"), q.Get("partner_id"), strings.ToLower(q.Get("program"))
+	pattern, ok := partnerSearch(w, r)
+	if !ok {
+		return
+	}
 	if typ != "" && !slices.Contains([]string{"signup", "sale", "refund", "custom"}, typ) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "type is signup, sale, refund or custom")
 		return
@@ -1218,11 +1277,12 @@ func (s *Server) listPartnerConversions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, typ, partner, program, before, limit + 1}
+	args := []any{a.WorkspaceID, typ, partner, program, before, limit + 1, pattern}
 	rows, err := s.pool.Query(r.Context(), partnerConversionSelect+`
 		JOIN partner_programs p ON p.id = v.program_id
 		WHERE v.workspace_id = $1 AND ($2 = '' OR v.type = $2) AND ($3 = '' OR f.membership_id::text = $3)
-		  AND ($4 = '' OR p.id::text = $4 OR p.slug = $4) AND ($5::timestamptz IS NULL OR v.created_at < $5)`+sel.sql("p.brand_id", &args)+`
+		  AND ($4 = '' OR p.id::text = $4 OR p.slug = $4) AND ($5::timestamptz IS NULL OR v.created_at < $5)
+		  AND ($7 = '' OR v.external_id ILIKE $7 OR vm.code ILIKE $7 OR `+emailMatches("vm.record_id", "$7")+` OR `+emailMatches("v.record_id", "$7")+`)`+sel.sql("p.brand_id", &args)+`
 		ORDER BY v.created_at DESC LIMIT $6`, args...)
 	if err != nil {
 		s.internal(w, r, err)
@@ -1245,16 +1305,19 @@ func (s *Server) listPartnerConversions(w http.ResponseWriter, r *http.Request) 
 }
 
 type partnerReferralView struct {
-	ID          string     `json:"id"`
-	ProgramID   string     `json:"program_id"`
-	PartnerID   string     `json:"partner_id"`
-	RecordID    string     `json:"record_id"`
-	Via         string     `json:"via"`
-	SubID       string     `json:"sub_id"`
-	Status      string     `json:"status"`
-	FirstSaleAt *time.Time `json:"first_sale_at"`
-	SalesCents  int64      `json:"sales_cents"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID            string     `json:"id"`
+	ProgramID     string     `json:"program_id"`
+	PartnerID     string     `json:"partner_id"`
+	RecordID      string     `json:"record_id"`
+	CustomerName  string     `json:"customer_name"`
+	CustomerEmail string     `json:"customer_email"`
+	Via           string     `json:"via"`
+	PromoCode     string     `json:"promo_code"`
+	SubID         string     `json:"sub_id"`
+	Status        string     `json:"status"`
+	FirstSaleAt   *time.Time `json:"first_sale_at"`
+	SalesCents    int64      `json:"sales_cents"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 func (s *Server) listPartnerReferrals(w http.ResponseWriter, r *http.Request) {
@@ -1282,10 +1345,12 @@ func (s *Server) listPartnerReferrals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := []any{a.WorkspaceID, partner, record, status, before, limit + 1}
-	rows, err := s.pool.Query(r.Context(), `SELECT f.id::text, f.program_id::text, f.membership_id::text, f.record_id::text, f.via, f.sub_id,
+	rows, err := s.pool.Query(r.Context(), `SELECT f.id::text, f.program_id::text, f.membership_id::text, f.record_id::text, COALESCE(c.name, ''),
+		COALESCE((SELECT i.value FROM record_identities i WHERE i.record_id = f.record_id AND i.namespace = 'email' AND i.valid_to IS NULL
+			ORDER BY i.verified DESC, i.valid_from LIMIT 1), ''), f.via, f.promo_code, f.sub_id,
 		f.status, f.first_sale_at, COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END)
 		FROM partner_conversions v WHERE v.referral_id = f.id AND v.type IN ('sale', 'refund')), 0)::bigint, f.created_at
-		FROM partner_referrals f JOIN partner_programs p ON p.id = f.program_id
+		FROM partner_referrals f JOIN partner_programs p ON p.id = f.program_id LEFT JOIN records c ON c.id = f.record_id
 		WHERE f.workspace_id = $1 AND ($2 = '' OR f.membership_id::text = $2) AND ($3 = '' OR f.record_id::text = $3)
 		AND ($4 = '' OR f.status = $4) AND ($5::timestamptz IS NULL OR f.created_at < $5)`+sel.sql("p.brand_id", &args)+` ORDER BY f.created_at DESC LIMIT $6`,
 		args...)

@@ -11,7 +11,7 @@ import { ago } from "../format";
 import { readWhy, retryIn } from "@/lib/read-failures";
 import type { Tab } from "../App";
 
-// Reviews: each brand's Trustpilot, G2, Capterra and Google pages, from its
+// Reviews: each brand's Trustpilot, G2, Capterra, SourceForge and Google pages, from its
 // links, read once a day through the workspace's own page reader. Every
 // review is kept with its stars, sentiment and the business's answer;
 // Outflare's review score and momentum say where they're heading, and
@@ -24,11 +24,12 @@ const platforms: { id: ReviewPlatform; name: string; example: string }[] = [
   { id: "trustpilot", name: "Trustpilot", example: "trustpilot.com/review/northpeak.example" },
   { id: "g2", name: "G2", example: "g2.com/products/northpeak/reviews" },
   { id: "capterra", name: "Capterra", example: "capterra.com/p/123456/Northpeak/" },
+  { id: "sourceforge", name: "SourceForge", example: "sourceforge.net/software/product/Northpeak/" },
   { id: "google_reviews", name: "Google", example: "the place's Google Maps link" },
 ];
 const platformName = (p: string) => platforms.find((x) => x.id === p)?.name ?? p;
 // The longest answer each site takes (reviewReplyLimits in the engine).
-const answerLimit: Record<ReviewPlatform, number> = { trustpilot: 2000, g2: 2000, capterra: 2000, google_reviews: 4000 };
+const answerLimit: Record<ReviewPlatform, number> = { trustpilot: 2000, g2: 2000, capterra: 2000, sourceforge: 2000, google_reviews: 4000 };
 
 const momentumText: Record<ReviewMomentum["state"], { label: string; tone: "green" | "amber" | "red" | "grey"; say: (m: ReviewMomentum) => string }> = {
   growing: { label: "Growing", tone: "green", say: (m) => `New reviews are coming ${pct(m.pace_change)} faster than the 28 days before, and the score held.` },
@@ -183,6 +184,7 @@ const kindOfURL = (url: string): ReviewPlatform | undefined => {
     if (/(^|\.)trustpilot\.com$/.test(h) && u.pathname.startsWith("/review/")) return "trustpilot";
     if (/(^|\.)g2\.com$/.test(h) && u.pathname.startsWith("/products/")) return "g2";
     if (/(^|\.)capterra\.[a-z.]+$/.test(h) && u.pathname.startsWith("/p/")) return "capterra";
+    if ((h === "sourceforge.net" || h === "www.sourceforge.net") && (u.pathname.startsWith("/software/product/") || u.pathname.startsWith("/projects/"))) return "sourceforge";
     if (h === "maps.app.goo.gl" || h === "g.page" || (/(^|\.)google\.[a-z.]+$/.test(h) && (u.pathname.startsWith("/maps") || u.searchParams.has("placeid") || u.searchParams.has("cid")))) return "google_reviews";
   } catch {
     return undefined;
@@ -235,7 +237,7 @@ function YourPages({ ws, brands, pages, canRead, canManage, go, onChange }: {
     const url = withScheme(adding.url);
     const kind = kindOfURL(url);
     if (!b || !adding.url.trim()) return;
-    if (!kind) return toast("Paste the address of a Trustpilot, G2 or Capterra review page, or a Google Maps place.", "error");
+    if (!kind) return toast("Paste the address of a Trustpilot, G2, Capterra or SourceForge review page, or a Google Maps place.", "error");
     if (b.links.some((l) => short(l.url).toLowerCase() === short(url).toLowerCase())) return toast(`${b.name} already has that page.`, "error");
     if (await saveLinks(b, [...b.links, { url, kind }], canRead ? "Added. Reading its reviews now." : "Added.", true)) setAdding({ brand: adding.brand, url: "" });
   }
@@ -326,7 +328,7 @@ function YourPages({ ws, brands, pages, canRead, canManage, go, onChange }: {
     <Card title="Your review pages" description="Each brand's pages on review sites. Add, confirm or remove them here; every page is read once a day, so the trend shows from today.">
       {!canRead && (
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/40 px-3 py-2.5 text-[13px]">
-          <span>{confirmed ? "Review pages are read through your own Geonode account. Connect it once and every page below is read today, then every day." : "Connect your own Geonode account and Outflare finds your brands' Trustpilot, G2 and Capterra pages for you to confirm, then reads them every day."}</span>
+          <span>{confirmed ? "Review pages are read through your own Geonode account. Connect it once and every page below is read today, then every day." : "Connect your own Geonode account and Outflare finds your brands' Trustpilot, G2, Capterra and SourceForge pages for you to confirm, then reads them every day."}</span>
           {canManage && <ConnectFor connector="geonode" name="Geonode" back="reviews" why={geonodeWhy.reviews} go={go} />}
         </div>
       )}

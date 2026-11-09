@@ -18,24 +18,51 @@ type SpendFilter struct {
 	Provider   string
 	Limit      int
 	Before     *time.Time
+	// Brand is a brand's id, "none" for charges no brand owns, or "" for
+	// all; BrandsIn, when set, keeps the list to these brands and charges
+	// no brand owns (a brand-limited caller). A charge's brand is its
+	// sequence's, else its own, else its mailbox's or sending domain's, as
+	// in the report.
+	Brand    string
+	BrandsIn []string
+	// Outreach keeps the list to the charges Outcomes counts
+	// (OutreachChannels).
+	Outreach bool
 }
+
+// chargeBrand is the brand of the spend entry e, the way the report
+// works it out (brandMaps.ofCharge).
+const chargeBrand = `CASE WHEN e.sequence_id IS NOT NULL THEN (SELECT s.brand_id FROM sequences s WHERE s.id = e.sequence_id)
+	ELSE COALESCE(e.brand_id,
+		(SELECT m.brand_id FROM mailboxes m WHERE m.id = e.mailbox_id),
+		(SELECT d.brand_id FROM sending_domains d WHERE d.workspace_id = e.workspace_id AND lower(d.domain) = e.domain AND e.domain <> '' LIMIT 1))
+	END`
 
 // ListSpend returns ledger entries, newest first.
 func ListSpend(ctx context.Context, q Querier, ws string, f SpendFilter) ([]Entry, error) {
 	if f.Limit <= 0 || f.Limit > 1000 {
 		f.Limit = 100
 	}
-	rows, err := q.Query(ctx, `SELECT `+entryCols+` FROM spend_entries
-		WHERE workspace_id = $1
-		  AND ($2::timestamptz IS NULL OR occurred_at >= $2)
-		  AND ($3::timestamptz IS NULL OR occurred_at < $3)
-		  AND ($4 = '' OR sequence_id::text = $4)
-		  AND ($5 = '' OR mission_id::text = $5)
-		  AND ($6 = '' OR category = $6)
-		  AND ($7 = '' OR lower(provider) = lower($7))
-		  AND ($8::timestamptz IS NULL OR occurred_at < $8)
+	var channels []string
+	if f.Outreach {
+		channels = OutreachChannels
+	}
+	rows, err := q.Query(ctx, `SELECT `+entryCols+` FROM (
+		SELECT e.*, (`+chargeBrand+`)::text AS charge_brand FROM spend_entries e
+		WHERE e.workspace_id = $1
+		  AND ($2::timestamptz IS NULL OR e.occurred_at >= $2)
+		  AND ($3::timestamptz IS NULL OR e.occurred_at < $3)
+		  AND ($4 = '' OR e.sequence_id::text = $4)
+		  AND ($5 = '' OR e.mission_id::text = $5)
+		  AND ($6 = '' OR e.category = $6)
+		  AND ($7 = '' OR lower(e.provider) = lower($7))
+		  AND ($8::timestamptz IS NULL OR e.occurred_at < $8)
+		  AND ($10::text[] IS NULL OR e.channel = ANY($10))
+		) x
+		WHERE ($11::text[] IS NULL OR charge_brand IS NULL OR charge_brand = ANY($11))
+		  AND ($12 = '' OR ($12 = 'none' AND charge_brand IS NULL) OR charge_brand = $12)
 		ORDER BY occurred_at DESC, id LIMIT $9`,
-		ws, f.From, f.To, f.SequenceID, f.MissionID, f.Category, f.Provider, f.Before, f.Limit)
+		ws, f.From, f.To, f.SequenceID, f.MissionID, f.Category, f.Provider, f.Before, f.Limit, channels, f.BrandsIn, f.Brand)
 	if err != nil {
 		return nil, err
 	}

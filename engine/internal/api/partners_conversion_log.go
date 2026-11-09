@@ -127,6 +127,12 @@ func (s *Server) saveConversionLog(r *http.Request, ws string, l *conversionLog)
 	if json.Unmarshal(l.body.Bytes(), &resp) != nil {
 		resp = map[string]any{}
 	}
+	if c, ok := resp["conversion"].(map[string]any); ok {
+		// The log keeps no one's name or email, like the request above.
+		delete(c, "customer_name")
+		delete(c, "customer_email")
+		delete(c, "partner_name")
+	}
 	if outcome == "rejected" || outcome == "error" {
 		if e, ok := resp["error"].(map[string]any); ok {
 			reason, _ = e["code"].(string)

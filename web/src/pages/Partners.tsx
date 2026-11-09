@@ -1,17 +1,17 @@
 import { PartnerProposals } from "./PartnerProposals";
 import { pickedBrandId } from "@/lib/brand";
 import { PartnerCouponDialog } from "./PartnerCoupons";
-import { PartnerPortalBrand } from "./PartnerPortalBrand";
 // Partners: customer referral, affiliate and influencer programs on one
 // platform. A program holds the rules; partners are customer records with a
 // ref code, links and promo codes; the workspace's backend reports
 // conversions; rewards are a ledger, and payouts are marked paid once the
 // workspace has paid them from its own account.
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { appPath } from "@/lib/paths";
+import { Settings2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from "react";
+import { isID, type Tab } from "@/lib/paths";
 import { track } from "@/lib/analytics";
-import type { Partner, PartnerAsset, PartnerGroup, PartnerStats, PartnerConversion, PartnerConversionLogEntry, PartnerImport, PartnerLead, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput } from "@outflare/sdk";
+import type { Partner, PartnerGroup, PartnerStats, PartnerConversionLogEntry, PartnerLead, PartnerPayout, PartnerProgram, PartnerReferral, PartnerReward, PartnerRuleInput, paths } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { useBrand } from "@/lib/brand";
 import { Badge, Button, CopyButton, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, Stat, Stats, ask, toast } from "../ui";
@@ -20,11 +20,16 @@ import { DataTable, type ColumnDef } from "@/components/data-table";
 import { Flows } from "./PartnerFlows";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PartnerTasks } from "./PartnerTasks";
-import { PartnerInstall } from "./PartnerInstall";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ProgramSettings, settingsTabs } from "./PartnerSettings";
+import { AppLink, PartnerPage, partnerActions, partnerName, type Section as PartnerSection } from "./PartnerPage";
+import { ConversionList, RewardList } from "./PartnerLedger";
+import { downloadProof, payoutProofName, platformName, saveFile } from "./PartnerProof";
 
-type Props = { ws: string; canManage: boolean };
+type Go = (t: Tab, item?: string) => void;
+type Props = { ws: string; canManage: boolean; open: string; onOpen: (id: string) => void; go: Go };
+type PartnerSort = NonNullable<NonNullable<paths["/v1/brands/{brand}/partners"]["get"]["parameters"]["query"]>["sort"]>;
+type PartnerFind = { q: string; sort: PartnerSort };
 type Section = "proposals" | "tasks" | "partners" | "groups" | "flows" | "leads" | "conversions" | "log" | "rewards" | "payouts";
 type Kind = PartnerProgram["kind"];
 
@@ -42,31 +47,60 @@ export const money = (cents: number, currency: string) => {
   }
 };
 
-const partnerTone = { active: "green", pending: "amber", suspended: "red", rejected: "grey" } as const;
-const rewardTone = { pending: "amber", approved: "blue", paid: "green", fulfilled: "green", rejected: "grey" } as const;
+export const partnerTone = { active: "green", pending: "amber", suspended: "red", rejected: "grey" } as const;
+export const rewardTone = { pending: "amber", approved: "blue", paid: "green", fulfilled: "green", rejected: "grey" } as const;
 
-export function Partners({ ws, canManage }: Props) {
+export function Partners({ ws, canManage, open, onOpen, go }: Props) {
   const { query: brandQuery } = useBrand(ws);
   const [programs, setPrograms] = useState<PartnerProgram[] | null>(null);
   const [program, setProgram] = useState("");
   const [section, setSection] = useState<Section>("partners");
   const [creating, setCreating] = useState(false);
-  const [settings, setSettings] = useState(false);
   const [error, setError] = useState("");
+  const [find, setFind] = useState<PartnerFind>({ q: "", sort: "newest" });
+  const [landing, setLanding] = useState<PartnerSection | undefined>();
+  useEffect(() => {
+    if (!open) setLanding(undefined);
+  }, [open]);
+  const openPartner = useCallback((id: string, section?: PartnerSection) => {
+    setLanding(section);
+    onOpen(id);
+  }, [onOpen]);
+  const fromLedger = (from: "rewards" | "conversions" | "proof") => (id: string, section?: PartnerSection) => {
+    track("ui.partner_opened", { from });
+    openPartner(id, section);
+  };
 
+  // The program picked last on this device, so a reload or a link to the
+  // settings page opens the same one.
+  const pick = (id: string) => {
+    setProgram(id);
+    try { localStorage.setItem("outflare.partners.program", id); } catch { /* storage blocked */ }
+  };
   const load = useCallback(async () => {
     const { data, error } = await api.GET("/v1/brands/{brand}/partner-programs", { params: { path: { brand: pickedBrandId() } } });
     if (error) setError(errorMessage(error));
     const list = (data?.data ?? []).filter((p) => p.status !== "archived");
     setPrograms(list);
-    setProgram((cur) => (list.some((p) => p.id === cur) ? cur : list[0]?.id ?? ""));
+    let last = "";
+    try { last = localStorage.getItem("outflare.partners.program") ?? ""; } catch { /* storage blocked */ }
+    setProgram((cur) => (list.some((p) => p.id === cur) ? cur : list.some((p) => p.id === last) ? last : list[0]?.id ?? ""));
   }, [ws, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     load();
   }, [load]);
 
   if (!programs) return <Loading />;
+  if (isID(open)) {
+    return <PartnerPage key={open} ws={ws} id={open} canManage={canManage} back={() => onOpen("")} go={go} initialSection={landing}
+      onLoaded={(p) => setProgram((cur) => (programs.some((x) => x.id === p.program_id) ? p.program_id : cur))} />;
+  }
   const current = programs.find((p) => p.id === program);
+  if ((open === "settings" || open.startsWith("settings/")) && current) {
+    const tab = settingsTabs.find((t) => `settings/${t.id}` === open)?.id ?? "general";
+    return <ProgramSettings key={current.id} ws={ws} program={current} programs={programs} canManage={canManage} tab={tab} onTab={(t) => onOpen(`settings/${t}`)} onPick={pick} onChanged={load}
+      back={() => onOpen("")} openFlows={() => { setSection("flows"); onOpen(""); }} />;
+  }
   return (
     <div className="space-y-6">
       <PageHeader
@@ -82,16 +116,19 @@ export function Partners({ ws, canManage }: Props) {
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <select aria-label="Program" className={field} value={program} onChange={(e) => setProgram(e.target.value)}>
+            <select aria-label="Program" className={field} value={program} onChange={(e) => pick(e.target.value)}>
               {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <Badge tone="grey">Partner program</Badge>
             {current.status === "paused" && <Badge tone="amber">Paused</Badge>}
             <span className="text-[12px] text-muted-foreground">{rulesSummary(current)}</span>
-            <Button variant="ghost" className="ml-auto" onClick={() => setSettings(true)}>Settings</Button>
+            {current.portal_enabled
+              ? <a className="text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground" href={current.portal_url} target="_blank" rel="noreferrer">Portal open</a>
+              : <span className="text-[12px] text-muted-foreground">Portal closed</span>}
+            <Button variant="ghost" className="ml-auto" onClick={() => onOpen("settings")}><Settings2 className="size-3.5" /> Program settings</Button>
           </div>
           <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-            <TabsList className="h-auto max-w-full flex-wrap">
+            <TabsList className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto">
               <TabsTrigger value="proposals" className="h-9 px-3 text-[12px]">Proposals</TabsTrigger>
               <TabsTrigger value="tasks" className="h-9 px-3 text-[12px]">Tasks</TabsTrigger>
               <TabsTrigger value="partners" className="h-9 px-3 text-[12px]">Partners</TabsTrigger>
@@ -106,18 +143,20 @@ export function Partners({ ws, canManage }: Props) {
           </Tabs>
           {section === "proposals" && <PartnerProposals key={current.id} ws={ws} program={current} canManage={canManage}/>}
           {section === "tasks" && <PartnerTasks key={current.id} ws={ws} program={current} canManage={canManage} />}
-          {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} />}
+          {section === "partners" && <PartnerList key={current.id} ws={ws} program={current} canManage={canManage} find={find} onFind={setFind} onOpen={openPartner} />}
           {section === "groups" && <Groups key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "flows" && <Flows key={current.id} ws={ws} program={current} canManage={canManage} onChanged={load} />}
           {section === "leads" && <Leads key={current.id} ws={ws} program={current} canManage={canManage} />}
-          {section === "conversions" && <Conversions key={current.id} ws={ws} program={current} />}
+          {section === "conversions" && <ConversionList key={current.id} ws={ws} go={go} programId={current.id} openPartner={fromLedger("conversions")} />}
           {section === "log" && <ConversionLog key={current.id} ws={ws} program={current} />}
-          {section === "rewards" && <Rewards key={current.id} ws={ws} program={current} canManage={canManage} />}
+          {section === "rewards" && (
+            <RewardList key={current.id} ws={ws} go={go} canManage={canManage} slug={current.slug} importedFrom={current.imported_from} programId={current.id}
+              openPartner={fromLedger("rewards")} openPayouts={(id) => fromLedger("proof")(id, "payouts")} />
+          )}
           {section === "payouts" && <Payouts key={current.id} ws={ws} program={current} canManage={canManage} />}
         </>
       )}
-      {creating && <NewProgram ws={ws} onClose={() => setCreating(false)} onSaved={(p) => { setCreating(false); setProgram(p.id); load(); }} />}
-      {settings && current && <ProgramSettings ws={ws} program={current} canManage={canManage} onClose={() => { setSettings(false); load(); }} />}
+      {creating && <NewProgram ws={ws} onClose={() => setCreating(false)} onSaved={(p) => { setCreating(false); pick(p.id); load(); }} />}
     </div>
   );
 }
@@ -155,7 +194,7 @@ function salesText(c: PartnerProgram["rules"][number]["conditions"] | undefined)
   return [which || "on sales", since].filter(Boolean).join(", ");
 }
 
-function rulesSummary(p: PartnerProgram): string {
+export function rulesSummary(p: PartnerProgram): string {
   const all = p.rules.filter((r) => !r.partner_id && !r.group_id);
   const own = new Set(p.rules.filter((r) => r.partner_id).map((r) => r.partner_id)).size;
   const groups = new Set(p.rules.filter((r) => r.group_id && !r.partner_id).map((r) => r.group_id)).size;
@@ -176,7 +215,7 @@ export function toRuleInput(r: PartnerProgram["rules"][number]): PartnerRuleInpu
 }
 
 // ownRate is a partner's own cash rule for sales, if they have one.
-function ownRate(rules: PartnerProgram["rules"], partner: string) {
+export function ownRate(rules: PartnerProgram["rules"], partner: string) {
   return rules.find((r) => r.partner_id === partner && r.side === "partner" && r.trigger === "sale" && (r.kind === "percent" || r.kind === "fixed"));
 }
 
@@ -184,23 +223,29 @@ function ownRate(rules: PartnerProgram["rules"], partner: string) {
 type PartnerProgramStats = PartnerStats & { partners: { total: number; active: number; pending: number; suspended: number; rejected: number; missing_payout_details: number } };
 
 // A page of a list, newest first, and the cursor to the next.
-type Page<T> = { list: T[]; next: string | null; error?: string };
+export type Page<T> = { list: T[]; next: string | null; error?: string };
 
 // usePages loads a list a page at a time: reload starts again, more adds
-// the next page. get must be stable (useCallback).
-function usePages<T>(get: (before?: string) => Promise<Page<T>>) {
+// the next page. get must be stable (useCallback). A page that arrives
+// after a newer reload is dropped.
+export function usePages<T>(get: (before?: string) => Promise<Page<T>>) {
   const [list, setList] = useState<T[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const gen = useRef(0);
   const reload = useCallback(async () => {
+    const g = ++gen.current;
     const r = await get();
+    if (g !== gen.current) return;
     setList(r.list);
     setNext(r.next);
     setError(r.error ?? "");
   }, [get]);
   const more = useCallback(async () => {
     if (!next) return;
+    const g = gen.current;
     const r = await get(next);
+    if (g !== gen.current) return;
     setList((l) => [...(l ?? []), ...r.list]);
     setNext(r.next);
     setError(r.error ?? "");
@@ -208,20 +253,26 @@ function usePages<T>(get: (before?: string) => Promise<Page<T>>) {
   return { list, next, error, reload, more };
 }
 
-function LoadMore({ next, onMore, shown }: { next: string | null; onMore: () => Promise<void>; shown: number }) {
+// Leave shown out when the server searches and sorts, so the note never claims the browser does.
+export function LoadMore({ next, onMore, shown, search = false }: { next: string | null; onMore: () => Promise<void>; shown?: number; search?: boolean }) {
   const [busy, setBusy] = useState(false);
   if (!next) return null;
   return (
-    <div className="flex items-center justify-center gap-3 text-[12px] text-muted-foreground">
-      <span>Showing the newest {shown}. Search and sorting cover these.</span>
+    <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground">
+      {shown !== undefined && <span>Showing the newest {shown}. {search ? "Search and sorting cover" : "Sorting covers"} these.</span>}
       <Button variant="ghost" disabled={busy} onClick={async () => { setBusy(true); await onMore(); setBusy(false); }}>{busy ? "Loading…" : "Load more"}</Button>
     </div>
   );
 }
 
-const pageSize = 100;
+export const pageSize = 100;
 
-function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
+const partnerSorts: [PartnerSort, string][] = [
+  ["newest", "Newest first"], ["oldest", "Oldest first"], ["name", "Name, A to Z"], ["code", "Code, A to Z"], ["clicks", "Most clicks"],
+  ["customers", "Most customers"], ["sales", "Most sales"], ["balance", "Most due"], ["paid", "Most paid"],
+];
+
+function PartnerList({ ws, program, canManage, find, onFind, onOpen }: { ws: string; program: PartnerProgram; canManage: boolean; find: PartnerFind; onFind: Dispatch<SetStateAction<PartnerFind>>; onOpen: (id: string) => void }) {
   const [couponPartner,setCouponPartner]=useState<Partner|null>(null);
   const [rules, setRules] = useState(program.rules);
   const [groups, setGroups] = useState<PartnerGroup[]>([]);
@@ -230,18 +281,41 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
   const [totals, setTotals] = useState<PartnerProgramStats | null>(null);
   // Only partners who haven't given payout details (imported ones re-enter them on the portal).
   const [missingOnly, setMissingOnly] = useState(false);
+  const [text, setText] = useState(find.q);
   useEffect(() => setRules(program.rules), [program.rules]);
+  useEffect(() => {
+    const q = text.trim();
+    if (q === find.q) return;
+    const t = setTimeout(async () => {
+      if (isID(q)) {
+        const { data } = await api.GET("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: q } } });
+        if (data) {
+          track("ui.partner_opened", { from: "search" });
+          return onOpen(data.id);
+        }
+      }
+      if (!find.q) track("ui.partners_searched", { sort: find.sort });
+      onFind((f) => ({ ...f, q }));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [text, find.q, find.sort, onFind, onOpen]);
   const get = useCallback(async (cursor?: string): Promise<Page<Partner>> => {
     const { data, error } = await api.GET("/v1/brands/{brand}/partners", {
-      params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}) } },
+      params: { path: { brand: pickedBrandId() }, query: {
+        program: program.id, limit: pageSize, ...(find.q ? { q: find.q } : {}), ...(find.sort !== "newest" ? { sort: find.sort } : {}),
+        ...(cursor ? { cursor } : {}), ...(missingOnly ? { payout_details: "missing" as const } : {}),
+      } },
     });
     return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
-  }, [ws, program.id, missingOnly]);
+  }, [ws, program.id, missingOnly, find.q, find.sort]);
   const { list, next, error, reload, more } = usePages(get);
+  useEffect(() => {
+    reload();
+    setPicked(new Set());
+  }, [reload]);
   // The tiles count every partner, not just the loaded page.
-  const load = useCallback(async () => {
-    const [, stats, prog] = await Promise.all([
-      reload(),
+  const loadProgram = useCallback(async () => {
+    const [stats, prog] = await Promise.all([
       api.GET("/v1/brands/{brand}/partner-programs/{id}/stats", { params: { path: { brand: pickedBrandId(), id: program.id } } }),
       api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } }),
     ]);
@@ -250,8 +324,14 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       setGroups(prog.data.groups);
       setRules(prog.data.rules);
     }
+  }, [ws, program.id]);
+  useEffect(() => {
+    loadProgram();
+  }, [loadProgram]);
+  const load = useCallback(async () => {
+    await Promise.all([reload(), loadProgram()]);
     setPicked(new Set());
-  }, [reload, ws, program.id]);
+  }, [reload, loadProgram]);
 
   // move puts the picked partners in a group, or in none.
   async function move(group: string) {
@@ -270,90 +350,11 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
     if (!next.delete(id)) next.add(id);
     return next;
   });
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  async function setStatus(p: Partner, status: Partner["status"]) {
-    const { error } = await api.PATCH("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { status } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(status === "active" ? `${p.name || p.code} is active.` : `${p.name || p.code} is ${status}. Their links still land, uncounted.`);
-    load();
-  }
   function addCode(p: Partner) {setCouponPartner(p);track("ui.partner_coupon_composer_opened");}
-  async function ledger(p: Partner, kind: "fees" | "adjustments") {
-    const fee = kind === "fees";
-    const r = await ask({
-      title: fee ? "Log a fee" : "Correct the balance",
-      body: fee ? "A fixed fee, such as for a post or a month. It counts toward their next payout and as a cost." : "Positive adds to what they're owed, negative takes away. Say why in the note.",
-      input: { label: `Amount (${program.currency})`, type: "number", placeholder: fee ? "500" : "-20" },
-      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: fee ? "Log fee" : "Next", value: "ok" }],
-    });
-    if (r?.choice !== "ok") return;
-    const cents = Math.round(Number(r.value) * 100);
-    if (!Number.isFinite(cents) || cents === 0) return toast("Enter an amount.", "error");
-    let note = "";
-    if (!fee) {
-      const n = await ask({ title: "Why?", input: { label: "Note", maxLength: 2000 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }] });
-      if (n?.choice !== "ok" || !n.value.trim()) return;
-      note = n.value.trim();
-    }
-    const { error } = await api.POST(`/v1/brands/{brand}/partners/{id}/${kind}`, { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { amount_cents: cents, note } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(fee ? "Fee logged." : "Balance corrected.");
-    load();
-  }
-
-  async function postback(p: Partner) {
-    const { data } = await api.GET("/v1/brands/{brand}/partners/{id}/postbacks", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-    const sends = data?.data ?? [];
-    const last = sends.slice(0, 5).map((s) => `${ago(s.created_at)}: ${s.status}${s.http_status ? ` (${s.http_status})` : ""}${s.error ? `, ${s.error}` : ""}`);
-    const r = await ask({
-      title: "Postback URL",
-      body: (
-        <span className="space-y-2">
-          <span className="block">The partner's own tracker, called once for each conversion credited to them and again if it's refunded. Placeholders: {"{sub_id}"} (the sub on their link, usually their click id), {"{click_id}"}, {"{conversion_id}"}, {"{type}"}, {"{amount}"}, {"{currency}"}, {"{commission}"}, {"{status}"} and more (see the docs). Partners can set it on the portal too. Empty turns it off.</span>
-          {last.length > 0 && <span className="block text-muted-foreground">Recent: {last.join(" · ")}</span>}
-        </span>
-      ),
-      input: { label: "https address", value: p.postback_url, placeholder: "https://tracker.example/postback?clickid={sub_id}&payout={commission}", maxLength: 2000, optional: true },
-      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
-    });
-    if (r?.choice !== "ok") return;
-    const { error } = await api.PATCH("/v1/brands/{brand}/partners/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { postback_url: r.value.trim() } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(r.value.trim() ? "Postback URL saved." : "Postbacks turned off.");
-    load();
-  }
-
-  // rate gives a partner their own share of each sale, which replaces the
-  // program's cash rate for them (their group's and tiers too).
-  async function rate(p: Partner) {
-    const cur = await api.GET("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: program.id } } });
-    if (cur.error || !cur.data) return toast(errorMessage(cur.error), "error");
-    const mine = ownRate(cur.data.rules, p.id);
-    const r = await ask({
-      title: `Commission for ${p.name || p.code}`,
-      body: `Their own share of each sale, instead of the program's (${rulesSummary({ ...cur.data, rules: cur.data.rules.filter((x) => !x.partner_id) })}). Leave it empty to go back to the program's rate.`,
-      input: { label: "Percent of each sale", type: "number", value: mine?.kind === "percent" ? String((mine.percent_bp ?? 0) / 100) : "", placeholder: "30", optional: true },
-      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok" }],
-    });
-    if (r?.choice !== "ok") return;
-    const pct = r.value.trim() === "" ? null : Number(r.value);
-    if (pct !== null && !(pct > 0 && pct <= 100)) return toast("Enter a percent from 0.01 to 100.", "error");
-    const next = cur.data.rules.filter((x) => x !== mine).map(toRuleInput);
-    if (pct !== null) next.push({ trigger: "sale", side: "partner", kind: "percent", percent_bp: Math.round(pct * 100), recurrence: "every", partner_id: p.id });
-    const { data, error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/rules", { params: { path: { brand: pickedBrandId(), id: program.id } }, body: { rules: next } });
-    if (error || !data) return toast(errorMessage(error), "error");
-    setRules(data.rules);
-    toast(pct === null ? `${p.name || p.code} is back on the program's rate.` : `${p.name || p.code} earns ${pct}% of each sale from now on. Rewards already earned keep their amounts.`);
-  }
-
-  async function viewAs(p: Partner) {
-    const { data, error } = await api.POST("/v1/brands/{brand}/partners/{id}/impersonate", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-    if (error || !data) return toast(errorMessage(error), "error");
-    window.open(data.url, "_blank", "noopener");
-  }
+  const open = (id: string) => {
+    track("ui.partner_opened", { from: "list" });
+    onOpen(id);
+  };
 
   const c = program.currency;
   const groupName = (id: string | null) => groups.find((g) => g.id === id)?.name ?? "";
@@ -372,7 +373,7 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       id: "name", header: "Partner", accessorFn: (p) => `${p.name} ${p.email} ${p.code}`,
       cell: ({ row: { original: p } }) => (
         <span className="block min-w-0">
-          <span className="block truncate font-medium">{p.name || p.email || p.code}</span>
+          <AppLink ws={ws} tab="partners" item={p.id} onOpen={() => open(p.id)} className="block truncate font-medium hover:underline">{partnerName(p)}</AppLink>
           {p.name && p.email && <span className="block truncate text-[12px] text-muted-foreground">{p.email}</span>}
           <span className="block truncate font-mono text-[12px] text-muted-foreground">{p.code}{ownRate(rules, p.id) && ` · own rate ${ruleText(ownRate(rules, p.id)!, c)}`}{p.promo_codes.length > 0 && ` · ${p.promo_codes.map((c) => c.code + (c.status === "failed" ? " (not made in billing)" : c.status === "pending" ? " (making…)" : "")).join(", ")}`}{!p.payout_method && " · no payout details"}</span>
         </span>
@@ -391,38 +392,34 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
       cell: ({ row: { original: p } }) => (
         <span className="flex items-center justify-end gap-1">
           <CopyButton text={p.link} label="Link" />
-          {canManage && (
-            <Menu aria={`Actions for ${p.code}`} items={[
-              ...(p.status !== "active" ? [{ label: p.status === "pending" ? "Approve" : "Reactivate", onClick: () => setStatus(p, "active") }] : []),
-              ...(p.status === "pending" ? [{ label: "Reject", onClick: () => setStatus(p, "rejected") }] : []),
-              ...(p.status === "active" ? [{ label: "Suspend", onClick: () => setStatus(p, "suspended") }] : []),
-              { label: "Add promo code", onClick: () => addCode(p) },
-              { label: "Log a fee", onClick: () => ledger(p, "fees") },
-              { label: "Correct balance", onClick: () => ledger(p, "adjustments") },
-              { label: "Commission rate", onClick: () => rate(p) },
-              { label: "Postback URL", onClick: () => postback(p) },
-              { label: "View as partner", onClick: () => viewAs(p) },
-            ]} />
-          )}
+          {canManage && <Menu aria={`Actions for ${p.code}`} items={partnerActions(p, load, () => addCode(p))} />}
         </span>
       ),
     },
   ];
 
   if (!list) return <Loading />;
+  const held = totals && (totals.held_at_source.pending_cents || totals.held_at_source.approved_cents) ? totals.held_at_source : null;
   return (
     <div className="space-y-4">
       <ErrorText>{error}</ErrorText>
       {couponPartner&&<PartnerCouponDialog ws={ws} partner={couponPartner} currency={program.currency} onClose={()=>setCouponPartner(null)} onSaved={()=>{setCouponPartner(null);load();}}/>}
       {totals && (
-        <Stats>
+        <div className={held ? "[&>div>div:last-child]:col-span-2 sm:[&>div>div:last-child]:col-span-1" : undefined}>
+        <Stats cols={held ? 5 : 4}>
           <Stat label="Partners" value={totals.partners.active} sub={totals.partners.pending ? `${totals.partners.pending} waiting for approval` : undefined} />
           <Stat label="Referred customers" value={totals.customers} sub={plural(totals.clicks, "click")} />
           <Stat label="Referred sales" value={money(totals.sales_cents, c)} />
-          <Stat label="Due to partners" value={money(totals.balance_cents, c)} sub={`${money(totals.pending_cents, c)} on hold`} />
+          {held ? (
+            <>
+              <Stat label="Due to partners" value={money(totals.balance_cents, c)} sub={`What Outflare pays; ${platformName(program.imported_from)} pays ${money(held.approved_cents, c)} more`} />
+              <Stat label="On hold" value={money(totals.pending_cents - held.pending_cents, c)} sub={`What Outflare pays; ${platformName(program.imported_from)} pays ${money(held.pending_cents, c)} more`} />
+            </>
+          ) : <Stat label="Due to partners" value={money(totals.balance_cents, c)} sub={`${money(totals.pending_cents, c)} on hold`} />}
         </Stats>
+        </div>
       )}
-      {list.length === 0 && !missingOnly ? (
+      {list.length === 0 && !missingOnly && !find.q ? (
         <Empty title="No partners yet" action={canManage && <Button onClick={() => setAdding(true)}>Add partner</Button>}>
           Add someone by email, or a customer record you already have. Each partner gets a ref code, a short link and a tagged campaign link.
         </Empty>
@@ -431,9 +428,17 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           columns={columns}
           data={list}
           rowId={(p) => p.id}
-          searchPlaceholder="Search partners"
+          searchPlaceholder="Search by name, email, code, promo code or id"
+          search={{ value: text, onChange: setText }}
           toolbar={
             <span className="flex flex-wrap items-center gap-2">
+              <select aria-label="Sort partners" className={field} value={find.sort} onChange={(e) => {
+                const sort = e.target.value as PartnerSort;
+                track("ui.partners_sorted", { sort });
+                onFind((f) => ({ ...f, sort }));
+              }}>
+                {partnerSorts.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
               {canManage && picked.size > 0 && (
                 <select aria-label="Move to group" className={field} value="" onChange={(e) => e.target.value && move(e.target.value)}>
                   <option value="">Move {picked.size} to…</option>
@@ -452,13 +457,13 @@ function PartnerList({ ws, program, canManage }: { ws: string; program: PartnerP
           empty="No partners match."
           mobile={(p) => (
             <span className="block min-w-0">
-              <span className="block truncate text-[13px] font-medium">{p.name || p.email || p.code}</span>
+              <AppLink ws={ws} tab="partners" item={p.id} onOpen={() => open(p.id)} className="block truncate text-[13px] font-medium underline-offset-2 hover:underline">{partnerName(p)}</AppLink>
               <span className="block truncate text-[12px] text-muted-foreground">{p.status} · {plural(p.stats.customers, "customer")} · {money(p.stats.balance_cents, c)} due</span>
             </span>
           )}
         />
       )}
-      <LoadMore next={next} onMore={more} shown={list.length} />
+      <LoadMore next={next} onMore={more} />
       {adding && <AddPartner ws={ws} program={program} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); }} />}
     </div>
   );
@@ -515,40 +520,6 @@ function AddPartner({ program, onClose, onSaved }: { ws: string; program: Partne
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function Conversions({ ws, program }: { ws: string; program: PartnerProgram }) {
-  const get = useCallback(async (cursor?: string): Promise<Page<PartnerConversion>> => {
-    const { data, error } = await api.GET("/v1/brands/{brand}/partner-conversions", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(cursor ? { cursor } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
-  }, [ws, program.id]);
-  const { list, next, error, reload, more } = usePages(get);
-  useEffect(() => {
-    reload();
-  }, [reload]);
-  if (!list) return <Loading />;
-  if (list.length === 0) {
-    return (
-      <Empty title="No conversions yet">
-        Have your backend report every sign-up, sale and refund with POST /v1/workspaces/{"{ws}"}/partner-conversions, using a token with the partners.conversions scope, or use the postback URL in Settings. Outflare credits the referred ones.
-      </Empty>
-    );
-  }
-  const columns: ColumnDef<PartnerConversion>[] = [
-    { id: "type", header: "Type", accessorFn: (v) => v.event_name || v.type, cell: ({ row: { original: v } }) => <Badge tone={v.type === "refund" ? "red" : v.type === "sale" ? "green" : "grey"}>{v.event_name || v.type}{v.recurring ? " (renewal)" : ""}</Badge> },
-    { id: "amount", header: "Amount", accessorFn: (v) => v.amount_cents, cell: ({ row: { original: v } }) => (v.type === "signup" ? "" : money(v.type === "refund" ? -v.amount_cents : v.amount_cents, v.currency)) },
-    { id: "external", header: "Your id", accessorFn: (v) => v.external_id, cell: ({ getValue }) => <span className="font-mono text-[12px]">{getValue() as string}</span> },
-    { id: "product", header: "Product", accessorFn: (v) => v.product_id },
-    { id: "source", header: "From", accessorFn: (v) => v.source },
-    { id: "when", header: "When", accessorFn: (v) => v.occurred_at, cell: ({ row: { original: v } }) => ago(v.occurred_at) },
-  ];
-  return (
-    <div className="space-y-3">
-      <ErrorText>{error}</ErrorText>
-      <DataTable columns={columns} data={list} rowId={(v) => v.id} searchPlaceholder="Search conversions" empty="No conversions match." />
-      <LoadMore next={next} onMore={more} shown={list.length} />
-    </div>
   );
 }
 
@@ -693,23 +664,11 @@ function Leads({ ws, program, canManage }: { ws: string; program: PartnerProgram
   );
 }
 
-function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [status, setStatus] = useState<PartnerReward["status"] | "">("");
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const get = useCallback(async (cursor?: string): Promise<Page<PartnerReward>> => {
-    const { data, error } = await api.GET("/v1/brands/{brand}/partner-rewards", { params: { path: { brand: pickedBrandId() }, query: { program: program.id, limit: pageSize, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) } } });
-    return { list: data?.data ?? [], next: data?.next_cursor ?? null, error: error ? errorMessage(error) : "" };
-  }, [ws, program.id, status]);
-  const { list, next, error: listError, reload, more } = usePages(get);
-  const load = useCallback(async () => {
-    await reload();
-    setPicked(new Set());
-  }, [reload]);
-  useEffect(() => {
-    load();
-  }, [load]);
-  async function act(w: PartnerReward, what: "approve" | "reject") {
+// SwitchOver warns, while the platform a program was imported from still
+// pays it, that its imported commissions are paid there, and records the
+// day that stops.
+export function rewardActions(w: PartnerReward, done: () => void) {
+  async function act(what: "approve" | "reject") {
     let note = "";
     if (what === "reject") {
       const r = await ask({ title: "Reject this reward?", body: "Say why; the partner can see it.", input: { label: "Reason", maxLength: 2000, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Reject", value: "ok", variant: "danger-solid" }] });
@@ -721,107 +680,33 @@ function Rewards({ ws, program, canManage }: { ws: string; program: PartnerProgr
       : await api.POST("/v1/brands/{brand}/partner-rewards/{id}/reject", { params: { path: { brand: pickedBrandId(), id: w.id } }, body: { note } });
     if (error) return toast(errorMessage(error), "error");
     toast(what === "approve" ? "Approved." : "Rejected.");
-    load();
+    done();
   }
-  // many approves or rejects the picked rewards, or every pending one in
-  // the program when none are picked, a thousand at a time.
-  async function many(what: "approve" | "reject") {
-    const ids = [...picked];
-    const which = ids.length > 0 ? plural(ids.length, "reward") : "every pending reward in this program";
-    const r = await ask({
-      title: what === "approve" ? `Approve ${which}?` : `Reject ${which}?`,
-      body: what === "approve" ? "Cash counts toward the next payouts and is logged as a cost; actions are sent to your system." : "Say why; the partners can see it.",
-      ...(what === "reject" ? { input: { label: "Reason", maxLength: 2000, optional: true } } : {}),
-      choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: what === "approve" ? "Approve" : "Reject", value: "ok", variant: what === "approve" ? undefined : "danger-solid" }],
-    });
-    if (r?.choice !== "ok") return;
-    setBusy(true);
-    let done = 0, skipped = 0;
-    for (;;) {
-      const { data, error } = await api.POST("/v1/brands/{brand}/partner-rewards/bulk", {
-        params: { path: { brand: pickedBrandId() } },
-        body: { action: what, ...(ids.length > 0 ? { ids } : { program: program.id }), ...(what === "reject" && r.value.trim() ? { note: r.value.trim() } : {}) },
-      });
-      if (error || !data) {
-        setBusy(false);
-        return toast(errorMessage(error), "error");
-      }
-      done += data.done;
-      skipped += data.skipped.length;
-      if (!data.more || data.done === 0) break;
-    }
-    setBusy(false);
-    toast(`${what === "approve" ? "Approved" : "Rejected"} ${plural(done, "reward")}${skipped ? `; ${skipped} weren't pending` : ""}.`);
-    load();
-  }
-  const toggle = (id: string) => setPicked((cur) => {
-    const next = new Set(cur);
-    if (!next.delete(id)) next.add(id);
-    return next;
-  });
-
-  if (!list) return <Loading />;
-  const pending = list.filter((w) => w.status === "pending");
-  const columns: ColumnDef<PartnerReward>[] = [
-    ...(canManage ? [{
-      id: "pick", enableSorting: false,
-      header: () => pending.length > 0 && (
-        <input type="checkbox" aria-label="Pick every pending reward" checked={picked.size > 0 && picked.size === pending.length}
-          onChange={(e) => setPicked(e.target.checked ? new Set(pending.map((w) => w.id)) : new Set())} />
-      ),
-      cell: ({ row: { original: w } }: { row: { original: PartnerReward } }) => w.status === "pending" && (
-        <input type="checkbox" aria-label="Pick this reward" checked={picked.has(w.id)} onChange={() => toggle(w.id)} />
-      ),
-    } as ColumnDef<PartnerReward>] : []),
-    { id: "kind", header: "Reward", accessorFn: (w) => w.kind, cell: ({ row: { original: w } }) => (w.action ? `${w.action}${w.side === "referred" ? " (friend)" : ""}` : w.kind) },
-    { id: "amount", header: "Amount", accessorFn: (w) => w.amount_cents, cell: ({ row: { original: w } }) => (w.kind === "action" ? "" : money(w.amount_cents, w.currency)) },
-    { id: "status", header: "Status", accessorFn: (w) => w.status, cell: ({ row: { original: w } }) => <Badge tone={rewardTone[w.status]}>{w.status}</Badge> },
-    { id: "hold", header: "Held until", accessorFn: (w) => w.hold_until, cell: ({ row: { original: w } }) => (w.status === "pending" ? new Date(w.hold_until).toLocaleDateString() : "") },
-    { id: "note", header: "Note", accessorFn: (w) => w.note },
-    { id: "created", header: "Made", accessorFn: (w) => w.created_at, cell: ({ row: { original: w } }) => ago(w.created_at) },
-    ...(canManage ? [{
-      id: "actions", header: "", enableSorting: false,
-      cell: ({ row: { original: w } }: { row: { original: PartnerReward } }) => w.status === "pending" && (
-        <Menu aria="Reward actions" items={[{ label: "Approve now", onClick: () => act(w, "approve") }, { label: "Reject", onClick: () => act(w, "reject") }]} />
-      ),
-    } as ColumnDef<PartnerReward>] : []),
-  ];
-  return (
-    <div className="space-y-3">
-      <ErrorText>{listError}</ErrorText>
-      <DataTable
-        columns={columns}
-        data={list}
-        rowId={(w) => w.id}
-        searchPlaceholder="Search rewards"
-        toolbar={
-          <span className="flex flex-wrap items-center gap-2">
-            <select aria-label="Status" className={field} value={status} onChange={(e) => setStatus(e.target.value as PartnerReward["status"] | "")}>
-              <option value="">Every status</option>
-              {(["pending", "approved", "paid", "fulfilled", "rejected"] as const).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            {canManage && (picked.size > 0 || pending.length > 0) && (
-              <>
-                <Button variant="ghost" disabled={busy} onClick={() => many("approve")}>{picked.size > 0 ? `Approve ${picked.size}` : "Approve all pending"}</Button>
-                <Button variant="ghost" disabled={busy} onClick={() => many("reject")}>{picked.size > 0 ? `Reject ${picked.size}` : "Reject all pending"}</Button>
-              </>
-            )}
-          </span>
-        }
-        empty="No rewards yet. They appear when a referred customer signs up or buys."
-      />
-      <LoadMore next={next} onMore={more} shown={list.length} />
-    </div>
-  );
+  return [{ label: "Approve now", onClick: () => act("approve") }, { label: "Reject", onClick: () => act("reject") }];
 }
 
-// SwitchOver warns, while the platform a program was imported from still
-// pays it, that its imported commissions are paid there, and records the
-// day that stops.
+export function payoutActions(o: PartnerPayout, done: () => void) {
+  async function paid() {
+    const r = await ask({ title: `Mark ${money(o.amount_cents, o.currency)} paid`, body: "Only once you've paid it. The reference is the payment's id, such as a PayPal or Wise transfer id.", input: { label: "Reference", maxLength: 200, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Mark paid", value: "ok" }] });
+    if (r?.choice !== "ok") return;
+    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/paid", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: { reference: r.value.trim() } });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Marked paid.");
+    done();
+  }
+  async function cancel() {
+    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/cancel", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: {} });
+    if (error) return toast(errorMessage(error), "error");
+    toast("Canceled; its rewards are back in the balance.");
+    done();
+  }
+  return [{ label: "Mark paid", onClick: paid }, { label: "Cancel", onClick: cancel }];
+}
+
 function SwitchOver({ program, canManage, onDone }: { ws: string; program: PartnerProgram; canManage: boolean; onDone: () => void }) {
   const [at, setAt] = useState(program.switched_over_at);
   if (!program.imported_from || at) return null;
-  const from = program.imported_from === "tolt" ? "Tolt" : program.imported_from;
+  const from = platformName(program.imported_from);
   async function switchOver() {
     const r = await ask({
       title: `Stop paying through ${from}?`,
@@ -867,26 +752,7 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
       params: { path: { brand: pickedBrandId() }, query: { program: program.id, status: "due" } }, parseAs: "text",
     });
     if (error || typeof data !== "string") return toast(errorMessage(error), "error");
-    const url = URL.createObjectURL(new Blob([data], { type: response.headers.get("Content-Type") ?? "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${program.slug}-due-payouts.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-  async function paid(o: PartnerPayout) {
-    const r = await ask({ title: `Mark ${money(o.amount_cents, o.currency)} paid`, body: "Only once you've paid it. The reference is the payment's id, such as a PayPal or Wise transfer id.", input: { label: "Reference", maxLength: 200, optional: true }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Mark paid", value: "ok" }] });
-    if (r?.choice !== "ok") return;
-    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/paid", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: { reference: r.value.trim() } });
-    if (error) return toast(errorMessage(error), "error");
-    toast("Marked paid.");
-    load();
-  }
-  async function cancel(o: PartnerPayout) {
-    const { error } = await api.POST("/v1/brands/{brand}/partner-payouts/{id}/cancel", { params: { path: { brand: pickedBrandId(), id: o.id } }, body: {} });
-    if (error) return toast(errorMessage(error), "error");
-    toast("Canceled; its rewards are back in the balance.");
-    load();
+    saveFile(data, response.headers.get("Content-Type") ?? "text/csv", `${program.slug}-due-payouts.csv`);
   }
   if (!list) return <Loading />;
   const columns: ColumnDef<PartnerPayout>[] = [
@@ -895,12 +761,15 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
     { id: "status", header: "Status", accessorFn: (o) => o.status, cell: ({ row: { original: o } }) => <Badge tone={o.status === "paid" ? "green" : o.status === "due" ? "amber" : "grey"}>{o.status}</Badge> },
     { id: "reference", header: "Reference", accessorFn: (o) => o.reference, cell: ({ getValue }) => <span className="font-mono text-[12px]">{getValue() as string}</span> },
     { id: "when", header: "Made", accessorFn: (o) => o.created_at, cell: ({ row: { original: o } }) => (o.paid_at ? `paid ${ago(o.paid_at)}` : ago(o.created_at)) },
-    ...(canManage ? [{
-      id: "actions", header: "", enableSorting: false,
-      cell: ({ row: { original: o } }: { row: { original: PartnerPayout } }) => o.status === "due" && (
-        <Menu aria="Payout actions" items={[{ label: "Mark paid", onClick: () => paid(o) }, { label: "Cancel", onClick: () => cancel(o) }]} />
+    {
+      id: "actions", header: "", enableSorting: false, enableHiding: false,
+      cell: ({ row: { original: o } }) => (
+        <span className="flex items-center justify-end gap-1">
+          <Button variant="ghost" onClick={() => downloadProof({ payout_id: o.id }, payoutProofName(program.slug, o.id))}>Download proof</Button>
+          {canManage && o.status === "due" && <Menu aria="Payout actions" items={payoutActions(o, load)} />}
+        </span>
       ),
-    } as ColumnDef<PartnerPayout>] : []),
+    },
   ];
   return (
     <div className="space-y-3">
@@ -920,7 +789,7 @@ function Payouts({ ws, program, canManage }: { ws: string; program: PartnerProgr
         empty="No payouts yet."
       />
       <ErrorText>{listError}</ErrorText>
-      <LoadMore next={next} onMore={more} shown={list.length} />
+      <LoadMore next={next} onMore={more} shown={list.length} search />
       <ErasePayoutNotes ws={ws} canManage={canManage} />
     </div>
   );
@@ -959,7 +828,7 @@ function NewProgram({ onClose, onSaved }: { ws: string; onClose: () => void; onS
   const [kind, setKind] = useState<Kind>("affiliate");
   const [name, setName] = useState("");
   const [landing, setLanding] = useState("");
-  const [autoAccept, setAutoAccept] = useState(true);
+  const [review, setReview] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(e: FormEvent) {
@@ -967,7 +836,7 @@ function NewProgram({ onClose, onSaved }: { ws: string; onClose: () => void; onS
     setBusy(true);
     const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs", {
       params: { path: { brand: pickedBrandId() } },
-      body: { name: name.trim(), kind, landing_url: landing.trim() || undefined, auto_accept: autoAccept },
+      body: { name: name.trim(), kind, landing_url: landing.trim() || undefined, auto_accept: !review },
     });
     setBusy(false);
     if (error || !data) return setError(errorMessage(error));
@@ -992,7 +861,7 @@ function NewProgram({ onClose, onSaved }: { ws: string; onClose: () => void; onS
           </div>
 </details>
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Northpeak partners" maxLength={120} required />
-          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={autoAccept} onChange={e => setAutoAccept(e.target.checked)} /> Let new partners participate immediately</label>
+          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={review} onChange={e => setReview(e.target.checked)} /> Review each application before the partner can take part</label>
           <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000} hint="Where partner links land." />
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-end gap-2">
@@ -1007,463 +876,8 @@ function NewProgram({ onClose, onSaved }: { ws: string; onClose: () => void; onS
 
 type PayoutMethod = PartnerProgram["payout_methods"][number];
 
-const payoutMethods: [PayoutMethod, string][] = [["paypal", "PayPal"], ["wise", "Wise"], ["bank_transfer", "Bank transfer"], ["crypto", "Crypto"], ["other", "Other"]];
+export const payoutMethods: [PayoutMethod, string][] = [["paypal", "PayPal"], ["wise", "Wise"], ["bank_transfer", "Bank transfer"], ["crypto", "Crypto"], ["other", "Other"]];
 
-function ProgramSettings({ ws, program: p, canManage, onClose }: { ws: string; program: PartnerProgram; canManage: boolean; onClose: () => void }) {
-  const [landing, setLanding] = useState(p.landing_url);
-  const [windowDays, setWindowDays] = useState(String(p.credit_window_days));
-  const [model, setModel] = useState(p.credit_model);
-  const [hold, setHold] = useState(String(p.hold_days));
-  const [auto, setAuto] = useState(p.auto_approve);
-  const [blockSelf, setBlockSelf] = useState(p.block_self_referrals);
-  const [payBrowser, setPayBrowser] = useState(p.pay_browser_signups);
-  const [minPayout, setMinPayout] = useState(String(p.min_payout_cents / 100));
-  const [term, setTerm] = useState(p.payout_term_days === null ? "" : String(p.payout_term_days));
-  const [methods, setMethods] = useState<PayoutMethod[]>(p.payout_methods);
-  const [tokens, setTokens] = useState(p.payout_tokens.join(", "));
-  const [leadDays, setLeadDays] = useState(p.lead_expiry_days === null ? "" : String(p.lead_expiry_days));
-  const [urlParams, setURLParams] = useState(p.url_params.join(", "));
-  const [blockAds, setBlockAds] = useState(p.block_ad_clicks);
-  const [blockSocial, setBlockSocial] = useState(p.block_social_clicks);
-  const [countries, setCountries] = useState(p.blocked_countries.join(", "));
-  const [salesSource, setSalesSource] = useState(p.sales_source);
-  const [postback, setPostback] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    const { error } = await api.PATCH("/v1/brands/{brand}/partner-programs/{id}", {
-      params: { path: { brand: pickedBrandId(), id: p.id } },
-      body: { landing_url: landing.trim(), credit_window_days: Number(windowDays), credit_model: model, hold_days: Number(hold), auto_approve: auto, pay_browser_signups: payBrowser, block_self_referrals: blockSelf, min_payout_cents: Math.round(Number(minPayout) * 100), sales_source: salesSource,
-        payout_term_days: term === "" ? null : Number(term), payout_methods: methods, payout_tokens: methods.includes("crypto") ? tokens.split(",").map((t) => t.trim()).filter(Boolean) : p.payout_tokens,
-        lead_expiry_days: leadDays.trim() === "" ? null : Number(leadDays),
-        url_params: urlParams.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), block_ad_clicks: blockAds, block_social_clicks: blockSocial,
-        blocked_countries: countries.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean) },
-    });
-    setBusy(false);
-    if (error) return setError(errorMessage(error));
-    toast("Saved.");
-    onClose();
-  }
-  async function setStatus(status: PartnerProgram["status"]) {
-    const { error } = await api.PATCH("/v1/brands/{brand}/partner-programs/{id}", { params: { path: { brand: pickedBrandId(), id: p.id } }, body: { status } });
-    if (error) return toast(errorMessage(error), "error");
-    toast(status === "active" ? "Program active." : status === "paused" ? "Paused: nothing new is credited; links still land." : "Archived.");
-    onClose();
-  }
-  async function makePostback() {
-    const { data, error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/postback", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-    if (error || !data) return toast(errorMessage(error), "error");
-    setPostback(data.url);
-  }
-
-  return (
-    <Sheet open onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-full overflow-y-auto overflow-x-hidden sm:max-w-3xl">
-        <SheetHeader>
-          <SheetTitle>{p.name}</SheetTitle>
-          <SheetDescription>The program's own credit rule, rewards and payouts. They never follow the workspace's attribution settings.</SheetDescription>
-        </SheetHeader>
-        <form onSubmit={save} className="space-y-6 px-4 pb-6">
-          <fieldset disabled={!canManage} className="min-w-0 space-y-3">
-            <Input label="Landing page" type="url" value={landing} onChange={(e) => setLanding(e.target.value)} placeholder="https://example.com/pricing" maxLength={2000} />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input label="Credit window (days)" type="number" min={1} max={365} value={windowDays} onChange={(e) => setWindowDays(e.target.value)} hint="How long after a visit a sale still counts." />
-              <label className="block space-y-1 text-[13px]">
-                <span className="font-medium">Which visit wins</span>
-                <select className={`${field} w-full`} value={model} onChange={(e) => setModel(e.target.value as "first" | "last")}>
-                  <option value="last">The last partner's</option>
-                  <option value="first">The first partner's</option>
-                </select>
-              </label>
-              <Input label="Hold (days)" type="number" min={0} max={365} value={hold} onChange={(e) => setHold(e.target.value)} hint="Refunds inside it cancel the reward." />
-              <Input label={`Minimum payout (${p.currency})`} type="number" min={0} step="0.01" value={minPayout} onChange={(e) => setMinPayout(e.target.value)} />
-              <label className="block space-y-1 text-[13px]">
-                <span className="font-medium">Payout term</span>
-                <select className={`${field} w-full`} value={term} onChange={(e) => setTerm(e.target.value)}>
-                  <option value="">Once approved</option>
-                  {[0, 15, 30, 45, 60, 90].map((n) => <option key={n} value={String(n)}>Net {n}: {n} days after the month ends</option>)}
-                  {term !== "" && ![0, 15, 30, 45, 60, 90].includes(Number(term)) && <option value={term}>Net {term}</option>}
-                </select>
-              </label>
-              <Input label="Lead expiration (days)" type="number" min={1} max={3650} value={leadDays} onChange={(e) => setLeadDays(e.target.value)} placeholder="Never" hint="A referred lead who hasn't bought by then no longer credits the partner." />
-            </div>
-            <div className="space-y-1 text-[13px]">
-              <span className="font-medium">Payout methods partners choose from</span>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {payoutMethods.map(([m, label]) => (
-                  <label key={m} className="flex items-center gap-2">
-                    <input type="checkbox" checked={methods.includes(m)} onChange={(e) => setMethods(e.target.checked ? [...methods, m] : methods.filter((x) => x !== m))} /> {label}
-                  </label>
-                ))}
-              </div>
-              <p className="text-[12px] text-muted-foreground">None ticked: any method, in the partner's own words.</p>
-            </div>
-            {methods.includes("crypto") && (
-              <Input label="Crypto tokens" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="USDC on Base, USDT on Tron" hint="Comma separated. Empty: any token." maxLength={1000} />
-            )}
-            <Input label="Other link parameters" value={urlParams} onChange={(e) => setURLParams(e.target.value)} placeholder="aff, fpr" maxLength={200}
-              hint="Besides ref and via: parameters that carry a partner's code on your website, such as those of links made on another platform. Comma separated." />
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Approve rewards on their own when the hold ends
-            </label>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={blockAds} onChange={(e) => setBlockAds(e.target.checked)} /> Don't credit website visits from paid ads (partners bidding on your brand)
-            </label>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={blockSocial} onChange={(e) => setBlockSocial(e.target.checked)} /> Don't credit website visits from social media
-            </label>
-            <div>
-              <Input label="Blocked countries" value={countries} onChange={(e) => setCountries(e.target.value)} placeholder="BR, IN" maxLength={1000}
-                hint="Two-letter codes, comma separated. Visits and new customers from these countries don't credit partners. Countries come from your site's proxy or the visitor's address, never the time zone." />
-              <p className="mt-1 text-[12px] text-muted-foreground">
-                <a href="https://db-ip.com" target="_blank" rel="noreferrer" className="underline">IP geolocation by DB-IP</a>
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={blockSelf} onChange={(e) => setBlockSelf(e.target.checked)} /> Block self-referrals: a partner's own sign-ups and purchases earn them nothing
-            </label>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={payBrowser} onChange={(e) => setPayBrowser(e.target.checked)} /> Pay for sign-ups the browser reports (outflare.signup). Off: they make the lead only, since anyone can call it
-            </label>
-            <label className="flex items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={salesSource === "stripe"} onChange={(e) => setSalesSource(e.target.checked ? "stripe" : "")} /> Also take sales and refunds from connected Stripe
-            </label>
-            {p.brand_id && (
-              <label className="flex items-center gap-2 text-[13px]">
-                <input type="checkbox" checked={salesSource === "transactions"} onChange={(e) => setSalesSource(e.target.checked ? "transactions" : "")} /> Also take this brand's payments and refunds sent to Outflare (transactions API and Order Completed events), each counted once
-              </label>
-            )}
-          </fieldset>
-          <p className="text-[12px] text-muted-foreground">Rewards are flows: set them on the Flows tab.</p>
-          <ErrorText>{error}</ErrorText>
-          {canManage && <Button disabled={busy}>Save</Button>}
-          <div className="space-y-2 border-t pt-4">
-            <h3 className="text-[13px] font-medium">Postback URL</h3>
-            <p className="text-[12px] text-muted-foreground">For trackers and backends that can only call a URL: ?type=sale&ref=…&user_id=…&amount=49.90&order_id=…. Anyone with it can report conversions, so keep it private. {p.postback_hint && `The current one starts ${p.postback_hint}; making a new one retires it.`}</p>
-            {postback ? (
-              <div className="space-y-2 rounded-md border p-3">
-                <p className="font-mono text-[12px] break-all">{postback}</p>
-                <CopyButton text={postback} label="Copy URL" />
-                <p className="text-[12px] text-muted-foreground">Shown once.</p>
-              </div>
-            ) : canManage && <Button type="button" variant="ghost" onClick={makePostback}>{p.postback_hint ? "Make a new postback URL" : "Make a postback URL"}</Button>}
-          </div>
-          {canManage && (
-            <div className="flex gap-2 border-t pt-4">
-              {p.status === "active" ? <Button type="button" variant="ghost" onClick={() => setStatus("paused")}>Pause</Button> : <Button type="button" variant="ghost" onClick={() => setStatus("active")}>Resume</Button>}
-              <Button type="button" variant="ghost" onClick={() => setStatus("archived")}>Archive</Button>
-            </div>
-          )}
-        </form>
-        <PartnerInstall ws={ws} program={p} />
-        <PortalSection ws={ws} program={p} canManage={canManage} />
-        <ImportSection ws={ws} program={p} canManage={canManage} />
-      </SheetContent>
-    </Sheet>
-  );
-}
-
-// The hosted portal: where partners apply, sign in by email and see their
-// links, referred customers (masked), rewards and payouts.
-const importReasons: Record<string, string> = {
-  incomplete: "missing its id or partner",
-  no_email: "no email address",
-  link_param: "a link parameter Outflare can't read (a name it uses already, or the program has 5 others)",
-  link_param_added: "a link parameter the program now reads too (Settings → Other link parameters)",
-  extra_link: "a partner's second link (their code is the first)",
-  code_changed: "the code was taken or not allowed, so the partner got a new one",
-  partner_missing: "its partner didn't come over",
-  partner_unavailable: "a partner other objects name, but Tolt couldn't give them either",
-  customer_missing: "its customer didn't come over",
-  promo_code_invalid: "a promo code with characters not allowed here",
-  promo_code_taken: "a promo code another partner has here",
-  already_referred: "another partner already has this customer here",
-  status_conflict: "rejected in Tolt after it was approved here",
-  unreadable: "Tolt's answer couldn't be read, so this kind didn't come over; the others did",
-  customer_id_taken: "another customer here already has this Tolt customer id",
-  too_many_groups: "the program already has 50 groups",
-  group_missing: "its group didn't come over",
-  flow_condition_unsupported: "a flow with a condition Outflare can't read yet: add it on the Flows tab",
-  flow_action_unsupported: "a flow whose action Outflare can't read yet: add it on the Flows tab",
-  flow_trigger_unsupported: "a flow whose trigger Outflare can't read yet: add it on the Flows tab",
-  flow_duration_unsupported: "a flow whose duration Outflare can't read yet: add it on the Flows tab",
-  flow_approval_unsupported: "a flow whose approval Outflare can't read yet: add it on the Flows tab",
-  flow_custom_rate_unsupported: "a flow with a custom rate Outflare can't read yet: add it on the Flows tab",
-  flow_invalid: "a flow Outflare can't accept as it is: add it on the Flows tab",
-  flow_paused: "a flow that's paused in Tolt, so it didn't come over",
-  groups_unavailable: "Tolt didn't list groups for this account, so none came over",
-  flows_unavailable: "Tolt didn't list flows for this account, so none came over: add them on the Flows tab",
-  custom_rate_partner_missing: "a flow's custom rate for a partner who didn't come over (the flow came over without it)",
-  partner_id_missing: "a promo code that names no partner where Outflare reads it: send us the fields below",
-  partners_unlisted: "Tolt reported more partners than came over",
-};
-
-type ImportSource = { id: string; name: string; currency: string; status: string };
-
-// ImportSection brings a Tolt program in, as often as needed until the
-// switch-over day.
-function ImportSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [runs, setRuns] = useState<PartnerImport[]>([]);
-  const [source, setSource] = useState("");
-  // The programs in the Tolt account, or null when they couldn't be listed
-  // (then the id is typed).
-  const [sources, setSources] = useState<ImportSource[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<ReactNode>("");
-  const load = useCallback(async () => {
-    const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/imports", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-    setRuns(data?.data ?? []);
-    return data?.data ?? [];
-  }, [ws, p.id]);
-  useEffect(() => {
-    (async () => {
-      const past = await load();
-      if (!canManage) return;
-      const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/import-sources", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-      if (!data) return;
-      setSources(data.data);
-      // The program the last run read, else the one an import would take.
-      const last = past.find((r) => r.source_program)?.source_program;
-      setSource(data.data.some((s) => s.id === last) ? last! : data.suggested);
-    })();
-  }, [load, canManage, ws, p.id]);
-  const running = runs.some((r) => r.status === "queued" || r.status === "running");
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, [running, load]);
-
-  async function start() {
-    setBusy(true);
-    setError("");
-    const { error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/imports", {
-      params: { path: { brand: pickedBrandId(), id: p.id } }, body: source.trim() ? { source_program: source.trim() } : {},
-    });
-    setBusy(false);
-    if (error) {
-      if ((error as { error?: { code?: string } }).error?.code === "connector_needed") {
-        return setError(<>Connect Tolt first, with your own API key: <a className="underline underline-offset-2" href={appPath(ws, "connectors", "tolt")}>Connectors, Tolt</a>.</>);
-      }
-      return setError(errorMessage(error));
-    }
-    toast("Import started.");
-    load();
-  }
-
-  return (
-    <div className="space-y-3 border-t px-4 pt-4 pb-6">
-      <h3 className="text-[13px] font-medium">Import from Tolt</h3>
-      <p className="text-[12px] text-muted-foreground">Brings partners with their link codes (so their links keep working), payout details, promo codes, referred customers, transactions and commissions, paid ones as paid payouts. Run it as often as you like until you switch: each run adds only what's new and brings over status changes. Keep auto-approve off until then, so Tolt's own decisions come over.</p>
-      {canManage && (
-        <div className="flex flex-wrap items-end gap-2">
-          {sources && sources.length > 1 ? (
-            <label className="grid gap-1 text-[12px]">
-              Tolt program
-              <select className={field} value={source} onChange={(e) => setSource(e.target.value)}>
-                {!source && <option value="">Choose a program</option>}
-                {sources.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name || s.id}{s.status === "inactive" ? " (inactive)" : ""}{s.currency ? `, ${s.currency}` : ""}</option>
-                ))}
-              </select>
-            </label>
-          ) : sources?.length === 1 ? (
-            <p className="text-[12px] text-muted-foreground">From your Tolt program {sources[0].name || sources[0].id}.</p>
-          ) : (
-            <Input label="Tolt program id" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Only if your account has more than one" maxLength={200} />
-          )}
-          <Button type="button" onClick={start} disabled={busy || running || (!!sources && sources.length > 1 && !source)}>{running ? "Importing…" : runs.length ? "Run again" : "Import"}</Button>
-        </div>
-      )}
-      <ErrorText>{error}</ErrorText>
-      {runs.slice(0, 5).map((r) => (
-        <div key={r.id} className="space-y-1 rounded-md border p-3 text-[12px]">
-          <div className="flex items-center gap-2">
-            <Badge tone={r.status === "failed" ? "red" : r.status === "done" ? "green" : "blue"}>{r.status}</Badge>
-            <span className="text-muted-foreground">{ago(r.created_at)}</span>
-          </div>
-          {r.error && <p className="text-destructive">{r.error}</p>}
-          <p className="text-muted-foreground">
-            {r.summary.kinds.filter((k) => k.kind !== "links" && (k.seen > 0 || k.reported)).map((k) => `${k.kind.replace("_", " ")}: ${k.seen} read${k.reported ? ` of ${k.reported} Tolt reports` : ""}, ${k.created} new, ${k.updated} updated${k.skipped ? `, ${k.skipped} skipped` : ""}${k.by_status ? ` (${Object.entries(k.by_status).map(([s, n]) => `${n} ${s}`).join(", ")})` : ""}`).join(" · ") || "Nothing read yet."}
-          </p>
-          {r.summary.issues.length > 0 && (
-            <details>
-              <summary className="cursor-pointer">{plural(r.summary.issues.length + r.summary.more_issues, "thing", "things")} to check</summary>
-              <ul className="mt-1 list-disc pl-5">
-                {r.summary.issues.map((i) => (
-                  <li key={i.kind + i.external_id + i.reason}>
-                    {i.kind.replace("_", " ")} {i.external_id && <code>{i.external_id}</code>}: {importReasons[i.reason] ?? i.reason}
-                    {i.message && <span className="block text-muted-foreground">{i.message}</span>}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// PortalPreview shows how the portal's sign-in page will look with the
-// settings as typed, before they are saved.
-function PortalPreview({ title, color, logo, favicon, welcome, poweredBy }: { title: string; color: string; logo: string; favicon: string; welcome: string; poweredBy: boolean }) {
-  const https = (u: string) => (/^https:\/\/\S+$/.test(u) ? u : "");
-  return (
-    <div className="overflow-hidden rounded-md border text-[13px]" aria-label="Portal preview">
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[12px] text-muted-foreground">
-        {https(favicon) ? <img src={https(favicon)} alt="" className="size-4" /> : <span className="size-4 rounded-sm bg-muted" />}
-        <span className="truncate">{title}</span>
-      </div>
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        {https(logo) && <img src={https(logo)} alt="" className="h-6" />}
-        <span className="font-semibold">{title}</span>
-      </div>
-      <div className="space-y-2 px-3 py-3">
-        {welcome && <p className="whitespace-pre-line text-muted-foreground">{welcome}</p>}
-        <span className="inline-block rounded-md px-3 py-1.5 font-semibold text-white" style={{ background: color }}>Email me a sign-in link</span>
-        {poweredBy && <p className="text-[11px] text-muted-foreground">Powered by Outflare</p>}
-      </div>
-    </div>
-  );
-}
-
-function PortalSection({ ws, program: p, canManage }: { ws: string; program: PartnerProgram; canManage: boolean }) {
-  const [brandPortal,setBrandPortal]=useState(p.portal);
-  const [enabled, setEnabled] = useState(p.portal_enabled);
-  const [sub, setSub] = useState(p.portal_subdomain ?? "");
-  const [title, setTitle] = useState(p.portal.title ?? "");
-  const [color, setColor] = useState(p.portal.color || "#111827");
-  const [logo, setLogo] = useState(p.portal.logo_url ?? "");
-  const [favicon, setFavicon] = useState(p.portal.favicon_url ?? "");
-  const [welcome, setWelcome] = useState(p.portal.welcome ?? "");
-  const [from, setFrom] = useState(p.portal.email_from ?? "");
-  const [signup, setSignup] = useState(!!p.portal.signup_open);
-  const [poweredBy, setPoweredBy] = useState(!p.portal.hide_powered_by);
-  const [businessOnly, setBusinessOnly] = useState(!!p.portal.business_email_only);
-  const [siteKey, setSiteKey] = useState(p.portal.site_key_id ?? "");
-  const [leadMode, setLeadMode] = useState<"" | "review" | "auto">(p.portal.lead_submissions ?? "");
-  const [ga, setGA] = useState(p.portal.ga_measurement_id ?? "");
-  const [siteKeys, setSiteKeys] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => {
-    // The program's brand's site keys.
-    if (p.brand_id) api.GET("/v1/brands/{brand}/site-keys", { params: { path: { brand: p.brand_id } } }).then(({ data }) => setSiteKeys((data?.data ?? []).map((k) => ({ id: k.id, name: k.name }))));
-  }, [ws, p.brand_id]);
-  const [url, setUrl] = useState(p.portal_url);
-  const [assets, setAssets] = useState<PartnerAsset[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const loadAssets = useCallback(async () => {
-    const { data } = await api.GET("/v1/brands/{brand}/partner-programs/{id}/assets", { params: { path: { brand: pickedBrandId(), id: p.id } } });
-    setAssets(data?.data ?? []);
-  }, [ws, p.id]);
-  useEffect(() => {
-    loadAssets();
-  }, [loadAssets]);
-
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    const { data, error } = await api.PUT("/v1/brands/{brand}/partner-programs/{id}/portal", {
-      params: { path: { brand: pickedBrandId(), id: p.id } },
-      body: { enabled, subdomain: sub.trim(), settings: { ...brandPortal, title: title.trim(), color, logo_url: logo.trim(), favicon_url: favicon.trim(), welcome: welcome.trim(), email_from: from.trim(), signup_open: signup, hide_powered_by: !poweredBy, business_email_only: businessOnly,
-        site_key_id: siteKey, lead_submissions: leadMode, ga_measurement_id: siteKey ? ga.trim().toUpperCase() : "" } },
-    });
-    setBusy(false);
-    if (error || !data) return setError(errorMessage(error));
-    setUrl(data.portal_url);
-    toast(enabled ? "Portal saved." : "Portal closed.");
-  }
-  async function addAsset() {
-    const r = await ask({ title: "Add an asset", body: "Copy or an email swipe partners can paste. For a banner or a link, put its https address on the first line.", input: { label: "Title", maxLength: 200 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Next", value: "ok" }] });
-    if (r?.choice !== "ok" || !r.value.trim()) return;
-    const b = await ask({ title: r.value.trim(), input: { label: "Text, or an https address", maxLength: 10000 }, choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Add", value: "ok" }] });
-    if (b?.choice !== "ok" || !b.value.trim()) return;
-    const v = b.value.trim();
-    const isURL = /^https:\/\/\S+$/.test(v);
-    const kind = isURL ? (/\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(v) ? "image" : "link") : "text";
-    const { error } = await api.POST("/v1/brands/{brand}/partner-programs/{id}/assets", {
-      params: { path: { brand: pickedBrandId(), id: p.id } }, body: { kind, title: r.value.trim(), ...(isURL ? { url: v } : { body: v }) },
-    });
-    if (error) return toast(errorMessage(error), "error");
-    loadAssets();
-  }
-  async function removeAsset(a: PartnerAsset) {
-    const { error } = await api.DELETE("/v1/brands/{brand}/partner-programs/{id}/assets/{asset}", { params: { path: { brand: pickedBrandId(), id: p.id, asset: a.id } } });
-    if (error) return toast(errorMessage(error), "error");
-    loadAssets();
-  }
-
-  return (
-    <div className="space-y-4 border-t px-4 pt-4 pb-6">
-      <form onSubmit={save} className="space-y-3">
-        <h3 className="text-[13px] font-medium">Partner portal</h3>
-        <p className="text-[12px] text-muted-foreground">Where partners apply, sign in with a link emailed through your own email provider, and see their links, referred customers (never their names), rewards and payouts. Point your own domain at it from Domains, Tracking domains. To show customers their referral link inside your own app instead, your backend opens the referral widget (<code>POST …/widget-sessions</code>), which works while the portal is closed.</p>
-        <fieldset disabled={!canManage} className="min-w-0 space-y-3">
-          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Open the portal</label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input label="Subdomain" value={sub} onChange={(e) => setSub(e.target.value)} placeholder="northpeak" maxLength={63} hint="Used when the server has a partners domain." />
-            <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={p.name} maxLength={120} />
-            <Input label="Sender" value={from} onChange={(e) => setFrom(e.target.value)} placeholder="Partners <partners@example.com>" hint="On a verified sending domain. Needed for email sign-in; your app can also use automatic sign-in." />
-            <Input label="Colour" type="color" value={color} onChange={(e) => setColor(e.target.value)} />
-            <Input label="Logo" type="url" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://example.com/logo.svg" maxLength={2000} />
-            <Input label="Favicon" type="url" value={favicon} onChange={(e) => setFavicon(e.target.value)} placeholder="https://example.com/favicon.png" maxLength={2000} hint="The browser tab's icon." />
-          </div>
-          <PartnerPortalBrand currency={p.currency} value={brandPortal} onChange={setBrandPortal}/>
-          <PortalPreview title={title.trim() || p.name} color={color} logo={logo.trim()} favicon={favicon.trim()} welcome={welcome.trim()} poweredBy={poweredBy} />
-          <Input label="Welcome" value={welcome} onChange={(e) => setWelcome(e.target.value)} maxLength={4000} placeholder="Earn 20% of every sale you send our way." />
-          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={signup} onChange={(e) => setSignup(e.target.checked)} /> Anyone can apply</label>
-          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={businessOnly} onChange={(e) => setBusinessOnly(e.target.checked)} /> Work email addresses only: refuse applications from free, disposable and relay addresses</label>
-          <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={poweredBy} onChange={(e) => setPoweredBy(e.target.checked)} /> Show "Powered by Outflare" at the foot of the portal</label>
-          <label className="block text-[13px]">
-            <span className="mb-1 block font-medium">Leads from partners</span>
-            <select className={field + " w-full sm:w-auto"} value={leadMode} onChange={(e) => setLeadMode(e.target.value as typeof leadMode)}>
-              <option value="">Off</option>
-              <option value="review">Partners submit leads, you approve each (Partners → Leads)</option>
-              <option value="auto">Partners submit leads, taken at once unless someone else has them</option>
-            </select>
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-[13px]">
-              <span className="mb-1 block font-medium">Website analytics</span>
-              <select className={field + " w-full"} value={siteKey} onChange={(e) => setSiteKey(e.target.value)}>
-                <option value="">Off</option>
-                {siteKeys.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
-              </select>
-              <span className="mt-1 block text-xs text-muted-foreground">Partners' visits to the portal show in your website analytics, through this site key and its cookie banner.</span>
-            </label>
-            {siteKey && <Input label="Google Analytics" value={ga} onChange={(e) => setGA(e.target.value)} placeholder="G-ABC123XYZ" maxLength={20} hint="Optional. Loads only once the visitor allows analytics where consent is needed." />}
-          </div>
-        </fieldset>
-        <ErrorText>{error}</ErrorText>
-        <div className="flex flex-wrap items-center gap-2">
-          {canManage && <Button disabled={busy}>Save portal</Button>}
-          {p.portal_enabled && <a className="text-[13px] underline" href={url} target="_blank" rel="noreferrer">{url}</a>}
-        </div>
-      </form>
-      <div className="space-y-2">
-        <h3 className="text-[13px] font-medium">Assets for partners</h3>
-        {assets.length === 0 ? <p className="text-[12px] text-muted-foreground">No banners, copy or links yet.</p> : (
-          <ul className="divide-y rounded-md border">
-            {assets.map((a) => (
-              <li key={a.id} className="flex items-center gap-2 px-3 py-2 text-[13px]">
-                <Badge tone="grey">{a.kind}</Badge>
-                <span className="min-w-0 flex-1 truncate">{a.title}</span>
-                {canManage && <Button type="button" variant="ghost" onClick={() => removeAsset(a)}>Remove</Button>}
-              </li>
-            ))}
-          </ul>
-        )}
-        {canManage && <Button type="button" variant="ghost" onClick={addAsset}>Add an asset</Button>}
-      </div>
-    </div>
-  );
-}
 
 // Groups: each partner is in at most one group, new partners join the
 // default one, and a group's own rate replaces the program's for its
@@ -1564,9 +978,10 @@ function Groups({ ws, program, canManage, onChanged }: { ws: string; program: Pa
 }
 
 // RecordPartners shows a customer record's place in partner programs: the
-// programs they are a partner in and the partner who referred them. It
-// shows nothing when there is neither, or the viewer can't read partners.
-export function RecordPartners({ ws, record, go }: { ws: string; record: string; go?: () => void }) {
+// programs they are a partner in and the partner who referred them, each
+// linking to that partner's page. It shows nothing when there is neither,
+// or the viewer can't read partners.
+export function RecordPartners({ ws, record, go }: { ws: string; record: string; go?: Go }) {
   const [own, setOwn] = useState<Partner[] | null>(null);
   const [by, setBy] = useState<{ ref: PartnerReferral; partner: Partner | null }[]>([]);
 
@@ -1589,22 +1004,36 @@ export function RecordPartners({ ws, record, go }: { ws: string; record: string;
   }, [ws, record]);
 
   if (own === null || (own.length === 0 && by.length === 0)) return null;
+  const open = go && ((id: string) => {
+    track("ui.partner_opened", { from: "record" });
+    go("partners", id);
+  });
   return (
     <div className="space-y-2">
       <div className="font-medium">Partners</div>
       {own.map((p) => (
         <div key={p.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className="min-w-0">Partner in <span className="font-medium">{p.program}</span> as <span className="font-mono">{p.code}</span> <Badge tone={partnerTone[p.status]}>{p.status}</Badge></span>
+          <span className="min-w-0">
+            <AppLink ws={ws} tab="partners" item={p.id} onOpen={open && (() => open(p.id))} className="underline underline-offset-2 hover:text-foreground">
+              Partner in <span className="font-medium">{p.program}</span> as <span className="font-mono">{p.code}</span>
+            </AppLink>{" "}
+            <Badge tone={partnerTone[p.status]}>{p.status}</Badge>
+          </span>
           <span className="shrink-0 text-muted-foreground">{money(p.stats.sales_cents, p.currency)} sales · {money(p.stats.balance_cents, p.currency)} due</span>
         </div>
       ))}
       {by.map(({ ref, partner }) => (
         <div key={ref.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className="min-w-0">Referred by {partner ? <><span className="font-mono">{partner.code}</span> ({partner.name || partner.email || "partner"}) in <span className="font-medium">{partner.program}</span></> : "a partner"}</span>
+          <span className="min-w-0">
+            {partner ? (
+              <AppLink ws={ws} tab="partners" item={partner.id} onOpen={open && (() => open(partner.id))} className="underline underline-offset-2 hover:text-foreground">
+                Referred by <span className="font-mono">{partner.code}</span> ({partner.name || partner.email || "partner"}) in <span className="font-medium">{partner.program}</span>
+              </AppLink>
+            ) : "Referred by a partner"}
+          </span>
           <span className="shrink-0 text-muted-foreground">{ref.status}, {ago(ref.created_at)}</span>
         </div>
       ))}
-      {go && <Button variant="ghost" onClick={go}>Open partners</Button>}
     </div>
   );
 }

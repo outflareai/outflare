@@ -43,9 +43,9 @@ A query belongs to one brand (`plans/brands/README.md`): different brands are di
 | `replies` | `inbox.read` | Mail received, with its AI label, without bodies |
 | `deals`, `meetings`, `spend` | `outcomes.read` | Outcomes and money spent |
 | `emails`, `email_events`, `broadcasts` | `emails.read` | Lifecycle email, without bodies or addresses |
-| `visits` | `analytics.read` | Website visits from the Outflare site snippet |
+| `visits` | `analytics.read` | Website visits from the Outflare site snippet, with where each came from (`country`, `region`, `city`, and the network: `asn` and `isp`) and the device (`device`, `device_brand`, `device_model`, `os`, `os_version`, `browser`, `browser_version`, `language`) |
 | `social_posts` | `social.read` | Posts on the workspace's own social accounts |
-| `reviews`, `review_page_days` | `social.read` | [Reviews](reviews.md) of the brands on Trustpilot, G2, Capterra and Google, and each review page's numbers day by day |
+| `reviews`, `review_page_days` | `social.read` | [Reviews](reviews.md) of the brands on Trustpilot, G2, Capterra, SourceForge and Google, and each review page's numbers day by day |
 | `backlinks`, `link_prospects` | `seo.read` | [Link building](seo.md): links from other sites to the brands' websites, live or lost, with each linking domain's strength, traffic and spam score; and the pages that could link, with how each was found (`method`), its score and where its pitch stands (`stage`), such as `select method, count(*) filter (where live_at is not null) from link_prospects group by 1` |
 
 jsonb columns such as `attributes` are read with `->>`: `select attributes->>'plan' as plan, count(*) from people group by 1`.

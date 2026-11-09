@@ -37,6 +37,7 @@ function endpointStatus(e: WebhookEndpoint) {
 const firstSentence = (d: string) => d.split(/(?<=\.)\s/)[0];
 
 const deliveryTone = { delivered: "green", pending: "blue", failed: "red", cancelled: "grey" } as const;
+const testBadge = <Badge title="Sent with Send a test event. Tests don't count toward this endpoint's failures or error rate.">Test</Badge>;
 
 /** Event picker: everything, or chosen categories and types. */
 function EventPicker({ catalog, value, onChange }: { catalog: WebhookEventType[]; value: string[]; onChange: (v: string[]) => void }) {
@@ -387,7 +388,7 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
         <span className="text-[12px] text-muted-foreground">Kept for 30 days.</span>
       </div>
       {rows === null && <Loading />}
-      {rows?.length === 0 && <Empty title="No deliveries yet">{status ? "None with this status." : "Events this endpoint subscribes to show up here as they are sent."}</Empty>}
+      {rows?.length === 0 && <Empty title="No deliveries yet">{status ? "None with this status." : "Events this endpoint subscribes to, and the tests you send, show up here as they are sent."}</Empty>}
       {rows && rows.length > 0 && (
         <>
           <DataTable
@@ -397,12 +398,12 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
             onRowClick={(d) => show(d)}
             mobile={(d) => (
               <span className="block space-y-1">
-                <span className="flex items-center justify-between gap-2"><span className="font-mono text-[12px]">{d.event_type}</span><Badge tone={deliveryTone[d.status]}>{d.status === "pending" ? "retrying" : d.status}</Badge></span>
+                <span className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5"><span className="font-mono text-[12px]">{d.event_type}</span>{d.test && testBadge}</span><Badge tone={deliveryTone[d.status]}>{d.status === "pending" ? "retrying" : d.status}</Badge></span>
                 <span className="block text-[12px] text-muted-foreground">{d.last_status_code ?? "No answer"} · {plural(d.attempts, "try", "tries")} · {ago(d.created_at)}</span>
               </span>
             )}
             columns={[
-              { id: "event", header: "Event", accessorFn: (d) => d.event_type, cell: ({ row: { original: d } }) => <span className="font-mono text-[12px]">{d.event_type}</span> },
+              { id: "event", header: "Event", accessorFn: (d) => d.event_type, cell: ({ row: { original: d } }) => <span className="flex items-center gap-1.5"><span className="font-mono text-[12px]">{d.event_type}</span>{d.test && testBadge}</span> },
               { id: "status", header: "Status", accessorFn: (d) => d.status, cell: ({ row: { original: d } }) => <Badge tone={deliveryTone[d.status]}>{d.status === "pending" ? "retrying" : d.status}</Badge> },
               { id: "answer", header: "Answer", accessorFn: (d) => d.last_status_code ?? 0, cell: ({ row: { original: d } }) => <span className="text-[12px] text-muted-foreground" title={d.last_error ?? undefined}>{d.last_status_code ?? (d.last_error ? "No answer" : "—")}{d.attempts > 1 && ` · ${plural(d.attempts, "try", "tries")}`}</span> },
               { id: "created", header: "Sent", accessorFn: (d) => d.created_at, cell: ({ row: { original: d } }) => <span className="whitespace-nowrap text-muted-foreground" title={stamp(d.created_at)}>{ago(d.created_at)}</span> },
@@ -416,7 +417,7 @@ function Deliveries({ ws, endpoint, canManage, back, onTest }: { ws: string; end
         <Dialog open onOpenChange={(o) => !o && setOpen(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
-              <DialogTitle className="font-mono text-[14px]">{open.delivery.event_type}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2 font-mono text-[14px]">{open.delivery.event_type}{open.delivery.test && testBadge}</DialogTitle>
               <DialogDescription>
                 {open.delivery.status === "pending" ? "Retrying" : open.delivery.status} · webhook-id {open.delivery.event_id} · created {stamp(open.delivery.created_at)}
               </DialogDescription>

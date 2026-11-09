@@ -33,6 +33,7 @@ var Platforms = []Platform{
 	{"tripadvisor", "Tripadvisor", true, false, "Invite genuine customers using the property's review link."},
 	{"g2", "G2", true, true, "Invite genuine users under G2's review guidelines."},
 	{"capterra", "Capterra", true, true, "Invite genuine users under Capterra's review guidelines."},
+	{"sourceforge", "SourceForge", true, true, "Invite genuine users to the product's SourceForge review page."},
 	{"trustradius", "TrustRadius", true, false, "Use an approved review invitation link."},
 	{"gartner_peer_insights", "Gartner Peer Insights", true, false, "Use the vendor's approved review sourcing link."},
 	{"clutch", "Clutch", true, false, "Use the business's client review link."},

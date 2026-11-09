@@ -21,14 +21,20 @@ import { Button } from "@/components/ui/button";
 
 export type { ColumnDef };
 
+// Opaque versions of the row's colors, so cells scrolled under a pinned column don't show through.
+const pinHead = "sticky right-0 z-[1] border-l bg-[color-mix(in_oklab,var(--card),var(--muted)_40%)]";
+const pinCell = "sticky right-0 z-[1] border-l bg-card group-hover:bg-[color-mix(in_oklab,var(--card),var(--muted)_50%)]";
+
 type Props<T> = {
   columns: ColumnDef<T, unknown>[];
   data: T[];
   /** Stable key for each row. */
   rowId: (row: T) => string;
   onRowClick?: (row: T) => void;
-  /** Filters rows in the browser. Leave out when the page searches on the server. */
+  /** Shows a search box. Without `search` it filters the rows in the browser. */
   searchPlaceholder?: string;
+  /** The server searches and orders the rows: the box shows this query, and the browser neither filters nor sorts. */
+  search?: { value: string; onChange: (q: string) => void };
   /** Extra controls next to the search box, such as filters. */
   toolbar?: ReactNode;
   /** One row as a compact card, shown instead of the table on phones. */
@@ -42,9 +48,11 @@ type Props<T> = {
   className?: string;
 };
 
-export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlaceholder, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, className }: Props<T>) {
+export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlaceholder, search, toolbar, mobile, empty = "Nothing here yet.", initialSort = [], hidden = [], columnsMenu = true, className }: Props<T>) {
   const [sorting, setSorting] = useState<SortingState>(initialSort);
-  const [filter, setFilter] = useState("");
+  const [localFilter, setLocalFilter] = useState("");
+  const filter = search ? search.value : localFilter;
+  const setFilter = search ? search.onChange : setLocalFilter;
   const [visibility, setVisibility] = useState<VisibilityState>(() => Object.fromEntries(hidden.map((h) => [h, false])));
   const table = useReactTable({
     data,
@@ -57,6 +65,9 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    manualFiltering: !!search,
+    manualSorting: !!search,
+    enableSorting: !search,
   });
   const rows = table.getRowModel().rows;
   const hideable = !columnsMenu ? [] : table.getAllLeafColumns().filter((c) => c.getCanHide() && typeof c.columnDef.header === "string");
@@ -122,10 +133,10 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
             {table.getHeaderGroups().map((g) => (
               <TableRow key={g.id} className="hover:bg-transparent">
                 {g.headers.map((h) => {
-                  const meta = h.column.columnDef.meta as { align?: "right" } | undefined;
+                  const meta = h.column.columnDef.meta as { align?: "right"; pin?: "right" } | undefined;
                   const sorted = h.column.getIsSorted();
                   return (
-                    <TableHead key={h.id} className={cn("h-9 px-3 font-mono text-[11px] font-medium tracking-wide text-muted-foreground uppercase first:pl-4 last:pr-4", meta?.align === "right" && "text-right")} aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}>
+                    <TableHead key={h.id} className={cn("h-9 px-3 font-mono text-[11px] font-medium tracking-wide text-muted-foreground uppercase first:pl-4 last:pr-4", meta?.align === "right" && "text-right", meta?.pin && pinHead)} aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}>
                       {h.isPlaceholder ? null : h.column.getCanSort() ? (
                         <button className={cn("-mx-1 inline-flex items-center gap-1 rounded px-1 uppercase hover:text-foreground", meta?.align === "right" && "flex-row-reverse")} onClick={h.column.getToggleSortingHandler()}>
                           {flexRender(h.column.columnDef.header, h.getContext())}
@@ -153,9 +164,9 @@ export function DataTable<T>({ columns, data, rowId, onRowClick, searchPlacehold
                 onClick={onRowClick ? (e) => !(e.target as HTMLElement).closest("button, a, input, select, [role=menuitem]") && onRowClick(r.original) : undefined}
               >
                 {r.getVisibleCells().map((c) => {
-                  const meta = c.column.columnDef.meta as { align?: "right"; mono?: boolean } | undefined;
+                  const meta = c.column.columnDef.meta as { align?: "right"; mono?: boolean; pin?: "right" } | undefined;
                   return (
-                    <TableCell key={c.id} className={cn("px-3 py-2.5 align-top whitespace-normal first:pl-4 last:pr-4", meta?.align === "right" && "text-right", meta?.mono && "font-mono text-[12px] tabular-nums")}>
+                    <TableCell key={c.id} className={cn("px-3 py-2.5 align-top whitespace-normal first:pl-4 last:pr-4", meta?.align === "right" && "text-right", meta?.mono && "font-mono text-[12px] tabular-nums", meta?.pin && pinCell)}>
                       {flexRender(c.column.columnDef.cell, c.getContext())}
                     </TableCell>
                   );

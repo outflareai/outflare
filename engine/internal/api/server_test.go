@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/api"
 	"github.com/outflareai/outflare/engine/internal/db"
@@ -82,5 +84,58 @@ func TestServesWebAppWithClientRouteFallback(t *testing.T) {
 	}
 	if rec := get(t, h, "/../../etc/passwd"); rec.Code == http.StatusOK && rec.Body.String() != "<html>app</html>" {
 		t.Fatal("path escaped the web dir")
+	}
+}
+
+func TestWebAppEntriesRevalidateAndAssetsCache(t *testing.T) {
+	dir := t.TempDir()
+	os.Mkdir(filepath.Join(dir, "assets"), 0o755)
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte(`<script type="module" src="/assets/app-new.js"></script>`), 0o644)
+	os.WriteFile(filepath.Join(dir, "portal.html"), []byte("<html>portal</html>"), 0o644)
+	os.WriteFile(filepath.Join(dir, "assets", "app-new.js"), []byte("console.log(1)"), 0o644)
+	os.WriteFile(filepath.Join(dir, "favicon.svg"), []byte("<svg/>"), 0o644)
+	h := newServer(t, dir)
+
+	for _, path := range []string{"/", "/acme/crm", "/acme/domains/acme-com.example", "/portal.html"} {
+		rec := get(t, h, path)
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-cache" || rec.Header().Get("ETag") == "" {
+			t.Errorf("%s: %d Cache-Control %q ETag %q", path, rec.Code, rec.Header().Get("Cache-Control"), rec.Header().Get("ETag"))
+		}
+	}
+	if rec := get(t, h, "/assets/app-new.js"); rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Errorf("hashed asset: %d Cache-Control %q", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+	for _, path := range []string{"/assets/app-old.js", "/assets/a/b.js"} {
+		if rec := get(t, h, path); rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "" {
+			t.Errorf("%s: %d Cache-Control %q", path, rec.Code, rec.Header().Get("Cache-Control"))
+		}
+	}
+	if rec := get(t, h, "/favicon.svg"); rec.Code != http.StatusOK || strings.Contains(rec.Header().Get("Cache-Control"), "immutable") {
+		t.Errorf("favicon: %d Cache-Control %q", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+
+	// A browser revalidates with the validators it was given; a rollback serves an older file.
+	revalidate := func(first http.Header) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if v := first.Get("ETag"); v != "" {
+			req.Header.Set("If-None-Match", v)
+		}
+		if v := first.Get("Last-Modified"); v != "" {
+			req.Header.Set("If-Modified-Since", v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	first := get(t, h, "/").Header()
+	if rec := revalidate(first); rec.Code != http.StatusNotModified {
+		t.Errorf("unchanged entry: %d", rec.Code)
+	}
+	index := filepath.Join(dir, "index.html")
+	os.WriteFile(index, []byte(`<script type="module" src="/assets/app-old.js"></script>`), 0o644)
+	older := time.Now().Add(-10 * time.Hour)
+	os.Chtimes(index, older, older)
+	if rec := revalidate(first); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "app-old.js") {
+		t.Errorf("rolled back entry: %d %q", rec.Code, rec.Body.String())
 	}
 }

@@ -8,6 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { MissionClient } from "@outflare/sdk";
 import { z } from "zod";
+import { brandCaller, brandRef } from "./records.js";
 
 type Call = (fn: () => Promise<{ data?: unknown; error?: unknown; response: Response }>) => Promise<CallToolResult>;
 
@@ -51,6 +52,7 @@ export function registerContextTools(
   call: Call,
   withBrand: <T extends { brand?: string }>(q: T) => T,
 ): void {
+  const onBrand = brandCaller(gtm, workspace);
   const path = () => ({ ws: workspace() });
 
   server.registerTool(
@@ -139,16 +141,16 @@ export function registerContextTools(
       description:
         "Lasting facts, preferences and decisions people and agents saved, pinned first. Search with q before asking the person something they may have told you before.",
       inputSchema: {
+        brand: brandRef,
         q: z.string().max(200).optional().describe("Words the memory contains."),
         kind: kind.optional(),
-        brand: z.string().optional().describe("A brand's handle or id, or none for memories true for the whole company."),
         pinned: z.boolean().optional(),
         limit: z.number().int().min(1).max(200).optional(),
         cursor: z.string().optional().describe("next_cursor from the previous answer, for the next page."),
       },
       annotations: read,
     },
-    (q) => call(() => gtm.GET("/v1/workspaces/{ws}/memories", { params: { path: path(), query: q } })),
+    ({ brand, ...q }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/memories", { params: { path: { brand: b }, query: q } }))),
   );
 
   server.registerResource(
@@ -273,31 +275,31 @@ export function registerContextTools(
         "\"Only target Series A and later\", \"Paused acme-io.example on 25 Oct after bounces\". Do it when the person states something that should outlive this chat, " +
         "and tell them in one line so they can correct it. Never save transcripts, secrets or personal data about leads. Pin what every conversation should know.",
       inputSchema: {
+        brand: brandRef,
         text: z.string().min(1).max(500),
         kind: kind.optional().describe("preference (how they like things), decision (what was decided), fact (about the business), feedback (what worked or didn't). Default fact."),
-        brand_id: z.string().nullable().optional().describe("The brand it is true for (a handle or id), when it is not true for every brand."),
         pinned: z.boolean().optional(),
       },
       annotations: { ...write, idempotentHint: true },
     },
-    (body) => call(() => gtm.POST("/v1/workspaces/{ws}/memories", { params: { path: path() }, body })),
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/memories", { params: { path: { brand: b } }, body }))),
   );
 
   server.registerTool(
     "update_memory",
     {
       title: "Correct a memory",
-      description: "Change a memory's text or kind, pin or unpin it, or move it to a brand (null for the whole workspace). For when the person corrects you.",
+      description: "Change a memory's text or kind, or pin or unpin it. For when the person corrects you.",
       inputSchema: {
+        brand: brandRef,
         memory_id: id,
         text: z.string().min(1).max(500).optional(),
         kind: kind.optional(),
         pinned: z.boolean().optional(),
-        brand_id: z.string().nullable().optional().describe("A brand's handle or id; null for the whole company."),
       },
       annotations: { ...write, idempotentHint: true },
     },
-    ({ memory_id, ...body }) => call(() => gtm.PATCH("/v1/workspaces/{ws}/memories/{id}", { params: { path: { ws: workspace(), id: memory_id } }, body })),
+    ({ brand, memory_id, ...body }) => call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/memories/{id}", { params: { path: { brand: b, id: memory_id } }, body }))),
   );
 
   server.registerTool(
@@ -305,9 +307,9 @@ export function registerContextTools(
     {
       title: "Forget a memory",
       description: "Delete a memory that is wrong or out of date, or that the person asks you to forget.",
-      inputSchema: { memory_id: id },
+      inputSchema: { brand: brandRef, memory_id: id },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    ({ memory_id }) => call(() => gtm.DELETE("/v1/workspaces/{ws}/memories/{id}", { params: { path: { ws: workspace(), id: memory_id } } })),
+    ({ brand, memory_id }) => call(() => onBrand(brand, (b) => gtm.DELETE("/v1/brands/{brand}/memories/{id}", { params: { path: { brand: b, id: memory_id } } }))),
   );
 }

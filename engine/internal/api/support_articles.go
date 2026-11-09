@@ -85,8 +85,8 @@ func (s *Server) listSupportArticles(w http.ResponseWriter, r *http.Request) {
 		q = string([]rune(q)[:1000])
 	}
 	brand := c.BrandID
-	if brand == nil && len(a.Brands) == 1 {
-		brand = &a.Brands[0]
+	if brand == nil && len(a.seenBrands()) == 1 {
+		brand = &a.seenBrands()[0]
 	}
 	centre, err := s.liveHelpCentre(ctx, a.WorkspaceID, brand)
 	if err != nil {

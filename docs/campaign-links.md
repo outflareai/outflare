@@ -85,8 +85,11 @@ https://links.northpeak.example/l/k7m2pq9x
   left before the page loaded, or went to a page without the snippet.
 - Clicks from link scanners and previews (Slack, mail security filters)
   are kept but not counted. Each link and campaign shows its `clicks`.
-- No address or browser details are stored with a click: only when it
-  happened, and whether it looked automated.
+- No address or user agent is stored with a click: only when it happened,
+  whether it looked automated, and what they say about it: the country,
+  region, city and network, the device with its maker and model, the
+  system and browser with their versions, and the language
+  ([where visitors are](website-tracking.md#where-visitors-are)).
 - A redirect link keeps working when its campaign is archived, since it
   may be printed. Turning `redirect_links` off doesn't remove the ones
   already made.

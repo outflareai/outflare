@@ -296,3 +296,76 @@ func TestEventsFeedPollsForward(t *testing.T) {
 		t.Fatalf("latest %v", latest)
 	}
 }
+
+func TestWebhookTestDeliveriesAreListedAndSpareTheEndpoint(t *testing.T) {
+	e, owner, ws, _ := webhookEnv(t)
+	rc := newReceiver(t)
+	rc.mu.Lock()
+	rc.status = 503
+	rc.mu.Unlock()
+	base := "/v1/workspaces/" + ws
+	id := owner.must(201, "POST", base+"/webhooks", map[string]any{"url": rc.URL, "events": []string{"lead.*"}})["id"].(string)
+
+	test := owner.must(200, "POST", base+"/webhooks/"+id+"/test", nil)
+	if test["test"] != true || test["status"] != "failed" || test["last_status_code"] != 503.0 {
+		t.Fatalf("test answer %v", test)
+	}
+	ds := owner.must(200, "GET", base+"/webhooks/"+id+"/deliveries", nil)["data"].([]any)
+	if len(ds) != 1 {
+		t.Fatalf("deliveries %v", ds)
+	}
+	listed := ds[0].(map[string]any)
+	if listed["id"] != test["id"] || listed["test"] != true || listed["event_type"] != "webhook.test" || listed["last_status_code"] != 503.0 || listed["last_error"] == nil {
+		t.Fatalf("listed test %v", listed)
+	}
+	one := owner.must(200, "GET", base+"/webhooks/"+id+"/deliveries/"+jsonNum(test["id"]), nil)
+	if a := one["attempts"].([]any); len(a) != 1 || a[0].(map[string]any)["status_code"] != 503.0 || one["delivery"].(map[string]any)["test"] != true {
+		t.Fatalf("test delivery %v", one)
+	}
+	if got := owner.must(200, "GET", base+"/webhooks", nil)["data"].([]any)[0].(map[string]any); got["failing_since"] != nil || got["attempts_24h"] != 0.0 || got["failed_attempts_24h"] != 0.0 {
+		t.Fatalf("a failed test counted against the endpoint %v", got)
+	}
+	if act := owner.must(200, "GET", base+"/webhooks/"+id+"/activity", nil); act["attempts"] != 0.0 {
+		t.Fatalf("activity counts the test %v", act)
+	}
+
+	// A receiver that answers 410 Gone to a test, or to a test sent again,
+	// keeps its endpoint on; a test that passes is not its last success.
+	// No test leaves a job to retry it.
+	rc.mu.Lock()
+	rc.status = http.StatusGone
+	rc.mu.Unlock()
+	gone := owner.must(200, "POST", base+"/webhooks/"+id+"/test", nil)
+	owner.must(200, "POST", base+"/webhooks/"+id+"/deliveries/"+jsonNum(test["id"])+"/redeliver", nil)
+	if got := owner.must(200, "GET", base+"/webhooks/"+id, nil); got["enabled"] != true || got["failing_since"] != nil {
+		t.Fatalf("410 to a test turned the endpoint off %v", got)
+	}
+	rc.mu.Lock()
+	rc.status = 200
+	rc.mu.Unlock()
+	if again := owner.must(200, "POST", base+"/webhooks/"+id+"/deliveries/"+jsonNum(gone["id"])+"/redeliver", nil); again["status"] != "delivered" || again["test"] != true {
+		t.Fatalf("test sent again %v", again)
+	}
+	if got := owner.must(200, "GET", base+"/webhooks/"+id, nil); got["last_success_at"] != nil || got["attempts_24h"] != 0.0 {
+		t.Fatalf("a passing test counted for the endpoint %v", got)
+	}
+	var jobsLeft int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM jobs WHERE kind = $1 AND workspace_id = $2`, webhooks.JobDeliver, ws).Scan(&jobsLeft); err != nil || jobsLeft != 0 {
+		t.Fatalf("test deliveries queued %d jobs (%v)", jobsLeft, err)
+	}
+
+	// Real deliveries are still listed without the mark.
+	owner.must(201, "POST", base+"/leads", map[string]any{"email": "ana@acme.example"})
+	deadline := time.Now().Add(10 * time.Second)
+	for rc.count() < 5 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	ds = owner.must(200, "GET", base+"/webhooks/"+id+"/deliveries", nil)["data"].([]any)
+	if len(ds) != 3 || ds[0].(map[string]any)["test"] != false || ds[0].(map[string]any)["status"] != "delivered" {
+		t.Fatalf("deliveries after a real event %v", ds)
+	}
+	if got := owner.must(200, "GET", base+"/webhooks/"+id, nil); got["last_success_at"] == nil || got["attempts_24h"] != 1.0 {
+		t.Fatalf("a real delivery did not count %v", got)
+	}
+}

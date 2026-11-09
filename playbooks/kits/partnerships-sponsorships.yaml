@@ -1,0 +1,56 @@
+id: partnerships-sponsorships
+version: 1
+title: Paid sponsorships
+summary: A pipeline for paid newsletter, podcast, creator, event and display sponsorships, from media kit to the run and its results.
+
+option_sets:
+  - key: sponsorship_stage
+    name: Sponsorship stage
+    options:
+      - { key: prospect, label: Prospect }
+      - { key: contacted, label: Contacted }
+      - { key: media_kit, label: Media kit received }
+      - { key: negotiating, label: Negotiating }
+      - { key: booked, label: Booked }
+      - { key: creative_sent, label: Creative sent }
+      - { key: ran, label: Ran }
+      - { key: reported, label: Reported }
+      - { key: declined, label: Declined }
+  - key: sponsorship_channel
+    name: Sponsorship channel
+    options:
+      - { key: newsletter, label: Newsletter }
+      - { key: podcast, label: Podcast }
+      - { key: creator, label: Creator }
+      - { key: event, label: Event }
+      - { key: display, label: Display ads }
+  - key: invoice_status
+    name: Invoice status
+    options:
+      - { key: not_invoiced, label: Not invoiced }
+      - { key: invoiced, label: Invoiced }
+      - { key: paid, label: Paid }
+
+record_types:
+  - key: sponsorship
+    name: Sponsorship
+    plural: Sponsorships
+    description: |
+      A paid placement with a newsletter, podcast, creator, event or ad
+      network: what it costs, when it runs, what they deliver and how it
+      did.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: sponsorship_stage, filterable: true }
+      - { key: company, label: Publisher, value_type: record_reference, target_type: account, filterable: true, description: "The newsletter, show, creator's business or network." }
+      - { key: contact, label: Contact, value_type: record_reference, target_type: person }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: channel, label: Channel, value_type: select, option_set: sponsorship_channel, filterable: true }
+      - { key: audience_size, label: Audience size, value_type: number, filterable: true, description: "Subscribers, listeners, followers or attendees." }
+      - { key: price, label: Price, value_type: currency }
+      - { key: run_on, label: Run date, value_type: date, filterable: true }
+      - { key: run_until, label: Run end date, value_type: date }
+      - { key: deliverables, label: Deliverables, value_type: text, description: "What they run, such as one main slot and two mentions." }
+      - { key: tracking_link, label: Tracked link, value_type: url, description: "The campaign link for this sponsorship, so visits and sign-ups count towards it." }
+      - { key: invoice_status, label: Invoice, value_type: select, option_set: invoice_status, filterable: true }
+      - { key: next_step, label: Next step, value_type: text }

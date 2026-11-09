@@ -113,3 +113,18 @@ func (s *Server) ResolvePresenceRedirects(ctx context.Context, ws, brand string)
 func (s *Server) RunCoverageVerify(ctx context.Context, ws, brand string) error {
 	return s.coverageVerifyJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"brand_id":"` + brand + `"}`)})
 }
+
+// RunPartnershipSync runs a partnership's stage actions.
+func (s *Server) RunPartnershipSync(ctx context.Context, ws, record string) error {
+	return s.partnershipSyncJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"record_id":"` + record + `"}`)})
+}
+
+// QueuePartnershipSyncs runs the daily sweep's partnership step.
+func (s *Server) QueuePartnershipSyncs(ctx context.Context) error {
+	return s.queuePartnershipSyncs(ctx)
+}
+
+// RunAffiliateSync brings a partner's affiliate partnerships up to date.
+func (s *Server) RunAffiliateSync(ctx context.Context, ws, partner string) error {
+	return s.partnershipAffiliateJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"partner_id":"` + partner + `"}`)})
+}

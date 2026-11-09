@@ -9,14 +9,14 @@
 // Older links still open: /w/{workspace id}/{tab} is rewritten to the slug,
 // and /{workspace}/{tab}?brand=repocket to /{workspace}/repocket/{tab}.
 
-export const appTabs = ["crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "funnels", "trends", "retention", "paths", "dashboards", "channels", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "brand-accounts", "workspace", "members", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre", "agent-mail"] as const;
+export const appTabs = ["crm", "overview", "get-started", "setup", "ai", "ai-usage", "ai-accounts", "tools", "reports", "funnels", "trends", "retention", "paths", "dashboards", "channels", "analytics", "live", "page-speed", "tracking", "flags", "ab-tests", "links", "seo", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "reddit", "reddit-campaigns", "social", "reviews", "ads", "partners", "visitors", "inbox", "missions", "agents", "playbooks", "outcomes", "sequences", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "infrastructure", "mailboxes", "domains", "warmup", "servers", "allocation", "lifecycle", "emails", "broadcasts", "journeys", "rules", "automations", "templates", "topics", "providers", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression", "knowledge", "company", "brands", "ideal-customers", "brand-accounts", "workspace", "members", "team", "team-activity", "alerts", "digests", "senders", "connectors", "webhooks", "tokens", "logs", "audit", "instance", "account", "support", "help-centre", "agent-mail", "telegram"] as const;
 export type Tab = (typeof appTabs)[number];
 
 export const isTab = (t?: string): t is Tab => !!t && (appTabs as readonly string[]).includes(t);
 
 // Pages that belong to the whole workspace, not to a brand: their URLs
 // have no brand in them.
-export const workspaceTabs: readonly Tab[] = ["get-started", "tools", "ai", "ai-usage", "ai-accounts", "workspace", "members", "digests", "tokens", "webhooks", "instance", "account"];
+export const workspaceTabs: readonly Tab[] = ["get-started", "tools", "ai", "ai-usage", "ai-accounts", "workspace", "members", "team", "team-activity", "digests", "tokens", "webhooks", "instance", "account"];
 
 // The brand part of URLs: a handle, "all", or "" for a workspace without
 // brands. Set by lib/brand.ts as the brand picked changes.
@@ -70,7 +70,7 @@ export function rememberWorkspaces(list: { id: string; slug: string }[]) {
 export function appPath(ws: string, tab: Tab, item?: string): string {
   const slug = slugs.get(ws) ?? ws;
   const brand = brandPart && !workspaceTabs.includes(tab) ? `/${encodeURIComponent(brandPart)}` : "";
-  return `/${encodeURIComponent(slug)}${brand}/${tab}${item ? `/${encodeURIComponent(item)}` : ""}`;
+  return `/${encodeURIComponent(slug)}${brand}/${tab}${item ? `/${item.split("/").map(encodeURIComponent).join("/")}` : ""}`;
 }
 
 // The same path with the workspace, brand and item hidden, for product

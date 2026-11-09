@@ -253,7 +253,18 @@ var VisitFields = map[string]string{
 	"country":       `NULLIF(s.country, '')`,
 	"browser":       `NULLIF(s.browser, '')`,
 	"os":            `NULLIF(s.os, '')`,
-	"partner":       `NULLIF(s.ref, '')`,
+	// Where the visit came from and on what, in more detail; empty on
+	// visits from before they were kept.
+	"region":          `NULLIF(s.region, '')`,
+	"city":            `NULLIF(s.city, '')`,
+	"isp":             `NULLIF(s.isp, '')`,
+	"asn":             `NULLIF(s.asn, 0)::text`,
+	"device_brand":    `NULLIF(s.device_brand, '')`,
+	"device_model":    `NULLIF(s.device_model, '')`,
+	"os_version":      `NULLIF(s.os_version, '')`,
+	"browser_version": `NULLIF(s.browser_version, '')`,
+	"language":        `NULLIF(s.language, '')`,
+	"partner":         `NULLIF(s.ref, '')`,
 	// The network's own ids, as the tracking template recorded them.
 	"ad_campaign": `NULLIF(s.ad ->> 'campaign', '')`,
 	"ad_set":      `NULLIF(s.ad ->> 'adset', '')`,

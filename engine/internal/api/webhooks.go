@@ -72,13 +72,16 @@ type webhookView struct {
 	// for an endpoint made before brands, which gets every event.
 	BrandID *string `json:"brand_id"`
 	// Tries in the last 24 hours and how many failed, for its error rate.
+	// Tests are left out.
 	Attempts24h       int `json:"attempts_24h"`
 	FailedAttempts24h int `json:"failed_attempts_24h"`
 }
 
+const realAttempts = `webhook_delivery_attempts a JOIN webhook_deliveries d ON d.id = a.delivery_id AND d.event_type <> '` + webhooks.TestEvent + `'`
+
 const webhookColumns = `id, url, description, events, categories, rule_ids::text[], enabled, disabled_reason, failing_since, last_success_at, created_at, updated_at, brand_id::text,
-	(SELECT count(*) FROM webhook_delivery_attempts a WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours')::int,
-	(SELECT count(*) FROM webhook_delivery_attempts a WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours' AND NOT a.ok)::int`
+	(SELECT count(*) FROM ` + realAttempts + ` WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours')::int,
+	(SELECT count(*) FROM ` + realAttempts + ` WHERE a.endpoint_id = webhook_endpoints.id AND a.at > now() - interval '24 hours' AND NOT a.ok)::int`
 
 func (s *Server) loadWebhooks(ctx context.Context, ws string, id *string) ([]webhookView, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+webhookColumns+` FROM webhook_endpoints
@@ -436,9 +439,11 @@ type webhookDeliveryView struct {
 	DeliveredAt    *time.Time     `json:"delivered_at"`
 	CreatedAt      time.Time      `json:"created_at"`
 	Payload        map[string]any `json:"payload"`
+	Test           bool           `json:"test"`
 }
 
-const deliveryColumns = `id, event_id, event_type, status, attempts, last_status_code, last_error, last_attempt_at, delivered_at, created_at, payload`
+const deliveryColumns = `id, event_id, event_type, status, attempts, last_status_code, last_error, last_attempt_at, delivered_at, created_at, payload,
+	event_type = '` + webhooks.TestEvent + `'`
 
 func (s *Server) loadDelivery(ctx context.Context, endpointID string, id int64) (webhookDeliveryView, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+deliveryColumns+` FROM webhook_deliveries WHERE endpoint_id = $1 AND id = $2`, endpointID, id)
@@ -505,7 +510,9 @@ func (s *Server) listWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
 }
 
 // testWebhook sends a webhook.test event now and answers with the delivery,
-// so the result (status code or error) is in the answer.
+// so the result (status code or error) is in the answer. It calls the
+// receiver from the request, unlike other deliveries, because the answer is
+// the point. The delivery is listed with the others, marked as a test.
 func (s *Server) testWebhook(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	cur, ok := s.oneWebhook(w, r)
@@ -725,6 +732,7 @@ type webhookActivityDay struct {
 
 // webhookActivity is an endpoint's tries per day (UTC) over the last days
 // (1 to 30, default 7), with the error rate and the slowest typical answer.
+// Tests are left out.
 func (s *Server) webhookActivity(w http.ResponseWriter, r *http.Request) {
 	cur, ok := s.oneWebhook(w, r)
 	if !ok {
@@ -742,7 +750,7 @@ func (s *Server) webhookActivity(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.pool.Query(r.Context(), `SELECT to_char(d, 'YYYY-MM-DD'),
 			count(a.id)::int, count(a.id) FILTER (WHERE NOT a.ok)::int, count(a.id) FILTER (WHERE a.ok)::int, COALESCE(avg(a.duration_ms), 0)::int
 		FROM generate_series((now() AT TIME ZONE 'UTC')::date - ($2::int - 1), (now() AT TIME ZONE 'UTC')::date, interval '1 day') d
-		LEFT JOIN webhook_delivery_attempts a ON a.endpoint_id = $1 AND (a.at AT TIME ZONE 'UTC')::date = d::date
+		LEFT JOIN (SELECT a.* FROM `+realAttempts+` WHERE a.endpoint_id = $1) a ON (a.at AT TIME ZONE 'UTC')::date = d::date
 		GROUP BY d ORDER BY d`, cur.ID, days)
 	if err != nil {
 		s.internal(w, r, err)
@@ -755,7 +763,7 @@ func (s *Server) webhookActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	var p95 int
 	if err := s.pool.QueryRow(r.Context(), `SELECT COALESCE(percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::int
-		FROM webhook_delivery_attempts WHERE endpoint_id = $1 AND at > now() - make_interval(days => $2)`, cur.ID, days).Scan(&p95); err != nil {
+		FROM `+realAttempts+` WHERE a.endpoint_id = $1 AND a.at > now() - make_interval(days => $2)`, cur.ID, days).Scan(&p95); err != nil {
 		s.internal(w, r, err)
 		return
 	}

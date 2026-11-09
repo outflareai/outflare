@@ -125,7 +125,7 @@ Read (always available):
 
 | Tool | What |
 | --- | --- |
-| `list_ideal_customer_profiles`, `get_ideal_customer_profile` | Who the workspace sells to: each profile's description, filters and brand |
+| `list_ideal_customer_profiles`, `get_ideal_customer_profile` | Who a brand sells to: each profile's description and filters (each brand has its own) |
 | `get_overview` | Mailbox health and capacity, sends, replies and bounces, unread replies; `brand` narrows it to one brand |
 | `list_mailboxes` | Sending mailboxes with status, daily limit, pool and warm-up (who runs it and its warm-up score) |
 | `get_mailbox` | One mailbox: status and last error, limits, pool, brand, stage, warm-up and sender |
@@ -214,9 +214,17 @@ Read (always available):
 | `list_allocation_changes` | Mailbox assignment history with reasons |
 | `list_allocation_declines` | Mailboxes kept from a sequence until someone clears it: declined suggestions, undone automatic choices, platform refusals |
 | `list_senders`, `list_teams` | Who a brand's mailboxes send as (each brand has its own senders), and the teams that own sequences and senders |
+| `list_staff`, `get_staff_member`, `create_staff_member`, `update_staff_member`, `list_departments`, `create_department` | The team directory: everyone at the company (signed in to Outflare or not), their departments, teams and managers. Needs `members.read`, and `members.manage` to change |
+| `list_staff_accounts`, `get_staff_account`, `create_staff_account`, `update_staff_account` | Work accounts the company owns (Telegram, email, phone numbers), who holds each, handing one on and its history. Needs `members.read`, and `members.manage` to change |
+| `get_telegram_session` | Whether a company Telegram account is signed in to Outflare, as whom, how it is protected (two-step password, login email, other devices) and its lock-down checklist. Signing in is a QR scan by a person in Settings, Team. Needs `members.read` |
+| `list_telegram_chats` | A brand's chats synced from company Telegram accounts: who with, the customer record once matched or the one suggested, and kind (unsorted, customer, internal, personal). Filter the queue to confirm with `match_status` and `mine`, and customers waiting for an answer with `waiting`. Needs `customers.read` |
+| `list_telegram_messages` | A synced Telegram chat's messages, newest first. Needs `customers.read` |
+| `summarize_telegram_chat` | Ask the workspace's AI to summarise a synced Telegram chat: what they want, what was agreed, what is open, who owes the next message. Needs `customers.manage` |
+| `match_telegram_chat` | Link a synced Telegram chat to a customer record (or to none of the suggestions); the record gets the chat's Telegram id. Needs `customers.manage` |
+| `update_telegram_chat` | Sort a synced Telegram chat (customer, internal, personal: nothing kept) or make it private to the account's holder. Needs `customers.manage` |
 | `list_playbooks`, `get_playbook` | Ready-made playbooks with whether the workspace is ready for each (connections and data still missing). Needs `agents.read`; `run_playbook` below starts one |
 | `list_playbook_automations`, `create_playbook_automation`, `update_playbook_automation`, `pause_playbook_automation`, `run_playbook_automation`, `list_playbook_automation_runs`, `delete_playbook_automation` | Run a playbook by itself on a schedule or when an event happens. An agent sets one up as a draft; a person approves it in Outflare, then each run is an agent run of Outflare's agent inside the approved mode and spend limits. Needs `agents.read`, and `agents.run` to change |
-| `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
+| `preview_kit`, `apply_kit` | What a playbook's setup kit (a pipeline, fields on people and companies, option lists, email drafts, and a flow kit's smart lists, rules and journeys) would add, and setting it up once the person agrees, for the workspace's first brand or the `brand` given (flow kits only for the first), with the kit's inputs. It only adds, adds automations as drafts, and stops at a conflict. Needs `customers.read` to preview; `catalog.manage`, plus `emails.manage` for email drafts and journeys and `customers.manage` for smart lists and rules, to apply |
 | `export_kit` | Journeys written out as a flow kit file, with the journeys, lists, emails and rules they use. Ids become placeholders, sequences and chosen events become inputs, and the file is checked as a shipped kit is. Changes nothing. Needs `emails.read` and `customers.read` |
 | `preview_kit_file`, `apply_kit_file` | The same as `preview_kit` and `apply_kit`, for a kit file sent with the call, such as one exported from another workspace. Same scopes |
 | `list_missions`, `get_mission` | Retired missions, as history: goal, progress, limits and the notes on each |
@@ -251,11 +259,13 @@ Read (always available):
 | `list_partner_programs`, `get_partner_program` | Referral, affiliate and influencer programs with their credit rule, hold, minimum payout, reward rules and groups |
 | `get_partner_settings` | Whether erasing a partner's record also clears their payouts' notes and references, for every program |
 | `get_partner_program_stats` | A program's totals across all its partners: partners by status, clicks, referred customers, sales, and rewards on hold, due and paid |
-| `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due) |
+| `list_partners`, `get_partner` | Partners with their ref code, short link, campaign link, promo codes and totals (clicks, referrals, customers, sales, cash pending, approved, paid and due), found by code, promo code, name, email or id and sorted by any total |
+| `list_partner_activity` | One partner's history: status and payout detail changes, referrals, rewards approved or rejected, and payouts paid, each with who did it |
 | `list_partner_conversions`, `list_partner_referrals` | Leads, sales and refunds credited to partners, and each referred customer with how they were credited |
 | `list_partner_conversion_log` | Every conversion call from the last 30 days with what it sent, the answer and why it was or wasn't credited |
 | `list_partner_leads`, `approve_partner_lead`, `reject_partner_lead` | Leads partners submitted on the portal, and taking or turning them down |
-| `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments) and payouts |
+| `list_partner_rewards`, `list_partner_payouts` | The reward ledger (cash, fees, actions, adjustments), each with its partner, customer, sale, rule, source and who decided it, and payouts |
+| `get_partner_reward_proof`, `export_partner_proofs` | Why a partner earned a reward: the click or visit, referral, customer, sale, rule, decision and payout, with what is missing and why; for one reward, one payout or one partner's rewards over a time range |
 | `list_partner_assets` | Banners, copy and links a program shows partners on its portal |
 | `list_partner_postbacks`, `export_partner_payouts` | A partner's postbacks to their own tracker, and payouts as CSV with payout details for paying them |
 | `list_partner_imports`, `get_partner_import` | A program's imports from Tolt: status, counts per kind and issues |
@@ -290,6 +300,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_record_timeline`, `list_record_consents`, `list_customer_events` | One timeline per person or company across every module (product events, changes, identities, consent, cold email and replies, meetings, deals, visits, opt-outs, journeys; a company with its people), a person's current consents, and product events (unmatched anonymous ones too) |
 | `list_record_duplicates` | Pairs of records that may be the same human (a shared email or phone), with both records |
 | `create_record`, `update_record` | Add or change a record; values are checked against the catalog, and a higher-precedence source's values are kept |
+| `add_partnership` | Add a partner to one of a brand's partnership pipelines (SEO links, sponsorships, integrations, affiliates, comparison sites) from its website: finds or adds its company, adds it at the first stage, and returns the existing one when it's already there. Needs `customers.manage` |
 | `delete_record` | Erase a person or company for good, with their activity, for an erasure request; optionally never contact them again |
 | `soft_delete_record`, `delete_field_value`, `delete_record_identity`, `delete_record_link`, `delete_customer_event`, `delete_transaction` | Delete a person or company (with their identities, links and events), a wrong field value, identity or link, a product event, or a transaction such as a test payment: hidden everywhere at once and restorable for 7 days, then purged |
 | `list_recently_deleted`, `get_deletion`, `restore_deletion` | See what was deleted in the last 7 days and restore it as it was, without firing rules, journeys, webhooks or emails again |
@@ -526,7 +537,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_story_pitch_sequence` | A draft sequence for a brand's story pitches that passes every pitch rule, for a person to give mailboxes and activate |
 | `list_news_articles`, `list_coverage`, `add_coverage`, `update_coverage` | What the news watch found, and coverage: articles about a brand on the outlet's company record, to confirm or dismiss |
 | `reclaim_link_prospects`, `check_link_prospects`, `check_link_prospect` | Lost links as prospects to win back, and OutflareBot's check of prospects' pages: up or gone, already linking, broken outbound links with archive snapshots, the AI's read (with the workspace's own key) and who to contact |
-| `search_web` | One search results page for any query (Google operators work) from the workspace's own DataForSEO or Geonode; costs money within the connection's budget, so estimate first |
+| `search_web` | One search results page for any query (Google operators work) from the workspace's own DataForSEO or Geonode, for one brand; costs money within the connection's budget, so estimate first |
 | `list_link_sequences`, `create_link_sequence`, `update_link_sequence`, `start_link_pitch`, `list_link_pitches`, `edit_link_pitch`, `approve_link_pitch`, `reject_link_pitch`, `get_link_results` | Pitch a prospect through an Outflare sequence with an opener the workspace's AI wrote for the page, approve or edit it (approval is on by default, per sequence; without it, a daily limit applies and pitches the AI is unsure about still wait), and see results by method: replies read as agreed, declined or asking for payment, links checked until live |
 | `read_links`, `list_link_reads`, `get_link_read`, `list_dead_pages`, `list_top_linked_pages` | Who links to any page or domain, from the workspace's own Ahrefs or DataForSEO (paid; estimate first), and free reports over earlier reads: competitors' dead pages with links, a domain's most linked pages |
 | `get_link_building_settings`, `update_link_building_settings` | A brand's pitch cool-down, the weekly read of competitors' dead pages with its share of the budget, and how often broken-link prospects are checked again |
@@ -574,7 +585,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_social_sign_in_link` | A link for the user to sign in to the brand's Reddit account through the workspace's own app |
 | `list_social_accounts`, `update_social_account`, `sync_social_accounts`, `sync_social_account` | The brand's own X accounts, LinkedIn company pages and LinkedIn profiles, with followers and the change over 7 and 28 days; put one on a brand, pause it, or read them all or one now (such as one whose read failed) |
 | `get_reviews_summary` | Outflare's review score (stars weighted by count and recency), momentum (growing, improving, steady, stagnating, slipping), each review site's score and count, weekly series, sentiment and reply rate |
-| `list_reviews`, `get_review` | Reviews from the brand's Trustpilot, G2, Capterra and Google pages, with stars, sentiment, link and answer; filter for the ones waiting for an answer |
+| `list_reviews`, `get_review` | Reviews from the brand's Trustpilot, G2, Capterra, SourceForge and Google pages, with stars, sentiment, link and answer; filter for the ones waiting for an answer |
 | `draft_review_answer`, `mark_review_answered` | Draft a public answer with the workspace's own AI from the brand's reply guide; the user posts it on the review site, then marks it answered |
 | `list_review_pages`, `update_review_page`, `read_review_pages`, `read_review_page`, `get_review_page_days`, `find_review_pages` | The brand's review pages (from its links) and their numbers day by day; pause one, read them all or one now (such as one whose read failed), or search the web for the brand's pages |
 | `get_review_guide`, `update_review_guide` | How the brand answers reviews: tone, sign-off, support contact, what never to say, known issues |
@@ -659,7 +670,7 @@ Coverage tools take an explicit brand ID. Start with `get_coverage_schema` for f
 | `scan_coverage_competitor` | Scan where a competitor appears now, on the workspace's own connections. |
 | `list_coverage_competitor_placements` | Where competitors appear, most valuable to the brand first: a 0 to 100 value with reasons, how the link is got (can't buy, earned, paid, free), type, likely paid with evidence, domain rating and traffic, and the sites where the brand has no publisher yet (`gap`). |
 | `list_coverage_found` | Everywhere the brand was found, grouped by site, with whether each page links to it, names its website or only shares its name. |
-| `review_coverage_found` | Say pages (or a whole site) are about the brand, making them placements, or not, dismissing them. |
+| `review_coverage_found` | Say pages (or a whole site) are about the brand, making them placements, or not, dismissing them; mark a site as spam; or check a page again in a week. |
 | `list_coverage_opportunities` | Places worth the team's effort, highest leverage (SEO and AI answers together) first, with the reason, the next action and the evidence. |
 | `update_coverage_opportunity`, `refresh_coverage_opportunities` | Pick, dismiss or win an opportunity and set its owner; suggest opportunities now. |
 | `confirm_coverage_candidate` | Create or reuse a placement from a discovery. |

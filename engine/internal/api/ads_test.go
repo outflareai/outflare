@@ -457,7 +457,7 @@ func TestAdsSyncAndReports(t *testing.T) {
 	}
 	accts := owner.must(200, "GET", base+"/ads/accounts", nil)["data"].([]any)
 	acct := accts[0].(map[string]any)
-	if len(accts) != 1 || acct["external_id"] != "55" || acct["sync_on"] != true || acct["first_day"] == nil || acct["brand_id"] != nil {
+	if len(accts) != 1 || acct["external_id"] != "55" || acct["sync_on"] != true || acct["first_day"] == nil || acct["brand_id"] == nil {
 		t.Fatalf("accounts: %v", accts)
 	}
 
@@ -576,11 +576,11 @@ func TestAdsSyncAndReports(t *testing.T) {
 	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM spend_entries WHERE workspace_id = $1 AND brand_id = $2`, ws, geo["id"]).Scan(&branded); err != nil || branded != 90 {
 		t.Fatalf("ledger rows with the brand: %d %v", branded, err)
 	}
-	if b := owner.must(200, "GET", base+"/ads/summary?group=brand&from="+from+"&to="+to, nil)["data"].([]any); b[0].(map[string]any)["key"] != geo["id"] {
+	if b := owner.must(200, "GET", base+"/ads/summary?brand=geonode&group=brand&from="+from+"&to="+to, nil)["data"].([]any); b[0].(map[string]any)["key"] != geo["id"] {
 		t.Fatalf("by brand: %v", b)
 	}
-	if none := owner.must(200, "GET", base+"/ads/campaigns?brand=none", nil)["data"].([]any); len(none) != 0 {
-		t.Fatalf("no unbranded campaigns left: %v", none)
+	if moved := owner.must(200, "GET", base+"/ads/campaigns?brand=geonode", nil)["data"].([]any); len(moved) == 0 {
+		t.Fatalf("the account's campaigns follow it: %v", moved)
 	}
 	owner.must(400, "PATCH", base+"/ads/accounts/"+acctID, map[string]any{"brand": "nope"})
 	owner.must(404, "PATCH", base+"/ads/accounts/00000000-0000-0000-0000-000000000000", map[string]any{"sync_on": false})

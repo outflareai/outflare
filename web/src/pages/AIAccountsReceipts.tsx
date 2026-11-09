@@ -26,9 +26,9 @@ type Props = {
 // The Gmail search for AI receipts: the companies' own mail, and receipts
 // for them sent by payment processors and app stores.
 export const filterQuery =
-  "(from:(anthropic.com OR openai.com OR cursor.com) OR (from:(stripe.com OR apple.com OR google.com OR github.com) (Anthropic OR Claude OR OpenAI OR ChatGPT OR Cursor OR Anysphere OR Copilot))) (receipt OR invoice OR payment OR subscription OR renewal OR refund)";
-const senderRegex = String.raw`(?i)@([a-z0-9-]+\.)*(anthropic\.com|openai\.com|cursor\.com|github\.com)>?$`;
-const outlookSenders = "anthropic.com; openai.com; cursor.com; github.com";
+  "(from:(anthropic.com OR claude.ai OR openai.com OR chatgpt.com OR cursor.com) OR (from:(stripe.com OR apple.com OR google.com) (Anthropic OR Claude OR OpenAI OR ChatGPT OR Cursor OR Anysphere))) (receipt OR invoice OR payment OR subscription OR renewal OR refund)";
+const senderRegex = String.raw`(?i)@([a-z0-9-]+\.)*(anthropic\.com|claude\.ai|openai\.com|chatgpt\.com|cursor\.com)>?$`;
+const outlookSenders = "anthropic.com; claude.ai; openai.com; chatgpt.com; cursor.com";
 const gmailSettings = "https://mail.google.com/mail/u/0/#settings/fwdandpop";
 
 const xmlEscape = (s: string) => s.replace(/&/g, "&amp;").replace(/'/g, "&apos;").replace(/</g, "&lt;");
@@ -84,6 +84,39 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
   );
 }
 
+// ReceiptAddress is the workspace's receipts address at the top of AI
+// accounts, with a copy button. The server makes it on first look; when
+// that didn't happen, an admin can generate it here.
+export function ReceiptAddress({ ws, canSetUp, setUp }: { ws: string; canSetUp: boolean; setUp: () => void }) {
+  const caps = useCapabilities();
+  const [address, setAddress] = useState<InboundAddress | null | undefined>(undefined);
+  const on = !!caps?.includes("inbound_email");
+  useEffect(() => {
+    if (!on) return;
+    api.GET("/v1/workspaces/{ws}/inbound-addresses", { params: { path: { ws } } }).then(({ data }) => {
+      // Not offered here (AI accounts off for receipts): show nothing.
+      setAddress(data?.purposes.includes("ai_receipts") ? data.data.find((x) => x.purpose === "ai_receipts") ?? null : undefined);
+    });
+  }, [ws, on]);
+  if (!on || address === undefined || (address === null && !canSetUp)) return null;
+  async function generate() {
+    const { data, error } = await api.POST("/v1/workspaces/{ws}/inbound-addresses", { params: { path: { ws } }, body: { purpose: "ai_receipts" } });
+    if (error) return toast(errorMessage(error), "error");
+    setAddress(data ?? null);
+    toast("Receipt email address ready.");
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2.5 text-[13px]">
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] text-muted-foreground">Forward AI receipts to</div>
+        {address ? <div className="font-mono text-[14px] break-all">{address.email}</div> : <div className="text-muted-foreground">No receipt email address yet.</div>}
+      </div>
+      {address ? <CopyButton text={address.email} /> : <Button onClick={generate}>Generate email address</Button>}
+      <Button variant="ghost" onClick={setUp}>Set up forwarding</Button>
+    </div>
+  );
+}
+
 export function ReceiptsView({ ws, accounts, canSetUp, seeSpend, manageAll, open, reload }: Props) {
   const caps = useCapabilities();
   const [address, setAddress] = useState<InboundAddress | null | undefined>(undefined);
@@ -129,11 +162,11 @@ export function ReceiptsView({ ws, accounts, canSetUp, seeSpend, manageAll, open
   return (
     <div className="space-y-6 text-[13px]">
       <ErrorText>{error}</ErrorText>
-      <Card title="Forward AI receipts" description="Send the receipts from Anthropic, OpenAI, Cursor and GitHub here. Outflare reads them and keeps each account's price, seats and renewal date up to date.">
+      <Card title="Forward AI receipts" description="Send the receipts from Anthropic (Claude), OpenAI (ChatGPT) and Cursor here. Outflare reads them and keeps each account's price, seats and renewal date up to date.">
         {address === undefined ? (
           <Loading />
         ) : address === null ? (
-          canSetUp ? <Button onClick={() => makeAddress(false)}>Create the forwarding address</Button> : <p className="text-muted-foreground">An admin needs to create the workspace's forwarding address first.</p>
+          canSetUp ? <Button onClick={() => makeAddress(false)}>Generate email address</Button> : <p className="text-muted-foreground">An admin needs to create the workspace's forwarding address first.</p>
         ) : (
           <div className="flex flex-wrap items-center gap-3 rounded-md bg-muted/50 px-3 py-2.5">
             <div className="min-w-0 flex-1">
@@ -210,7 +243,7 @@ export function ReceiptsView({ ws, accounts, canSetUp, seeSpend, manageAll, open
                   <li>Action: <b>Modify message → Also deliver to → Add more recipients</b>, and add <span className="font-mono">{address.email}</span>. Save.</li>
                 </ol>
                 <Code label="Sender regex" text={senderRegex} wrap />
-                <p className="text-muted-foreground">This catches mail the AI companies send themselves. Receipts sent through Stripe or app stores still need the Gmail filter.</p>
+                <p className="text-muted-foreground">This catches mail the AI companies send from their own domains. Receipts sent from a stripe.com address (Anthropic and Cursor often bill through Stripe) or by Apple or Google Play don't match it, so add the Gmail filter too.</p>
               </Step>
             </ol>
           )}
@@ -223,6 +256,7 @@ export function ReceiptsView({ ws, accounts, canSetUp, seeSpend, manageAll, open
                   <li>Condition: <b>From</b>, with each of these senders. Action: <b>Forward to</b> <span className="font-mono">{address.email}</span>. Save.</li>
                 </ol>
                 <Code label="Senders" text={outlookSenders} />
+                <p className="text-muted-foreground">Receipts sent from a stripe.com address don't match these senders. Forward those by hand, or add a rule for stripe.com with the AI company's name in the message.</p>
                 <p className="text-muted-foreground">Microsoft 365 often blocks forwarding outside your company. If nothing arrives, ask your admin to allow it for this address.</p>
               </Step>
             </ol>

@@ -6,6 +6,62 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.89.0] - 2026-11-09
+
+### Added
+
+- A team directory in Settings, Team: everyone at the company with their department, team and manager, plus the work accounts the company owns and who holds each. Company Telegram accounts sign in to Outflare as a linked device by QR code, with checks every six hours.
+- Company Telegram chats sync into the CRM, read only. Each is matched to a customer (your own AI suggests, the account's holder confirms in CRM, Telegram), customers waiting four hours alert the holder, and your AI can summarise a chat or an account's chats when it changes hands.
+- Website visits and redirect link clicks now keep the visitor's region, city and network (internet provider or mobile carrier), their device's maker and model, their system and browser versions, and their language. Break visits down by any of them in Insights, or read them in Query.
+
+### Fixed
+
+- The changes from v0.88.0, which didn't pass the release checks, are now published.
+- A Google Workspace rule that copies AI receipts from everyone's inbox now works for the whole company. Receipts sent to any colleague at your company's domain count, not only those sent to Outflare members.
+
+### Upgrading
+
+- runs migration 0504. Each server that answers visitors downloads DB-IP's free City Lite and ASN Lite files (about 65 MB, monthly, no key) from download.db-ip.com into OUTFLARE_GEOIP_DIR; set OUTFLARE_GEOIP_DOWNLOAD=off on a server without internet access and copy the files in yourself.
+
+## [0.88.0] - 2026-11-09
+
+### Added
+
+- Outflare for Mac, in testing: the Outflare you use in the browser, in a window of its own, in the dock, signed in once from your browser, with system notifications and a badge. Test builds are unsigned for now; the download page follows.
+- Check any domain's SPF, DKIM, DMARC, MX and domain blocklist standing without an account, with the exact DNS record to add for each problem. It powers the free checkers on outflare.ai and is open to anyone at `GET /v1/tools/domain-check`.
+- Each partner now has their own page, with their numbers, referred customers, conversions, rewards, payouts and history in one place. Searching and sorting the partners list now covers every partner in the program, not only the newest 100, so you can find an older or imported partner by code, email, name or id.
+- Each partner reward now has a proof trail from the click or visit to the sale, rule, approval and payout, and you can download it for a payout or a partner. The Rewards and Conversions lists show and search the partner, customer and sale, and bulk approve leaves out rewards your old platform still pays.
+- Partnership pipelines: Presence's Partnerships tab has a board each for SEO links, sponsorships, integrations, affiliates and comparison sites. Add a partner by website; when one goes live it becomes a tracked placement, and affiliates move on their own when they join your partner program and make their first sale.
+
+### Changed
+
+- The Agent page's top row is shorter: Chat, Waiting for you, History and Settings. History holds every agent's changes and Outflare agent runs; Settings holds what agents may do. Each picks its view from a row of buttons.
+- AI accounts now shows the workspace's receipt email address at the top, with a copy button. Outflare makes it by itself the first time anyone opens the page, and admins can press Generate email address if that fails.
+- The AI receipts forwarding steps now cover receipts from claude.ai and chatgpt.com, drop GitHub, and say that receipts sent from a stripe.com address need the Gmail filter.
+- Paid ads now belong to one brand each, under `/v1/brands/{brand}/`, and the old workspace routes answer 410 with the route to call instead. The Ads page asks you to pick a brand; connecting ad accounts and assigning them to brands stay on the workspace.
+- Approvals, agent runs and API logs each have brand routes under `/v1/brands/{brand}/` that show only that brand's items. The workspace routes still work for now; next they will keep only the team's own items, such as invites and connections.
+- Knowledge, memories, help centres and the support inbox (conversations, the assistant, SLAs, chat widgets and handoff topics) now belong to one brand each, under `/v1/brands/{brand}/`. The old workspace routes answer 410 and name the route to call instead. Their pages ask you to pick a brand. Support mailboxes and the workspace's assistant and SLA defaults stay on the workspace.
+- Ideal customer profiles, senders, inbox tags and saved inbox views now belong to one brand each, under `/v1/brands/{brand}/`, and the old workspace routes answer 410. A profile shared by every brand is now copied into each brand, and two brands can use the same profile name.
+- Outflare for Mac updates itself: when a newer version is ready, an Update button appears at the bottom of the sidebar. One click installs it and reopens the app; nothing else to do.
+- Presence's Found list marks sites whose links to you look like spam (Possible spam, Likely spam), using your SEO tool's own spam judgement such as Ahrefs' and Outflare's link checks, with the reasons on hover. Nothing is hidden until you choose Spam site.
+- A partner portal's link can now be readable, such as `/p/northpeak/`, instead of the program's id. Program settings → Portal suggests an address from the program's name; links with the id keep working. The Portal tab can also put the portal on your own domain, such as partners.example.com, with one DNS record.
+- Partner program settings are now a full page instead of a side panel, in tabs (General, Payouts, Tracking, Fraud, Portal, Import), with plain on/off switches and one Save button that appears when something changed. The Partners page also shows whether the portal is open.
+- Program settings → General has a "Review each application" switch, so a program can approve each new partner by hand or accept everyone who applies. Every new program, referral programs included, reviews each application by default.
+- New SEO partnership prospects get the site's domain rating filled in from what your SEO tool already read (backlinks and competitor scans), so you can see who's worth pitching first.
+- Presence opens on Found, and the Overview tab is gone (Reports has the same numbers). Found shows every page as its own row with a link that opens it in a new tab, says what the page shows in its own column, and asks "Yes, track it" or "No, hide it" with a line explaining what each does.
+- Presence's Found list can mark a site as spam (its pages leave the list, and pages found on it later stay hidden) or check a page again in a week, for a site that's offline. Follow-ups, formerly the Work queue tab, are now a view on the Found page.
+- Reviews: SourceForge is now a review site. Outflare finds each brand's SourceForge listing for you to confirm, alongside Trustpilot, G2 and Capterra, then reads its rating and reviews every day.
+- Approvals, agent runs and API logs now show only the picked brand's on the Agents and Logs pages. The team's own, about no brand (such as invites, members and connections), are on a new Settings page, Team activity, and on the workspace routes, which no longer show a brand's.
+- Test events you send to a webhook are marked "Test" in its delivery list, with the receiver's status code, so you can show that the endpoint works. A failed test no longer counts against the endpoint. It doesn't start a failure streak, raise the error rate or turn the endpoint off on a 410.
+
+### Fixed
+
+- If Gmail's forwarding confirmation reaches your receipts address before you link the Gmail address in Outflare, linking it now shows the Confirm in Gmail button. You no longer have to ask Gmail to send it again.
+- A web search an agent asks for now belongs to the brand it searches for: `POST /v1/brands/{brand}/search-results` (MCP `search_web` takes `brand`) replaces the workspace route, so the approval waits under that brand alone on the Agents page, and its cost and event carry the brand. A change that names no brand says "Every brand" on its card when a brand is picked.
+- Outcomes counts only outreach costs. Ad spend, searches, rank checks, SEO reports and site crawls stay out of cost per meeting. Searches and SEO reports now count toward the brand they ran for. The list of charges shows only the brand you're looking at. Costs that belong to no single sequence are no longer described as shared out when no emails went out.
+- After an update, an open tab or a page your browser kept from before no longer shows a blank screen. The app and the partner portal reload once and open the new version.
+- Reviews: SourceForge reviews are now kept with their date, title and text, not only the listing's score and count.
+
 ## [0.87.0] - 2026-11-07
 
 ### Added

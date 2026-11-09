@@ -2,8 +2,10 @@
 // description in words plus filters in the same vocabulary as lead
 // searches. Lead list fit scores and the lead finder read it.
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { Brand, CustomerProfile, ICP } from "@outflare/sdk";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useBrand } from "@/lib/brand";
+import { PickBrand } from "@/components/pick-brand";
+import type { CustomerProfile, ICP } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { Badge, Button, Empty, ErrorText, field, Input, Loading, Menu, PageHeader, toast } from "../ui";
 import { ago, plural } from "../format";
@@ -15,28 +17,30 @@ type Props = { ws: string; canManage: boolean };
 
 const filterCount = (f: ICP) => Object.values(f).reduce((n, v) => n + v.length, 0);
 
-export function IdealCustomers({ ws, canManage }: Props) {
+// A profile is one brand's: the page shows the picked brand's.
+export function IdealCustomers(props: Props) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Ideal customer profiles" brands={active.length} />;
+  return <IdealCustomersPage key={brand.id} {...props} brandId={brand.id} />;
+}
+
+function IdealCustomersPage({ canManage, brandId }: Props & { brandId: string }) {
   const [profiles, setProfiles] = useState<CustomerProfile[] | null>(null);
-  const [brands, setBrands] = useState<Brand[]>([]);
   const [status, setStatus] = useState<"active" | "archived">("active");
   const [editing, setEditing] = useState<CustomerProfile | "new" | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws }, query: { status } } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/ideal-customer-profiles", { params: { path: { brand: brandId }, query: { status } } });
     if (error) setError(errorMessage(error));
     setProfiles(data?.data ?? []);
-  }, [ws, status]);
+  }, [brandId, status]);
   useEffect(() => {
     load();
   }, [load]);
-  useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/brands", { params: { path: { ws } } }).then(({ data }) => setBrands(data?.data ?? []));
-  }, [ws]);
-  const brandName = useMemo(() => Object.fromEntries(brands.map((b) => [b.id, b.name])) as Record<string, string>, [brands]);
 
   async function setArchived(p: CustomerProfile, archived: boolean) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/ideal-customer-profiles/{id}", { params: { path: { ws, id: p.id } }, body: { status: archived ? "archived" : "active" } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/ideal-customer-profiles/{id}", { params: { path: { brand: brandId, id: p.id } }, body: { status: archived ? "archived" : "active" } });
     if (error) return toast(errorMessage(error), "error");
     toast(archived ? `Archived ${p.name}. Lists that use it keep scoring against it.` : `Restored ${p.name}.`);
     load();
@@ -53,7 +57,6 @@ export function IdealCustomers({ ws, canManage }: Props) {
       ),
     },
     { id: "filters", header: "Filters", accessorFn: (p) => filterCount(p.filters) },
-    { id: "brand", header: "Brand", accessorFn: (p) => (p.brand_id ? brandName[p.brand_id] ?? "" : ""), cell: ({ getValue }) => (getValue() as string) || <span className="text-muted-foreground">All</span> },
     { id: "updated", header: "Changed", accessorFn: (p) => p.updated_at, cell: ({ row: { original: p } }) => ago(p.updated_at) },
   ];
 
@@ -102,18 +105,17 @@ export function IdealCustomers({ ws, canManage }: Props) {
         />
       )}
       {editing && (
-        <ProfileDialog ws={ws} profile={editing === "new" ? null : editing} brands={brands} readOnly={!canManage}
+        <ProfileDialog brandId={brandId} profile={editing === "new" ? null : editing} readOnly={!canManage}
           onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />
       )}
     </div>
   );
 }
 
-function ProfileDialog({ ws, profile, brands, readOnly, onClose, onSaved }: { ws: string; profile: CustomerProfile | null; brands: Brand[]; readOnly: boolean; onClose: () => void; onSaved: () => void }) {
+function ProfileDialog({ brandId, profile, readOnly, onClose, onSaved }: { brandId: string; profile: CustomerProfile | null; readOnly: boolean; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(profile?.name ?? "");
   const [description, setDescription] = useState(profile?.description ?? "");
   const [filters, setFilters] = useState<ICP>({ ...emptyICP(), ...profile?.filters });
-  const [brand, setBrand] = useState(profile?.brand_id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -121,10 +123,10 @@ function ProfileDialog({ ws, profile, brands, readOnly, onClose, onSaved }: { ws
     e.preventDefault();
     setBusy(true);
     setError("");
-    const body = { name: name.trim(), description: description.trim(), filters, brand_id: brand || null };
+    const body = { name: name.trim(), description: description.trim(), filters };
     const { error } = profile
-      ? await api.PATCH("/v1/workspaces/{ws}/ideal-customer-profiles/{id}", { params: { path: { ws, id: profile.id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/ideal-customer-profiles/{id}", { params: { path: { brand: brandId, id: profile.id } }, body })
+      : await api.POST("/v1/brands/{brand}/ideal-customer-profiles", { params: { path: { brand: brandId } }, body });
     setBusy(false);
     if (error) return setError(errorMessage(error));
     toast(profile ? `Saved ${body.name}.` : `Made ${body.name}.`);
@@ -152,15 +154,6 @@ function ProfileDialog({ ws, profile, brands, readOnly, onClose, onSaved }: { ws
           {icpFields.map((f) => (
             <TagInput key={f.key} label={f.label} placeholder={f.placeholder} values={filters[f.key] ?? []} readOnly={readOnly} onChange={(v) => setFilters((x) => ({ ...x, [f.key]: v }))} />
           ))}
-          {brands.length > 0 && (
-            <label className="block space-y-1 text-[13px]">
-              <span className="font-medium">Brand</span>
-              <select className={`${field} w-full`} value={brand} disabled={readOnly} onChange={(e) => setBrand(e.target.value)}>
-                <option value="">All brands</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </label>
-          )}
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>

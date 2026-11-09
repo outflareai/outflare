@@ -5,6 +5,7 @@ import { ask, Badge, Button, confirmAction, Empty, ErrorText, field, Input, Load
 import { ago, plural, stamp } from "../format";
 import { track } from "@/lib/analytics";
 import { useBrand } from "@/lib/brand";
+import { actionsAPI } from "@/lib/scoped";
 import { BrandBadge } from "@/components/brand-badge";
 import { DataTable } from "@/components/data-table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -55,12 +56,12 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
 
   const agents = tokens?.filter((t) => t.action_gate) ?? null;
   // The tab says how many changes wait before Waiting for you opens.
-  const brandHandle = useBrand(ws).brand?.handle;
+  const brandId = useBrand(ws).brand?.id;
   const hasAgent = !!brandAgent;
   useEffect(() => {
     if (!hasAgent || view === "waiting") return;
-    api.GET("/v1/workspaces/{ws}/actions", { params: { path: { ws }, query: { status: "held", limit: 200, ...(brandHandle ? { brand: brandHandle } : {}) } } }).then(({ data }) => setWaiting(data?.data.length ?? 0));
-  }, [ws, hasAgent, view, brandHandle]);
+    actionsAPI(ws, brandId).list({ status: "held", limit: 200 }).then(({ data }) => setWaiting(data?.data.length ?? 0));
+  }, [ws, hasAgent, view, brandId]);
   const [extra, setExtra] = useState<AgentPageTab[]>([]);
   const pick = useCallback((v: View) => { setView(v); track("ui.agents_view_opened", { view: v }); }, []);
   if (open) return <AgentRunDetail key={open} ws={ws} id={open} canRun={canRun} canApprove={canApprove} onBack={() => { setOpen(undefined); setView("runs"); }} />;
@@ -69,6 +70,15 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
   // tab in one row at the top.
   if (brandAgent) {
     const agentView = view === "agent" || extra.some((t) => t.value === view);
+    // History and Settings each gather several views; a row of pills under
+    // the tabs picks one.
+    const groups: Record<"history" | "settings", { value: string; label: string }[]> = {
+      history: [...extra.filter((t) => t.group === "history"), { value: "all", label: "Every agent's changes" }, { value: "runs", label: "Outflare agent runs" }],
+      settings: [...extra.filter((t) => t.group === "settings"), { value: "grants", label: "What agents may do" }],
+    };
+    const groupOf = (v: string) => (groups.history.some((t) => t.value === v) ? "history" : groups.settings.some((t) => t.value === v) ? "settings" : v);
+    const top = groupOf(view);
+    const pickTop = (v: string) => pick(v === "history" || v === "settings" ? groups[v][0].value : v);
     return (
       <div className="space-y-4">
         <PageHeader
@@ -76,16 +86,25 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
           description="Ask for anything. It works on your tasks and asks before changes you haven't allowed."
           action={canTokens ? <Button variant="ghost" onClick={() => go("tokens")}>API tokens</Button> : undefined}
         />
-        <Tabs value={view} onValueChange={pick}>
+        <Tabs value={top} onValueChange={pickTop}>
           <TabsList variant="line" className="max-w-full justify-start overflow-x-auto">
             <TabsTrigger value="agent">Chat</TabsTrigger>
-            {extra.map((t) => <TabsTrigger key={t.value} value={t.value}>{t.label}{t.count ? ` (${t.count})` : ""}</TabsTrigger>)}
+            {extra.filter((t) => !t.group).map((t) => <TabsTrigger key={t.value} value={t.value}>{t.label}{t.count ? ` (${t.count})` : ""}</TabsTrigger>)}
             <TabsTrigger value="waiting">Waiting for you{waiting ? ` (${waiting})` : ""}</TabsTrigger>
-            <TabsTrigger value="all">Everything changed</TabsTrigger>
-            <TabsTrigger value="grants">What agents may do</TabsTrigger>
-            <TabsTrigger value="runs">Runs</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
         </Tabs>
+        {(top === "history" || top === "settings") && (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={top === "history" ? "History" : "Settings"}>
+            {groups[top].map((t) => (
+              <button key={t.value} type="button" aria-pressed={view === t.value} onClick={() => pick(t.value)}
+                className={`rounded-full border px-3 py-1 text-[13px] ${view === t.value ? "border-foreground bg-foreground text-background" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div hidden={!agentView}>
           <AgentPageTabsContext.Provider value={{ view: agentView ? view : "agent", go: pick, setTabs: setExtra }}>{brandAgent}</AgentPageTabsContext.Provider>
         </div>
@@ -127,15 +146,18 @@ export function Agents({ ws, canApprove, canManage, canTokens, canRun, open, set
 
 // ---- Waiting for you ----
 
-function Waiting({ ws, canApprove, canManage, onCount }: { ws: string; canApprove: boolean; canManage: boolean; onCount: (n: number) => void }) {
+// team shows the team's changes, about no brand (workspace Settings);
+// otherwise the picked brand's.
+export function Waiting({ ws, canApprove, canManage, onCount, team }: { ws: string; canApprove: boolean; canManage: boolean; onCount: (n: number) => void; team?: boolean }) {
   const [list, setList] = useState<Action[] | null>(null);
   const [error, setError] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const brand = useBrand(ws).brand?.handle;
+  const pickedBrand = useBrand(ws).brand?.id;
+  const brand = team ? undefined : pickedBrand;
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/actions", { params: { path: { ws }, query: { status: "held", limit: 200, ...(brand ? { brand } : {}) } } });
+    const { data, error } = await actionsAPI(ws, brand).list({ status: "held", limit: 200 });
     if (error) return setError(errorMessage(error));
     setError("");
     setList(data?.data ?? []);
@@ -158,7 +180,7 @@ function Waiting({ ws, canApprove, canManage, onCount }: { ws: string; canApprov
       note = r.value;
     }
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/actions/decide", { params: { path: { ws } }, body: approve ? { approve: ids, note } : { reject: ids, note } });
+    const { data, error } = await actionsAPI(ws, brand).decide(approve ? { approve: ids, note } : { reject: ids, note });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     const failed = data?.data.filter((d) => d.error).length ?? 0;
@@ -237,10 +259,8 @@ function HeldAction({ ws, a, canApprove, canManage, picked, onPick, onDone }: { 
       note = r.value;
     }
     setBusy(true);
-    const p = { params: { path: { ws, id: a.id } } };
-    const { data, error } = approve
-      ? await api.POST("/v1/workspaces/{ws}/actions/{id}/approve", { ...p, body: { note, ...(remember ? { remember } : {}) } })
-      : await api.POST("/v1/workspaces/{ws}/actions/{id}/reject", { ...p, body: { note } });
+    const acts = actionsAPI(ws, a.brand_id ?? undefined);
+    const { data, error } = approve ? await acts.approve(a.id, { note, ...(remember ? { remember } : {}) }) : await acts.reject(a.id, { note });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     track("ui.action_decided", { decision: approve ? "approve" : "reject", how: remember ? "remember" : "single", count: 1 });
@@ -323,19 +343,18 @@ function HeldAction({ ws, a, canApprove, canManage, picked, onPick, onDone }: { 
 
 // ---- Everything ----
 
-function Everything({ ws, tokens }: { ws: string; tokens: APIToken[] | null }) {
+export function Everything({ ws, tokens, team }: { ws: string; tokens: APIToken[] | null; team?: boolean }) {
   const [list, setList] = useState<Action[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [token, setToken] = useState("");
   const [open, setOpen] = useState<Action | null>(null);
   const [error, setError] = useState("");
-  const brand = useBrand(ws).brand?.handle;
+  const picked = useBrand(ws).brand?.id;
+  const brand = team ? undefined : picked;
 
   const load = useCallback(async (after?: string) => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/actions", {
-      params: { path: { ws }, query: { limit: 50, ...(status ? { status } : {}), ...(token ? { token_id: token } : {}), ...(after ? { cursor: after } : {}), ...(brand ? { brand } : {}) } },
-    });
+    const { data, error } = await actionsAPI(ws, brand).list({ limit: 50, ...(status ? { status } : {}), ...(token ? { token_id: token } : {}), ...(after ? { cursor: after } : {}) });
     if (error) return setError(errorMessage(error));
     setError("");
     setList((l) => (after && l ? [...l, ...(data?.data ?? [])] : data?.data ?? []));

@@ -37,14 +37,19 @@ import (
 
 func (s *Server) routesActions(mux *http.ServeMux) {
 	read, approve, manage := auth.ScopeActionsRead, auth.ScopeActionsApprove, auth.ScopeActionsManage
-	base := "/v1/workspaces/{ws}/actions"
 	// Brand-limited callers are let in, kept to their brands: an agent
 	// kept to one brand reads its own held changes and their decisions.
-	mux.HandleFunc("GET "+base, s.inBrand(read, s.listActions))
-	mux.HandleFunc("POST "+base+"/decide", s.inBrand(approve, s.decideActions))
-	mux.HandleFunc("GET "+base+"/{id}", s.inBrand(read, s.getAction))
-	mux.HandleFunc("POST "+base+"/{id}/approve", s.inBrand(approve, s.approveAction))
-	mux.HandleFunc("POST "+base+"/{id}/reject", s.inBrand(approve, s.rejectAction))
+	// A brand's changes are on its own route.
+	for _, b := range []struct {
+		base string
+		on   func(string, http.HandlerFunc) http.HandlerFunc
+	}{{"/v1/workspaces/{ws}/actions", s.inBrand}, {"/v1/brands/{brand}/actions", s.onBrand}} {
+		mux.HandleFunc("GET "+b.base, b.on(read, s.listActions))
+		mux.HandleFunc("POST "+b.base+"/decide", b.on(approve, s.decideActions))
+		mux.HandleFunc("GET "+b.base+"/{id}", b.on(read, s.getAction))
+		mux.HandleFunc("POST "+b.base+"/{id}/approve", b.on(approve, s.approveAction))
+		mux.HandleFunc("POST "+b.base+"/{id}/reject", b.on(approve, s.rejectAction))
+	}
 	grants := "/v1/workspaces/{ws}/action-grants"
 	mux.HandleFunc("GET "+grants, s.inBrand(read, s.listActionGrants))
 	mux.HandleFunc("POST "+grants, s.inWorkspace(manage, s.createActionGrant))
@@ -87,8 +92,17 @@ const (
 // Those calls are not gated: deciding is a person's (or an approver
 // token's), and setting grants is a signed-in person's alone.
 func isActionRoute(r *http.Request) bool {
-	rest := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"+r.PathValue("ws"))
+	rest := routeRest(r)
 	return strings.HasPrefix(rest, "/actions") || strings.HasPrefix(rest, "/action-grants")
+}
+
+// routeRest is a workspace or brand route's path after its
+// /v1/workspaces/{ws} or /v1/brands/{brand} prefix.
+func routeRest(r *http.Request) string {
+	if b := r.PathValue("brand"); b != "" && strings.HasPrefix(r.URL.Path, "/v1/brands/"+b) {
+		return strings.TrimPrefix(r.URL.Path, "/v1/brands/"+b)
+	}
+	return strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"+r.PathValue("ws"))
 }
 
 // actionPath is a request's path as grants match it: the part after
@@ -991,6 +1005,26 @@ func seesAction(a *access, v actionView) bool {
 	return a.sees(v.BrandID)
 }
 
+// onRouteAction reports whether an action belongs on the route it was
+// asked for: a brand's changes on the brand's own routes, and changes about
+// no brand (the team's own, such as invites and connections) on the
+// workspace's.
+func onRouteAction(a *access, v actionView) bool {
+	if a.Brand == "" && v.BrandID != nil {
+		return false
+	}
+	return seesAction(a, v)
+}
+
+// findRouteAction is findGateAction for the actions routes.
+func (s *Server) findRouteAction(ctx context.Context, a *access, id string) (actionView, error) {
+	v, err := s.findGateAction(ctx, a, id)
+	if err == nil && !onRouteAction(a, v) {
+		return actionView{}, errNotFound
+	}
+	return v, err
+}
+
 func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
@@ -1004,6 +1038,11 @@ func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.seenBrands() != nil {
 		where = append(where, "x.brand_id IS NOT NULL")
+	}
+	// The workspace's own list holds only the team's changes, about no
+	// brand; each brand's are on its own route.
+	if a.Brand == "" {
+		where = append(where, "x.brand_id IS NULL")
 	}
 	if st := q.Get("status"); st != "" {
 		args = append(args, strings.Split(st, ","))
@@ -1048,7 +1087,7 @@ func (s *Server) listActions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getAction(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	v, err := s.findGateAction(r.Context(), a, r.PathValue("id"))
+	v, err := s.findRouteAction(r.Context(), a, r.PathValue("id"))
 	if errors.Is(err, errNotFound) {
 		writeError(w, r, http.StatusNotFound, "not_found", "action not found")
 		return
@@ -1109,7 +1148,7 @@ func (s *Server) decide(ctx context.Context, a *access, id string, approve bool,
 			}
 			return err
 		}
-		if !seesAction(a, act) {
+		if !onRouteAction(a, act) {
 			return errNotFound
 		}
 		if act.Status == actionExpired {
@@ -1245,7 +1284,7 @@ func (s *Server) approveAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "remember.daily_limit is 1 to 100,000")
 			return
 		}
-		act, err := s.findGateAction(ctx, a, r.PathValue("id"))
+		act, err := s.findRouteAction(ctx, a, r.PathValue("id"))
 		if s.actionError(w, r, err) {
 			return
 		}
@@ -1390,10 +1429,10 @@ func (s *Server) decideActions(w http.ResponseWriter, r *http.Request) {
 // ---- paid ads rules ----
 
 var (
-	adCampaignChange = regexp.MustCompile(`^/v1/workspaces/[^/]+/ads/campaigns/([0-9a-fA-F-]{36})(/resume)?/?$`)
+	adCampaignChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/([0-9a-fA-F-]{36})(/resume)?/?$`)
 	// adTargetingChange is a change to a campaign's bidding, audiences or
 	// countries: an agent's always waits for a person.
-	adTargetingChange = regexp.MustCompile(`^/v1/workspaces/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries)$`)
+	adTargetingChange = regexp.MustCompile(`^/v1/(?:workspaces|brands)/[^/]+/ads/campaigns/[0-9a-fA-F-]{36}/(bidding|audiences|countries)$`)
 	// adBudgetRaiseMax is the largest raise of a campaign's daily budget
 	// an agent makes on its own: a fifth. More always needs a person.
 	adBudgetRaiseMax = 0.2

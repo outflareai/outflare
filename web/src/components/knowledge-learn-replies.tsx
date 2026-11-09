@@ -4,19 +4,19 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, toast } from "../ui";
 import { Icon } from "../icons";
 import { ago } from "../format";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 
 // Learning from past replies, in Knowledge → Review: the answers your team
 // already gave in support become suggestions to approve.
 export function LearnFromReplies({ ws, canManage, onDone }: { ws: string; canManage: boolean; onDone: () => void }) {
-  const { brand, query } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [list, setList] = useState<KnowledgeReplyImport[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = () =>
-    api.GET("/v1/workspaces/{ws}/knowledge/reply-imports", { params: { path: { ws }, query } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/knowledge/reply-imports", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setList(data.data);
     });
@@ -38,8 +38,8 @@ export function LearnFromReplies({ ws, canManage, onDone }: { ws: string; canMan
   async function start() {
     setBusy(true);
     setError("");
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/knowledge/reply-imports", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/knowledge/reply-imports", {
+      params: { path: { brand: pickedBrandId() } },
       body: { brand: brand?.handle ?? null, days: 90 },
     });
     setBusy(false);

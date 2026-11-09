@@ -163,7 +163,7 @@ func competitorProfileURL(w http.ResponseWriter, r *http.Request, raw string) (s
 	l, ok := sociallinks.Clean(raw, nil)
 	if !ok || !sociallinks.Followable(l) {
 		writeError(w, r, http.StatusBadRequest, "invalid_request",
-			"url is a social profile (X, LinkedIn, YouTube, Instagram, TikTok, Facebook and others) or a review page (Trustpilot, G2, Capterra, Google) Outflare can read")
+			"url is a social profile (X, LinkedIn, YouTube, Instagram, TikTok, Facebook and others) or a review page (Trustpilot, G2, Capterra, SourceForge, Google) Outflare can read")
 		return sociallinks.Link{}, false
 	}
 	return l, true

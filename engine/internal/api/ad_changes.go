@@ -30,9 +30,13 @@ import (
 
 func (s *Server) routesAdChanges(mux *http.ServeMux) {
 	manage := auth.ScopeAdsManage
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/pause", s.onBrand(manage, s.pauseAdCampaign))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/pause", s.inBrand(manage, s.pauseAdCampaign))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/campaigns/{id}/resume", s.onBrand(manage, s.resumeAdCampaign))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/campaigns/{id}/resume", s.inBrand(manage, s.resumeAdCampaign))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/ads/campaigns/{id}", s.onBrand(manage, s.updateAdCampaign))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ads/campaigns/{id}", s.inBrand(manage, s.updateAdCampaign))
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/changes", s.onBrand(auth.ScopeAnalyticsRead, s.listAdChanges))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/changes", s.inBrand(auth.ScopeAnalyticsRead, s.listAdChanges))
 	// The kill switch: every active campaign of a brand, paused at once.
 	mux.HandleFunc("POST /v1/brands/{brand}/ads/pause-all", s.onBrand(manage, s.pauseAllAds))

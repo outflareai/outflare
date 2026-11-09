@@ -373,6 +373,12 @@ func TestPartnerToltImport(t *testing.T) {
 	for page := all; ; {
 		for _, p := range page["data"].([]any) {
 			for k, v := range p.(map[string]any)["stats"].(map[string]any) {
+				if held, ok := v.(map[string]any); ok {
+					for hk, hv := range held {
+						sum[k+"."+hk] += hv.(float64)
+					}
+					continue
+				}
 				sum[k] += v.(float64)
 			}
 		}
@@ -385,6 +391,11 @@ func TestPartnerToltImport(t *testing.T) {
 	for _, k := range []string{"customers", "sales_cents", "pending_cents", "paid_cents", "balance_cents"} {
 		if totals[k] != sum[k] {
 			t.Fatalf("totals %s = %v, partners add up to %v", k, totals[k], sum[k])
+		}
+	}
+	for k, v := range totals["held_at_source"].(map[string]any) {
+		if v != sum["held_at_source."+k] {
+			t.Fatalf("totals held_at_source.%s = %v, partners add up to %v", k, v, sum["held_at_source."+k])
 		}
 	}
 	if pt := totals["partners"].(map[string]any); pt["total"] != 4.0 || pt["active"] != 2.0 || pt["pending"] != 1.0 {

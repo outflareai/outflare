@@ -18,6 +18,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/connectors"
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/ranks"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -42,6 +43,8 @@ func (s *Server) registerPresenceJobs(q *jobs.Queue) {
 	q.Handle(jobCompetitorScan, s.coverageCompetitorScanJob)
 	q.Handle(jobOpportunitiesRefresh, s.coverageOpportunitiesRefreshJob)
 	q.Handle(jobCoverageVerify, s.coverageVerifyJob)
+	q.Handle(jobPartnershipSync, s.partnershipSyncJob)
+	q.Handle(jobPartnershipAffiliate, s.partnershipAffiliateJob)
 }
 
 func (s *Server) routesPresenceDiscovery(mux *http.ServeMux) {
@@ -245,6 +248,8 @@ func (s *Server) coverageSearchJob(ctx context.Context, j jobs.Job) error {
 		return fmt.Errorf("%w: invalid coverage search job", jobs.ErrPermanent)
 	}
 	ws := *j.WorkspaceID
+	// What its searches cost is the brand's.
+	ctx = outcomes.WithBrand(ctx, req.Brand)
 	a := &access{WorkspaceID: ws, Brand: req.Brand}
 	var query, country string
 	var depth int

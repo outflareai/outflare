@@ -34,7 +34,7 @@ Outflare never holds or sends money. It works out what each partner is owed, and
   - When the partner or program isn't active, the link still lands, untagged and uncounted.
 - **The campaign link** is the landing page with the tags already on it and no redirect. The website snippet reads the tags on arrival.
 
-The program's settings (Install) give the website snippet ready to paste as an HTML tag, a Next.js `<Script>` or a Google Tag Manager Custom HTML tag, with your site key filled in, and the calls your backend makes (API, Node.js or the postback URL).
+Program settings, Tracking, gives the website snippet ready to paste as an HTML tag, a Next.js `<Script>` or a Google Tag Manager Custom HTML tag, with your site key filled in, and the calls your backend makes (API, Node.js or the postback URL).
 
 Either way, the visit is stored with its `ref` ([website tracking](website-tracking.md)). A visit only *proposes* a partner. The partner is credited (*bound*) only when that person signs up or pays: from the events and transactions you already send, or a report to the partner conversions API.
 
@@ -56,7 +56,7 @@ A brand's programs read the data your product already sends Outflare, so they ne
 
 ## Other ways to record a sign-up
 
-- **No code: the website snippet and your billing.** Put the snippet on your site and connect Stripe (Settings → "Also take sales and refunds from connected Stripe"). Sales come from Stripe; there is no lead until the first payment.
+- **No code: the website snippet and your billing.** Put the snippet on your site and connect Stripe (Program settings → Tracking → Stripe). Sales come from Stripe; there is no lead until the first payment.
 - **A little code: `outflare.signup(email)`.** Call it in the browser once your sign-up form succeeds, on a page with the snippet. The lead shows at once (a `signup` conversion with source `browser`). Anyone can call it with any address, so it pays no sign-up reward unless the program turns on **Pay for sign-ups the browser reports** (`pay_browser_signups`, off by default). Money still comes only from your server or billing.
 - **The partner conversions API.** Report the sign-up with the conversion API or the postback URL (below), with the partner's `ref`, a `promo_code`, the visitor's `anonymous_id` (`outflare.anonymousId()` from the page), or just the customer's email or id when they visited with a ref.
 
@@ -108,9 +108,9 @@ Report every sale and let Outflare pick out the referred ones.
 
 ### Sales from your billing account
 
-Turn on `sales_source: "stripe"` on a program (Settings, "Also take sales and refunds from connected Stripe") and the payments and refunds Outflare reads from your connected Stripe account become partner sales too, beside what your backend reports. A referral already bound to the customer, or their own visits, decide the partner, as for the API. They count once: the payment's own customer event comes from the Stripe sync.
+Turn on `sales_source: "stripe"` on a program (Program settings → Tracking → Stripe) and the payments and refunds Outflare reads from your connected Stripe account become partner sales too, beside what your backend reports. A referral already bound to the customer, or their own visits, decide the partner, as for the API. They count once: the payment's own customer event comes from the Stripe sync.
 
-A brand's program takes the payments and refunds you already send Outflare for that brand: Settings, "Also take this brand's payments and refunds sent to Outflare" (`sales_source: "transactions"`, on by default for a new brand program). Every payment the [transactions API](transactions.md) or an Order Completed event counts (each once, however it arrives) becomes a partner sale for that brand's programs, and every refund (with `refund_of`) takes its reward back. Your backend then needs no partner call for sales at all ("From your events and transactions" above). Programs shared by every brand don't take them, so one brand's sales never credit another's partners.
+A brand's program takes the payments and refunds you already send Outflare for that brand: Program settings → Tracking → "This brand's payments in Outflare" (`sales_source: "transactions"`, on by default for a new brand program). Every payment the [transactions API](transactions.md) or an Order Completed event counts (each once, however it arrives) becomes a partner sale for that brand's programs, and every refund (with `refund_of`) takes its reward back. Your backend then needs no partner call for sales at all ("From your events and transactions" above). Programs shared by every brand don't take them, so one brand's sales never credit another's partners.
 
 Promo codes can be made in Stripe for you: add one with a `coupon` (the id of a coupon you already have) and Outflare makes the promotion code with your own key. The key needs Write access to Promotion codes. Without a coupon, make the code in your billing system yourself; Outflare only matches it.
 
@@ -164,16 +164,18 @@ Each conversion credited to the partner, and each refund of one, calls it once (
 
 ## Credit rule
 
+Program settings is a page of its own (Partners → Program settings), in tabs, each with its own address (`/partners/settings/<tab>`): **General** (links and credit, pause or archive), **Payouts** (rewards and payouts), **Tracking** (where sales come from, the postback URL, install on your website), **Fraud** (fraud protection), **Portal** (the partner portal; a dot shows whether it is open) and **Import** (from Tolt). Edits are kept while you switch tabs, a tab with unsaved changes is marked, and **Save changes** at the foot of the page saves them all at once; the portal has its own Save button. Archiving asks first.
+
 Each program keeps its own credit rule. It never follows the workspace's [attribution](attribution.md) settings, so changing how the CMO view credits channels never changes what partners earn.
 
 - **`credit_window_days`:** how long after a visit or click a conversion still credits the partner.
 - **`credit_model`:** `first` or `last` visit with a ref inside the window.
 - **`codes_win`:** a promo code beats a link when a conversion carries both.
 - **`block_self_referrals`:** a partner's own sign-ups and purchases earn them nothing (the conversion answers `reason: self_referral`). On by default; turn it off for programs where partners may buy through their own link.
-- **`url_params`** (Settings → Other link parameters): query parameters besides `ref` and `via` that carry a partner's code on your website, such as `aff` or `fpr` for links made on another platform. A page view with no `ref` or `via` is credited by the first of these it carries. Up to 5 lowercase names; not `ref`, `via`, `utm_…`, `of…` or an ad network's click id, which the website script reads already.
-- **`block_ad_clicks`** and **`block_social_clicks`** (Settings): a website visit with a partner's ref that came from a paid ad click (it carries an ad network's paid click id, such as `gclid` or `msclkid`) or from social media (`fbclid`, which Facebook adds to every outbound link, paid or not, or a social network such as Facebook, X, LinkedIn, YouTube or Reddit as referrer) doesn't credit the partner. Use them for programs whose partners may not bid on your brand or post links on social media. They judge website visits only: a conversion that names the partner itself (`ref`, a promo code) is credited as before. Both are off by default.
-- **`blocked_countries`** (Settings): two-letter codes, such as `BR` and `IN`, for countries whose customers don't earn partners anything, for programs that sell only in some countries or see fake sign-ups from others. A website visit from one of them doesn't credit the partner, and neither does a new customer whose conversion call says one in `country`. A visit's country comes from your own-domain proxy or the visitor's address in the engine's IP database ([IP geolocation by DB-IP](https://db-ip.com)), never from the browser's time zone, which is too easy to get wrong: a visit whose country isn't known that way isn't blocked. A customer already referred keeps their partner. Empty by default.
-- **`lead_expiry_days`** (Settings → Lead expiration): a referred customer who hasn't bought within this many days of being referred no longer credits the partner (`lead_expired`). Once they have bought, their later sales credit the partner as the flows say, whatever the lead expiration. Empty (`null`, the default) means leads never expire.
+- **`url_params`** (Program settings → General → Other link parameters): query parameters besides `ref` and `via` that carry a partner's code on your website, such as `aff` or `fpr` for links made on another platform. A page view with no `ref` or `via` is credited by the first of these it carries. Up to 5 lowercase names; not `ref`, `via`, `utm_…`, `of…` or an ad network's click id, which the website script reads already.
+- **`block_ad_clicks`** and **`block_social_clicks`** (Program settings → Fraud, "Ignore visits from paid ads" and "Ignore visits from social media"): a website visit with a partner's ref that came from a paid ad click (it carries an ad network's paid click id, such as `gclid` or `msclkid`) or from social media (`fbclid`, which Facebook adds to every outbound link, paid or not, or a social network such as Facebook, X, LinkedIn, YouTube or Reddit as referrer) doesn't credit the partner. Use them for programs whose partners may not bid on your brand or post links on social media. They judge website visits only: a conversion that names the partner itself (`ref`, a promo code) is credited as before. Both are off by default.
+- **`blocked_countries`** (Program settings → Fraud → Blocked countries): two-letter codes, such as `BR` and `IN`, for countries whose customers don't earn partners anything, for programs that sell only in some countries or see fake sign-ups from others. A website visit from one of them doesn't credit the partner, and neither does a new customer whose conversion call says one in `country`. A visit's country comes from your own-domain proxy or the visitor's address in the engine's IP database ([IP geolocation by DB-IP](https://db-ip.com)), never from the browser's time zone, which is too easy to get wrong: a visit whose country isn't known that way isn't blocked. A customer already referred keeps their partner. Empty by default.
+- **`lead_expiry_days`** (Program settings → General → Lead expiry): a referred customer who hasn't bought within this many days of being referred no longer credits the partner (`lead_expired`). Once they have bought, their later sales credit the partner as the flows say, whatever the lead expiration. Empty (`null`, the default) means leads never expire.
 
 Channel reporting credits a visit by `ofc` first, while commissions credit by `ref` first ([campaign links](campaign-links.md#partner-links-and-ref)).
 
@@ -245,7 +247,7 @@ To pay them in bulk, download the due payouts as CSV: Payouts → Download CSV, 
 
 Outflare has no PayPal, Wise or crypto integration and never stores bank details. A partner's `payout_method` is free text, such as "PayPal: ana@example.com", stored sealed like connector keys. Tax forms may come later.
 
-**Payout term.** A program's `payout_term_days` (Settings → Payout term) sets Net 0 to Net 90: a reward joins a payout only that many days after the end of the UTC month it was earned in, so with Net 30 everything approved for October is paid from 30 November. Rewards whose term hasn't passed stay in the balance for a later payout. Left empty (`null`, the default), a reward is paid once it is approved.
+**Payout term.** A program's `payout_term_days` (Program settings → Payouts → When partners are paid) sets Net 0 to Net 90: a reward joins a payout only that many days after the end of the UTC month it was earned in, so with Net 30 everything approved for October is paid from 30 November. Rewards whose term hasn't passed stay in the balance for a later payout. Left empty (`null`, the default), a reward is paid once it is approved.
 
 **Payout methods.** A program's `payout_methods` lists what partners choose from: `paypal`, `wise`, `bank_transfer`, `crypto` and `other`, and `payout_tokens` the crypto tokens (such as "USDC on Base"). On the portal, a partner picks one (`payout_type`, and `payout_token` for crypto) and adds their details in their own words. With no methods listed, any method is allowed. The method and token are on the partner (`PATCH .../partners/{id}` can set them too) and in the payout CSV's `payout_type` and `payout_token` columns.
 
@@ -259,19 +261,19 @@ A payout's note and reference can hold the partner's name or email, so they are 
 
 ## Partner portal
 
-Each program can have a hosted portal where partners apply, sign in and see how they're doing. It is off until you open it (Partners → program → Settings, or `PUT .../partner-programs/{id}/portal`).
+Each program can have a hosted portal where partners apply, sign in and see how they're doing. It is off until you open it (Partners → Program settings → Portal, or `PUT .../partner-programs/{id}/portal`).
 
 - **Where it lives.**
-  - At `<subdomain>.<partners domain>` when the server has one. The operator sets the partners domain with `OUTFLARE_PARTNERS_DOMAIN`, with wildcard DNS and a wildcard certificate.
-  - On your own domain: add it as a tracking domain tied to the program (`POST .../tracking-domains` with `partner_program`) and point its CNAME at the target shown. It is verified and given HTTPS like any tracking domain. A program has one own domain; delete it from tracking domains to use another.
-  - Otherwise at `/p/<program id>/` on the Outflare server.
+  - At `<subdomain>.<partners domain>` when the server has one. The operator sets the partners domain with `OUTFLARE_PARTNERS_DOMAIN`, with wildcard DNS and a wildcard certificate. It can be the server's own domain (portals at `<address>.example.com`): addresses such as `app`, `docs`, `login` and `grafana` are reserved, so a portal can never take or pass for one of the operator's own hosts.
+  - On your own domain: add it under Program settings → Portal → Your own domain, or as a tracking domain tied to the program (`POST .../tracking-domains` with `partner_program`), and point its CNAME at the target shown. It is verified and given HTTPS like any tracking domain. A program has one own domain; delete it from tracking domains to use another.
+  - Otherwise at `/p/<address>/` on the Outflare server, such as `/p/northpeak/`. The portal's address (Program settings → Portal → Portal address, `subdomain` in the API) is suggested from the program's name and is unique on the server. Without one, the portal is at `/p/<program id>/`, which keeps working after you set one.
 
   On its own host the portal serves only itself and partners' short links (`/r/<code>`): the rest of Outflare, sign-in included, isn't there.
 - **Signing in.** Partners sign in with a one-time link emailed to them through your own email provider, from the sender you set (`email_from`, on a verified sending domain). Without one, the portal can't sign anyone in.
   - The link works once, for 30 minutes. It carries its secret after `#`, so it never reaches server logs.
   - Following it confirms the address and starts a 30-day session on that portal only.
   - Asking for a link answers the same whether or not the address belongs to a partner.
-- **Applying.** With `signup_open`, anyone can apply with their name, email, your questions (`signup_fields`: text, long text, URL or a choice) and, when the program has terms, accepting them. They become a customer record and a partner, waiting for approval unless the program accepts everyone (`auto_accept`).
+- **Applying.** With `signup_open`, anyone can apply with their name, email, your questions (`signup_fields`: text, long text, URL or a choice) and, when the program has terms, accepting them. They become a customer record and a partner, waiting for approval unless the program accepts everyone (`auto_accept`, off by default; Program settings → General → Review each application).
 - **Leads from partners.** With the portal setting `lead_submissions` (Settings → Partner portal → Leads from partners), a partner can submit someone they referred who signed up without their link or code: an email and a note, on the portal's Referrals page.
   - **review:** each waits on Partners → Leads, where you approve or reject it (`GET .../partner-leads`, `POST .../partner-leads/{id}/approve`, `.../reject` with a `reason` the partner sees).
   - **auto:** a lead is taken at once.
@@ -370,9 +372,10 @@ The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_pro
 ## Tasks and audience profiles
 
 Creating the first task adds Opportunities and Your profiles to that program's
-portal; other programs keep their existing navigation. New programs created in
-the app let partners participate immediately by default; brands can require
-approval instead.
+portal; other programs keep their existing navigation. Every new program,
+whichever kind, reviews each application by default: a partner who applies waits
+until you approve them. A brand can turn that off (Program settings → General →
+Review each application).
 
 A program's Tasks tab offers fixed cash rewards, price ranges, custom quotes,
 product rewards delivered through the existing action webhook, or voluntary

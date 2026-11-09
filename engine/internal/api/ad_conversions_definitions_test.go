@@ -40,15 +40,15 @@ func TestAdConversionsFromDefinitions(t *testing.T) {
 
 	ana := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ana",
 		"identities": []any{map[string]any{"namespace": "email", "value": "ana@acme.example"}}})["id"].(string)
-	if _, err := e.pool.Exec(ctx, `INSERT INTO site_sessions (workspace_id, anonymous_id, record_id, click_ids, country, started_at, last_seen_at)
-		VALUES ($1, 'anon-ana', $2, '{"fbclid": "fb-ana"}', 'US', now() - interval '1 hour', now() - interval '1 hour')`, ws, ana); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO site_sessions (workspace_id, brand_id, anonymous_id, record_id, click_ids, country, started_at, last_seen_at)
+		VALUES ($1, outflare_first_brand($1), 'anon-ana', $2, '{"fbclid": "fb-ana"}', 'US', now() - interval '1 hour', now() - interval '1 hour')`, ws, ana); err != nil {
 		t.Fatal(err)
 	}
 	// A long call and a short one, received a few minutes ago so the
 	// matcher has settled on them.
 	for _, c := range []struct{ msg, props string }{{"call-long", `{"duration_s": 300}`}, {"call-short", `{"duration_s": 20}`}} {
-		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, properties, message_id, occurred_at, received_at)
-			VALUES ($1, $2, 'track', 'call.completed', $3, $4, now() - interval '5 minutes', now() - interval '5 minutes')`, ws, ana, c.props, c.msg); err != nil {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at, received_at)
+			VALUES ($1, outflare_first_brand($1), $2, 'track', 'call.completed', $3, $4, now() - interval '5 minutes', now() - interval '5 minutes')`, ws, ana, c.props, c.msg); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -91,8 +91,8 @@ func TestAdConversionsFromDefinitions(t *testing.T) {
 	if _, err := e.pool.Exec(ctx, `UPDATE ad_conversion_rules SET matched_until = now() - interval '4 minutes' WHERE id = $1`, ruleID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, record_id, kind, name, properties, message_id, occurred_at, received_at)
-		VALUES ($1, $2, 'track', 'call.completed', '{"duration_s": 900}', 'call-later', now() - interval '3 minutes', now() - interval '3 minutes')`, ws, ana); err != nil {
+	if _, err := e.pool.Exec(ctx, `INSERT INTO customer_events (workspace_id, brand_id, record_id, kind, name, properties, message_id, occurred_at, received_at)
+		VALUES ($1, outflare_first_brand($1), $2, 'track', 'call.completed', '{"duration_s": 900}', 'call-later', now() - interval '3 minutes', now() - interval '3 minutes')`, ws, ana); err != nil {
 		t.Fatal(err)
 	}
 	if n, _ := adconv.Match(ctx, e.pool, ws); n != 1 {

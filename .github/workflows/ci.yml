@@ -369,6 +369,18 @@ jobs:
       - name: Subscription brand assignment and workspace switching
         if: env.WEB != 'false'
         run: pnpm --filter @outflare/web test:ai-account-brands
+      - name: Desktop app sign-in and shell behaviour
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:app-signin
+      - name: Reload once when a deploy removed the page's scripts
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:stale-build-reload
+      - name: Partner list search and partner pages
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:partner-page
+      - name: Partner program settings page
+        if: env.WEB != 'false'
+        run: pnpm --filter @outflare/web test:partner-settings
       - if: env.WEB != 'false'
         run: pnpm --filter @outflare/sdk test
       - if: env.WEB != 'false'

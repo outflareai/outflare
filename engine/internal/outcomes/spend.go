@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/outflareai/outflare/engine/internal/actionctx"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,8 +66,36 @@ type Entry struct {
 	Ref           *string   `json:"ref"`
 	Note          string    `json:"note"`
 	ActorID       *string   `json:"actor_id"`
-	CreatedAt     time.Time `json:"created_at"`
+	// BrandID is the brand the charge belongs to when it has no sequence
+	// (a sequence's charge is its sequence's brand). Record takes it from
+	// the context (WithBrand) when it is not set.
+	BrandID *string `json:"brand_id"`
+	// Channel is the marketing channel the charge paid for (Channels);
+	// "" means not assigned. Outcomes counts only outreach channels.
+	Channel   string    `json:"channel"`
+	CreatedAt time.Time `json:"created_at"`
 }
+
+// Spend channels: the marketing channel a charge paid for, the same list
+// as the channel column of spend_entries.
+const (
+	ChannelNone          = ""
+	ChannelOutboundEmail = "outbound_email"
+	ChannelSEO           = "seo"
+	ChannelAIAnswers     = "ai_answers"
+	ChannelPaidAds       = "paid_ads"
+	ChannelShared        = "shared"
+)
+
+// Channels lists every spend channel.
+var Channels = []string{"", "outbound_email", "seo", "ai_answers", "organic_social", "reddit", "paid_ads", "affiliates",
+	"lifecycle_email", "referral", "direct", "shared"}
+
+// OutreachChannels are the channels Outcomes counts: outbound email,
+// costs shared across channels (mailbox seats, data subscriptions), and
+// charges no channel was given. Ads, SEO, AI answers, social, partners and
+// the rest have their own pages and never count toward cost per meeting.
+var OutreachChannels = []string{ChannelNone, ChannelOutboundEmail, ChannelShared}
 
 // ErrInvalid wraps a validation failure worded for the person who sent it.
 type ErrInvalid struct{ Msg string }
@@ -138,6 +167,10 @@ func (e *Entry) normalize() error {
 	if e.OccurredAt.After(time.Now().Add(24 * time.Hour)) {
 		return invalid("occurred_at is in the future")
 	}
+	e.Channel = strings.TrimSpace(e.Channel)
+	if !slices.Contains(Channels, e.Channel) {
+		return invalid("channel must be one of %s", strings.Join(Channels[1:], ", "))
+	}
 	if e.Ref != nil {
 		r := strings.TrimSpace(*e.Ref)
 		if r == "" {
@@ -152,13 +185,14 @@ func (e *Entry) normalize() error {
 }
 
 const entryCols = `id, sequence_id, mission_id, mailbox_id, domain, category, provider, integration_id,
-	units::float8, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, created_at, action_id::text`
+	units::float8, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, created_at, action_id::text,
+	brand_id::text, channel`
 
 func scanEntry(row pgx.Row, ws string) (Entry, error) {
 	e := Entry{WorkspaceID: ws}
 	err := row.Scan(&e.ID, &e.SequenceID, &e.MissionID, &e.MailboxID, &e.Domain, &e.Category, &e.Provider,
 		&e.IntegrationID, &e.Units, &e.UnitName, &e.AmountCents, &e.Currency, &e.OccurredAt, &e.Source, &e.Ref, &e.Note,
-		&e.ActorID, &e.CreatedAt, &e.ActionID)
+		&e.ActorID, &e.CreatedAt, &e.ActionID, &e.BrandID, &e.Channel)
 	return e, err
 }
 
@@ -181,17 +215,25 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 			e.ActionID = &id
 		}
 	}
+	if e.BrandID == nil && e.SequenceID == nil {
+		if id := BrandFrom(ctx); id != "" {
+			e.BrandID = &id
+		}
+	}
 	created, err := scanEntry(q.QueryRow(ctx, `
 		INSERT INTO spend_entries (workspace_id, sequence_id, mission_id, mailbox_id, domain, category, provider,
-			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, action_id)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+			integration_id, units, unit_name, amount_cents, currency, occurred_at, source, ref, note, actor_id, action_id,
+			brand_id, channel)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
 		WHERE ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM sequences WHERE id = $2 AND workspace_id = $1))
+		  AND ($19::uuid IS NULL OR EXISTS (SELECT 1 FROM brands WHERE id = $19 AND workspace_id = $1))
 		  AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM mailboxes WHERE id = $4 AND workspace_id = $1))
 		  AND ($8::uuid IS NULL OR EXISTS (SELECT 1 FROM integrations WHERE id = $8 AND workspace_id = $1))
 		ON CONFLICT (workspace_id, ref) WHERE ref IS NOT NULL DO NOTHING
 		RETURNING `+entryCols,
 		e.WorkspaceID, e.SequenceID, e.MissionID, e.MailboxID, e.Domain, e.Category, e.Provider,
-		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID, e.ActionID), e.WorkspaceID)
+		e.IntegrationID, e.Units, e.UnitName, e.AmountCents, e.Currency, e.OccurredAt, e.Source, e.Ref, e.Note, e.ActorID, e.ActionID,
+		e.BrandID, e.Channel), e.WorkspaceID)
 	if err == nil {
 		// A connection's charge counts toward its usage limits, which
 		// warn the workspace at 80% and when one is reached.
@@ -215,7 +257,7 @@ func Record(ctx context.Context, q jobs.Querier, e Entry) (Entry, bool, error) {
 			return Entry{}, false, err
 		}
 	}
-	return Entry{}, false, invalid("the sequence, mailbox or integration is not in this workspace")
+	return Entry{}, false, invalid("the sequence, mailbox, integration or brand is not in this workspace")
 }
 
 func isUniqueViolation(err error) bool {

@@ -53,6 +53,7 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 	s.twinRoute(mux, "POST", "partners", s.inBrand, manage, s.createPartner)
 	s.twinRoute(mux, "GET", "partners/{id}", s.inBrand, read, s.getPartner)
 	s.twinRoute(mux, "PATCH", "partners/{id}", s.inBrand, manage, s.updatePartner)
+	mux.HandleFunc("GET /v1/brands/{brand}/partners/{id}/activity", s.onBrand(read, s.listPartnerActivity))
 	s.twinRoute(mux, "POST", "partners/{id}/promo-codes", s.inBrand, manage, s.addPartnerPromoCode)
 	s.twinRoute(mux, "DELETE", "partners/{id}/promo-codes/{code}", s.inBrand, manage, s.removePartnerPromoCode)
 	s.twinRoute(mux, "POST", "partners/{id}/fees", s.inBrand, manage, s.addPartnerFee)
@@ -68,6 +69,8 @@ func (s *Server) routesPartners(mux *http.ServeMux) {
 	s.twinRoute(mux, "POST", "partner-rewards/{id}/approve", s.inBrand, manage, s.approvePartnerReward)
 	s.twinRoute(mux, "POST", "partner-rewards/{id}/reject", s.inBrand, manage, s.rejectPartnerReward)
 	s.twinRoute(mux, "POST", "partner-rewards/{id}/fulfil", s.inBrand, conv, s.fulfilPartnerReward)
+	mux.HandleFunc("GET /v1/brands/{brand}/partner-rewards/{id}/proof", s.onBrand(read, s.getPartnerRewardProof))
+	mux.HandleFunc("GET /v1/brands/{brand}/partner-proofs/export", s.onBrand(read, s.exportPartnerProofs))
 
 	s.twinRoute(mux, "GET", "partner-payouts", s.inBrand, read, s.listPartnerPayouts)
 	s.twinRoute(mux, "POST", "partner-payouts", s.inBrand, manage, s.createPartnerPayouts)

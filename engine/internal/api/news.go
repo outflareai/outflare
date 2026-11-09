@@ -957,7 +957,7 @@ func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 		return err
 	}
 	res, serr := searcher.WebSearch(ctx, o.Client, o.Creds, connectors.WebQuery{Query: v.Query, Locale: v.Locale, TimeRange: v.TimeRange})
-	if err := s.bookNewsSearch(ctx, ws, o, searchID, res.Cost); err != nil {
+	if err := s.bookNewsSearch(ctx, ws, o, searchID, v.BrandID, res.Cost); err != nil {
 		return err
 	}
 	if serr != nil {
@@ -1028,13 +1028,16 @@ func (s *Server) RunNewsSearch(ctx context.Context, ws, searchID string) error {
 
 // bookNewsSearch books a search's cost in the workspace's spend ledger,
 // against the connection, so it counts toward its usage limits.
-func (s *Server) bookNewsSearch(ctx context.Context, ws string, o *connectors.Opened, searchID string, cost connectors.SEOCost) error {
+func (s *Server) bookNewsSearch(ctx context.Context, ws string, o *connectors.Opened, searchID string, brand *string, cost connectors.SEOCost) error {
 	if cost.USD <= 0 && cost.Units <= 0 {
 		return nil
 	}
 	id, ref := o.ID, "news_search:"+searchID+":"+strconv.FormatInt(time.Now().UnixNano(), 10)
 	e := outcomes.Entry{WorkspaceID: ws, Category: outcomes.CategoryData, Provider: o.Connector.Definition().ID, IntegrationID: &id,
-		OccurredAt: time.Now(), Source: outcomes.SourceAuto, Ref: &ref, Note: "News search"}
+		OccurredAt: time.Now(), Source: outcomes.SourceAuto, Ref: &ref, Note: "News search",
+		// Press coverage has no channel of its own; it is counted with
+		// SEO (links and mentions), never as an outreach cost.
+		BrandID: brand, Channel: outcomes.ChannelSEO}
 	if cost.Units > 0 {
 		u := cost.Units
 		e.Units, e.UnitName = &u, "token"

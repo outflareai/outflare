@@ -6,11 +6,12 @@ import { pageIsAvailable } from "./lib/extensions";
 import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import type { Workspace } from "@outflare/sdk";
 import { Icon, isIconName, type IconName } from "./icons";
-import { CopyButton, Kbd, Logo } from "./ui";
+import { CopyButton, Kbd, Logo, toast } from "./ui";
 import type { Tab } from "./App";
 import { appTabs } from "./lib/paths";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
+import { desktop, isDesktopApp, onUpdateReady, type UpdateState } from "@/lib/desktop";
 import { pickedBrandId, setBrand, useBrand } from "@/lib/brand";
 import { useAgentApps } from "@/lib/agentApps";
 import {
@@ -131,6 +132,9 @@ export const tabNames: Record<Tab, string> = {
   "brand-accounts": "Accounts",
   workspace: "General",
   members: "Members",
+  team: "Team",
+  telegram: "Telegram",
+  "team-activity": "Team activity",
   alerts: "Alerts",
   digests: "Digests",
   connectors: "Connectors",
@@ -224,7 +228,7 @@ export const tabBlurbs: Record<Tab, string> = {
   visitors: "The companies and people on your website, scored for buying intent, from your site snippet and clicks on your emails.",
   ads: "Spend, clicks and platform-reported conversions from your own Google, Meta, Microsoft, Reddit, X and LinkedIn ad accounts, by brand.",
   social: "Confirm your brands' X and LinkedIn accounts, then follow their followers, posts and engagement every day.",
-  reviews: "Every review of your brands on Trustpilot, G2, Capterra and Google, your review score and its direction, and answers drafted for you to post.",
+  reviews: "Every review of your brands on Trustpilot, G2, Capterra, SourceForge and Google, your review score and its direction, and answers drafted for you to post.",
   reddit: "Find threads where your brand can help, reply with a disclosure from its own account, and count the sign-ups.",
   "reddit-campaigns": "Comments, replies, posts and upvotes placed through Engain within each brand's budget, and how long each mention stayed live.",
   seo: "Domain rating, backlinks and the keywords your sites rank for, from DataForSEO or Ahrefs.",
@@ -239,6 +243,9 @@ export const tabBlurbs: Record<Tab, string> = {
   "brand-accounts": "The external accounts your brand's agent acts through: how each signs in, whether access works, the vault, incidents, and the takeovers waiting for a person.",
   workspace: "The workspace's name and its address in the app.",
   members: "Who is in this workspace, and what each person can do.",
+  telegram: "Chats from the company's Telegram accounts, and the ones to link to a customer.",
+  team: "Everyone who works here, their departments and teams, and the accounts the company gives them.",
+  "team-activity": "Changes, agent runs and API calls about the team rather than one brand, such as invites and connections.",
   alerts: "What needs someone now, such as hot replies and hot website visitors, and who hears about it by email.",
   digests: "A daily or weekly summary of the whole workspace, kept here and emailed through your own provider.",
   tokens: "Tokens for scripts and agents, with scopes and send budgets.",
@@ -322,6 +329,8 @@ export const tabDocs: Partial<Record<Tab, string>> = {
   company: "/docs/agents/memory/",
   workspace: "/docs/guides/workspaces-and-access/",
   members: "/docs/guides/workspaces-and-access/",
+  team: "/docs/guides/team/",
+  telegram: "/docs/guides/team/#match-chats-to-customers",
   alerts: "/docs/guides/alerts/",
   digests: "/docs/guides/digests/",
   tokens: "/docs/api/authentication/",
@@ -345,7 +354,7 @@ export const everyday: Tab[] = ["overview", "inbox", "agents"];
 
 export type Module = { id: string; label: string; icon: IconName; tabs: Tab[] };
 export const modules: Module[] = [
-  { id: "crm", label: "CRM", icon: "leads", tabs: ["crm", "people", "query", "leads", "lists", "lead-finder", "email-finder", "suppression"] },
+  { id: "crm", label: "CRM", icon: "leads", tabs: ["crm", "people", "query", "leads", "lists", "telegram", "lead-finder", "email-finder", "suppression"] },
   { id: "visitors", label: "Visitors", icon: "visitors", tabs: ["visitors"] },
   { id: "outreach", label: "Outreach", icon: "sequences", tabs: ["sequences", "link-building", "link-autopilot", "news", "stories", "pr-autopilot", "allocation", "reports"] },
   // Presence: everywhere the brand appears, what to go after next, and the
@@ -380,7 +389,7 @@ const allModules = modules;
 
 // Pages that work for someone kept to some brands. The others need every
 // brand (the API answers 403), so they are hidden from them.
-const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail"];
+const brandTabs: readonly Tab[] = ["crm","overview", "seo-overview", "search-insights", "audits", "fixes", "experiments", "keywords", "content", "ai-visibility", "ai-questions", "ai-competitors", "ai-sources", "ai-pages", "ai-perception", "ai-traffic", "ai-visibility-settings", "backlinks", "competition", "competitors", "link-building", "link-autopilot", "coverage", "news", "stories", "pr-autopilot", "reddit", "reddit-campaigns", "social", "reviews", "ads", "visitors", "funnels", "trends", "retention", "paths", "dashboards", "live", "page-speed", "tracking", "flags", "ab-tests", "inbox", "sequences", "people", "query", "leads", "lists", "rules", "lead-finder", "suppression", "mailboxes", "domains", "knowledge", "company", "brands", "setup", "ideal-customers", "brand-accounts", "members", "account", "instance", "ai-accounts", "support", "help-centre", "agent-mail", "telegram"];
 // Pages of parts of Outflare switched on per workspace while they are
 // tested (GET /v1/me lists each workspace's features).
 const featureTabs: Partial<Record<Tab, string>> = { "ai-accounts": "ai_accounts" };
@@ -495,7 +504,7 @@ export function PinButton({ tab, from, className }: { tab: Tab; from: string; cl
 // the workspace, its AI, and what developers and agents use.
 export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   const groups: NavGroup[] = [
-    { label: "Workspace", tabs: ["workspace", "members"] },
+    { label: "Workspace", tabs: ["workspace", "members", "team", "team-activity"] },
     { label: "AI", tabs: ["ai", "ai-usage", "ai-accounts"] },
     { label: "Notifications", tabs: ["alerts", "digests"] },
     { label: "Developers", tabs: isAdmin ? ["tokens", "webhooks", "logs", "audit", "tools"] : ["webhooks", "tools"] },
@@ -505,7 +514,7 @@ export function settingsGroups(isAdmin: boolean, ws?: Workspace): NavGroup[] {
   return groups.map((g) => ({ ...g, tabs: g.tabs.filter((t) => canOpen(ws, t)) })).filter((g) => g.tabs.length > 0);
 }
 
-export const settingsTabs: readonly Tab[] = ["workspace", "members", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
+export const settingsTabs: readonly Tab[] = ["workspace", "members", "team", "team-activity", "ai", "ai-usage", "ai-accounts", "alerts", "digests", "tokens", "webhooks", "logs", "audit", "tools", "account", "instance"];
 export const isSettings = (t: Tab) => settingsTabs.includes(t);
 
 // ---- Theme ----
@@ -656,6 +665,7 @@ export function Sidebar(p: SidebarProps) {
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
+        <AppUpdate />
         <Account email={p.me.email} theme={p.theme} onTheme={p.onTheme} onSignOut={p.onSignOut} onAccount={() => p.onTab("account")} />
       </SidebarFooter>
       <SidebarRail />
@@ -722,6 +732,49 @@ function NavItem({ tab, label = tabNames[tab], icon = tab as IconName, active, u
         </SidebarMenuBadge>
       )}
     </SidebarMenuItem>
+  );
+}
+
+// In the Outflare desktop app, the shell downloads a newer version in the
+// background and this button appears at the bottom of the sidebar, as in
+// other desktop apps. One click installs it and reopens the app; the person
+// does nothing else. In a browser it renders nothing.
+function AppUpdate() {
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!isDesktopApp()) return;
+    let gone = false;
+    desktop.updateState().then((s) => { if (!gone && s.available) setUpdate(s); }).catch(() => {});
+    const stop = onUpdateReady((s) => { if (!gone) setUpdate(s); });
+    return () => { gone = true; stop(); };
+  }, []);
+  useEffect(() => {
+    if (update?.available) track("ui.app_update_offered", { version: update.version });
+  }, [update?.available, update?.version]);
+  if (!update?.available) return null;
+  const install = async () => {
+    if (busy) return;
+    setBusy(true);
+    track("ui.app_update_started", { version: update.version });
+    try {
+      await desktop.installUpdate(); // only returns when it failed: on success the app reopens
+    } catch {
+      track("ui.app_update_failed", { outcome: "error", error_code: "install_failed", version: update.version });
+      toast("Couldn't install the update. Try again from the Outflare menu.", "error");
+      setBusy(false);
+    }
+  };
+  return (
+    <SidebarMenu className="gap-px">
+      <SidebarMenuItem>
+        <SidebarMenuButton onClick={install} disabled={busy} tooltip={busy ? "Updating…" : `Update to Outflare ${update.version ?? ""}`.trim()} className="h-10 text-[13px] text-primary md:h-7">
+          <Icon name={busy ? "refresh" : "sparkles"} className={cn("size-4", busy && "animate-spin")} />
+          <span className="flex-1">{busy ? "Updating…" : "Update available"}</span>
+          {!busy && update.version && <span className="text-[11px] tabular-nums text-muted-foreground">{update.version}</span>}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }
 
@@ -1065,7 +1118,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "visitors":
       return { title: "Companies on your website", path: "/v1/brands/{brand}/visitors", params: brandBase, query: { view: "companies" }, mcp: "list_website_visitors", ask: "Which companies looked at our pricing this week, and who there should we follow up with?", scope: "customers.read" };
     case "ads":
-      return { title: "Ad spend and results by platform", path: "/v1/workspaces/{ws}/ads/summary", params: base, query: { group: "connector" }, mcp: "get_ads_summary", ask: "What did we spend on ads this month per brand, and which campaigns have the worst cost per conversion?", scope: "analytics.read" };
+      return { title: "Ad spend and results by platform", path: "/v1/brands/{brand}/ads/summary", params: base, query: { group: "connector" }, mcp: "get_ads_summary", ask: "What did we spend on ads this month per brand, and which campaigns have the worst cost per conversion?", scope: "analytics.read" };
     case "warmup":
       return { title: "Mailboxes and their warm-up", path: "/v1/workspaces/{ws}/mailboxes", params: base, mcp: "list_mailboxes", ask: "Which mailboxes are still warming, and which have a low warm-up score?", scope: "mailboxes.read" };
     case "reports":
@@ -1107,7 +1160,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "One playbook", path: "/v1/workspaces/{ws}/playbooks/{id}", params: { ...base, id: item }, mcp: "get_playbook", ask: "Run this playbook for my brand.", scope: "agents.read" }
         : { title: "Playbooks", path: "/v1/workspaces/{ws}/playbooks", params: base, mcp: "list_playbooks", ask: "Which playbooks am I ready to run, and what should I connect for the rest?", scope: "agents.read" };
     case "agents":
-      return { title: "Agent changes waiting for a person", path: "/v1/workspaces/{ws}/actions", params: base, query: { status: "held" }, mcp: "list_actions", ask: "What are my agents waiting on me to approve, and what did they change today?", scope: "actions.read" };
+      return { title: "Agent changes waiting for a person", path: "/v1/brands/{brand}/actions", params: brandBase, query: { status: "held" }, mcp: "list_actions", ask: "What are my agents waiting on me to approve, and what did they change today?", scope: "actions.read" };
     case "missions":
       return item
         ? { title: "One mission", path: "/v1/workspaces/{ws}/missions/{id}", params: { ...base, id: item }, mcp: "get_mission", ask: "What has this mission done so far, and what is it waiting on?", scope: "missions.read" }
@@ -1192,12 +1245,12 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
       return { title: "Email providers", path: "/v1/workspaces/{ws}/email-providers", params: base, mcp: "list_email_providers", ask: "Is my email provider still in the SES sandbox, and are my sending domains verified?", scope: "emails.read" };
     case "support":
       return item
-        ? { title: "One conversation", path: "/v1/workspaces/{ws}/support/conversations/{id}", params: { ...base, id: item }, mcp: "get_support_conversation", ask: "Draft a reply to this customer from our knowledge, and show it to me before sending.", scope: "inbox.read" }
-        : { title: "Support inbox", path: "/v1/workspaces/{ws}/support/conversations", params: base, mcp: "list_support_conversations", ask: "Which customers have waited longest for an answer, and what do they want?", scope: "inbox.read" };
+        ? { title: "One conversation", path: "/v1/brands/{brand}/support/conversations/{id}", params: { ...base, id: item }, mcp: "get_support_conversation", ask: "Draft a reply to this customer from our knowledge, and show it to me before sending.", scope: "inbox.read" }
+        : { title: "Support inbox", path: "/v1/brands/{brand}/support/conversations", params: base, mcp: "list_support_conversations", ask: "Which customers have waited longest for an answer, and what do they want?", scope: "inbox.read" };
     case "knowledge":
-      return { title: "Knowledge", path: "/v1/workspaces/{ws}/knowledge/items", params: base, mcp: "search_knowledge", ask: "Write down our refund policy: full refunds within 30 days, no questions asked.", scope: "workspace.read" };
+      return { title: "Knowledge", path: "/v1/brands/{brand}/knowledge/items", params: base, mcp: "search_knowledge", ask: "Write down our refund policy: full refunds within 30 days, no questions asked.", scope: "workspace.read" };
     case "help-centre":
-      return { title: "Help centres", path: "/v1/workspaces/{ws}/help-centres", params: base, mcp: "list_help_centres", ask: "Set up our help centre with our brand colours, a contact link to support, and the refund articles on it.", scope: "workspace.read" };
+      return { title: "Help centres", path: "/v1/brands/{brand}/help-centres", params: base, mcp: "list_help_centres", ask: "Set up our help centre with our brand colours, a contact link to support, and the refund articles on it.", scope: "workspace.read" };
     case "company":
       return { title: "What Outflare knows about the brand", path: "/v1/workspaces/{ws}/context", params: base, mcp: "get_context", ask: "What do you know about my company, and what is blocking my outreach?", scope: "workspace.read" };
     case "brands":
@@ -1205,15 +1258,21 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
         ? { title: "A brand's context", path: "/v1/workspaces/{ws}/brands/{brand}/context", params: { ...base, brand: item }, mcp: "get_brand_context", ask: "Read this brand's website and fill in what it is, who it's for and how it sounds.", scope: "workspace.read" }
         : { title: "Brands", path: "/v1/workspaces/{ws}/brands", params: base, mcp: "list_brands", ask: "Which brands do we market, and what belongs to each?", scope: "workspace.read" };
     case "ideal-customers":
-      return { title: "Ideal customer profiles", path: "/v1/workspaces/{ws}/ideal-customer-profiles", params: base, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
+      return { title: "Ideal customer profiles", path: "/v1/brands/{brand}/ideal-customer-profiles", params: brandBase, mcp: "list_ideal_customer_profiles", ask: "Write an ideal customer profile from our best customers and use it for the AU lead list.", scope: "profiles.read" };
     case "content":
       return { title: "The brand's posts and pages", path: "/v1/brands/{brand}/content", params: { brand: "BRAND_ID" }, mcp: "list_content", ask: "Write a comparison page against our main competitor, in Australian English, for review.", scope: "content.read" };
     case "brand-accounts":
       return { title: "The brand's accounts", path: "/v1/brands/{brand}/accounts", params: { brand: "BRAND_ID" }, mcp: "list_accounts", ask: "Which of our accounts need attention, and is anything waiting for a person?", scope: "accounts.read" };
     case "workspace":
       return { title: "The workspace", path: "/v1/workspaces/{ws}", params: base, scope: "workspace.read" };
+    case "team-activity":
+      return { title: "The team's changes waiting for a person", path: "/v1/workspaces/{ws}/actions", params: base, query: { status: "held" }, mcp: "list_actions", ask: "Which team changes, such as invites, are waiting for me?", scope: "actions.read" };
     case "members":
       return { title: "Members", path: "/v1/workspaces/{ws}/members", params: base, scope: "members.read" };
+    case "telegram":
+      return { title: "Telegram chats", path: "/v1/brands/{brand}/telegram-chats", params: { brand: "BRAND_ID" }, mcp: "list_telegram_chats", ask: "Which Telegram chats still need linking to a customer, and who are they probably?", scope: "customers.read" };
+    case "team":
+      return { title: "The team directory", path: "/v1/workspaces/{ws}/staff", params: base, mcp: "list_staff", ask: "Who is leaving and still holds a company Telegram account?", scope: "members.read" };
     case "alerts":
       return { title: "Alerts", path: "/v1/brands/{brand}/alerts", params: { brand: "BRAND_ID" }, mcp: "list_alerts", ask: "What needs me right now?", scope: "workspace.read" };
     case "digests":
@@ -1228,7 +1287,7 @@ function callFor(tab: Tab, ws: string, item?: string): Call {
     case "tokens":
       return { title: "API tokens", path: "/v1/workspaces/{ws}/api-tokens", params: base, scope: "tokens.manage" };
     case "logs":
-      return { title: "Request logs", path: "/v1/workspaces/{ws}/logs", params: { ...base, level: "warning,error", since: "1h" }, mcp: "list_logs", ask: "Which of my calls failed in the last hour, and why?", scope: "audit.read" };
+      return { title: "Request logs", path: "/v1/brands/{brand}/logs", params: { ...brandBase, level: "warning,error", since: "1h" }, mcp: "list_logs", ask: "Which of my calls failed in the last hour, and why?", scope: "audit.read" };
     case "audit":
       return { title: "Audit log", path: "/v1/workspaces/{ws}/audit-events", params: base, scope: "audit.read" };
     case "instance":

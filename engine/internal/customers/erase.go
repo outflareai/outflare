@@ -14,6 +14,7 @@ var Erased = []Ref{
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},
+	{"telegram_chats", "record_id"},
 	{"review_requests", "record_id"},
 	{"coverage_publishers", "record_id"},
 	{"coverage_parties", "record_id"},
@@ -63,6 +64,9 @@ var Kept = []Ref{
 	{"partner_memberships", "record_id"}, {"partner_rewards", "recipient_id"},
 	{"customer_events", "account_id"}, {"deals", "record_id"}, {"payment_subscriptions", "record_id"}, {"transactions", "record_id"},
 	{"seo_competitors", "record_id"}, {"suppressions", "record_id"}, {"site_visitors", "account_id"},
+	// A suggestion that someone's chat might be theirs: the chat is the
+	// account's, and is matched again.
+	{"telegram_chats", "suggested_record_id"},
 }
 
 // Erase deletes the records in ids, what Erased says is theirs, and the

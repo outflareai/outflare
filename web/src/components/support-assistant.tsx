@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Button, ErrorText, Loading, field, toast } from "../ui";
 import { Icon } from "../icons";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import type { Tab } from "@/lib/paths";
 import { ConnectFor } from "./connect-for";
 import { cloudCapability, useCapabilities } from "@/lib/cloud";
@@ -65,7 +65,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
   const shown = all?.find((x) => x.brand_id === brandID) ?? null;
 
   useEffect(() => {
-    api.GET("/v1/workspaces/{ws}/support/assistant-settings", { params: { path: { ws } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/support/assistant-settings", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setAll(data.data);
       setAuto(data.auto_available);
@@ -73,7 +73,7 @@ export function SupportAssistantSettings({ ws, canManage, go }: { ws: string; ca
     api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws } } }).then(({ data }) => {
       setSlacks(((data?.data ?? []) as Integration[]).filter((i) => i.connector === "slack_knowledge" && i.status === "connected"));
     });
-    api.GET("/v1/workspaces/{ws}/support/assistant/stats", { params: { path: { ws } } }).then(({ data }) => {
+    api.GET("/v1/brands/{brand}/support/assistant/stats", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => {
       if (data) setStats(data as Report);
     });
   }, [ws]);
@@ -316,7 +316,7 @@ const actionLabel: Record<string, string> = { answer: "Would answer", clarify: "
 
 // TryAssistant asks the assistant a made-up question: nothing is stored
 // or sent.
-function TryAssistant({ ws, brand }: { ws: string; brand: string | null }) {
+function TryAssistant({ brand }: { ws: string; brand: string | null }) {
   const [q, setQ] = useState("");
   const [channel, setChannel] = useState<"email" | "chat">("chat");
   const [busy, setBusy] = useState(false);
@@ -325,7 +325,7 @@ function TryAssistant({ ws, brand }: { ws: string; brand: string | null }) {
   async function run() {
     setBusy(true);
     setRes(null);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/assistant/test", { params: { path: { ws } }, body: { question: q.trim(), channel, brand } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/support/assistant/test", { params: { path: { brand: pickedBrandId() } }, body: { question: q.trim(), channel, brand } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setRes(data as TestResult);
@@ -360,7 +360,7 @@ function TryAssistant({ ws, brand }: { ws: string; brand: string | null }) {
 
 // AssistantDraft shows what the assistant left on a conversation: a draft
 // to use or discard, or why it left it to the team.
-export function AssistantDraft({ ws, id, run, onUse, onDiscarded, onChanged }: {
+export function AssistantDraft({ id, run, onUse, onDiscarded, onChanged }: {
   ws: string;
   id: string;
   run: SupportAssistantRun;
@@ -394,7 +394,7 @@ export function AssistantDraft({ ws, id, run, onUse, onDiscarded, onChanged }: {
   // stop keeps a held reply from going; it stays a draft.
   async function stop(): Promise<SupportAssistantRun | null> {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/assistant-runs/{id}/stop", { params: { path: { ws, id: run.id } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/support/assistant-runs/{id}/stop", { params: { path: { brand: pickedBrandId(), id: run.id } } });
     setBusy(false);
     if (error) {
       toast(errorMessage(error), "error");
@@ -417,7 +417,7 @@ export function AssistantDraft({ ws, id, run, onUse, onDiscarded, onChanged }: {
 
   async function discard() {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/support/assistant-runs/{id}/discard", { params: { path: { ws, id: run.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/support/assistant-runs/{id}/discard", { params: { path: { brand: pickedBrandId(), id: run.id } } });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     onDiscarded();

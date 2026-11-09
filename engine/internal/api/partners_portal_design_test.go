@@ -43,6 +43,9 @@ func TestPartnerPortalDesignSystem(t *testing.T) {
 		if r.Code != 200 || !strings.Contains(r.Body.String(), `data-portal-base="/p/`+id+`/"`) || !strings.Contains(r.Body.String(), "/assets/portal.js") {
 			t.Fatalf("compiled portal %s: %d %s", path, r.Code, r.Body.String())
 		}
+		if r.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("compiled portal %s can be cached past a deploy: %q", path, r.Header().Get("Cache-Control"))
+		}
 		if strings.Contains(path, "embed") && r.Header().Get("X-Frame-Options") != "" {
 			t.Fatal("full portal embed cannot be framed")
 		}
@@ -52,8 +55,8 @@ func TestPartnerPortalDesignSystem(t *testing.T) {
 		t.Fatalf("custom portal root: %d %s", root.Code, root.Body.String())
 	}
 	asset := get("https://northpeak.partners.test/assets/portal.js")
-	if asset.Code != 200 || asset.Body.String() != "export const portal = true;" {
-		t.Fatalf("custom portal asset: %d %s", asset.Code, asset.Body.String())
+	if asset.Code != 200 || asset.Body.String() != "export const portal = true;" || asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("custom portal asset: %d %s %v", asset.Code, asset.Body.String(), asset.Header())
 	}
 	// FileServer canonicalizes index.html to the same asset directory.
 	redirected := get("https://northpeak.partners.test/assets/index.html")
@@ -62,7 +65,7 @@ func TestPartnerPortalDesignSystem(t *testing.T) {
 	}
 	for _, path := range []string{"assets/missing.js", "v1/setup"} {
 		r := get("https://northpeak.partners.test/" + path)
-		if r.Code != 404 || strings.Contains(r.Body.String(), "dashboard-only-entry") {
+		if r.Code != 404 || strings.Contains(r.Body.String(), "dashboard-only-entry") || strings.Contains(r.Header().Get("Cache-Control"), "immutable") {
 			t.Fatalf("portal host exposed app fallback/API on %s: %d %s", path, r.Code, r.Body.String())
 		}
 	}

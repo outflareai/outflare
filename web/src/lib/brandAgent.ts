@@ -20,10 +20,11 @@ export type AgentObjective = {
   measure_error: string;
 };
 // The Agents page's tabs: the brand agent's page adds its own views to the
-// row at the top (its tasks, its activity), so every part of the page is
-// one click away instead of in a menu. view is the tab that is open; go
+// row at the top, or under History or Settings (its activity, its tasks),
+// so every part of the page is one or two clicks away, never in a menu. view is the tab that is open; go
 // opens one ("agent" is the chat).
-export type AgentPageTab = { value: string; label: string; count?: number };
+// group puts a view under History or Settings instead of in the top row.
+export type AgentPageTab = { value: string; label: string; count?: number; group?: "history" | "settings" };
 export type AgentPageTabs = { view: string; go: (view: string) => void; setTabs: (tabs: AgentPageTab[]) => void };
 export const AgentPageTabsContext = createContext<AgentPageTabs | null>(null);
 

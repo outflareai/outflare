@@ -319,6 +319,7 @@ func record(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit 
 		WorkspaceID: o.WorkspaceID, Category: outcomes.CategoryData, Provider: o.Connector.Definition().ID,
 		IntegrationID: &id, Units: &units, UnitName: unit, OccurredAt: time.Now(), Source: outcomes.SourceAuto,
 		Domain: q.Target, Note: fmt.Sprintf("SEO %s for %s (%s)", q.Report, q.Target, q.Country), ActorID: actor,
+		Channel: outcomes.ChannelSEO, BrandID: CostBrand(ctx, pool, o.WorkspaceID, q.Target),
 	}
 	if cost.Estimated {
 		e.Note += ", estimated from the price list"
@@ -329,6 +330,26 @@ func record(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit 
 	}
 	_, _, err := outcomes.Record(ctx, pool, e)
 	return err
+}
+
+// CostBrand is the brand an SEO or search charge belongs to: the brand
+// the call runs for (outcomes.WithBrand), else the brand of the tracked
+// site host is, else none (nil).
+func CostBrand(ctx context.Context, q jobs.Querier, ws, host string) *string {
+	if id := outcomes.BrandFrom(ctx); id != "" {
+		return &id
+	}
+	host = LinkTarget(strings.ToLower(strings.TrimSpace(host)))
+	if host == "" {
+		return nil
+	}
+	var id *string
+	if err := q.QueryRow(ctx, `SELECT brand_id::text FROM seo_sites
+		WHERE workspace_id = $1 AND brand_id IS NOT NULL AND (lower(host) = $2 OR lower(host) = 'www.' || $2)
+		ORDER BY status = 'active' DESC LIMIT 1`, ws, host).Scan(&id); err != nil {
+		return nil
+	}
+	return id
 }
 
 // ---- Weekly snapshots ----
@@ -552,6 +573,7 @@ func EnqueueRefresh(ctx context.Context, q jobs.Querier, ws, integrationID, bran
 // refreshBrand is the RefreshBrand job: each of the brand's SEO sites'
 // tracked competitors, while the budget lasts.
 func (s *Syncer) refreshBrand(ctx context.Context, ws, integrationID, brandID string) error {
+	ctx = outcomes.WithBrand(ctx, brandID)
 	o, err := s.Store.Open(ctx, s.Pool, ws, integrationID)
 	if err != nil {
 		if connectors.KindOf(err) == connectors.ErrUnavailable && !errors.Is(err, connectors.ErrNotFound) {

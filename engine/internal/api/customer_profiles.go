@@ -21,9 +21,13 @@ const maxProfiles = 500
 
 func (s *Server) routesCustomerProfiles(mux *http.ServeMux) {
 	read, manage := auth.ScopeProfilesRead, auth.ScopeProfilesManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ideal-customer-profiles", s.onBrand(read, s.listCustomerProfiles))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ideal-customer-profiles", s.inBrand(read, s.listCustomerProfiles))
+	mux.HandleFunc("POST /v1/brands/{brand}/ideal-customer-profiles", s.onBrand(manage, s.createCustomerProfile))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ideal-customer-profiles", s.inBrand(manage, s.createCustomerProfile))
+	mux.HandleFunc("GET /v1/brands/{brand}/ideal-customer-profiles/{id}", s.onBrand(read, s.getCustomerProfile))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ideal-customer-profiles/{id}", s.inBrand(read, s.getCustomerProfile))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/ideal-customer-profiles/{id}", s.onBrand(manage, s.updateCustomerProfile))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/ideal-customer-profiles/{id}", s.inBrand(manage, s.updateCustomerProfile))
 }
 
@@ -286,7 +290,7 @@ func (s *Server) updateCustomerProfile(w http.ResponseWriter, r *http.Request) {
 		if brand, err = s.brandRef(ctx, a.WorkspaceID, in.BrandID.Value); s.allocError(w, r, err) {
 			return
 		}
-		if a.Brands != nil && (brand == nil || !a.writes(brand)) {
+		if a.seenBrands() != nil && (brand == nil || !a.writes(brand)) {
 			s.allocError(w, r, errInvalid("you can only move profiles between your own brands"))
 			return
 		}

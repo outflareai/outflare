@@ -72,6 +72,11 @@ func Parse(platform, page string, now time.Time) Read {
 	if r.Score == nil || r.Count == nil || len(r.Reviews) == 0 {
 		r = mergeRead(r, jsonLD(page))
 	}
+	if platform == SourceForge && (r.Score == nil || r.Count == nil || len(r.Reviews) == 0) {
+		// SourceForge marks its rating and reviews up in the page itself
+		// (schema.org microdata) where JSON-LD leaves something out.
+		r = mergeRead(r, microdata(page))
+	}
 	if platform == Google {
 		r = mergeRead(r, googleMaps(page, now))
 	}
@@ -579,11 +584,12 @@ func text(v any) string {
 	return strings.TrimSpace(s)
 }
 
-// date reads the dates review pages use: RFC 3339, a bare day, or
-// Capterra's "September 5, 2026".
+// date reads the dates review pages use: RFC 3339, a bare day,
+// Capterra's "September 5, 2026", or SourceForge's "11/04/2026" (month
+// first).
 func date(s string) time.Time {
 	s = strings.TrimSpace(s)
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02", "January 2, 2006", "Jan 2, 2006"} {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02", "January 2, 2006", "Jan 2, 2006", "01/02/2006"} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t.UTC()
 		}

@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { HelpCentre as HelpCentreView, HelpCentreSettings, HelpCentreStats, KnowledgeCollection } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -65,15 +66,22 @@ const socials: { id: "x" | "linkedin" | "youtube" | "facebook" | "instagram" | "
 
 export const folderIcons = ["book", "rocket", "card", "shield", "settings", "users", "chat", "bolt", "star", "globe", "help", "tag", "box", "chart", "plug", "lock"] as const;
 
-export function HelpCentre({ ws, canManage, go }: { ws: string; canManage: boolean; go?: (tab: "knowledge" | "domains") => void }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+// Help centres belong to one brand.
+export function HelpCentre(props: { ws: string; canManage: boolean; go?: (tab: "knowledge" | "domains") => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Help centres" brands={active.length} />;
+  return <HelpCentrePage key={brand.id} {...props} />;
+}
+
+function HelpCentrePage({ ws, canManage, go }: { ws: string; canManage: boolean; go?: (tab: "knowledge" | "domains") => void }) {
+  const { brand } = useBrand(ws);
   const [list, setList] = useState<HelpCentreView[] | null>(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/help-centres", { params: { path: { ws }, query: brandQuery } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/help-centres", { params: { path: { brand: pickedBrandId() } } });
     if (error) return setError(errorMessage(error));
     setList(data.data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,7 +93,7 @@ export function HelpCentre({ ws, canManage, go }: { ws: string; canManage: boole
 
   async function create() {
     setBusy(true);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/help-centres", { params: { path: { ws } }, body: brand ? { brand_id: brand.id } : {} });
+    const { data, error } = await api.POST("/v1/brands/{brand}/help-centres", { params: { path: { brand: pickedBrandId() } }, body: brand ? { brand_id: brand.id } : {} });
     setBusy(false);
     if (error) return toast(errorMessage(error), "error");
     setList((l) => [...(l ?? []), data]);
@@ -94,7 +102,7 @@ export function HelpCentre({ ws, canManage, go }: { ws: string; canManage: boole
 
   async function patch(body: { enabled?: boolean; domain_id?: string | null; name?: string; slug?: string; settings?: Settings }, done?: string) {
     if (!hc) return false;
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/help-centres/{id}", { params: { path: { ws, id: hc.id } }, body });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/help-centres/{id}", { params: { path: { brand: pickedBrandId(), id: hc.id } }, body });
     if (error) {
       toast(errorMessage(error), "error");
       return false;
@@ -213,7 +221,7 @@ function Dashboard({
 }) {
   const [stats, setStats] = useState<HelpCentreStats | null>(null);
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/help-centres/{id}/stats", { params: { path: { ws, id: hc.id } } }).then(({ data }) => data && setStats(data));
+    void api.GET("/v1/brands/{brand}/help-centres/{id}/stats", { params: { path: { brand: pickedBrandId(), id: hc.id } } }).then(({ data }) => data && setStats(data));
   }, [ws, hc.id]);
   const rated = (stats?.helpful ?? 0) + (stats?.unhelpful ?? 0);
   const max = Math.max(1, ...(stats?.by_day.map((d) => d.views) ?? [0]));
@@ -304,13 +312,13 @@ function Metric({ label, value, hint }: { label: string; value?: ReactNode; hint
 
 // Collections: the folders readers browse, with their icons.
 function Collections({ ws, canManage }: { ws: string; canManage: boolean }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [folders, setFolders] = useState<KnowledgeCollection[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/knowledge/collections", { params: { path: { ws }, query: brandQuery } }).then(({ data }) => data && setFolders(data.data));
+    void api.GET("/v1/brands/{brand}/knowledge/collections", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => data && setFolders(data.data));
     void api
-      .GET("/v1/workspaces/{ws}/knowledge/items", { params: { path: { ws }, query: { ...brandQuery, visibility: "public", status: "published", limit: 200 } } })
+      .GET("/v1/brands/{brand}/knowledge/items", { params: { path: { brand: pickedBrandId() }, query: { visibility: "public", status: "published", limit: 200 } } })
       .then(({ data }) => {
         const c: Record<string, number> = {};
         for (const it of data?.data ?? []) c[it.collection_id ?? ""] = (c[it.collection_id ?? ""] ?? 0) + 1;
@@ -320,7 +328,7 @@ function Collections({ ws, canManage }: { ws: string; canManage: boolean }) {
   }, [ws, brand?.id]);
 
   async function setIcon(f: KnowledgeCollection, icon: string) {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/knowledge/collections/{id}", { params: { path: { ws, id: f.id } }, body: { icon: icon as never } });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/knowledge/collections/{id}", { params: { path: { brand: pickedBrandId(), id: f.id } }, body: { icon: icon as never } });
     if (error) return toast(errorMessage(error), "error");
     setFolders((l) => l?.map((x) => (x.id === data.id ? data : x)) ?? null);
   }
@@ -497,8 +505,8 @@ function Designer({ ws, hc, canManage, onClose, onSaved }: { ws: string; hc: Hel
   useEffect(() => {
     const n = ++seq.current;
     const t = setTimeout(async () => {
-      const { data, error } = await api.POST("/v1/workspaces/{ws}/help-centres/{id}/preview", {
-        params: { path: { ws, id: hc.id } },
+      const { data, error } = await api.POST("/v1/brands/{brand}/help-centres/{id}/preview", {
+        params: { path: { brand: pickedBrandId(), id: hc.id } },
         body: { settings: ready, name, page },
         parseAs: "text",
       });
@@ -519,8 +527,8 @@ function Designer({ ws, hc, canManage, onClose, onSaved }: { ws: string; hc: Hel
 
   async function save() {
     setBusy(true);
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/help-centres/{id}", {
-      params: { path: { ws, id: hc.id } },
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/help-centres/{id}", {
+      params: { path: { brand: pickedBrandId(), id: hc.id } },
       body: { settings: ready, ...(name !== hc.name ? { name } : {}), ...(slug !== hc.slug ? { slug } : {}) },
     });
     setBusy(false);

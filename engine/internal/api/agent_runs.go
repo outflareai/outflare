@@ -26,23 +26,26 @@ import (
 
 func (s *Server) routesAgentRuns(mux *http.ServeMux) {
 	read, run := auth.ScopeAgentsRead, auth.ScopeAgentsRun
-	base := "/v1/workspaces/{ws}/agent-runs"
-	mux.HandleFunc("GET "+base, s.inBrand(read, s.listAgentRuns))
-	mux.HandleFunc("GET "+base+"/{id}", s.inBrand(read, s.getAgentRun))
-	mux.HandleFunc("GET "+base+"/{id}/updates", s.inBrand(read, s.listAgentRunUpdates))
-	mux.HandleFunc("POST "+base+"/{id}/updates", s.inBrand(run, s.addAgentRunUpdate))
-	mux.HandleFunc("POST "+base+"/{id}/pause", s.inBrand(run, s.pauseAgentRun))
-	mux.HandleFunc("POST "+base+"/{id}/resume", s.inBrand(run, s.resumeAgentRun))
-	mux.HandleFunc("POST "+base+"/{id}/stop", s.inBrand(run, s.stopAgentRun))
-	mux.HandleFunc("POST "+base+"/{id}/complete", s.inBrand(run, s.completeAgentRun))
+	for _, b := range []struct {
+		base string
+		on   func(string, http.HandlerFunc) http.HandlerFunc
+	}{{"/v1/workspaces/{ws}/agent-runs", s.inBrand}, {"/v1/brands/{brand}/agent-runs", s.onBrand}} {
+		mux.HandleFunc("GET "+b.base, b.on(read, s.listAgentRuns))
+		mux.HandleFunc("GET "+b.base+"/{id}", b.on(read, s.getAgentRun))
+		mux.HandleFunc("GET "+b.base+"/{id}/updates", b.on(read, s.listAgentRunUpdates))
+		mux.HandleFunc("POST "+b.base+"/{id}/updates", b.on(run, s.addAgentRunUpdate))
+		mux.HandleFunc("POST "+b.base+"/{id}/pause", b.on(run, s.pauseAgentRun))
+		mux.HandleFunc("POST "+b.base+"/{id}/resume", b.on(run, s.resumeAgentRun))
+		mux.HandleFunc("POST "+b.base+"/{id}/stop", b.on(run, s.stopAgentRun))
+		mux.HandleFunc("POST "+b.base+"/{id}/complete", b.on(run, s.completeAgentRun))
+	}
 }
 
 // isAgentRunRoute reports whether r manages a run itself: a run's own
 // bookkeeping (its updates, completing it), never a change to the
 // workspace, so the action gate leaves it alone.
 func isAgentRunRoute(r *http.Request) bool {
-	rest := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/"+r.PathValue("ws"))
-	return strings.HasPrefix(rest, "/agent-runs")
+	return strings.HasPrefix(routeRest(r), "/agent-runs")
 }
 
 // Run modes.
@@ -125,6 +128,25 @@ func (s *Server) loadAgentRun(ctx context.Context, a *access, id string) (agentR
 	return v, err
 }
 
+// onRouteRun reports whether a run belongs on the route it was asked for:
+// a brand's runs on the brand's own routes, and runs for no brand (the
+// team's) on the workspace's.
+func onRouteRun(a *access, v agentRunView) bool {
+	if a.Brand == "" && v.BrandID != nil {
+		return false
+	}
+	return a.sees(v.BrandID)
+}
+
+// loadRouteAgentRun is loadAgentRun for the agent runs routes.
+func (s *Server) loadRouteAgentRun(ctx context.Context, a *access, id string) (agentRunView, error) {
+	v, err := s.loadAgentRun(ctx, a, id)
+	if err == nil && !onRouteRun(a, v) {
+		return agentRunView{}, errNotFound
+	}
+	return v, err
+}
+
 // errRunState is a change a run's state doesn't allow.
 type errRunState string
 
@@ -161,6 +183,13 @@ func (s *Server) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 	// A run without a brand works for the whole workspace, so a picked
 	// brand shows it beside its own, as for actions.
 	where += actionBrandSQL(sel, "r.brand_id", &args)
+	// On a brand's own route, only that brand's runs; on the workspace's,
+	// only the team's, for no brand.
+	if a.Brand != "" {
+		where += " AND r.brand_id IS NOT NULL"
+	} else {
+		where += " AND r.brand_id IS NULL"
+	}
 	if st := r.URL.Query().Get("status"); st != "" {
 		args = append(args, strings.Split(st, ","))
 		where += " AND r.status = ANY($" + itoa(len(args)) + ")"
@@ -204,7 +233,7 @@ func (s *Server) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getAgentRun(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	v, err := s.loadAgentRun(ctx, a, r.PathValue("id"))
+	v, err := s.loadRouteAgentRun(ctx, a, r.PathValue("id"))
 	if s.agentRunError(w, r, err) {
 		return
 	}
@@ -305,7 +334,7 @@ func (s *Server) agentRunUpdates(ctx context.Context, runID string, limit int) (
 
 func (s *Server) listAgentRunUpdates(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
-	v, err := s.loadAgentRun(r.Context(), a, r.PathValue("id"))
+	v, err := s.loadRouteAgentRun(r.Context(), a, r.PathValue("id"))
 	if s.agentRunError(w, r, err) {
 		return
 	}
@@ -341,7 +370,7 @@ func addRunUpdate(ctx context.Context, tx pgx.Tx, runID, ws, actorID, author, ki
 func (s *Server) addAgentRunUpdate(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	ctx := r.Context()
-	v, err := s.loadAgentRun(ctx, a, r.PathValue("id"))
+	v, err := s.loadRouteAgentRun(ctx, a, r.PathValue("id"))
 	if s.agentRunError(w, r, err) {
 		return
 	}
@@ -404,7 +433,7 @@ func (s *Server) changeAgentRun(w http.ResponseWriter, r *http.Request, change f
 			return errNotFound
 		}
 		v, err := scanAgentRun(tx.QueryRow(ctx, `SELECT `+agentRunColumns+` `+agentRunFrom+` WHERE r.id = $1 AND r.workspace_id = $2 FOR UPDATE OF r`, r.PathValue("id"), a.WorkspaceID))
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !a.sees(v.BrandID)) {
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !onRouteRun(a, v)) {
 			return errNotFound
 		}
 		if err != nil {
@@ -706,7 +735,7 @@ func (s *Server) runPlaybook(w http.ResponseWriter, r *http.Request) {
 					kitInputs[ki.Name] = v
 				}
 			}
-			if _, err := applyKit(ctx, tx, a, kit, kitInputs, kitFromCatalog); err != nil {
+			if _, err := applyKit(ctx, tx, a, "", kit, kitInputs, kitFromCatalog); err != nil {
 				return err
 			}
 		}

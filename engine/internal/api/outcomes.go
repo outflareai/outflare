@@ -517,6 +517,13 @@ func (s *Server) spendFilter(r *http.Request) (outcomes.SpendFilter, error) {
 		return f, err
 	}
 	f.Category, f.Provider = q.Get("category"), q.Get("provider")
+	switch q.Get("outreach") {
+	case "", "false":
+	case "true":
+		f.Outreach = true
+	default:
+		return f, errors.New("outreach is true or false")
+	}
 	return f, nil
 }
 
@@ -526,6 +533,11 @@ func (s *Server) listSpend(w http.ResponseWriter, r *http.Request) {
 	if s.badQuery(w, r, err) {
 		return
 	}
+	sel, ok := s.brandFilter(w, r)
+	if !ok {
+		return
+	}
+	f.Brand, f.BrandsIn = sel.id, sel.in
 	list, err := outcomes.ListSpend(r.Context(), s.pool, a.WorkspaceID, f)
 	if s.outcomeError(w, r, err, "spend entry") {
 		return
@@ -566,6 +578,8 @@ type spendInput struct {
 	OccurredAt    *time.Time `json:"occurred_at"`
 	Ref           *string    `json:"ref"`
 	Note          string     `json:"note"`
+	BrandID       *string    `json:"brand_id"`
+	Channel       string     `json:"channel"`
 }
 
 func (s *Server) createSpend(w http.ResponseWriter, r *http.Request) {
@@ -574,16 +588,26 @@ func (s *Server) createSpend(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	for _, id := range []*string{req.SequenceID, req.MissionID, req.MailboxID, req.IntegrationID} {
+	for _, id := range []*string{req.SequenceID, req.MissionID, req.MailboxID, req.IntegrationID, req.BrandID} {
 		if id != nil && !validUUID(*id) {
-			writeError(w, r, http.StatusBadRequest, "invalid_request", "sequence_id, mission_id, mailbox_id and integration_id must be ids")
+			writeError(w, r, http.StatusBadRequest, "invalid_request", "sequence_id, mission_id, mailbox_id, integration_id and brand_id must be ids")
 			return
 		}
+	}
+	// A charge with no sequence is the brand's it names, else the
+	// brand route's; a brand-limited caller can't book one for a brand it
+	// can't see.
+	if req.BrandID == nil && req.SequenceID == nil && a.Brand != "" {
+		req.BrandID = &a.Brand
+	}
+	if req.BrandID != nil && !a.sees(req.BrandID) {
+		writeError(w, r, http.StatusNotFound, "not_found", "brand not found")
+		return
 	}
 	e := outcomes.Entry{WorkspaceID: a.WorkspaceID, SequenceID: req.SequenceID, MissionID: req.MissionID,
 		MailboxID: req.MailboxID, Domain: req.Domain, Category: req.Category, Provider: req.Provider, IntegrationID: req.IntegrationID,
 		Units: req.Units, UnitName: req.UnitName, AmountCents: req.AmountCents, Currency: req.Currency, Ref: req.Ref, Note: req.Note,
-		Source: outcomes.SourceManual, ActorID: &a.ActorID}
+		Source: outcomes.SourceManual, ActorID: &a.ActorID, BrandID: req.BrandID, Channel: req.Channel}
 	if req.OccurredAt != nil {
 		e.OccurredAt = *req.OccurredAt
 	}

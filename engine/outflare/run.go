@@ -60,6 +60,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/experiments"
 	"github.com/outflareai/outflare/engine/internal/fixauto"
 	"github.com/outflareai/outflare/engine/internal/fxrates"
+	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/health"
 	"github.com/outflareai/outflare/engine/internal/imports"
 	"github.com/outflareai/outflare/engine/internal/inbound"
@@ -95,6 +96,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/support"
 	"github.com/outflareai/outflare/engine/internal/sysmail"
 	"github.com/outflareai/outflare/engine/internal/telemetry"
+	"github.com/outflareai/outflare/engine/internal/tgsession"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/vendorsync"
 	"github.com/outflareai/outflare/engine/internal/verify"
@@ -293,6 +295,16 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	analyticsSync := &analyticsync.Syncer{Pool: pool, Store: integrations, Log: log}
 	analyticsSync.Register(queue)
 	(&searchinsights.Service{Pool: pool, Store: integrations, Log: log}).Register(queue)
+	// Company Telegram accounts signed in as a linked device (QR scan), on
+	// the workspace's own Telegram app.
+	// A proxy is an address the workspace types in, so it is held to the
+	// public internet like the connectors.
+	telegramDial := &net.Dialer{Timeout: 20 * time.Second}
+	if !cfg.ConnectorsAllowPrivate {
+		telegramDial.Control = netguard.Control
+	}
+	telegramAccounts := &tgsession.Service{Pool: pool, Box: box, Store: integrations, Telegram: tgsession.MTProto{Dial: telegramDial.DialContext}, Log: log}
+	telegramAccounts.Register(queue)
 	seoSync := &seosync.Syncer{Pool: pool, Store: integrations, Log: log}
 	seoSync.Register(queue)
 	rankChecks := &ranks.Service{Pool: pool, Store: integrations, Log: log}
@@ -457,6 +469,7 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 	researcher.Models = apiServer.AIModels()
 	labeller.Models = apiServer.AIModels()
 	browserSvc.Models = apiServer.AIModels()
+	telegramAccounts.Models = apiServer.AIModels()
 	linkChecker.Models = apiServer.AIModels()
 	visibility.Models = apiServer.AIVisibilityModels()
 	visibility.Screens = apiServer.AIVisibilityScreens()
@@ -522,6 +535,16 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			if err := metrics.Serve(ctx, cfg.MetricsAddr, metrics.Options{Token: cfg.MetricsToken, Pprof: cfg.MetricsPprof}); err != nil {
 				track.Fail(ctx, log, track.Event{Name: "metrics.listen_failed", ActorType: "system", Surface: "system"}, "unavailable", err)
 			}
+		}()
+	}
+	// Every process that answers visitors looks up where they are, so each
+	// keeps DB-IP's city and network files current itself.
+	if cfg.Role != config.RoleWorker && cfg.Role != config.RoleBrowser {
+		geo := &geoip.Updater{Dir: cfg.GeoIPDir, Download: cfg.GeoIPDownload, Log: log}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			geo.Run(ctx, 6*time.Hour)
 		}()
 	}
 	wg.Add(1)
@@ -716,6 +739,12 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 		go func() {
 			defer wg.Done()
 			dataNet.Run(ctx, time.Hour)
+		}()
+		// Connected company Telegram accounts are checked every few hours.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			telegramAccounts.Run(ctx, 15*time.Minute)
 		}()
 		// Raw inbound messages are deleted after 30 days.
 		wg.Add(1)

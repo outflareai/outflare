@@ -494,7 +494,7 @@ function VisitorSheet({ ws, v, canManage, onClose, onChanged, go }: {
               )}
             </div>
           )}
-          {v.kind === "person" && v.record_id && <RecordPartners ws={ws} record={v.record_id} go={() => go("partners")} />}
+          {v.kind === "person" && v.record_id && <RecordPartners ws={ws} record={v.record_id} go={go} />}
           {fromLookup && (
             <div className="space-y-2 rounded-md border p-3">
               <div className="text-muted-foreground">

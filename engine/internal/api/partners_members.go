@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,15 +45,21 @@ type partnerPromoCode struct {
 }
 
 type partnerStats struct {
-	Clicks         int   `json:"clicks"`
-	Referrals      int   `json:"referrals"`
-	Customers      int   `json:"customers"`
-	SalesCents     int64 `json:"sales_cents"`
-	PendingCents   int64 `json:"pending_cents"`
-	ApprovedCents  int64 `json:"approved_cents"`
-	PaidCents      int64 `json:"paid_cents"`
-	BalanceCents   int64 `json:"balance_cents"`
-	PendingActions int   `json:"pending_actions"`
+	Clicks         int               `json:"clicks"`
+	Referrals      int               `json:"referrals"`
+	Customers      int               `json:"customers"`
+	SalesCents     int64             `json:"sales_cents"`
+	PendingCents   int64             `json:"pending_cents"`
+	ApprovedCents  int64             `json:"approved_cents"`
+	PaidCents      int64             `json:"paid_cents"`
+	BalanceCents   int64             `json:"balance_cents"`
+	PendingActions int               `json:"pending_actions"`
+	HeldAtSource   heldAtSourceCents `json:"held_at_source"`
+}
+
+type heldAtSourceCents struct {
+	PendingCents  int64 `json:"pending_cents"`
+	ApprovedCents int64 `json:"approved_cents"`
 }
 
 type partnerView struct {
@@ -92,6 +99,18 @@ type partnerView struct {
 	campaignMedium string
 }
 
+// A partner's totals, in partnerSelect and in the sorts on them.
+const (
+	partnerClicksSQL    = `(SELECT count(*) FROM partner_clicks k WHERE k.membership_id = m.id)::int`
+	partnerCustomersSQL = `(SELECT count(*) FROM partner_referrals f WHERE f.membership_id = m.id AND f.first_sale_at IS NOT NULL)::int`
+	partnerSalesSQL     = `COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END) FROM partner_conversions v
+	                 JOIN partner_referrals f ON f.id = v.referral_id WHERE f.membership_id = m.id AND v.type IN ('sale', 'refund')), 0)::bigint`
+	partnerPaidSQL = `COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'paid')
+	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint`
+	partnerBalanceSQL = `COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved' AND w.payout_id IS NULL AND NOT ` + heldAtSource + `)
+	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint`
+)
+
 // partnerSelect reads memberships with their record, program, campaign
 // and totals. Cash totals count cash, fees and adjustments.
 const partnerSelect = `
@@ -102,20 +121,21 @@ const partnerSelect = `
 	       COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, ''),
 	       COALESCE((SELECT json_agg(json_build_object('code', pc.code, 'coupon', pc.coupon, 'status', pc.sync_status, 'error', pc.sync_error, 'rules', pc.rules)
 	                 ORDER BY pc.created_at) FROM partner_promo_codes pc WHERE pc.membership_id = m.id), '[]'),
-	       (SELECT count(*) FROM partner_clicks k WHERE k.membership_id = m.id)::int,
+	       ` + partnerClicksSQL + `,
 	       (SELECT count(*) FROM partner_referrals f WHERE f.membership_id = m.id)::int,
-	       (SELECT count(*) FROM partner_referrals f WHERE f.membership_id = m.id AND f.first_sale_at IS NOT NULL)::int,
-	       COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END) FROM partner_conversions v
-	                 JOIN partner_referrals f ON f.id = v.referral_id WHERE f.membership_id = m.id AND v.type IN ('sale', 'refund')), 0)::bigint,
+	       ` + partnerCustomersSQL + `,
+	       ` + partnerSalesSQL + `,
 	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'pending')
 	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
 	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved')
 	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
-	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'paid')
-	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
-	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved' AND w.payout_id IS NULL AND NOT ` + heldAtSource + `)
-	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
+	       ` + partnerPaidSQL + `,
+	       ` + partnerBalanceSQL + `,
 	       (SELECT count(*) FROM partner_rewards w WHERE w.membership_id = m.id AND w.kind = 'action' AND w.status = 'approved')::int,
+	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'pending' AND ` + heldAtSource + `)
+	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
+	       COALESCE((SELECT sum(w.amount_cents) FILTER (WHERE w.status = 'approved' AND ` + heldAtSource + `)
+	                 FROM partner_rewards w WHERE w.membership_id = m.id AND w.side = 'partner' AND w.kind <> 'action'), 0)::bigint,
 	       m.created_at, m.updated_at
 	FROM partner_memberships m
 	JOIN partner_programs p ON p.id = m.program_id
@@ -129,7 +149,7 @@ func scanPartner(row pgx.Row) (partnerView, error) {
 	err := row.Scan(&v.ID, &v.ProgramID, &v.Program, &v.brandID, &v.RecordID, &v.Name, &v.Email, &v.Code, &v.Status, &v.GroupID, &v.CampaignID,
 		&v.payoutSealed, &v.PayoutType, &v.PayoutToken, &v.PostbackURL, &v.Note, &v.Source, &v.Currency, &v.landing, &v.campaignSlug, &v.campaignCode, &v.campaignSrc, &v.campaignMedium,
 		&v.PromoCodes, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents, &st.ApprovedCents, &st.PaidCents,
-		&st.BalanceCents, &st.PendingActions, &v.CreatedAt, &v.UpdatedAt)
+		&st.BalanceCents, &st.PendingActions, &st.HeldAtSource.PendingCents, &st.HeldAtSource.ApprovedCents, &v.CreatedAt, &v.UpdatedAt)
 	return v, err
 }
 
@@ -213,27 +233,56 @@ func (s *Server) findPartner(w http.ResponseWriter, r *http.Request, ws, id stri
 	return &v, true
 }
 
+// partnerSorts are the orders listPartners takes: each ends in m.id so
+// pages never skip or repeat a partner.
+var partnerSorts = map[string]string{
+	"newest":    `m.created_at DESC, m.id DESC`,
+	"oldest":    `m.created_at, m.id`,
+	"name":      `COALESCE(r.name, '') = '', lower(r.name), m.id`,
+	"code":      `lower(m.code), m.id`,
+	"clicks":    partnerClicksSQL + ` DESC, m.id`,
+	"customers": partnerCustomersSQL + ` DESC, m.id`,
+	"sales":     partnerSalesSQL + ` DESC, m.id`,
+	"balance":   partnerBalanceSQL + ` DESC, m.id`,
+	"paid":      partnerPaidSQL + ` DESC, m.id`,
+}
+
+// listPartners finds partners across every one the caller can see: q is
+// part of a code, promo code, name or current email, a partner's or their
+// record's whole id, or an imported partner's id on the platform it came
+// from. It pages by offset, whatever the sort: it finds the page's ids
+// first, so a deep page doesn't total every partner it skips.
 func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	a := accessFrom(r.Context())
 	q := r.URL.Query()
 	status, program, record, details := q.Get("status"), q.Get("program"), q.Get("record_id"), q.Get("payout_details")
-	if status != "" && !slices.Contains([]string{"pending", "active", "suspended", "rejected"}, status) {
+	search, sort := strings.TrimSpace(q.Get("q")), q.Get("sort")
+	if sort == "" {
+		sort = "newest"
+	}
+	order, sorted := partnerSorts[sort]
+	switch {
+	case status != "" && !slices.Contains([]string{"pending", "active", "suspended", "rejected"}, status):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "status is pending, active, suspended or rejected")
 		return
-	}
-	if details != "" && details != "missing" && details != "set" {
+	case details != "" && details != "missing" && details != "set":
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "payout_details is missing or set")
 		return
-	}
-	if record != "" && !validUUID(record) {
+	case record != "" && !validUUID(record):
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "record_id is a record's id")
+		return
+	case len(search) > 200:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "q is at most 200 characters")
+		return
+	case !sorted:
+		writeError(w, r, http.StatusBadRequest, "invalid_request", "sort is newest, oldest, name, code, clicks, customers, sales, balance or paid")
 		return
 	}
 	limit, ok := pageLimit(w, r, 100, 500)
 	if !ok {
 		return
 	}
-	before, ok := beforeTime(w, r)
+	offset, ok := pageOffsetParam(w, r)
 	if !ok {
 		return
 	}
@@ -241,11 +290,43 @@ func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	args := []any{a.WorkspaceID, status, strings.ToLower(program), record, before, limit + 1, details}
-	rows, err := s.pool.Query(r.Context(), partnerSelect+`
-		AND ($2 = '' OR m.status = $2) AND ($3 = '' OR p.id::text = $3 OR p.slug = $3) AND ($4 = '' OR m.record_id::text = $4)
-		AND ($5::timestamptz IS NULL OR m.created_at < $5) AND ($7 = '' OR (m.payout_method IS NULL) = ($7 = 'missing'))`+sel.sql("p.brand_id", &args)+`
-		ORDER BY m.created_at DESC LIMIT $6`, args...)
+	var id *string
+	if validUUID(search) {
+		lower := strings.ToLower(search)
+		id = &lower
+	}
+	pattern := ""
+	if search != "" {
+		pattern = "%" + escapeLike(search) + "%"
+	}
+	args := []any{a.WorkspaceID, status, strings.ToLower(program), record, offset, limit + 1, details, pattern, search, id}
+	ctx := r.Context()
+	idRows, err := s.pool.Query(ctx, `SELECT m.id::text FROM partner_memberships m JOIN partner_programs p ON p.id = m.program_id
+		LEFT JOIN records r ON r.id = m.record_id
+		WHERE m.workspace_id = $1 AND ($2 = '' OR m.status = $2) AND ($3 = '' OR p.id::text = $3 OR p.slug = $3) AND ($4 = '' OR m.record_id::text = $4)
+		AND ($7 = '' OR (m.payout_method IS NULL) = ($7 = 'missing'))
+		AND ($8 = '' OR m.code ILIKE $8 OR r.name ILIKE $8
+			OR m.id IN (SELECT pc.membership_id FROM partner_promo_codes pc WHERE pc.workspace_id = $1 AND pc.code ILIKE $8)
+			OR EXISTS (SELECT 1 FROM record_identities i WHERE i.workspace_id = $1 AND i.record_id = m.record_id AND i.namespace = 'email'
+				AND i.valid_to IS NULL AND i.value ILIKE $8)
+			OR EXISTS (SELECT 1 FROM partner_import_refs x WHERE x.workspace_id = $1 AND x.local_id = m.id AND x.kind = 'partner' AND x.external_id = $9)
+			OR m.id = $10::uuid OR m.record_id = $10::uuid)`+sel.sql("p.brand_id", &args)+`
+		ORDER BY `+order+` LIMIT $6 OFFSET $5`, args...)
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	ids, err := pgx.CollectRows(idRows, pgx.RowTo[string])
+	if err != nil {
+		s.internal(w, r, err)
+		return
+	}
+	var next any
+	if len(ids) > limit {
+		ids = ids[:limit]
+		next = strconv.Itoa(offset + limit)
+	}
+	rows, err := s.pool.Query(ctx, partnerSelect+` AND m.id = ANY($2::uuid[])`, a.WorkspaceID, ids)
 	if err != nil {
 		s.internal(w, r, err)
 		return
@@ -255,12 +336,12 @@ func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	bases := map[string]string{}
-	var next *time.Time
-	if len(list) > limit {
-		list = list[:limit]
-		next = &list[limit-1].CreatedAt
+	at := map[string]int{}
+	for i, id := range ids {
+		at[id] = i
 	}
+	slices.SortFunc(list, func(x, y partnerView) int { return at[x.ID] - at[y.ID] })
+	bases := map[string]string{}
 	for i := range list {
 		base, ok := bases[list[i].ProgramID]
 		if !ok {
@@ -275,7 +356,7 @@ func (s *Server) listPartners(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []partnerView{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageBefore, next)})
+	writeJSON(w, http.StatusOK, map[string]any{"data": list, "next_cursor": nextCursor(pageOffset, next)})
 }
 
 func (s *Server) getPartner(w http.ResponseWriter, r *http.Request) {
@@ -483,6 +564,11 @@ func (s *Server) joinPartner(ctx context.Context, tx pgx.Tx, ws string, p *princ
 		MessageID:  "partner.joined:" + id, RequestID: RequestID(ctx)}); err != nil {
 		return "", err
 	}
+	// An affiliate partnership in the pipeline for this partner moves
+	// to signed up (brand_partnership_actions.go).
+	if err := enqueueAffiliateSync(ctx, tx, ws, id, "joined"); err != nil {
+		return "", err
+	}
 	return id, partnerRecord(ctx, tx, p, ws, "partner.created", "partner", id,
 		map[string]any{"program_id": prog.ID, "program_kind": prog.Kind, "record_id": rec, "status": status, "source": source})
 }
@@ -618,7 +704,7 @@ func (s *Server) updatePartner(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		data := map[string]any{"program_id": cur.ProgramID, "record_id": cur.RecordID, "status": coalesce(in.Status, cur.Status),
-			"previous_status": cur.Status, "group_id": group}
+			"previous_status": cur.Status, "group_id": group, "changed": partnerChanges(cur, in, group)}
 		return partnerRecord(ctx, tx, &a.principal, a.WorkspaceID, "partner.updated", "partner", cur.ID, data)
 	})
 	if s.allocError(w, r, err) {
@@ -627,6 +713,30 @@ func (s *Server) updatePartner(w http.ResponseWriter, r *http.Request) {
 	if v, ok := s.findPartner(w, r, a.WorkspaceID, cur.ID); ok {
 		writeJSON(w, http.StatusOK, v)
 	}
+}
+
+// partnerChanges names the fields an update changes, never their values:
+// payout details stay out of the audit log.
+func partnerChanges(cur *partnerView, in partnerInput, group *string) []string {
+	same := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	out := []string{}
+	for _, c := range []struct {
+		name    string
+		changed bool
+	}{
+		{"status", in.Status != nil && *in.Status != cur.Status},
+		{"group_id", !same(group, cur.GroupID)},
+		{"note", in.Note != nil && *in.Note != cur.Note},
+		{"postback_url", in.PostbackURL != nil && strings.TrimSpace(*in.PostbackURL) != cur.PostbackURL},
+		{"payout_method", in.PayoutMethod != nil && strings.TrimSpace(*in.PayoutMethod) != cur.PayoutMethod},
+		{"payout_type", in.PayoutType.Set && !same(in.PayoutType.Value, cur.PayoutType)},
+		{"payout_token", in.PayoutToken.Set && !same(trimPtr(in.PayoutToken.Value), cur.PayoutToken)},
+	} {
+		if c.changed {
+			out = append(out, c.name)
+		}
+	}
+	return out
 }
 
 // addPartnerPromoCode ties a promo code (as customers type it at checkout)
@@ -863,9 +973,12 @@ func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) 
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'paid') FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
 		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND payout_id IS NULL AND NOT `+heldAtSource+`) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
-		       (SELECT count(*) FROM w WHERE kind = 'action' AND status = 'approved')::int`, a.WorkspaceID, prog.ID).
+		       (SELECT count(*) FROM w WHERE kind = 'action' AND status = 'approved')::int,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'pending' AND `+heldAtSource+`) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint,
+		       COALESCE((SELECT sum(amount_cents) FILTER (WHERE status = 'approved' AND `+heldAtSource+`) FROM w WHERE side = 'partner' AND kind <> 'action'), 0)::bigint`,
+		a.WorkspaceID, prog.ID).
 		Scan(&active, &pending, &suspended, &rejected, &missing, &st.Clicks, &st.Referrals, &st.Customers, &st.SalesCents, &st.PendingCents,
-			&st.ApprovedCents, &st.PaidCents, &st.BalanceCents, &st.PendingActions)
+			&st.ApprovedCents, &st.PaidCents, &st.BalanceCents, &st.PendingActions, &st.HeldAtSource.PendingCents, &st.HeldAtSource.ApprovedCents)
 	if err != nil {
 		s.internal(w, r, err)
 		return

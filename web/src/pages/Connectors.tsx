@@ -49,6 +49,7 @@ const categories: { id: ConnectorCategory; label: string; help: string }[] = [
   { id: "registrar", label: "Domain registrars", help: "Buy and renew sending domains." },
   { id: "warehouse", label: "Warehouses", help: "Export sends, replies and results." },
   { id: "notification", label: "Notifications", help: "Get alerts where your team works." },
+  { id: "messaging", label: "Messaging", help: "Read the company's own Telegram accounts' chats into customer records. Connect your Telegram app here, then sign each account in under Settings, Team." },
   { id: "knowledge", label: "Knowledge sources", help: "Let the support assistant find answers your team already wrote down, in the channels you choose. Read only; every answer it finds waits for a person to approve." },
   { id: "custom", label: "Custom", help: "Any HTTP API or MCP server." },
 ];

@@ -288,19 +288,20 @@ const FailingFor = 5 * 24 * time.Hour
 // attempt sends a delivery once and records the result. lastTry marks it
 // failed if this try fails; otherwise it stays pending and attempt returns
 // what went wrong, for the queue to retry. force sends it whatever its
-// status, for a redelivery by hand.
+// status, for a redelivery by hand. A test is recorded but never touches
+// the endpoint's failure streak, last success or enabled state.
 func (s *Service) attempt(ctx context.Context, deliveryID int64, lastTry, force bool) (retry string, err error) {
 	var (
-		endpointID, eventID, rawURL string
-		payload, sealed, prevSealed []byte
-		prevExpires                 *time.Time
-		enabled                     bool
-		status                      string
+		endpointID, eventID, eventType, rawURL string
+		payload, sealed, prevSealed            []byte
+		prevExpires                            *time.Time
+		enabled                                bool
+		status                                 string
 	)
 	err = s.Pool.QueryRow(ctx, `
-		SELECT d.endpoint_id, d.event_id, d.payload, d.status, e.url, e.secret, e.previous_secret, e.previous_secret_expires_at, e.enabled
+		SELECT d.endpoint_id, d.event_id, d.event_type, d.payload, d.status, e.url, e.secret, e.previous_secret, e.previous_secret_expires_at, e.enabled
 		  FROM webhook_deliveries d JOIN webhook_endpoints e ON e.id = d.endpoint_id
-		 WHERE d.id = $1`, deliveryID).Scan(&endpointID, &eventID, &payload, &status, &rawURL, &sealed, &prevSealed, &prevExpires, &enabled)
+		 WHERE d.id = $1`, deliveryID).Scan(&endpointID, &eventID, &eventType, &payload, &status, &rawURL, &sealed, &prevSealed, &prevExpires, &enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil // the endpoint was deleted
 	}
@@ -354,6 +355,9 @@ func (s *Service) attempt(ctx context.Context, deliveryID int64, lastTry, force 
 			deliveryID, endpointID, codePtr, nullIf(errText), took, force, ok); err != nil {
 			return err
 		}
+		if eventType == TestEvent {
+			return nil
+		}
 		if ok {
 			_, err := tx.Exec(ctx, `UPDATE webhook_endpoints SET last_success_at = now(), failing_since = NULL WHERE id = $1`, endpointID)
 			return err
@@ -386,8 +390,9 @@ func (s *Service) attempt(ctx context.Context, deliveryID int64, lastTry, force 
 	return errText, nil
 }
 
-// SendTest sends a webhook.test event to one endpoint now, and returns the
-// delivery with the result.
+// SendTest sends a webhook.test event to one endpoint now, once, and
+// returns the delivery with the result. It is listed with the endpoint's
+// deliveries; nothing retries it.
 func (s *Service) SendTest(ctx context.Context, workspaceID, endpointID string, actor Ref) (int64, error) {
 	ev := Envelope{ID: "evt_test_" + randomID(), Type: TestEvent, CreatedAt: time.Now().UTC(), WorkspaceID: workspaceID, Actor: actor,
 		Data: map[string]any{"message": "This is a test event from Outflare."}}

@@ -27,9 +27,13 @@ import (
 
 func (s *Server) routesAdTests(mux *http.ServeMux) {
 	manage := auth.ScopeAdsManage
+	mux.HandleFunc("GET /v1/brands/{brand}/ads/tests", s.onBrand(auth.ScopeAnalyticsRead, s.listAdTests))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/ads/tests", s.inBrand(auth.ScopeAnalyticsRead, s.listAdTests))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/tests", s.onBrand(manage, s.createAdTest))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/tests", s.inBrand(manage, s.createAdTest))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/tests/{id}/keep", s.onBrand(manage, s.endAdTest("keep")))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/tests/{id}/keep", s.inBrand(manage, s.endAdTest("keep")))
+	mux.HandleFunc("POST /v1/brands/{brand}/ads/tests/{id}/roll-back", s.onBrand(manage, s.endAdTest("roll_back")))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/ads/tests/{id}/roll-back", s.inBrand(manage, s.endAdTest("roll_back")))
 }
 

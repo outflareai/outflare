@@ -29,12 +29,19 @@ import (
 
 func (s *Server) routesHelpCentres(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
+	mux.HandleFunc("GET /v1/brands/{brand}/help-centres", s.onBrand(read, s.listHelpCentres))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/help-centres", s.inBrand(read, s.listHelpCentres))
+	mux.HandleFunc("POST /v1/brands/{brand}/help-centres", s.onBrand(manage, s.createHelpCentre))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/help-centres", s.inBrand(manage, s.createHelpCentre))
+	mux.HandleFunc("GET /v1/brands/{brand}/help-centres/{id}", s.onBrand(read, s.getHelpCentre))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/help-centres/{id}", s.inBrand(read, s.getHelpCentre))
+	mux.HandleFunc("PATCH /v1/brands/{brand}/help-centres/{id}", s.onBrand(manage, s.updateHelpCentre))
 	mux.HandleFunc("PATCH /v1/workspaces/{ws}/help-centres/{id}", s.inBrand(manage, s.updateHelpCentre))
+	mux.HandleFunc("DELETE /v1/brands/{brand}/help-centres/{id}", s.onBrand(manage, s.deleteHelpCentre))
 	mux.HandleFunc("DELETE /v1/workspaces/{ws}/help-centres/{id}", s.inBrand(manage, s.deleteHelpCentre))
+	mux.HandleFunc("POST /v1/brands/{brand}/help-centres/{id}/preview", s.onBrand(read, s.previewHelpCentre))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/help-centres/{id}/preview", s.inBrand(read, s.previewHelpCentre))
+	mux.HandleFunc("GET /v1/brands/{brand}/help-centres/{id}/stats", s.onBrand(read, s.helpCentreStats))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/help-centres/{id}/stats", s.inBrand(read, s.helpCentreStats))
 }
 
@@ -362,7 +369,7 @@ func (s *Server) helpCentreFor(ctx context.Context, q interface {
 		return helpCentreView{}, errNotFound
 	}
 	v, err := s.scanHelpCentre(q.QueryRow(ctx, helpCentreSelect+` WHERE h.workspace_id = $1 AND h.id = $2`, a.WorkspaceID, id))
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && a.Brands != nil && v.BrandID != nil && !slices.Contains(a.Brands, *v.BrandID)) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && a.seenBrands() != nil && v.BrandID != nil && !slices.Contains(a.seenBrands(), *v.BrandID)) {
 		return v, errNotFound
 	}
 	return v, err

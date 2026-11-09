@@ -1,0 +1,49 @@
+id: partnerships-seo
+version: 1
+title: SEO link partnerships
+summary: A pipeline for backlink outreach (guest posts, link inserts, resource pages and mentions), from first pitch to a live link Presence keeps checking.
+
+option_sets:
+  - key: link_partnership_stage
+    name: SEO partnership stage
+    options:
+      - { key: prospect, label: Prospect }
+      - { key: pitched, label: Pitched }
+      - { key: replied, label: Replied }
+      - { key: negotiating, label: Negotiating }
+      - { key: agreed, label: Agreed }
+      - { key: content_sent, label: Content sent }
+      - { key: live, label: Live }
+      - { key: declined, label: Declined }
+      - { key: no_reply, label: No reply }
+  - key: link_type
+    name: Link type
+    options:
+      - { key: guest_post, label: Guest post }
+      - { key: link_insert, label: Link insert }
+      - { key: resource_page, label: Resource page }
+      - { key: mention, label: Mention }
+
+record_types:
+  - key: link_partnership
+    name: SEO partnership
+    plural: SEO partnerships
+    description: |
+      A site you want a link from: a guest post, a link in an existing
+      article, a resource page or a mention, from the first pitch to the
+      link going live.
+    stage: stage
+    fields:
+      - { key: stage, label: Stage, value_type: status, option_set: link_partnership_stage, filterable: true }
+      - { key: company, label: Site, value_type: record_reference, target_type: account, filterable: true, description: "The site's company record." }
+      - { key: contact, label: Contact, value_type: record_reference, target_type: person }
+      - { key: owner, label: Owner, value_type: actor_reference, filterable: true }
+      - { key: target_page, label: Our target page, value_type: url, description: "The page of ours the link should point to." }
+      - { key: their_page, label: Their page, value_type: url, description: "The page the link is on, or will be." }
+      - { key: link_type, label: Link type, value_type: select, option_set: link_type, filterable: true }
+      - { key: anchor_text, label: Anchor text, value_type: text }
+      - { key: domain_rating, label: Domain rating, value_type: number, filterable: true, description: "The site's strength, 0 to 100." }
+      - { key: price, label: Price, value_type: currency, description: "What the link costs; leave empty or 0 for a free one." }
+      - { key: dofollow, label: Followed link, value_type: checkbox }
+      - { key: due_on, label: Due date, value_type: date, filterable: true }
+      - { key: next_step, label: Next step, value_type: text }

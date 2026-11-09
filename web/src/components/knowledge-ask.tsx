@@ -4,7 +4,7 @@ import { api, errorMessage } from "../api";
 import { Badge, Button, ErrorText, field } from "../ui";
 import { Icon } from "../icons";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 
 // Ask your knowledge: a question asked the way an agent or support reply
@@ -48,8 +48,8 @@ export function KnowledgeAsk({
     setBusy(true);
     setError("");
     setShowPassages(false);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/knowledge/ask", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/knowledge/ask", {
+      params: { path: { brand: pickedBrandId() } },
       body: { question: q, audience, ...(brand ? { brand: brand.handle } : {}) },
     });
     setBusy(false);

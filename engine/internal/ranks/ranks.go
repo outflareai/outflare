@@ -445,20 +445,22 @@ func (s *Service) record(ctx context.Context, o *connectors.Opened, unit, host s
 }
 
 // recordCost puts a SERP call's cost in the Outcomes ledger, counted
-// against the connection's budget.
+// against the connection's budget, on the SEO channel: searches and rank
+// checks are never outreach costs.
 func recordCost(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note string, cost connectors.SEOCost) error {
-	return recordCostRef(ctx, pool, o, unit, host, note, "", cost)
+	return recordCostRef(ctx, pool, o, unit, host, note, "", outcomes.ChannelSEO, cost)
 }
 
 // recordCostRef is recordCost with the caller's reference for the entry
-// ("" for none), so the caller can find it again.
-func recordCostRef(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note, ref string, cost connectors.SEOCost) error {
+// ("" for none), so the caller can find it again, and its channel ("" for
+// one the caller sets after, as AI answers does).
+func recordCostRef(ctx context.Context, pool *pgxpool.Pool, o *connectors.Opened, unit, host, note, ref, channel string, cost connectors.SEOCost) error {
 	units := amount(unit, cost)
 	id := o.ID
 	e := outcomes.Entry{
 		WorkspaceID: o.WorkspaceID, Category: outcomes.CategoryData, Provider: o.Connector.Definition().ID,
 		IntegrationID: &id, Units: &units, UnitName: unit, OccurredAt: time.Now(), Source: outcomes.SourceAuto,
-		Domain: host, Note: note,
+		Domain: host, Note: note, Channel: channel, BrandID: seosync.CostBrand(ctx, pool, o.WorkspaceID, host),
 	}
 	if cost.Estimated {
 		e.Note += ", estimated from the price list"

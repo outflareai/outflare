@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -111,8 +112,8 @@ func TestSupportChat(t *testing.T) {
 		t.Fatalf("poll: %v", p)
 	}
 	after := msgs[2].(map[string]any)["created_at"].(string)
-	if _, p := chatCall(t, e.h, "GET", cb+"/messages?after="+after, ana, nil); len(p["messages"].([]any)) != 0 {
-		t.Fatalf("after: %v", p)
+	if code, p := chatCall(t, e.h, "GET", cb+"/messages?after="+url.QueryEscape(after), ana, nil); code != 200 || len(p["messages"].([]any)) != 0 {
+		t.Fatalf("after: %d %v", code, p)
 	}
 	if owner.must(200, "GET", conv, nil)["conversation"].(map[string]any)["status"] != "pending" {
 		t.Fatal("not pending")

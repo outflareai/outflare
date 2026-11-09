@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,5 +245,79 @@ func TestPinnedAttributionSurvivesSync(t *testing.T) {
 	m, _ = outcomes.GetMeeting(ctx, pool, f.ws, ms[0].ID)
 	if m.Status != outcomes.MeetingCanceled {
 		t.Fatalf("status %s", m.Status)
+	}
+}
+
+// TestReportCountsOutreachOnly: ad spend and SEO searches are not outreach
+// costs, so they stay out of the report and its charges list; a search
+// booked while working for a brand is that brand's.
+func TestReportCountsOutreachOnly(t *testing.T) {
+	pool := testPool(t)
+	f := setup(t, pool)
+	var other string
+	if err := pool.QueryRow(context.Background(), `INSERT INTO brands (workspace_id, name, handle) VALUES ($1, 'Northpeak', 'northpeak') RETURNING id`, f.ws).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	ctx := outcomes.WithBrand(context.Background(), f.brand)
+	tx(t, pool, func(tx pgx.Tx) {
+		for _, e := range []outcomes.Entry{
+			// Outreach: a shared lead data charge, the brand's own.
+			{WorkspaceID: f.ws, Category: "data", Provider: "Apollo", AmountCents: i64(1000), OccurredAt: f.at},
+			// Not outreach: a day of ads and a search.
+			{WorkspaceID: f.ws, Category: "ads", Provider: "google_ads", AmountCents: i64(300000), OccurredAt: f.at, Channel: outcomes.ChannelPaidAds},
+			{WorkspaceID: f.ws, Category: "data", Provider: "dataforseo", AmountCents: i64(1), OccurredAt: f.at, Channel: outcomes.ChannelSEO, Note: "Search on google"},
+			// Another brand's outreach cost.
+			{WorkspaceID: f.ws, Category: "data", Provider: "Apollo", AmountCents: i64(700), OccurredAt: f.at, BrandID: &other},
+		} {
+			got, _, err := outcomes.Record(ctx, tx, e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e.BrandID == nil && (got.BrandID == nil || *got.BrandID != f.brand) {
+				t.Fatalf("brand from the context: %+v", got)
+			}
+		}
+	})
+	if _, _, err := outcomes.Record(ctx, pool, outcomes.Entry{WorkspaceID: f.ws, Category: "data", AmountCents: i64(1), Channel: "nope"}); !outcomes.IsInvalid(err) {
+		t.Fatalf("bad channel: %v", err)
+	}
+
+	from, to := f.at.Add(-24*time.Hour), f.at.Add(24*time.Hour)
+	rep, err := outcomes.Summary(ctx, pool, f.ws, outcomes.ReportFilter{From: from, To: to, GroupBy: outcomes.GroupSequence, Brand: f.brand, Currency: "USD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rep.Totals.Spend.TotalCents; got != 1000 {
+		t.Fatalf("brand outreach spend: %d want 1000", got)
+	}
+	list, err := outcomes.ListSpend(ctx, pool, f.ws, outcomes.SpendFilter{From: &from, To: &to, Brand: f.brand, Outreach: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || *list[0].AmountCents != 1000 {
+		t.Fatalf("brand outreach charges: %+v", list)
+	}
+	all, err := outcomes.ListSpend(ctx, pool, f.ws, outcomes.SpendFilter{From: &from, To: &to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("all charges: %d", len(all))
+	}
+	kept, err := outcomes.ListSpend(ctx, pool, f.ws, outcomes.SpendFilter{From: &from, To: &to, BrandsIn: []string{other}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || *kept[0].BrandID != other {
+		t.Fatalf("kept to the other brand: %+v", kept)
+	}
+	// Nothing was sent in the period, so shared costs are not shared out
+	// and the note says so.
+	found := false
+	for _, n := range rep.Notes {
+		found = found || strings.Contains(n, "no emails were sent")
+	}
+	if rep.Totals.Sent == 0 && !found {
+		t.Fatalf("notes: %v", rep.Notes)
 	}
 }

@@ -2,6 +2,8 @@
 
 The support inbox is where a team answers customers who write in. Each email from a customer becomes part of a **conversation**: the team reads it, assigns it, leaves notes for each other, replies in the same email thread and closes it. It lives under **Support** in the web app, beside Knowledge and the help centre, and is separate from the sales inbox, which holds replies to cold email.
 
+Each brand has its own support inbox. Its routes are under `/v1/brands/{brand}/support/` (the `...` below), apart from support mailboxes and the assistant settings and SLA policies set by scope, which stay under `/v1/workspaces/{ws}/support/`.
+
 ## Where the mail comes from
 
 **A support mailbox.** Any mailbox connected with its login (Settings, Mailboxes) can answer support instead of sending cold email: choose it under Support, Settings, or call `PUT /v1/workspaces/{ws}/support/mailboxes/{id}`. From then on:

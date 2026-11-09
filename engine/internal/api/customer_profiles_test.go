@@ -42,11 +42,18 @@ func TestIdealCustomerProfiles(t *testing.T) {
 		t.Fatalf("no-op = %v", same)
 	}
 
-	// A brand's profile.
-	owner.must(200, "PATCH", base+"/ideal-customer-profiles/"+own, map[string]any{"brand_id": "geonode"})
-	if l := owner.must(200, "GET", base+"/ideal-customer-profiles?brand=geonode", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["brand_id"] != geo {
+	// A profile is one brand's: it stays in its brand, and another brand
+	// keeps its own, even under the same name.
+	owner.must(400, "PATCH", base+"/ideal-customer-profiles/"+own, map[string]any{"brand_id": "geonode"})
+	gb := "/v1/brands/" + geo
+	if l := owner.must(200, "GET", gb+"/ideal-customer-profiles", nil)["data"].([]any); len(l) != 0 {
+		t.Fatalf("geonode before = %v", l)
+	}
+	owner.must(201, "POST", gb+"/ideal-customer-profiles", map[string]any{"name": "AU CFOs"})
+	if l := owner.must(200, "GET", gb+"/ideal-customer-profiles", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["brand_id"] != geo {
 		t.Fatalf("by brand = %v", l)
 	}
+	owner.must(404, "GET", gb+"/ideal-customer-profiles/"+own, nil)
 
 	// Archived profiles leave the default list.
 	owner.must(200, "PATCH", base+"/ideal-customer-profiles/"+cid, map[string]any{"status": "archived"})

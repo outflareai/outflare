@@ -32,9 +32,13 @@ import (
 const DefaultLogRetention = 30 * 24 * time.Hour
 
 func (s *Server) routesLogs(mux *http.ServeMux) {
+	mux.HandleFunc("GET /v1/brands/{brand}/logs", s.onBrand(auth.ScopeAuditRead, s.listLogs))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/logs", s.inBrand(auth.ScopeAuditRead, s.listLogs))
+	mux.HandleFunc("GET /v1/brands/{brand}/logs/export", s.onBrand(auth.ScopeAuditRead, s.exportLogs))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/logs/export", s.inBrand(auth.ScopeAuditRead, s.exportLogs))
+	mux.HandleFunc("GET /v1/brands/{brand}/logs/histogram", s.onBrand(auth.ScopeAuditRead, s.logHistogram))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/logs/histogram", s.inBrand(auth.ScopeAuditRead, s.logHistogram))
+	mux.HandleFunc("GET /v1/brands/{brand}/logs/{id}", s.onBrand(auth.ScopeAuditRead, s.getLog))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/logs/{id}", s.inBrand(auth.ScopeAuditRead, s.getLog))
 }
 
@@ -68,7 +72,7 @@ type requestLog struct {
 // every call in a workspace except reading the logs themselves, which the
 // Logs page does every few seconds while it follows new calls.
 func logged(r *http.Request, route string) bool {
-	if r.Method == http.MethodGet && strings.HasPrefix(route, "GET /v1/workspaces/{ws}/logs") {
+	if r.Method == http.MethodGet && (strings.HasPrefix(route, "GET /v1/workspaces/{ws}/logs") || strings.HasPrefix(route, "GET /v1/brands/{brand}/logs")) {
 		return false
 	}
 	return true
@@ -371,6 +375,11 @@ func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (string, []an
 	}
 	sel.in = nil
 	where += sel.sql("l.brand_id", &args)
+	// The workspace's own logs are the team's calls, about no brand; each
+	// brand's are on its own route.
+	if a.Brand == "" {
+		where += " AND l.brand_id IS NULL"
+	}
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		if len(v) > 200 {
 			return bad("q is at most 200 characters")
@@ -540,7 +549,10 @@ func (s *Server) getLog(w http.ResponseWriter, r *http.Request) {
 		row = s.pool.QueryRow(r.Context(), `SELECT `+logCols+logFrom+` WHERE l.workspace_id = $1 AND l.request_id = $2 ORDER BY l.id LIMIT 1`, a.WorkspaceID, ref)
 	}
 	v, err := scanLog(row)
-	if err == nil && a.Brands != nil && (v.BrandID == nil || !slices.Contains(a.Brands, *v.BrandID)) {
+	if seen := a.seenBrands(); err == nil && seen != nil && (v.BrandID == nil || !slices.Contains(seen, *v.BrandID)) {
+		err = pgx.ErrNoRows
+	}
+	if err == nil && a.Brand == "" && v.BrandID != nil {
 		err = pgx.ErrNoRows
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -564,8 +576,10 @@ func (s *Server) getLog(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, r, err)
 		return
 	}
-	if a.Brands != nil {
-		// Audit entries carry no brand; a brand-limited caller sees the call only.
+	if a.Brand == "" && a.Brands != nil {
+		// A brand-limited caller on the workspace's routes sees the call
+		// only. On a brand's route the call is that brand's, and so is
+		// what it changed.
 		audits = []auditView{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"log": v, "audit_events": audits})

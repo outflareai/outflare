@@ -387,6 +387,21 @@ func coverageAddFind(ctx context.Context, tx pgx.Tx, a *access, h coverageFind) 
 	if _, err := tx.Exec(ctx, "INSERT INTO coverage_discovery_receipts(workspace_id,brand_id,source,source_id,candidate_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", a.WorkspaceID, a.Brand, h.Source, h.ID, candidate); err != nil {
 		return false, err
 	}
+	if created {
+		// A page on a site someone marked as spam arrives as spam, so it
+		// never reaches the review list.
+		tag, err := tx.Exec(ctx, `UPDATE coverage_candidates n SET status='spam' WHERE n.workspace_id=$1 AND n.brand_id=$2 AND n.id=$3
+ AND EXISTS(SELECT 1 FROM coverage_candidates c WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.status='spam' AND `+coverageHostSQL("c.url")+`=`+coverageHostSQL("n.url")+`)`, a.WorkspaceID, a.Brand, candidate)
+		if err != nil {
+			return false, err
+		}
+		if tag.RowsAffected() > 0 {
+			if err := coverageHistory(ctx, tx, a, "candidates", candidate, "spam", map[string]any{"site_is_spam": true}); err != nil {
+				return false, err
+			}
+			return false, nil
+		}
+	}
 	var known bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM coverage_history WHERE workspace_id=$1 AND brand_id=$2 AND resource='candidates' AND resource_id=$3 AND action='discovered' AND detail->>'source'=$4 AND detail->>'source_id'=$5)", a.WorkspaceID, a.Brand, candidate, h.Source, h.ID).Scan(&known); err != nil {
 		return false, err

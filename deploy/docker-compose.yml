@@ -44,6 +44,9 @@ services:
       # Requests per minute per API token; 0 for no limit.
       API_RATE_LIMIT: ${API_RATE_LIMIT:-600}
       OUTFLARE_LOG_RETENTION_DAYS: ${OUTFLARE_LOG_RETENTION_DAYS:-30}
+      # Visitors' region, city and network: DB-IP's monthly files, downloaded unless off.
+      OUTFLARE_GEOIP_DOWNLOAD: ${OUTFLARE_GEOIP_DOWNLOAD:-on}
+      OUTFLARE_GEOIP_DIR: ${OUTFLARE_GEOIP_DIR:-}
       # Passkey sign-in: auto (on once PUBLIC_URL is https), on or off.
       PASSKEYS: ${PASSKEYS:-auto}
       # Optional: tell your website (a parent domain of PUBLIC_URL) that someone is signed in.

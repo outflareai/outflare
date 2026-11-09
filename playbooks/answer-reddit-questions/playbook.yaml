@@ -37,7 +37,7 @@ steps:
   - say: Read new posts and pick the ones the brand can genuinely help with.
     tools: [listBrandSocialItems, getBrandSocialItem]
   - say: Draft a reply to each from what the brand knows, held for a person's approval.
-    tools: [findKnowledgePassages, draftBrandSocialReply]
+    tools: [findBrandKnowledgePassages, draftBrandSocialReply]
   - say: Check which replies are still up and what they brought.
     tools: [listBrandSocialActions]
 guardrails:

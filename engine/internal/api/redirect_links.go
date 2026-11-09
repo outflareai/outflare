@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/track"
 	"github.com/outflareai/outflare/engine/internal/tracking"
@@ -94,8 +95,13 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	target := tagLink(c, l)
 	bot := tracking.LikelyBot(r.UserAgent(), time.Time{}, time.Now())
 	key := utm.NewShortCode(clickKeyLen)
-	if _, err := s.pool.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, link_id, click_key, likely_bot) VALUES ($1, $2, $3, $4)`,
-		ws, l.ID, key, bot); err != nil {
+	click := clickDetails(r)
+	if _, err := s.pool.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, link_id, click_key, likely_bot,
+			country, region, city, asn, isp, device, device_brand, device_model, os, os_version, browser, browser_version, language)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		ws, l.ID, key, bot, click.place.Country, cutUTF8(click.place.Region, 200), cutUTF8(click.place.City, 200), int64(click.place.ASN), cutUTF8(click.place.Org, 200),
+		click.device, click.detail.brand, click.detail.model, click.os, cutUTF8(click.detail.osVersion, 20), click.browser, cutUTF8(click.detail.browserVersion, 20),
+		click.language); err != nil {
 		// The person still goes where the link says; only the count is lost.
 		metrics.RedirectClick("error")
 		track.Fail(ctx, s.log, track.Event{Name: "tracking_link.click_failed", Surface: "system", WorkspaceID: ws,
@@ -110,6 +116,30 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// clickDetail is where a redirect click came from and on what, worked out
+// from the request. The address and user agent themselves aren't kept.
+type clickDetail struct {
+	place               geoip.Place
+	device, browser, os string
+	detail              deviceDetail
+	language            string
+}
+
+func clickDetails(r *http.Request) clickDetail {
+	var c clickDetail
+	if ip, err := parseClientAddr(clientIP(r)); err == nil {
+		c.place = geoip.Lookup(ip)
+	}
+	if !countryRe.MatchString(c.place.Country) {
+		c.place = geoip.Place{ASN: c.place.ASN, Org: c.place.Org}
+	}
+	ua := r.UserAgent()
+	c.device, c.browser, c.os = parseUA(ua)
+	c.detail = parseDevice(ua, c.os, c.browser)
+	c.language = visitLanguage(r.Header.Get("Accept-Language"))
+	return c
 }
 
 // withParam adds one query parameter last, keeping the order of the others

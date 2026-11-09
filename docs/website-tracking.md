@@ -39,7 +39,7 @@ On every page, including in-app navigation, the snippet sends a `page` event on 
 
 ## Visits, touches and devices
 
-Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id or ad, a `ref` or an `ofc`; an ad pixel's cookie never starts one). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, ad ids, `ref` and `ofc`, plus its country, device type (desktop, mobile, tablet), browser and system. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
+Each event joins a visit: a session that ends after 30 minutes without an event, or when the visitor comes back through a different campaign (new tags, a new ad click id or ad, a `ref` or an `ofc`; an ad pixel's cookie never starts one). The visit's id is in `context.sessionId`. A visit keeps its landing page, referrer, tags, click ids, ad ids, `ref` and `ofc`, plus where the visitor is (country, region, city and their network; see [Where visitors are](#where-visitors-are)), their device type (desktop, mobile, tablet), its maker and model, their browser and system with each one's version, and their language. A visit from another page of your own site, or from another of the key's origins, is not counted as a referral.
 
 When your product identifies a visitor, their visits join their record, and Outflare works out these fields on the person (computed, so nobody writes them):
 
@@ -140,7 +140,30 @@ A Cloudflare Worker sets the same two headers, taking the address from `CF-Conne
 
 With the secret, the proxy can also pass the visitor's country in `X-Outflare-Country` (two letters, such as `DE`), from its CDN's geolocation (`CF-IPCountry` on Cloudflare, `x-vercel-ip-country` on Vercel). The [consent banner](consent-banner.md) then picks the region's rule by country instead of the browser's time zone.
 
-A visit's country comes from, in order: your proxy's `X-Outflare-Country`; the visitor's address, looked up in the IP database the engine ships with ([IP geolocation by DB-IP](https://db-ip.com), CC BY 4.0, about 95% right by country, refreshed with engine releases); or, when neither knows, the browser's time zone. The address is only looked up, never stored. Partner programs that [block countries](partners.md) trust only the first two.
+A visit's country comes from, in order: your proxy's `X-Outflare-Country`; the visitor's address, looked up in DB-IP's databases ([Where visitors are](#where-visitors-are)); or, when neither knows, the browser's time zone. The address is only looked up, never stored. Partner programs that [block countries](partners.md) trust only the first two.
+
+## Where visitors are
+
+Each visit and each [redirect link](campaign-links.md#redirect-links) click keeps where it came from, looked up from the visitor's address when the request arrives. The address itself is never stored.
+
+| Field | What it is | Where it comes from |
+| --- | --- | --- |
+| `country` | Two letters, such as `US` | Your proxy's `X-Outflare-Country`, else the address, else the browser's time zone |
+| `region` | The state, province or other first-level region, in English (`California`, `England`) | The address |
+| `city` | The city, in English (`Lyon`) | The address |
+| `asn`, `isp` | The visitor's network: its number and who runs it, an internet provider, a mobile carrier or a host (`Northpeak Fiber`) | The address |
+| `device_brand`, `device_model` | The device's maker and model (`Samsung`, `SM-S918B`; `Apple`, `iPhone`) | The browser's user agent |
+| `os_version`, `browser_version` | The system's version (`17.5`, `14`) and the browser's major version (`131`) | The user agent |
+| `language` | The browser's language (`de` from `de-DE`) | The page's locale, or a redirect click's `Accept-Language` |
+
+Outflare uses DB-IP's free databases ([IP geolocation by DB-IP](https://db-ip.com), CC BY 4.0, about 95% right by country and less by city). The country file ships with the engine. The City Lite and ASN Lite files (about 60 MB and 5 MB to download, a new release on the first of each month) are downloaded by each server that answers visitors and kept in `OUTFLARE_GEOIP_DIR` (a folder in the user's cache directory unless set). They need no account or key, and a server checks every 6 hours whether a newer month is out. Without them, visits get a country and nothing more. To run without internet access, set `OUTFLARE_GEOIP_DOWNLOAD=off` and copy `dbip-city-lite.mmdb` and `dbip-asn-lite.mmdb` (DB-IP's `.mmdb` files, unpacked) into that folder yourself. The Grafana dashboard's "IP geolocation" row shows each file's age.
+
+- **Through your own domain without the proxy secret**, every event comes from your proxy's address, so the visit keeps no region, city or network rather than the proxy's. With the [proxy secret](#serve-it-from-your-own-domain), the visitor's own address is looked up. When your proxy sends the country, a city is kept only when it is in that country.
+- **A city with no country** is left out: when the country comes from the browser's time zone, the visit keeps no region or city.
+- **Browsers hide some details.** Chrome on Android reports Android 10 and model `K` whatever the phone is, and every browser on a Mac reports macOS 10.15.7. A model Outflare can't read is left empty rather than guessed; versions are what the browser says. iPhones and iPads report their system's version but not their model.
+- Visits from before these fields were kept have them empty.
+
+The fields can be filtered and broken down by in [Insights](insights.md) and read in [Query](query.md) from the `visits` table.
 
 ## Sites on more than one domain
 

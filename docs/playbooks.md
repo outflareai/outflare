@@ -72,6 +72,8 @@ Some playbooks need things set up before their first run, such as a pipeline in 
 
 A kit only adds. Nothing you already have changes, email drafts are added unpublished so you read and publish them first, and while anything conflicts it changes nothing. Applying it again changes nothing. Applying needs `catalog.manage`, and `emails.manage` when it adds email drafts.
 
+The **partnerships kits** (`partnerships-seo`, `partnerships-sponsorships`, `partnerships-integrations`, `partnerships-affiliates`, `partnerships-comparison-sites`) each add one partnership pipeline: a record type with its own stages and fields, a `company` field for the partner's company and a `stage` field. Presence's **Partnerships** tab sets them up per brand and shows each as a board ([coverage.md](coverage.md#partnership-pipelines)).
+
 The first kit, **Creator partnerships**, adds a Partnerships record type with a stage field (Found, Vetted, Pitched, Negotiating, Agreed, Live, Measured, Renewed, Declined), the creator, deal type, fee, deliverables, platform, go-live date, post, content rights, tracked link and promo code; creator fields on people (platforms, audience size, topics, rate card, past sponsors); and four email drafts (brief, go-live reminder, thanks and results, an invite for customers who create). Five playbooks use it: **Run creator partnerships from first find to results**, **Find creators who already cover your competitors**, **Sponsor newsletters and podcasts that pay back**, **Seed your product to creators**, **Renew the creator deals that pay back** and **Recruit affiliates and creators from your own sign-ups**.
 
 ## API
@@ -86,10 +88,11 @@ The first kit, **Creator partnerships**, adds a Partnerships record type with a 
 | `GET /v1/kits`, `GET /v1/kits/{id}` | Setup kits, public, with the playbooks that use each |
 | `GET /v1/workspaces/{ws}/kits/{id}/preview` | What the kit would add, extend, reuse or conflict with (`customers.read`) |
 | `POST /v1/workspaces/{ws}/kits/{id}/apply` | Set it up (`catalog.manage`, and `emails.manage` for email drafts); 409 `conflict` names what's in the way |
+| `GET /v1/brands/{brand}/kits/{id}/preview`, `POST /v1/brands/{brand}/kits/{id}/apply` | The same for one brand's catalog, so each brand gets its own pipeline. A kit with smart lists, rules or journeys is 400 here: those are set up for the workspace's first brand |
 
 ## Events
 
-Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`, and `run_id`). An automation's run records it too, with `automation_id`, `trigger` (schedule, event or manual) and `events`, and `playbook_automation.ran`. Automations record `playbook_automation.created`, `updated`, `approved`, `paused`, `held` (with the reason) and `deleted`. All of these are webhook events. Applying a kit records `kit.applied` (with `kit_id`, `kit_version` and how many parts were added, extended and reused), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.
+Starting a playbook records `playbook.started` (with `playbook_id`, `playbook_version`, `mode`, `publisher` and `kit_applied`, and `run_id`). An automation's run records it too, with `automation_id`, `trigger` (schedule, event or manual) and `events`, and `playbook_automation.ran`. Automations record `playbook_automation.created`, `updated`, `approved`, `paused`, `held` (with the reason) and `deleted`. All of these are webhook events. Applying a kit records `kit.applied` (with `kit_id`, `kit_version`, how many parts were added, extended and reused, and `brand_id` when it was set up for a brand), and each part records its own action with `kit_id`. The web app records `ui.playbook_opened` and `ui.playbook_prompt_copied`.
 
 ## Partnership qualification from sign-ups
 

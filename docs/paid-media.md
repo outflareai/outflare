@@ -121,15 +121,16 @@ In the app, open **Paid ads** in the sidebar. A trail at the top picks the level
 
 | Call | What it answers |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/ads/accounts` | Every account, its brand and sync status |
-| `GET /v1/workspaces/{ws}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS, their type, how the platform bids, the brand's target with over or under, and the trend against the days before |
-| `PUT /v1/workspaces/{ws}/ads/campaigns/{id}/target` | Set a campaign's target cost per conversion (`analytics.manage`) |
+| `GET /v1/workspaces/{ws}/ads/accounts` | Every account, its brand and sync status, including those with no brand yet |
+| `GET /v1/brands/{brand}/ads/accounts` | The brand's accounts |
+| `GET /v1/brands/{brand}/ads/campaigns` | Campaigns ranked by spend over `from`–`to`, with CPC, CTR, cost per conversion and platform ROAS, their type, how the platform bids, the brand's target with over or under, and the trend against the days before |
+| `PUT /v1/brands/{brand}/ads/campaigns/{id}/target` | Set a campaign's target cost per conversion (`analytics.manage`) |
 | `PUT /v1/workspaces/{ws}/ads/accounts/{id}/target` | Set the target for every campaign of an account without its own (`analytics.manage`) |
-| `GET /v1/workspaces/{ws}/ads/items` | Ad sets and ad groups (`level=ad_group`) or ads (`level=ad`), ranked by spend, with their campaign; `campaign_id` or `parent_id` narrows them |
-| `GET /v1/workspaces/{ws}/ads/conversion-actions` | Platform conversions by action, per connector and currency; `entity_id` gives one campaign's, ad set's or ad's |
-| `GET /v1/workspaces/{ws}/ads/keywords` | Google search keywords ranked by spend; `campaign_id` or `ad_group_id` narrows them |
-| `GET /v1/workspaces/{ws}/ads/search-terms` | What people searched that showed a Google ad, with the keyword it matched, ranked by spend |
-| `GET /v1/workspaces/{ws}/ads/summary` | Totals grouped by `connector`, `brand`, `account` or `day`, per currency; `entity_id` gives one campaign's, ad set's or ad's numbers alone |
+| `GET /v1/brands/{brand}/ads/items` | Ad sets and ad groups (`level=ad_group`) or ads (`level=ad`), ranked by spend, with their campaign; `campaign_id` or `parent_id` narrows them |
+| `GET /v1/brands/{brand}/ads/conversion-actions` | Platform conversions by action, per connector and currency; `entity_id` gives one campaign's, ad set's or ad's |
+| `GET /v1/brands/{brand}/ads/keywords` | Google search keywords ranked by spend; `campaign_id` or `ad_group_id` narrows them |
+| `GET /v1/brands/{brand}/ads/search-terms` | What people searched that showed a Google ad, with the keyword it matched, ranked by spend |
+| `GET /v1/brands/{brand}/ads/summary` | Totals grouped by `connector`, `brand`, `account` or `day`, per currency; `entity_id` gives one campaign's, ad set's or ad's numbers alone |
 | `POST /v1/workspaces/{ws}/ads/sync` | Sync now instead of within six hours |
 
 All of them take `brand`. Money is in micros of the account's currency
@@ -372,11 +373,11 @@ When the window ends the change is judged against as many days just before it: *
 
 | Call | What it does |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/ads/suggestions` | Suggestions by network (`connector`), account, campaign or status, open first (`analytics.read`) |
-| `POST /v1/workspaces/{ws}/ads/suggestions/{id}/approve` | Make the change and start measuring it; a person's session only (`ads.manage`), except savings applying on their own (below) |
-| `POST /v1/workspaces/{ws}/ads/suggestions/{id}/dismiss` | Leave the campaign as it is (`ads.manage`) |
-| `GET /v1/workspaces/{ws}/ads/recommendations` | The platform's own recommendations for an account, read live (Google Ads; `analytics.read`) |
-| `POST /v1/workspaces/{ws}/ads/suggestions/refresh` | Read the campaigns again now, at most once an hour (`ads.manage`) |
+| `GET /v1/brands/{brand}/ads/suggestions` | Suggestions by network (`connector`), account, campaign or status, open first (`analytics.read`) |
+| `POST /v1/brands/{brand}/ads/suggestions/{id}/approve` | Make the change and start measuring it; a person's session only (`ads.manage`), except savings applying on their own (below) |
+| `POST /v1/brands/{brand}/ads/suggestions/{id}/dismiss` | Leave the campaign as it is (`ads.manage`) |
+| `GET /v1/brands/{brand}/ads/recommendations` | The platform's own recommendations for an account, read live (Google Ads; `analytics.read`) |
+| `POST /v1/brands/{brand}/ads/suggestions/refresh` | Read the campaigns again now, at most once an hour (`ads.manage`) |
 
 **Savings that apply on their own.** An extension can let an agent approve suggestions that only spend less (a lower budget, a pause, a negative keyword) for a brand, with `Host.SetAdAutoApprove`; `/v1/meta` then lists `ad_suggestions_auto`. Anything that can spend more always waits for a person, a suggestion on an account every brand shares never applies on its own, the agent's grant still applies, and the change is measured and judged like any other. `ad_suggestion.approved` carries `auto: true` for these.
 
@@ -396,11 +397,11 @@ A trial whose conversions cost more than twice the target three days running is 
 
 | Call | What it does |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/ads/tests` | Tests by network, account, campaign or status, with both sides' numbers and the verdict (`analytics.read`) |
-| `POST /v1/workspaces/{ws}/ads/tests` | Start a test; a person's session only (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/tests/{id}/keep` | Apply the trial's change to the campaign and end the test (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/tests/{id}/roll-back` | End the test and leave the campaign as it was (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/suggestions/{id}/approve` with `{"test": true}` | Test a budget suggestion instead of making it (`ads.manage`) |
+| `GET /v1/brands/{brand}/ads/tests` | Tests by network, account, campaign or status, with both sides' numbers and the verdict (`analytics.read`) |
+| `POST /v1/brands/{brand}/ads/tests` | Start a test; a person's session only (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/tests/{id}/keep` | Apply the trial's change to the campaign and end the test (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/tests/{id}/roll-back` | End the test and leave the campaign as it was (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/suggestions/{id}/approve` with `{"test": true}` | Test a budget suggestion instead of making it (`ads.manage`) |
 
 X Ads tests are planned once X's developer access is set up.
 
@@ -412,11 +413,11 @@ TikTok (the other platforms are read but not changed yet, and say so with
 
 | Call | What it does |
 | --- | --- |
-| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/pause` | Pause a campaign (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/resume` | Run a paused campaign again (`ads.manage`) |
-| `PATCH /v1/workspaces/{ws}/ads/campaigns/{id}` | Set its daily budget, `daily_budget_micros` in the account's currency (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/campaigns/{id}/pause` | Pause a campaign (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/campaigns/{id}/resume` | Run a paused campaign again (`ads.manage`) |
+| `PATCH /v1/brands/{brand}/ads/campaigns/{id}` | Set its daily budget, `daily_budget_micros` in the account's currency (`ads.manage`) |
 | `POST /v1/brands/{brand}/ads/pause-all` | The kill switch: pause every active campaign of the brand at once, on every platform that can be changed, as one batch (`ads.manage`) |
-| `GET /v1/workspaces/{ws}/ads/changes` | Every change asked for, by network (`connector`), account (`account_id`), campaign, status or brand (`analytics.read`) |
+| `GET /v1/brands/{brand}/ads/changes` | Every change asked for, by network (`connector`), account (`account_id`), campaign, status or brand (`analytics.read`) |
 
 Each call checks the campaign (yours, on an active account, in a state the
 change makes sense for) and answers `202` with the **change** (`ad_changes`,
@@ -459,10 +460,10 @@ How a campaign bids, which audiences it reaches and in which countries it runs, 
 
 | Call | What it does |
 | --- | --- |
-| `GET /v1/workspaces/{ws}/ads/campaigns/{id}/targeting` | Its bidding method and target, audiences, countries, and notes on anything else (regions, cities, exclusions, ad sets that differ), read live, plus the bidding methods the platform lets Outflare set (`analytics.read`) |
-| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/bidding` | Bid for as many conversions as it can (`maximize_conversions`, with an optional `target_cpa_micros`) or as much conversion value (`maximize_conversion_value`, with an optional `target_roas`); Google Ads only (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/audiences` | Add or remove (`add: false`) one of the account's audiences, such as one made from a smart list (`ads.manage`) |
-| `POST /v1/workspaces/{ws}/ads/campaigns/{id}/countries` | Add or remove a country by its two-letter code (`ads.manage`) |
+| `GET /v1/brands/{brand}/ads/campaigns/{id}/targeting` | Its bidding method and target, audiences, countries, and notes on anything else (regions, cities, exclusions, ad sets that differ), read live, plus the bidding methods the platform lets Outflare set (`analytics.read`) |
+| `POST /v1/brands/{brand}/ads/campaigns/{id}/bidding` | Bid for as many conversions as it can (`maximize_conversions`, with an optional `target_cpa_micros`) or as much conversion value (`maximize_conversion_value`, with an optional `target_roas`); Google Ads only (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/campaigns/{id}/audiences` | Add or remove (`add: false`) one of the account's audiences, such as one made from a smart list (`ads.manage`) |
+| `POST /v1/brands/{brand}/ads/campaigns/{id}/countries` | Add or remove a country by its two-letter code (`ads.manage`) |
 
 Each answers `202` with the change, which runs as a job like the other campaign changes and shows on the **Changes** tab. On Meta an audience or a country is added to or removed from every ad set of the campaign, keeping the rest of each ad set's targeting as it was. A campaign never loses its last country: removing it is refused, so it can't start running everywhere. A change made by an agent always waits for a person, whatever its grant. Each is an audit event (`ad_campaign.bidding_changed`, `ad_campaign.audience_added`, `ad_campaign.audience_removed`, `ad_campaign.country_added`, `ad_campaign.country_removed`).
 

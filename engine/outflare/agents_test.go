@@ -14,7 +14,7 @@ func TestAPIGuideListsWorkspaceOperations(t *testing.T) {
 		t.Fatal("guide paths should be relative to the workspace")
 	}
 	d := APIDocs("/memories")
-	if !strings.Contains(d, "operationId: createMemory") || !strings.Contains(d, "Memory:") {
+	if !strings.Contains(d, "operationId: createBrandMemory") || !strings.Contains(d, "Memory:") {
 		t.Fatalf("docs for /memories lack the operation or its schema:\n%.800s", d)
 	}
 }

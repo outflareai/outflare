@@ -578,21 +578,60 @@ type siteKeyRow struct {
 	// The country of the batch's visitor, set per request: from the site's
 	// own proxy ("proxy") or the IP database ("ip"); "" when neither knows.
 	country, countrySource string
+	// The rest of where the visitor is, from the IP database's city and
+	// network files when the server has them (visitorPlace).
+	region, city, isp string
+	asn               int64
 }
 
-// visitorCountry is where the request's visitor is: what the site's own
-// proxy says, else what the IP database finds for their address. The
-// address is only looked up, never kept.
-func visitorCountry(r *http.Request, k siteKeyRow) (country, source string) {
+// visitorPlace is where the request's visitor is. The country is what the
+// site's own proxy says, else what the IP database finds for their address;
+// the region, city and network come from the address. The address is only
+// looked up, never kept.
+func visitorPlace(r *http.Request, k siteKeyRow) (place geoip.Place, countrySource string) {
+	ip, err := parseClientAddr(siteClientIP(r, k))
+	// Through the site's own domain without the proxy secret, the address
+	// is the proxy's: its city and network would be the data centre's.
+	if err == nil && !(throughOwnDomain(r) && !siteProxied(r, k)) {
+		place = geoip.Lookup(ip)
+	} else if err == nil {
+		place = geoip.Place{Country: geoip.Country(ip)}
+	}
+	if !countryRe.MatchString(place.Country) {
+		place.Country = ""
+	}
 	if c := siteCountry(r, k); c != "" {
-		return c, "proxy"
-	}
-	if ip, err := netip.ParseAddr(siteClientIP(r, k)); err == nil {
-		if c := geoip.Country(ip); countryRe.MatchString(c) {
-			return c, "ip"
+		// A city from the address is kept only when it is in that country.
+		if place.Country != c {
+			place.Region, place.City = "", ""
 		}
+		place.Country = c
+		return place, "proxy"
 	}
-	return "", ""
+	if place.Country != "" {
+		return place, "ip"
+	}
+	// A city with no country is left out, as the country is.
+	return geoip.Place{ASN: place.ASN, Org: place.Org}, ""
+}
+
+// parseClientAddr reads an address from clientIP, which keeps the brackets
+// around an IPv6 address from the connection ("[2001:db8::1]").
+func parseClientAddr(s string) (netip.Addr, error) {
+	return netip.ParseAddr(strings.TrimSuffix(strings.TrimPrefix(s, "["), "]"))
+}
+
+// siteProxied reports whether the request carries the key's proxy secret,
+// so the visitor's own address came with it.
+func siteProxied(r *http.Request, k siteKeyRow) bool {
+	return k.proxyHash != nil && siteClientIP(r, k) != clientIP(r)
+}
+
+// setPlace keeps where the batch's visitor is on the key row for the
+// inbox.
+func (k *siteKeyRow) setPlace(p geoip.Place, source string) {
+	k.country, k.countrySource = p.Country, source
+	k.region, k.city, k.isp, k.asn = cutUTF8(p.Region, 200), cutUTF8(p.City, 200), cutUTF8(p.Org, 200), int64(p.ASN)
 }
 
 // siteEvents takes a browser's events. The body is JSON, sent as text/plain
@@ -662,7 +701,7 @@ func (s *Server) siteEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ua := r.Header.Get("User-Agent")
-	k.country, k.countrySource = visitorCountry(r, k)
+	k.setPlace(visitorPlace(r, k))
 	if isBotUA(ua) {
 		// Crawlers and scripts are counted, not stored.
 		if _, err := s.pool.Exec(ctx, `INSERT INTO site_key_days (key_id, workspace_id, day, bots) VALUES ($1, $2, current_date, $3)
@@ -796,8 +835,9 @@ func (s *Server) queueSiteBatch(ctx context.Context, k siteKeyRow, ua string, ba
 	if len(keep) == 0 {
 		return accepted, rejected, anon, nil
 	}
-	_, err = s.pool.Exec(ctx, `INSERT INTO site_event_inbox (workspace_id, key_id, user_agent, batch, country, country_source) VALUES ($1, $2, $3, $4, $5, $6)`,
-		k.workspaceID, k.id, cutUTF8(ua, 1000), keep, k.country, k.countrySource)
+	_, err = s.pool.Exec(ctx, `INSERT INTO site_event_inbox (workspace_id, key_id, user_agent, batch, country, country_source, region, city, asn, isp)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		k.workspaceID, k.id, cutUTF8(ua, 1000), keep, k.country, k.countrySource, k.region, k.city, k.asn, k.isp)
 	if err == nil {
 		s.wakeSiteInbox()
 	}
@@ -810,8 +850,10 @@ func (s *Server) queueSiteBatch(ctx context.Context, k siteKeyRow, ua string, ba
 // conflict) is counted and skipped; any other error ends the transaction.
 func (s *Server) storeSiteBatch(ctx context.Context, tx pgx.Tx, k siteKeyRow, ua string, batch []json.RawMessage, now time.Time) (accepted, rejected int, anon string, err error) {
 	a := &access{principal: principal{ActorType: "site_key", TokenID: k.id}, WorkspaceID: k.workspaceID}
-	v := siteVisitor{keyID: k.id, brandID: k.brandID, origins: k.origins, country: k.country, countrySource: k.countrySource}
+	v := siteVisitor{keyID: k.id, brandID: k.brandID, origins: k.origins, country: k.country, countrySource: k.countrySource,
+		region: k.region, city: k.city, isp: k.isp, asn: k.asn}
 	v.device, v.browser, v.os = parseUA(ua)
+	v.detail = parseDevice(ua, v.os, v.browser)
 	c, err := loadCatalog(ctx, tx, k.workspaceID, deref(k.brandID), false)
 	if err != nil {
 		return 0, 0, "", err

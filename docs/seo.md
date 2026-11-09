@@ -541,14 +541,16 @@ read: your backlinks already name the page that dropped the link.
 
 ### Searching the web
 
-`POST /search-results` (MCP `search_web`) reads one Google results page
-for any query, as you'd type it (operators such as `intitle:` and
-`-site:` work), from your own DataForSEO or Geonode connection: the one
-rank tracking uses, or `integration_id`. It costs money within the
-connection's budget (about $0.02 a search on DataForSEO, $0.005 on
-Geonode), so ask with `estimate_only` first. You get the organic results,
-best first; only the cost is kept, in Outcomes. Without a SERP
-connection, it answers `409 connector_needed`.
+`POST /v1/brands/{brand}/search-results` (MCP `search_web`) reads one
+Google results page for any query, as you'd type it (operators such as
+`intitle:` and `-site:` work), from your own DataForSEO or Geonode
+connection: the one rank tracking uses, or `integration_id`. It costs
+money within the connection's budget (about $0.02 a search on DataForSEO,
+$0.005 on Geonode), so ask with `estimate_only` first. You get the organic
+results, best first; only the cost is kept, in Outcomes. The search is
+the brand's: its cost, and the approval when an agent's search waits for
+a person, show in that brand on the Agents page and nowhere else.
+Without a SERP connection, it answers `409 connector_needed`.
 
 ### Link building playbooks
 

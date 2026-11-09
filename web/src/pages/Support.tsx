@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Mailbox, Member, SupportArticle, SupportAssistantRun, SupportConversation, SupportCounts, SupportMailbox, SupportMessage } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -6,7 +7,7 @@ import { Icon } from "../icons";
 import { ago, listTime, stamp } from "../format";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/analytics";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import type { Tab } from "../App";
 import { SupportForwarding } from "@/components/support-forwarding";
 import { SupportSLA } from "@/components/support-sla";
@@ -147,7 +148,22 @@ function SlaChip({ c, long = false }: { c: SupportConversation; long?: boolean }
   );
 }
 
-export function Support({
+// Support belongs to one brand.
+export function Support(props: {
+  ws: string;
+  canManage: boolean;
+  canSetUp: boolean;
+  myId: string;
+  open?: string;
+  setOpen: (id?: string) => void;
+  go: (tab: Tab) => void;
+}) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Support conversations" brands={active.length} />;
+  return <SupportPage key={brand.id} {...props} />;
+}
+
+function SupportPage({
   ws,
   canManage,
   canSetUp,
@@ -179,23 +195,22 @@ export function Support({
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
   const { brand } = useBrand(ws);
-  const brandQ = brand ? { brand: brand.handle } : {};
 
   useEffect(() => {
     api.GET("/v1/workspaces/{ws}/support/mailboxes", { params: { path: { ws } } }).then(({ data }) => setMailboxes(data?.data ?? []));
     api.GET("/v1/workspaces/{ws}/inbound-addresses", { params: { path: { ws } } }).then(({ data }) =>
       setForwarding((data?.data ?? []).filter((a) => a.purpose === "support").map((a) => a.email)),
     );
-    api.GET("/v1/workspaces/{ws}/support/stats", { params: { path: { ws }, query: brandQ } }).then(({ data }) => data && setStats(data));
-    api.GET("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: { ws }, query: brandQ } }).then(({ data }) => data && setReview(data.counts.answers + data.counts.conflicts));
+    api.GET("/v1/brands/{brand}/support/stats", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => data && setStats(data));
+    api.GET("/v1/brands/{brand}/knowledge/suggestions", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => data && setReview(data.counts.answers + data.counts.conflicts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, tick, brand?.id]);
 
   useEffect(() => {
     let live = true;
     const t = setTimeout(async () => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/support/conversations", {
-        params: { path: { ws }, query: { ...query(folder), ...brandQ, ...(q.trim() ? { q: q.trim() } : {}), limit: 100 } as never },
+      const { data, error } = await api.GET("/v1/brands/{brand}/support/conversations", {
+        params: { path: { brand: pickedBrandId() }, query: { ...query(folder), ...(q.trim() ? { q: q.trim() } : {}), limit: 100 } as never },
       });
       if (!live) return;
       if (error) return setError(errorMessage(error));
@@ -354,15 +369,15 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   const [articles, setArticles] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
-  const path = { ws, id };
+  const path = { brand: pickedBrandId(), id };
 
   const load = useCallback(async () => {
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/support/conversations/{id}", { params: { path } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/support/conversations/{id}", { params: { path } });
     if (error) return setError(errorMessage(error));
     setConv(data.conversation);
     setMessages(data.messages);
     setOthers(data.other_conversations);
-    const a = await api.GET("/v1/workspaces/{ws}/support/conversations/{id}/assistant", { params: { path } });
+    const a = await api.GET("/v1/brands/{brand}/support/conversations/{id}/assistant", { params: { path } });
     if (a.data) setRun(a.data.run ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, id]);
@@ -386,7 +401,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   }, [messages.length]);
 
   async function patch(change: Record<string, unknown>, done?: string) {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/support/conversations/{id}", { params: { path }, body: change as never });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/support/conversations/{id}", { params: { path }, body: change as never });
     if (error) return toast(errorMessage(error), "error");
     setConv(data as SupportConversation);
     onChanged();
@@ -398,8 +413,8 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
     setBusy(true);
     const res =
       mode === "note"
-        ? await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/notes", { params: { path }, body: { body } })
-        : await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/replies", {
+        ? await api.POST("/v1/brands/{brand}/support/conversations/{id}/notes", { params: { path }, body: { body } })
+        : await api.POST("/v1/brands/{brand}/support/conversations/{id}/replies", {
             params: { path },
             body: { body, ...(after ? { status: after } : {}), ...(runId ? { assistant_run_id: runId } : {}) },
           });
@@ -435,7 +450,7 @@ function Conversation({ ws, id, canManage, myId, onBack, onChanged, go }: { ws: 
   async function suggest() {
     setSuggesting(true);
     setAiProblem(null);
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/support/conversations/{id}/assistant", { params: { path } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/support/conversations/{id}/assistant", { params: { path } });
     setSuggesting(false);
     if (error) {
       const e = (error as { error?: { code?: string; message?: string } }).error;
@@ -641,8 +656,8 @@ function ArticlePicker({ ws, id, onPick, onClose, go }: {
   useEffect(() => {
     let live = true;
     const t = setTimeout(async () => {
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/support/conversations/{id}/articles", {
-        params: { path: { ws, id }, query: q.trim() ? { q: q.trim() } : {} },
+      const { data, error } = await api.GET("/v1/brands/{brand}/support/conversations/{id}/articles", {
+        params: { path: { brand: pickedBrandId(), id }, query: q.trim() ? { q: q.trim() } : {} },
       });
       if (!live) return;
       if (error) return setError(errorMessage(error));

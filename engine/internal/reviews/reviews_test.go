@@ -19,6 +19,10 @@ func TestParsePage(t *testing.T) {
 		{"https://maps.app.goo.gl/AbCd123", Google, "maps.app.goo.gl/AbCd123", "https://maps.app.goo.gl/AbCd123"},
 		{"https://www.google.com/maps/place/Northpeak+Studio/@-33.8688,151.2093,17z/data=!3m1", Google, "northpeak+studio@-33.869,151.209", "https://www.google.com/maps/place/Northpeak+Studio/@-33.8688,151.2093,17z"},
 		{"https://search.google.com/local/reviews?placeid=ChIJ_test", Google, "place:ChIJ_test", "https://search.google.com/local/reviews?placeid=ChIJ_test"},
+		{"https://sourceforge.net/software/product/Northpeak/", SourceForge, "product:northpeak", "https://sourceforge.net/software/product/Northpeak/"},
+		{"www.sourceforge.net/software/product/Northpeak/reviews/?utm_source=x", SourceForge, "product:northpeak", "https://sourceforge.net/software/product/Northpeak/"},
+		{"https://sourceforge.net/projects/northpeak/", SourceForge, "project:northpeak", "https://sourceforge.net/projects/northpeak/reviews/"},
+		{"https://sourceforge.net/projects/Northpeak/reviews/?stars=5", SourceForge, "project:northpeak", "https://sourceforge.net/projects/northpeak/reviews/"},
 	}
 	for _, c := range cases {
 		p, ok := ParsePage(c.in)
@@ -26,7 +30,7 @@ func TestParsePage(t *testing.T) {
 			t.Errorf("ParsePage(%q) = %+v, %v; want %s %s %s", c.in, p, ok, c.platform, c.id, c.url)
 		}
 	}
-	for _, bad := range []string{"https://www.trustpilot.com/categories/software", "https://www.g2.com/categories/crm", "https://www.capterra.com/crm-software/",
+	for _, bad := range []string{"https://www.trustpilot.com/categories/software", "https://www.g2.com/categories/crm", "https://www.capterra.com/crm-software/", "https://sourceforge.net/software/crm/", "https://sourceforge.net/directory/",
 		"https://www.google.com/search?q=northpeak", "https://northpeak.example/reviews", "https://www.google.com/maps"} {
 		if p, ok := ParsePage(bad); ok {
 			t.Errorf("ParsePage(%q) = %+v, want not a review page", bad, p)
@@ -53,6 +57,11 @@ func TestMatches(t *testing.T) {
 	g2, _ := ParsePage("https://www.g2.com/products/northpeak-studio/reviews")
 	if !Matches(g2, "Northpeak Studio", "") || !Matches(g2, "Northpeak", "") || Matches(g2, "Acme", "") {
 		t.Fatal("g2 match by name")
+	}
+	sf, _ := ParsePage("https://sourceforge.net/software/product/Northpeak-Studio/")
+	sfp, _ := ParsePage("https://sourceforge.net/projects/northpeak/reviews/")
+	if !Matches(sf, "Northpeak Studio", "") || !Matches(sfp, "Northpeak", "") || Matches(sfp, "Acme", "") {
+		t.Fatal("sourceforge match by name")
 	}
 	other, _ := ParsePage("https://www.g2.com/products/northpeakish/reviews")
 	if Matches(other, "Northpeak", "") {
@@ -232,5 +241,36 @@ func TestSentiment(t *testing.T) {
 		if got := Sentiment(stars); got != want {
 			t.Errorf("Sentiment(%v) = %s, want %s", stars, got, want)
 		}
+	}
+}
+
+func TestParseSourceForge(t *testing.T) {
+	r := Parse(SourceForge, read(t, "sourceforge.html"), time.Now())
+	if r.Score == nil || *r.Score != 4.6 || r.Count == nil || *r.Count != 37 || r.Name != "Northpeak" || !r.More {
+		t.Fatalf("headline: %+v", r)
+	}
+	if len(r.Reviews) != 3 {
+		t.Fatalf("reviews: %+v", r.Reviews)
+	}
+	// SourceForge's own markup: a month-first date, the title and text
+	// outside the microdata.
+	if c := r.Reviews[2]; c.Rating != 4 || c.Author != "Cara L." || c.Title != "Good value" ||
+		c.Body != "Pros Fair pricing.\n\nCons Setup took a while." || c.PostedAt.Format("2006-01-02") != "2026-11-04" {
+		t.Fatalf("sourceforge markup review: %+v", c)
+	}
+	a, b := r.Reviews[0], r.Reviews[1]
+	if a.ExternalID != "md:review-9001" || a.Rating != 5 || a.Author != "Ana R." || a.Title != "Fast and simple" ||
+		a.Body != "Set up in a day.\nSupport answers quickly." || a.PostedAt.Format("2006-01-02") != "2026-10-30" {
+		t.Fatalf("first review: %+v", a)
+	}
+	if b.ExternalID != "md:review-9002" || b.Rating != 2 || b.RatingScale != 5 || b.Author != "Ben T." || b.Title != "" {
+		t.Fatalf("second review: %+v", b)
+	}
+	p, _ := ParsePage("https://sourceforge.net/software/product/Northpeak/")
+	if PageURL(p, 1) != p.URL || PageURL(p, 2) != p.URL+"?page=2" || !RenderJS(SourceForge) || NewestFirst(SourceForge) {
+		t.Fatal("sourceforge page rules")
+	}
+	if q := SearchQueries("Northpeak", "northpeak.example")[SourceForge]; q != `site:sourceforge.net "Northpeak" reviews` {
+		t.Fatal(q)
 	}
 }

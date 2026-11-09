@@ -590,8 +590,8 @@ func (s *Server) testAssistant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brand = &id
-	} else if len(a.Brands) == 1 {
-		brand = &a.Brands[0]
+	} else if len(a.seenBrands()) == 1 {
+		brand = &a.seenBrands()[0]
 	}
 	start := time.Now()
 	out := map[string]any{"cited": []assistantCit{}, "checks": map[string]any{}}

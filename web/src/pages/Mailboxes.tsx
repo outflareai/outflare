@@ -35,9 +35,11 @@ export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolea
   // Connected sequencers that can run warm-up themselves.
   const [warmupPlatforms, setWarmupPlatforms] = useState<{ id: string; name: string; config: Record<string, unknown> }[]>([]);
 
-  const brand = useBrand(ws).brand?.handle;
+  const picked = useBrand(ws).brand;
+  const brand = picked?.handle;
+  const brandId = picked?.id;
   const load = useCallback(async () => {
-    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/senders", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } })]);
+    const [m, d, s, h] = await Promise.all([api.GET("/v1/workspaces/{ws}/mailboxes", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), api.GET("/v1/workspaces/{ws}/sending-domains", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } }), brandId ? api.GET("/v1/brands/{brand}/senders", { params: { path: { brand: brandId } } }) : Promise.resolve({ data: { data: [] as Sender[] } }), api.GET("/v1/workspaces/{ws}/mailbox-health", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } })]);
     setMailboxes(m.data?.data ?? []);
     setDomains(d.data?.data ?? []);
     setSenders(s.data?.data ?? []);
@@ -45,7 +47,7 @@ export function Mailboxes({ ws, canManage, go }: { ws: string; canManage: boolea
     const i = await api.GET("/v1/workspaces/{ws}/integrations", { params: { path: { ws }, query: { ...(brand ? { brand } : {}) } } });
     setWarmupPlatforms((i.data?.data ?? []).filter((x) => x.capabilities.includes("control.warmup")).map((x) => ({ id: x.id, name: x.name, config: x.config })));
     setLoaded(true);
-  }, [ws, brand]);
+  }, [ws, brand, brandId]);
 
   useEffect(() => {
     load();

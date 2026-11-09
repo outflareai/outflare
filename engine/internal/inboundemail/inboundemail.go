@@ -58,6 +58,13 @@ type Purpose struct {
 	// northpeak-support, and a person may rename them. Without it an
 	// address is one per workspace, with letters nobody can guess.
 	Suffix string
+	// Workspace keeps a readable purpose (one with Suffix) to one address
+	// per workspace, named after the workspace's slug, such as
+	// geonode-receipts.
+	Workspace bool
+	// Auto makes the workspace's address as soon as someone looks for it
+	// (the addresses list), so nobody has to press a button first.
+	Auto bool
 	// On reports whether the purpose is on for a workspace; nil is always.
 	On func(ctx context.Context, q Querier, workspaceID string) (bool, error)
 }
@@ -122,16 +129,46 @@ type Service struct {
 	purposes map[string]Purpose
 	// lookupTXT resolves DKIM keys; nil uses DNS. Tests set it.
 	lookupTXT func(string) ([]string, error)
+	// taken reports whether an address at the domain is used by something
+	// else the operator runs there (SetTaken).
+	taken func(ctx context.Context, address string) (bool, error)
+}
+
+// SetTaken tells the service about other addresses at its domain, such as
+// an extension's own mailboxes, so it never picks or accepts one of them.
+func (s *Service) SetTaken(fn func(ctx context.Context, address string) (bool, error)) { s.taken = fn }
+
+// TakenHere reports whether address (local@domain) is one of the
+// service's addresses, live or disabled, so an extension sharing the
+// domain doesn't hand it out.
+func (s *Service) TakenHere(ctx context.Context, q Querier, address string) (bool, error) {
+	local, domain, ok := strings.Cut(strings.ToLower(strings.TrimSpace(address)), "@")
+	if !ok || !s.Enabled() || domain != s.domain {
+		return false, nil
+	}
+	var taken bool
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM inbound_addresses WHERE local_part = $1)`, local).Scan(&taken)
+	return taken, err
+}
+
+// takenElsewhere reports whether local is used at the domain by something
+// other than this service.
+func (s *Service) takenElsewhere(ctx context.Context, local string) (bool, error) {
+	if s.taken == nil {
+		return false, nil
+	}
+	return s.taken(ctx, local+"@"+s.domain)
 }
 
 // Enable turns inbound email on for the server: addresses are
-// local@domain, and deliveries are signed with secret.
+// local@domain, and deliveries are signed with secret. Without a secret,
+// mail arrives only through Deliver, called by the extension itself.
 func (s *Service) Enable(domain string, secret []byte) {
 	s.domain, s.secret = strings.ToLower(strings.TrimSpace(domain)), secret
 }
 
 // Enabled reports whether the operator turned inbound email on.
-func (s *Service) Enabled() bool { return s != nil && s.domain != "" && len(s.secret) > 0 }
+func (s *Service) Enabled() bool { return s != nil && s.domain != "" }
 
 // Domain is the inbound domain, such as in.outflare.ai.
 func (s *Service) Domain() string { return s.domain }
@@ -291,6 +328,9 @@ func (s *Service) Ensure(ctx context.Context, tx pgx.Tx, w Want) (Address, bool,
 	if p.Suffix == "" {
 		w.BrandID, w.Name = nil, ""
 	}
+	if p.Workspace {
+		w.BrandID = nil
+	}
 	if w.Name != "" {
 		// Naming it replaces it.
 		w.Replace = true
@@ -312,6 +352,11 @@ func (s *Service) Ensure(ctx context.Context, tx pgx.Tx, w Want) (Address, bool,
 		local = strings.ToLower(strings.TrimSpace(w.Name))
 		if !nameRe.MatchString(local) || strings.Contains(local, "--") || slices.Contains(reserved, local) {
 			return Address{}, false, ErrBadName
+		}
+		if taken, err := s.takenElsewhere(ctx, local); err != nil {
+			return Address{}, false, err
+		} else if taken {
+			return Address{}, false, ErrNameTaken
 		}
 	} else {
 		var err error
@@ -374,6 +419,12 @@ func (s *Service) readableName(ctx context.Context, tx pgx.Tx, w Want, suffix st
 			return "", err
 		}
 		if !taken {
+			var err error
+			if taken, err = s.takenElsewhere(ctx, name); err != nil {
+				return "", err
+			}
+		}
+		if !taken {
 			return name, nil
 		}
 		name = fmt.Sprintf("%s-%s-%d", base, suffix, n)
@@ -393,6 +444,10 @@ func Sign(secret []byte, ts int64, body []byte) string {
 
 // Verify checks a delivery's signature, made within five minutes of now.
 func (s *Service) Verify(ts string, sig string, body []byte, now time.Time) error {
+	if len(s.secret) == 0 {
+		// Mail comes only through the extension (Enable without a secret).
+		return ErrBadSignature
+	}
 	t, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil || now.Sub(time.Unix(t, 0)).Abs() > 5*time.Minute {
 		return ErrBadSignature
@@ -492,10 +547,58 @@ func Forwarders(ctx context.Context, q Querier, workspaceID, userID string) ([]F
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Forwarder, error) {
+	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Forwarder, error) {
 		var f Forwarder
 		return f, row.Scan(&f.Email, &f.UserID, &f.ConfirmationCode, &f.ConfirmationURL, &f.ConfirmationAt, &f.LastEmailAt, &f.CreatedAt)
 	})
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		f := &list[i]
+		if f.ConfirmationURL != nil || f.LastEmailAt != nil {
+			continue
+		}
+		if err := earlierConfirmation(ctx, q, workspaceID, f); err != nil {
+			return nil, err
+		}
+	}
+	return list, nil
+}
+
+// earlierConfirmation fills in Gmail's forwarding confirmation for f when
+// it arrived before anyone linked the address, so it was turned away
+// then: the person who links it afterwards can still confirm it. Only a
+// confirmation Google signed, asking to forward from f's address, counts,
+// as when it arrives after the link.
+func earlierConfirmation(ctx context.Context, q Querier, workspaceID string, f *Forwarder) error {
+	var raw []byte
+	var at time.Time
+	err := q.QueryRow(ctx, `SELECT raw, received_at FROM inbound_emails
+		WHERE workspace_id = $1 AND from_address = 'forwarding-noreply@google.com' AND forwarded_by = $2
+			AND 'google.com' = ANY(dkim_domains) AND raw IS NOT NULL
+		ORDER BY received_at DESC LIMIT 1`, workspaceID, f.Email).Scan(&raw, &at)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return nil
+	}
+	e := Email{Subject: decodeHeader(msg.Header.Get("Subject"))}
+	from, code, link, ok := readGmailConfirmation(&e, msg)
+	if !ok || from != f.Email || link == "" {
+		return nil
+	}
+	if code != "" {
+		f.ConfirmationCode = &code
+	}
+	f.ConfirmationURL = &link
+	f.ConfirmationAt = &at
+	return nil
 }
 
 // UnlinkForwarder removes a linked address of userID's (any member's when

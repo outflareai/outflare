@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -69,10 +68,11 @@ func TestInboundEmail(t *testing.T) {
 	}
 
 	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "leads"})
-	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts", "name": "receipts"})
+	// AI receipts are one readable address per workspace.
+	owner.must(400, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts", "brand": "acme-outbound"})
 	addr := owner.must(201, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts"})
 	email := addr["email"].(string)
-	if !strings.HasPrefix(email, "acme-outbound-") || !strings.HasSuffix(email, "@in.example.test") {
+	if email != "acme-outbound-receipts@in.example.test" || addr["brand_id"] != nil {
 		t.Fatalf("address: %v", addr)
 	}
 	if again := owner.must(200, "POST", base+"/inbound-addresses", map[string]any{"purpose": "ai_receipts"}); again["email"] != email {

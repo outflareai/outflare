@@ -38,7 +38,7 @@ steps:
   - say: Read the brand's context and voice, and how the last issues did.
     tools: [getBrandContext, listBrandEmailBroadcasts, getBrandEmailBroadcastLift]
   - say: Gather this month's news from the brand's knowledge.
-    tools: [listKnowledgeItems, findKnowledgePassages]
+    tools: [listBrandKnowledgeItems, findBrandKnowledgePassages]
   - say: Draft the issue with a holdout, addressed to people with consent to email.
     tools: [createBrandEmailBroadcast, updateBrandEmailBroadcast, listBrandEmailBroadcastRecipients]
   - say: Send it once a person approves the draft.

@@ -18,6 +18,13 @@ jobs
 memberships
 oauth_grants
 teams
+# The team directory: who works here, their departments, and the work
+# accounts the company hands them (migration 0490).
+departments
+staff
+staff_accounts
+staff_account_holders
+telegram_sessions
 workspace_ai_settings
 workspace_onboarding
 workspace_roles
@@ -29,6 +36,9 @@ ai_account_members
 ai_accounts
 ai_budget_alerts
 ai_device_links
+# A sign-in to the desktop app in progress: a person, not a workspace,
+# signs in (docs/desktop-app.md).
+app_signins
 ai_devices
 ai_receipt_ids
 ai_receipts

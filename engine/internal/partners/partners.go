@@ -88,7 +88,7 @@ func PresetFor(kind string) Preset {
 	case KindReferral:
 		// Customers share a short link; both sides get something the
 		// workspace's own product grants, on the first sale.
-		return Preset{CreditWindowDays: 60, CreditModel: "last", HoldDays: 14, AutoApprove: true, AutoAccept: true, Rules: []Rule{
+		return Preset{CreditWindowDays: 60, CreditModel: "last", HoldDays: 14, AutoApprove: true, Rules: []Rule{
 			{Trigger: "sale", Side: "partner", Kind: "action", Action: "referral_reward", ActionData: map[string]any{}, Recurrence: "first", ProductIDs: []string{}},
 			{Trigger: "sale", Side: "referred", Kind: "action", Action: "welcome_reward", ActionData: map[string]any{}, Recurrence: "first", ProductIDs: []string{}},
 		}}
@@ -200,7 +200,7 @@ var narrowness = map[string]int{"every": 0, "months": 1, "first": 2}
 
 // pays is the cash a cash rule gives for a conversion, after overrides.
 func (r Rule) pays(c Conversion) int64 {
-	bp, cents := r.rate(c)
+	bp, cents := r.Rate(c)
 	switch {
 	case r.Kind == "percent" && bp != nil:
 		return Percent(c.AmountCents, *bp)
@@ -260,6 +260,7 @@ func Share(amount, refunded, total int64) int64 {
 type Visit struct {
 	At           time.Time
 	MembershipID string
+	SessionID    string
 }
 
 // Credit picks the visit that gets the credit for a conversion at at, by a

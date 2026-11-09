@@ -40,7 +40,7 @@ func TestReviewRequests(t *testing.T) {
 	other := owner.must(201, "POST", base+"/brands", map[string]any{"name": "Acme", "website": "acme.example"})["id"].(string)
 	route := "/v1/brands/" + brand + "/review-requests"
 	defaults := owner.must(200, "GET", route+"/settings", nil)
-	if len(defaults["platforms"].([]any)) != 20 || defaults["settings"].(map[string]any)["interval_days"] != 90.0 {
+	if len(defaults["platforms"].([]any)) != 21 || defaults["settings"].(map[string]any)["interval_days"] != 90.0 {
 		t.Fatalf("defaults=%v", defaults)
 	}
 	settings := reviewrequests.Defaults()

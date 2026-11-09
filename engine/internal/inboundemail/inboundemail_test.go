@@ -227,6 +227,73 @@ func TestDeliverAndProcess(t *testing.T) {
 		t.Fatalf("personal forward: %s %+v", st, got)
 	}
 
+	// Gmail's confirmation for an address nobody had linked yet is turned
+	// away, but whoever links it afterwards can still confirm it.
+	early := sign("google.com", message("c3@google", "Gmail Team <forwarding-noreply@google.com>", "",
+		"(#987654321) Gmail Forwarding Confirmation - Receive Mail from ana.later@gmail.example",
+		"ana.later@gmail.example has requested to automatically forward mail to your email address.\r\nConfirmation code: 987654321\r\nTo allow, click the link below:\r\nhttps://mail-settings.google.com/mail/vf-%5BANGjdJ-later%5D-abc"))
+	id, _, _ = s.Deliver(ctx, a.Email, early)
+	if err := s.process(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if st, reason := statusOf(t, s, id); st != "rejected" || reason != "unknown_forwarder" {
+		t.Fatalf("early confirmation: %s %s", st, reason)
+	}
+	if err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error { return LinkForwarder(ctx, tx, ws, user, "ana.later@gmail.example") }); err != nil {
+		t.Fatal(err)
+	}
+	fs, err = Forwarders(ctx, s.Pool, ws, user)
+	var later *Forwarder
+	for i := range fs {
+		if fs[i].Email == "ana.later@gmail.example" {
+			later = &fs[i]
+		}
+	}
+	if err != nil || later == nil || later.ConfirmationCode == nil || *later.ConfirmationCode != "987654321" ||
+		later.ConfirmationURL == nil || !strings.Contains(*later.ConfirmationURL, "vf-%5BANGjdJ-later") {
+		t.Fatalf("early confirmation after linking: %+v %v", fs, err)
+	}
+	// The unsigned look-alike above, for an address linked later, is not.
+	if err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error { return LinkForwarder(ctx, tx, ws, user, "evil@example.test") }); err != nil {
+		t.Fatal(err)
+	}
+	fs, _ = Forwarders(ctx, s.Pool, ws, user)
+	for _, f := range fs {
+		if f.Email == "evil@example.test" && f.ConfirmationURL != nil {
+			t.Fatalf("unsigned confirmation shown: %+v", f)
+		}
+	}
+	if err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
+		_, err := UnlinkForwarder(ctx, tx, ws, user, "evil@example.test")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A Google Workspace rule copies a colleague's mail, with nothing saying
+	// who forwarded it: it counts when the colleague is at a domain a
+	// member's own address is at, never at a personal mail provider's.
+	colleague := func(id, to string) []byte {
+		return []byte("From: receipts@openai.example\r\nTo: " + to + "\r\nSubject: Receipt\r\nMessage-ID: <" + id + ">\r\nDate: Thu, 29 Oct 2026 10:00:00 +0000\r\n\r\nb\r\n")
+	}
+	anaDomain := anaEmail[strings.LastIndexByte(anaEmail, '@')+1:]
+	id, _, _ = s.Deliver(ctx, a.Email, colleague("w1@x", "Bo <bo@"+strings.ToUpper(anaDomain)+">"))
+	if err := s.process(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := statusOf(t, s, id); st != "processed" || got[len(got)-1].ForwarderID != user || got[len(got)-1].ForwardedBy != "bo@"+anaDomain {
+		t.Fatalf("colleague: %s %+v", st, got[len(got)-1])
+	}
+	for i, to := range []string{"bo@elsewhere.test", "bo@gmail.com"} {
+		id, _, _ = s.Deliver(ctx, a.Email, colleague(fmt.Sprintf("w%d@y", i), to))
+		if err := s.process(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if st, reason := statusOf(t, s, id); st != "rejected" || reason != "unknown_forwarder" {
+			t.Fatalf("%s: %s %s", to, st, reason)
+		}
+	}
+
 	// Another member can't take Ana's address.
 	if err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		return LinkForwarder(ctx, tx, ws, "00000000-0000-0000-0000-000000000000", "ana.personal@gmail.example")

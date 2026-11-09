@@ -48,7 +48,7 @@ const itemOf = (v: View) => (v === "account" ? "companies" : "");
 
 
 
-export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab) => void }) {
+export function People({ ws, canManage, canConfigure = false, open, onOpen, go }: { ws: string; canManage: boolean; canConfigure?: boolean; open: string; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void }) {
   const cat = useCatalog(ws);
   if (isID(open)) return <RecordPage key={open} ws={ws} id={open} cat={cat} canManage={canManage} onOpen={onOpen} go={go} />;
   const tabs = <ViewTabs value={open === "duplicates" || open === "events" || open === "products" || open === "batches" || open === "deleted" || open === "transactions" || open === "metrics" || open === "setup" ? open : viewOf(open)} onOpen={onOpen} />;
@@ -328,7 +328,7 @@ function FieldValue({ f, v, cat, names, onOpen }: { f?: Field; v: unknown; cat: 
   return <span className="break-words">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>;
 }
 
-function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string; id: string; cat: CatalogInfo; canManage: boolean; onOpen: (item: string) => void; go: (t: Tab) => void }) {
+function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string; id: string; cat: CatalogInfo; canManage: boolean; onOpen: (item: string) => void; go: (t: Tab, item?: string) => void }) {
   const [rec, setRec] = useState<Rec | null>(null);
   // A record's fields are its brand's catalog's, whichever brand is picked.
   const own = useCatalog(ws, rec?.brand_id);
@@ -522,7 +522,7 @@ function RecordPage({ ws, id, cat: picked, canManage, onOpen, go }: { ws: string
           <Identities key={`i${tick}`} rec={rec} canManage={manage} onChange={changed} />
           <Links rec={rec} links={links} fields={fields} canManage={manage} onChange={changed} onOpen={onOpen} />
           {people && <Consents key={`c${tick}`} brand={brand} id={id} canManage={manage} onChange={changed} go={go} />}
-          {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={() => go("partners")} /></div>}
+          {people && <div className="rounded-md border p-4 text-sm empty:hidden"><RecordPartners ws={ws} record={id} go={go} /></div>}
           {rec.brand_id && <RecordLifecycle key={`l${tick}`} brand={rec.brand_id} record={id} />}
           {rec.brand_id && <RecordMetrics key={`x${tick}`} brand={rec.brand_id} record={id} />}
           {rec.brand_id && <RecordTransactions key={`t${tick}`} brand={rec.brand_id} record={id} />}

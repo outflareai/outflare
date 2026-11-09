@@ -52,8 +52,11 @@ const replyImportSelect = `SELECT id::text, brand_id::text, days, status, conver
 
 func (s *Server) routesLearnReplies(mux *http.ServeMux) {
 	read, manage := auth.ScopeWorkspaceRead, auth.ScopeContextManage
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/reply-imports", s.onBrand(read, s.listReplyImports))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/reply-imports", s.inBrand(read, s.listReplyImports))
+	mux.HandleFunc("POST /v1/brands/{brand}/knowledge/reply-imports", s.onBrand(manage, s.startReplyImport))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/knowledge/reply-imports", s.inBrand(manage, s.startReplyImport))
+	mux.HandleFunc("GET /v1/brands/{brand}/knowledge/reply-imports/{id}", s.onBrand(read, s.getReplyImport))
 	mux.HandleFunc("GET /v1/workspaces/{ws}/knowledge/reply-imports/{id}", s.inBrand(read, s.getReplyImport))
 }
 
@@ -124,9 +127,9 @@ func (s *Server) startReplyImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		brand = &id
-	} else if len(a.Brands) == 1 {
-		brand = &a.Brands[0]
-	} else if a.Brands != nil {
+	} else if len(a.seenBrands()) == 1 {
+		brand = &a.seenBrands()[0]
+	} else if a.seenBrands() != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "say which of your brands to learn from (brand)")
 		return
 	}

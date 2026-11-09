@@ -302,6 +302,7 @@ func TestContentPublishingByAnAgent(t *testing.T) {
 	ctx := context.Background()
 	owner, ws := setupOwner(t, e.h)
 	base := "/v1/workspaces/" + ws
+	bb := brandBase(t, e, ws)
 	brand := owner.must(200, "GET", base+"/brands", nil)["data"].([]any)[0].(map[string]any)["id"].(string)
 	path := "/v1/brands/" + brand + "/content"
 	owner.must(201, "POST", base+"/integrations", map[string]any{"connector": "wordpress", "credentials": map[string]string{"site_url": "https://www.example.com", "username": "ana", "api_key": "app pass"}})
@@ -310,11 +311,11 @@ func TestContentPublishingByAnAgent(t *testing.T) {
 	if st != 202 {
 		t.Fatalf("agent write: %d %v", st, res)
 	}
-	held := owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any)
+	held := owner.must(200, "GET", bb+"/actions?status=held", nil)["data"].([]any)
 	if len(held) != 1 {
 		t.Fatalf("held: %v", held)
 	}
-	owner.must(200, "POST", base+"/actions/"+held[0].(map[string]any)["id"].(string)+"/approve", map[string]any{"note": "ok"})
+	owner.must(200, "POST", bb+"/actions/"+held[0].(map[string]any)["id"].(string)+"/approve", map[string]any{"note": "ok"})
 	items := owner.must(200, "GET", path, nil)["data"].([]any)
 	if len(items) != 1 || items[0].(map[string]any)["status"] != "draft" {
 		t.Fatalf("items after approval: %v", items)
@@ -324,8 +325,8 @@ func TestContentPublishingByAnAgent(t *testing.T) {
 	if st != 202 || res["queued"] == true {
 		t.Fatalf("agent publish should be held: %d %v", st, res)
 	}
-	held = owner.must(200, "GET", base+"/actions?status=held", nil)["data"].([]any)
-	owner.must(200, "POST", base+"/actions/"+held[0].(map[string]any)["id"].(string)+"/approve", map[string]any{"note": "ok"})
+	held = owner.must(200, "GET", bb+"/actions?status=held", nil)["data"].([]any)
+	owner.must(200, "POST", bb+"/actions/"+held[0].(map[string]any)["id"].(string)+"/approve", map[string]any{"note": "ok"})
 	got := owner.must(200, "GET", path+"/"+id, nil)
 	pubs := got["publishes"].([]any)
 	if len(pubs) != 1 || pubs[0].(map[string]any)["status"] != "queued" {

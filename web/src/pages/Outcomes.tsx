@@ -268,7 +268,9 @@ function Notes({ report, onRates, onMeetings }: { report: OutcomesReport; onRate
   const others = Object.entries(report.other_currencies);
   if (others.length) items.push(<>Left out, in other currencies: {others.map(([c, v]) => money(v, c)).join(", ")}. Switch the currency to see them.</>);
   if (report.totals.spend.shared_cents && report.group_by !== "none") {
-    items.push(<>{money(report.totals.spend.shared_cents, report.currency)} of costs belong to no single {report.group_by}, so each gets a share by how many emails it sent.</>);
+    items.push(report.totals.sent > 0
+      ? <>{money(report.totals.spend.shared_cents, report.currency)} of costs belong to no single {report.group_by}, so each gets a share by how many emails it sent.</>
+      : <>{money(report.totals.spend.shared_cents, report.currency)} of costs belong to no single {report.group_by}. No emails were sent in this period, so they aren't shared out.</>);
   }
   if (!items.length) return null;
   return (
@@ -729,17 +731,19 @@ function Spend({ ws, from, to, canManage, currency, sequences, onChange }: { ws:
   const [adding, setAdding] = useState<"" | "once" | "recurring">("");
   const [editing, setEditing] = useState<RecurringSpend | null>(null);
   const seqName = useMemo(() => Object.fromEntries(sequences.map((s) => [s.id, s.name])), [sequences]);
+  const { query: brandQuery } = useBrand(ws);
 
   const load = useCallback(async () => {
+    // The same charges the report counts: this brand's outreach costs.
     const [e, r, x] = await Promise.all([
-      api.GET("/v1/workspaces/{ws}/spend", { params: { path: { ws }, query: { from, to, limit: 1000 } } }),
+      api.GET("/v1/workspaces/{ws}/spend", { params: { path: { ws }, query: { from, to, limit: 1000, outreach: true, ...brandQuery } } }),
       api.GET("/v1/workspaces/{ws}/spend-recurring", { params: { path: { ws } } }),
       api.GET("/v1/workspaces/{ws}/spend-rates", { params: { path: { ws } } }),
     ]);
     setEntries(e.data?.data ?? []);
     setRecurring(r.data?.data ?? []);
     setRates(x.data?.data ?? []);
-  }, [ws, from, to]);
+  }, [ws, from, to, brandQuery.brand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     load();
@@ -928,7 +932,7 @@ function CountsFor({ sequences, seq, setSeq }: { sequences: Sequence[]; seq: str
     <label className="block">
         <span className="mb-1 block font-medium">Sequence <span className="font-normal text-muted-foreground">(optional)</span></span>
         <select className={`${field} w-full`} value={seq} onChange={(e) => setSeq(e.target.value)}>
-          <option value="">Shared by the workspace</option>
+          <option value="">Shared by this brand's sequences</option>
           {sequences.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
     </label>
@@ -947,6 +951,7 @@ function RecordSpend({ ws, currency, sequences, onClose, onDone }: { ws: string;
   const [seq, setSeq] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const brandId = useBrand(ws).brand?.id;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -960,7 +965,7 @@ function RecordSpend({ ws, currency, sequences, onClose, onDone }: { ws: string;
         currency: cur,
         occurred_at: new Date(`${date}T12:00:00Z`).toISOString(),
         ...(mode === "money" ? { amount_cents: Math.round(value * 100) } : { units: value, unit_name: unit }),
-        ...(seq ? { sequence_id: seq } : {}),
+        ...(seq ? { sequence_id: seq } : brandId ? { brand_id: brandId } : {}),
         ...(note ? { note } : {}),
       },
     });

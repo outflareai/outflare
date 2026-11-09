@@ -18,7 +18,7 @@ Each step has a `kind`:
 
 | Kind | Matches | Filters on |
 |---|---|---|
-| `visit` | A website visit (a session), with its source and the ad click it carried | `network` (the ad network whose click id the visit carried: `google`, `meta`, `microsoft`, `linkedin`, `reddit`, `x`, `tiktok`), `channel`, `source`, `campaign`, `utm_*`, `landing_path`, `landing_url`, `referrer_host`, `device`, `country`, `browser`, `os`, `partner`, `ad_campaign`, `ad_set`, `ad` |
+| `visit` | A website visit (a session), with its source and the ad click it carried | `network` (the ad network whose click id the visit carried: `google`, `meta`, `microsoft`, `linkedin`, `reddit`, `x`, `tiktok`), `channel`, `source`, `campaign`, `utm_*`, `landing_path`, `landing_url`, `referrer_host`, `device`, `country`, `region`, `city`, `isp`, `asn`, `browser`, `browser_version`, `os`, `os_version`, `device_brand`, `device_model`, `language`, `partner`, `ad_campaign`, `ad_set`, `ad` |
 | `page` | A page view | `url`, `path`, `title`, `referrer`, `host`, `utm_*`, `source`, `param:<name>` (a query parameter, such as `param:ref`) |
 | `event` | A product event by name (`event`, such as `signed_up`) | The same as pages, plus any property of the event (`plan` or `property:plan`) |
 | `conversion` | One of the brand's [conversion definitions](conversions.md) (`conversion`, by id or key), with its own event and filters | As events |

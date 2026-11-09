@@ -376,7 +376,8 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 	}
 
 	// Spend: one-off entries, then recurring costs spread over the days of
-	// the period they were active.
+	// the period they were active. Only outreach costs count: ad spend,
+	// SEO, AI answers and the other channels have pages of their own.
 	type charge struct {
 		seq, brand, mailbox, domain *string
 		cents                       float64
@@ -392,7 +393,8 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		LEFT JOIN spend_rates r ON r.workspace_id = e.workspace_id AND r.provider = lower(e.provider) AND r.unit_name = e.unit_name
 		WHERE e.workspace_id = $1 AND e.occurred_at >= $2 AND e.occurred_at < $3
 		  AND ($4 = '' OR e.sequence_id::text = $4)
-		  AND ($5 = '' OR e.mission_id::text = $5)`, ws, f.From, f.To, f.SequenceID, f.MissionID)
+		  AND ($5 = '' OR e.mission_id::text = $5)
+		  AND e.channel = ANY($6)`, ws, f.From, f.To, f.SequenceID, f.MissionID, OutreachChannels)
 	if err != nil {
 		return rep, err
 	}
@@ -438,8 +440,9 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 				r.starts_on, r.ends_on
 			FROM spend_recurring r
 			WHERE r.workspace_id = $1 AND r.starts_on < $3::timestamptz::date + 1 AND (r.ends_on IS NULL OR r.ends_on >= $2::timestamptz::date)
-			  AND ($4 = '' OR r.sequence_id::text = $4)`,
-			ws, f.From, f.To, f.SequenceID)
+			  AND ($4 = '' OR r.sequence_id::text = $4)
+			  AND r.channel = ANY($5)`,
+			ws, f.From, f.To, f.SequenceID, OutreachChannels)
 		if err != nil {
 			return rep, err
 		}
@@ -638,7 +641,11 @@ func Summary(ctx context.Context, q Querier, ws string, f ReportFilter) (Report,
 		rep.Notes = append(rep.Notes, "Part of the spend is estimated from units and the workspace's rates.")
 	}
 	if rep.Totals.Spend.SharedCents > 0 && f.GroupBy != GroupNone {
-		rep.Notes = append(rep.Notes, "Costs not tied to one "+f.GroupBy+" are shared out by each one's share of emails sent.")
+		if rep.Totals.Sent > 0 {
+			rep.Notes = append(rep.Notes, "Costs not tied to one "+f.GroupBy+" are shared out by each one's share of emails sent.")
+		} else {
+			rep.Notes = append(rep.Notes, "Costs not tied to one "+f.GroupBy+" are not shared out, because no emails were sent in the period.")
+		}
 	}
 	if rep.UnattributedMeetings > 0 {
 		rep.Notes = append(rep.Notes, "Some meetings could not be tied to a lead or campaign and are not counted. Attribute them on the meeting to count them.")

@@ -109,7 +109,7 @@ function ListsPage({ ws, canManage, open, setOpen, go }: { ws: string; canManage
       // Smart lists are a brand's: with all brands picked there are none to show.
       brandID ? api.GET("/v1/brands/{brand}/smart-lists", { params: { path: { brand: brandID } } }) : Promise.resolve({ data: { data: [] as SmartList[] } }),
       api.GET("/v1/workspaces/{ws}/data-providers", { params: { path: { ws } } }),
-      api.GET("/v1/workspaces/{ws}/ideal-customer-profiles", { params: { path: { ws } } }),
+      brandID ? api.GET("/v1/brands/{brand}/ideal-customer-profiles", { params: { path: { brand: brandID } } }) : Promise.resolve({ data: { data: [] as CustomerProfile[] } }),
     ]);
     if (l.data) setLists(l.data.data);
     else setError(errorMessage(l.error));

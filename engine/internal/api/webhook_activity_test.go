@@ -3,6 +3,7 @@ package api_test
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // TestWebhookAttemptsAndActivity: every try of a delivery is kept with its
@@ -17,12 +18,24 @@ func TestWebhookAttemptsAndActivity(t *testing.T) {
 		t.Fatalf("new endpoint = %v", hook)
 	}
 
-	// The receiver fails the test event, then takes it when sent again.
+	// The receiver fails a real event, then takes it when sent again. A
+	// test it fails meanwhile is not counted.
 	rc.mu.Lock()
 	rc.status = 500
 	rc.mu.Unlock()
-	test := owner.must(200, "POST", base+"/webhooks/"+id+"/test", nil)
-	delivery := fmt.Sprint(int64(test["id"].(float64)))
+	owner.must(201, "POST", base+"/leads", map[string]any{"email": "ana@acme.example"})
+	var delivery string
+	deadline := time.Now().Add(10 * time.Second)
+	for delivery == "" && time.Now().Before(deadline) {
+		if ds := owner.must(200, "GET", base+"/webhooks/"+id+"/deliveries", nil)["data"].([]any); len(ds) == 1 && ds[0].(map[string]any)["attempts"] == 1.0 {
+			delivery = fmt.Sprint(int64(ds[0].(map[string]any)["id"].(float64)))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if delivery == "" {
+		t.Fatal("the event was never tried")
+	}
+	owner.must(200, "POST", base+"/webhooks/"+id+"/test", nil)
 	rc.mu.Lock()
 	rc.status = 200
 	rc.mu.Unlock()
@@ -37,10 +50,10 @@ func TestWebhookAttemptsAndActivity(t *testing.T) {
 		t.Fatalf("attempts = %v", tries)
 	}
 	first, second := tries[0].(map[string]any), tries[1].(map[string]any)
-	if first["ok"] != false || first["status_code"] != 500.0 || first["error"] == nil || first["manual"] != true {
+	if first["ok"] != false || first["status_code"] != 500.0 || first["error"] == nil || first["manual"] != false {
 		t.Errorf("first try = %v", first)
 	}
-	if second["ok"] != true || second["status_code"] != 200.0 || second["error"] != nil {
+	if second["ok"] != true || second["status_code"] != 200.0 || second["error"] != nil || second["manual"] != true {
 		t.Errorf("second try = %v", second)
 	}
 	owner.must(404, "GET", base+"/webhooks/"+id+"/deliveries/999999999", nil)

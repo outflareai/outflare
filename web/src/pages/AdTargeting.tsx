@@ -7,6 +7,7 @@ import type { AdCampaign, AdTargeting as Targeting } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
 import { ask, Badge, Button, Card, ErrorText, Loading, toast } from "../ui";
 import { money, platformName } from "./Ads";
+import { pickedBrandId } from "@/lib/brand";
 
 const methodWord: Record<string, string> = { maximize_conversions: "Maximise conversions", maximize_conversion_value: "Maximise conversion value" };
 
@@ -22,9 +23,9 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
   const [data, setData] = useState<{ supported: boolean; targeting?: Targeting; bidding_methods: string[] } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const path = { ws, id: campaign.id };
+  const path = { brand: pickedBrandId(), id: campaign.id };
   const load = useCallback(() => {
-    api.GET("/v1/workspaces/{ws}/ads/campaigns/{id}/targeting", { params: { path: { ws, id: campaign.id } } }).then(({ data, error }) => {
+    api.GET("/v1/brands/{brand}/ads/campaigns/{id}/targeting", { params: { path: { brand: pickedBrandId(), id: campaign.id } } }).then(({ data, error }) => {
       if (error) setError(errorMessage(error));
       else setData(data ?? null);
     });
@@ -51,12 +52,12 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
     const strategy = r.choice as "maximize_conversions" | "maximize_conversion_value";
     const target = r.value.trim() === "" || !(v > 0) ? {} : strategy === "maximize_conversions" ? { target_cpa_micros: Math.round(v * 1e6) } : { target_roas: v };
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/bidding", { params: { path }, body: { strategy, ...target } });
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/bidding", { params: { path }, body: { strategy, ...target } });
     done(error);
   }
   async function audience(id: string, name: string, action: "add" | "remove") {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/audiences", { params: { path }, body: { audience_id: id, audience_name: name, action } });
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/audiences", { params: { path }, body: { audience_id: id, audience_name: name, action } });
     done(error);
   }
   async function addAudience() {
@@ -77,7 +78,7 @@ export function CampaignTargeting({ ws, campaign }: { ws: string; campaign: AdCa
   }
   async function country(code: string, action: "add" | "remove") {
     setBusy(true);
-    const { error } = await api.POST("/v1/workspaces/{ws}/ads/campaigns/{id}/countries", { params: { path }, body: { country: code, action } });
+    const { error } = await api.POST("/v1/brands/{brand}/ads/campaigns/{id}/countries", { params: { path }, body: { country: code, action } });
     done(error);
   }
   async function addCountry() {

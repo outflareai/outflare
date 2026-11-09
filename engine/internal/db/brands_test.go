@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"embed"
+	"io/fs"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +18,34 @@ import (
 
 //go:embed brandtables/*.txt
 var brandTables embed.FS
+
+//go:embed migrations/*.sql
+var migrationFiles embed.FS
+
+var madeTable = regexp.MustCompile(`(?i)(?:CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNLOGGED\s+|MATERIALIZED\s+)?(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?|RENAME\s+TO\s+)"?(\w+)`)
+
+// knownTables are the tables and views this version's own migrations create
+// or rename to. The test also runs the previous version against a newer schema (CI's
+// migrations job), where a table the next version adds is one this version's
+// lists can't know about yet: that version's own run checks it.
+func knownTables(t *testing.T) map[string]bool {
+	t.Helper()
+	names, err := fs.Glob(migrationFiles, "migrations/*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{}
+	for _, name := range names {
+		b, err := migrationFiles.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range madeTable.FindAllStringSubmatch(string(b), -1) {
+			known[strings.ToLower(m[1])] = true
+		}
+	}
+	return known
+}
 
 func tableList(t *testing.T, name string) []string {
 	t.Helper()
@@ -41,6 +71,7 @@ func tableList(t *testing.T, name string) []string {
 func TestEveryWorkspaceTableHasABrand(t *testing.T) {
 	pool := testPool(t)
 	workspace, pending := tableList(t, "workspace.txt"), tableList(t, "pending.txt")
+	known := knownTables(t)
 	for _, name := range workspace {
 		if slices.Contains(pending, name) {
 			t.Errorf("%s is in both workspace.txt and pending.txt", name)
@@ -65,6 +96,9 @@ func TestEveryWorkspaceTableHasABrand(t *testing.T) {
 		// the previous version against a newer schema (CI's migrations job),
 		// where the next step has moved some. The step that moves a table
 		// takes it off pending.txt.
+		if !known[name] {
+			continue // made by a newer version (see knownTables)
+		}
 		if !branded && !slices.Contains(workspace, name) && !slices.Contains(pending, name) {
 			t.Errorf("%s has workspace_id but no brand_id: brand data carries brand_id (plans/brands/README.md); "+
 				"only the team, the account and machinery are workspace-level (engine/internal/db/brandtables/workspace.txt)", name)

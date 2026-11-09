@@ -23,7 +23,9 @@ import (
 // the preview says what applying it would add, reuse or extend, and what
 // conflicts with what is there; applying it only adds, in one
 // transaction, with the same rows and audit events as doing each step by
-// hand.
+// hand. A kit sets up the workspace's first brand from the workspace
+// routes, and the brand in the path from the brand routes; a kit with
+// smart lists, rules or journeys sets those up for the first brand only.
 
 func (s *Server) routesKits(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/kits", s.listKitCatalog)
@@ -33,6 +35,8 @@ func (s *Server) routesKits(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/export", s.inWorkspace(auth.ScopeEmailsRead, s.exportKit))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/preview", s.inWorkspace(auth.ScopeCustomersRead, s.previewKitFile))
 	mux.HandleFunc("POST /v1/workspaces/{ws}/kits/apply", s.inWorkspace(auth.ScopeCatalogManage, s.applyKitFile))
+	mux.HandleFunc("GET /v1/brands/{brand}/kits/{id}/preview", s.onBrand(auth.ScopeCustomersRead, s.previewKit))
+	mux.HandleFunc("POST /v1/brands/{brand}/kits/{id}/apply", s.onBrand(auth.ScopeCatalogManage, s.applyKitHandler))
 }
 
 // kitSource is where a kit's file lives on GitHub.
@@ -133,9 +137,10 @@ func (p *kitPlan) addsTemplates() bool {
 	return slices.ContainsFunc(p.Items, func(it kitItem) bool { return it.Kind == "email_template" && it.Action == kitAdd })
 }
 
-// planKit compares kit k with the workspace's catalog and email templates.
-func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPlan, error) {
-	c, err := loadCatalog(ctx, tx, ws, "", false)
+// planKit compares kit k with brand's catalog and email templates, or the
+// workspace's first brand's when brand is "".
+func planKit(ctx context.Context, tx pgx.Tx, ws, brand string, k playbooks.Kit) (*kitPlan, error) {
+	c, err := loadCatalog(ctx, tx, ws, brand, false)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +227,7 @@ func planKit(ctx context.Context, tx pgx.Tx, ws string, k playbooks.Kit) (*kitPl
 		it := kitItem{Kind: "email_template", Key: kt.Handle, Label: kt.Name, Action: kitAdd, template: kt, Detail: "a draft to read and publish"}
 		var exists bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM email_templates WHERE workspace_id = $1 AND handle = $2
-			AND brand_id IS NOT DISTINCT FROM outflare_first_brand($1))`, ws, kt.Handle).Scan(&exists); err != nil {
+			AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($3, '')::uuid, outflare_first_brand($1)))`, ws, kt.Handle, brand).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if exists {
@@ -264,11 +269,12 @@ type errKitConflict string
 
 func (e errKitConflict) Error() string { return string(e) }
 
-// applyKit adds what kit k needs to workspace a.WorkspaceID, in tx, with
-// inputs for a flow kit's inputs. It stops with errKitConflict when
-// anything conflicts, errDenied when the kit adds what the caller may not
-// manage, and errInvalid for inputs that don't fit.
-func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs map[string]string, source string) (*kitPlan, error) {
+// applyKit adds what kit k needs to brand's catalog (the workspace's first
+// brand when brand is ""), in tx, with inputs for a flow kit's inputs. It
+// stops with errKitConflict when anything conflicts, errDenied when the
+// kit adds what the caller may not manage, and errInvalid for inputs that
+// don't fit or a flow kit applied to a brand.
+func applyKit(ctx context.Context, tx pgx.Tx, a *access, brand string, k playbooks.Kit, inputs map[string]string, source string) (*kitPlan, error) {
 	values, err := k.CheckInputs(inputs)
 	if err != nil {
 		return nil, errInvalid(err.Error())
@@ -278,9 +284,14 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('kit:' || $1::text))`, a.WorkspaceID); err != nil {
 		return nil, err
 	}
-	plan, err := planKit(ctx, tx, a.WorkspaceID, k)
+	plan, err := planKit(ctx, tx, a.WorkspaceID, brand, k)
 	if err != nil {
 		return nil, err
+	}
+	if brand != "" && slices.ContainsFunc(plan.Items, func(it kitItem) bool {
+		return it.Kind == "smart_list" || it.Kind == "journey" || it.Kind == "rule"
+	}) {
+		return plan, errInvalid("the kit " + k.ID + " adds smart lists, rules or journeys, which kits set up for the workspace's first brand: apply it with POST /v1/workspaces/{ws}/kits/" + k.ID + "/apply")
 	}
 	if plan.Conflicts > 0 {
 		var msgs []string
@@ -305,8 +316,8 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 			continue
 		}
 		if it.Action == kitAdd {
-			if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, key, name, options, created_by) VALUES ($1, $2, $3, $4, $5)`,
-				ws, it.Key, it.Label, it.options, a.ActorID); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO option_sets (workspace_id, brand_id, key, name, options, created_by) VALUES ($1, NULLIF($6, '')::uuid, $2, $3, $4, $5)`,
+				ws, it.Key, it.Label, it.options, a.ActorID, brand); err != nil {
 				return nil, err
 			}
 			if err := record(ctx, tx, p, ws, "option_set.created", "option_set", it.Key, map[string]any{"options": len(it.options), "kit_id": k.ID}); err != nil {
@@ -317,7 +328,7 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		// Kits set up the workspace's first brand's catalog (the one planKit
 		// read), never another brand's list of the same key.
 		if _, err := tx.Exec(ctx, `UPDATE option_sets SET options = $3, updated_at = now()
-			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM outflare_first_brand($1) AND key = $2`, ws, it.Key, it.options); err != nil {
+			WHERE workspace_id = $1 AND brand_id IS NOT DISTINCT FROM COALESCE(NULLIF($4, '')::uuid, outflare_first_brand($1)) AND key = $2`, ws, it.Key, it.options, brand); err != nil {
 			return nil, err
 		}
 		if err := record(ctx, tx, p, ws, "option_set.updated", "option_set", it.Key, map[string]any{"options": len(it.options), "kit_id": k.ID}); err != nil {
@@ -328,8 +339,8 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		if it.Kind != "record_type" || it.Action != kitAdd {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, key, name, plural, description, created_by) VALUES ($1, $2, $3, $4, $5, $6)`,
-			ws, it.ktype.Key, it.ktype.Name, it.ktype.Plural, it.ktype.Description, a.ActorID); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO record_types (workspace_id, brand_id, key, name, plural, description, created_by) VALUES ($1, NULLIF($7, '')::uuid, $2, $3, $4, $5, $6)`,
+			ws, it.ktype.Key, it.ktype.Name, it.ktype.Plural, it.ktype.Description, a.ActorID, brand); err != nil {
 			return nil, err
 		}
 		if err := record(ctx, tx, p, ws, "record_type.created", "record_type", it.ktype.Key, map[string]any{"kit_id": k.ID}); err != nil {
@@ -349,10 +360,10 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 			target = &f.TargetType
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO field_definitions (workspace_id, record_type, key, label, description, value_type, option_set, multiple, target_type,
+			INSERT INTO field_definitions (workspace_id, brand_id, record_type, key, label, description, value_type, option_set, multiple, target_type,
 				write_policy, precedence, sensitivity, filterable, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'platform_owned', $10, 'internal', $11, $12)`,
-			ws, it.onType, f.Key, f.Label, f.Description, f.ValueType, set, f.Multiple, target, defaultPrecedence, f.Filterable, a.ActorID); err != nil {
+			VALUES ($1, NULLIF($13, '')::uuid, $2, $3, $4, $5, $6, $7, $8, $9, 'platform_owned', $10, 'internal', $11, $12)`,
+			ws, it.onType, f.Key, f.Label, f.Description, f.ValueType, set, f.Multiple, target, defaultPrecedence, f.Filterable, a.ActorID, brand); err != nil {
 			return nil, err
 		}
 		if err := record(ctx, tx, p, ws, "field.created", "field", it.Key, map[string]any{
@@ -370,9 +381,9 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		var id string
 		err := tx.QueryRow(ctx, `
 			INSERT INTO email_templates (workspace_id, brand_id, handle, name, purpose, subject, html, text_body, variables)
-			VALUES ($1, outflare_first_brand($1), $2, $3, $4, $5, '', $6, $7)
+			VALUES ($1, COALESCE(NULLIF($8, '')::uuid, outflare_first_brand($1)), $2, $3, $4, $5, '', $6, $7)
 			ON CONFLICT DO NOTHING RETURNING id`,
-			ws, t.Handle, t.Name, t.Purpose, t.Subject, t.Text, vars).Scan(&id)
+			ws, t.Handle, t.Name, t.Purpose, t.Subject, t.Text, vars, brand).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			plan.Items[i].Action, plan.Items[i].Detail = kitReuse, "a template with this handle is already there; it stays as it is"
 			plan.Changes--
@@ -394,6 +405,9 @@ func applyKit(ctx context.Context, tx pgx.Tx, a *access, k playbooks.Kit, inputs
 		count[it.Action]++
 	}
 	data := map[string]any{"kit_id": k.ID, "kit_version": k.Version, "added": count[kitAdd], "extended": count[kitExtend], "reused": count[kitReuse], "source": source}
+	if brand != "" {
+		data["brand_id"] = brand
+	}
 	props, target := data, k.ID
 	if source == kitFromFile {
 		// A kit file's id is whatever its author wrote, so the product
@@ -479,7 +493,8 @@ func (s *Server) writeKitPreview(w http.ResponseWriter, r *http.Request, k playb
 	var plan *kitPlan
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
-		plan, err = planKit(ctx, tx, accessFrom(ctx).WorkspaceID, k)
+		a := accessFrom(ctx)
+		plan, err = planKit(ctx, tx, a.WorkspaceID, a.Brand, k)
 		return err
 	})
 	if err != nil {
@@ -509,7 +524,7 @@ func (s *Server) writeKitApply(w http.ResponseWriter, r *http.Request, k playboo
 	var plan *kitPlan
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
-		plan, err = applyKit(ctx, tx, a, k, inputs, source)
+		plan, err = applyKit(ctx, tx, a, a.Brand, k, inputs, source)
 		return err
 	})
 	if s.kitError(w, r, err) {

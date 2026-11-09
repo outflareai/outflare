@@ -37,7 +37,7 @@ var KindHosts = map[string]string{
 }
 
 // KindOf names a link's kind by its host, or "" when it is no known place.
-// Review pages (Trustpilot, G2, Capterra, a Google Maps place) are kinds of
+// Review pages (Trustpilot, G2, Capterra, SourceForge, a Google Maps place) are kinds of
 // their own.
 func KindOf(u *url.URL) string {
 	if k := reviews.KindOf(u); k != "" {

@@ -21,6 +21,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/auth"
 	"github.com/outflareai/outflare/engine/internal/mailbox"
 	"github.com/outflareai/outflare/engine/internal/missions"
+	"github.com/outflareai/outflare/engine/internal/outcomes"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -307,7 +308,9 @@ func (s *Server) onBrand(scope string, next http.HandlerFunc) http.HandlerFunc {
 			a.Brand = brand
 			// The call's log row names the brand its route is on.
 			noteBrand(r.Context(), brand)
-			next(w, r)
+			// Costs booked while it runs (a search, an SEO report) are
+			// the brand's own.
+			next(w, r.WithContext(outcomes.WithBrand(r.Context(), brand)))
 		})(w, r)
 	}
 }
@@ -331,6 +334,25 @@ func isAgentAppRoute(r *http.Request) bool {
 	}
 	_, rest, _ = strings.Cut(rest, "/")
 	return strings.HasPrefix(rest, "agent-apps")
+}
+
+// costBrand returns r's context carrying the brand that costs booked
+// while the call runs belong to (outcomes.WithBrand): a brand token's
+// brand, or the brand ?brand= names, when the caller sees it. onBrand
+// puts its route's brand on top.
+func (s *Server) costBrand(r *http.Request, a *access) context.Context {
+	ctx := r.Context()
+	if len(a.Brands) == 1 {
+		return outcomes.WithBrand(ctx, a.Brands[0])
+	}
+	b := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("brand")))
+	if b == "" || b == "none" || b == "all" {
+		return ctx
+	}
+	if id, err := s.brandIDFor(ctx, a.WorkspaceID, b); err == nil && a.sees(&id) {
+		return outcomes.WithBrand(ctx, id)
+	}
+	return ctx
 }
 
 func (s *Server) workspaceAccess(scope string, brandAware bool, next http.HandlerFunc) http.HandlerFunc {
@@ -408,7 +430,7 @@ func (s *Server) workspaceAccess(scope string, brandAware bool, next http.Handle
 			w.Header().Set("Outflare-Test-Workspace", "true")
 		}
 		noteAccessScope(r, a)
-		r = r.WithContext(context.WithValue(r.Context(), ctxAccessKey{}, a))
+		r = r.WithContext(context.WithValue(s.costBrand(r, a), ctxAccessKey{}, a))
 		m := r.Header.Get(missions.Header)
 		// An agent token's changes go through the action layer, whatever
 		// headers it sends, except a held change a person approved, which

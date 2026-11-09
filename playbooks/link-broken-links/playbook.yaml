@@ -36,7 +36,7 @@ inputs:
     example: hiking backpacks, trail running gear
 steps:
   - say: Search Google for pages on each topic that list tools, guides or resources, after showing what the searches cost.
-    tools: [listBrandSEOSites, readSearchResults]
+    tools: [listBrandSEOSites, readBrandSearchResults]
   - say: Add the pages that list outbound links as broken link prospects.
     tools: [addBrandLinkProspects]
   - say: Check each new prospect's page with OutflareBot (free apart from the AI read) for whether it is up, already links, its broken links, what it is about and who to contact.

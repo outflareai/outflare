@@ -54,10 +54,15 @@ func scanHandoffTopic(row pgx.Row) (handoffTopicView, error) {
 func (s *Server) routesSupportTopics(mux *http.ServeMux) {
 	read, manage := auth.ScopeInboxRead, auth.ScopeInboxManage
 	base := "/v1/workspaces/{ws}/support/handoff-topics"
+	brandBase := "/v1/brands/{brand}/support/handoff-topics"
 	mux.HandleFunc("GET "+base, s.inBrand(read, s.listHandoffTopics))
+	mux.HandleFunc("GET "+brandBase, s.onBrand(read, s.listHandoffTopics))
 	mux.HandleFunc("POST "+base, s.inBrand(manage, s.createHandoffTopic))
+	mux.HandleFunc("POST "+brandBase, s.onBrand(manage, s.createHandoffTopic))
 	mux.HandleFunc("PATCH "+base+"/{id}", s.inBrand(manage, s.updateHandoffTopic))
+	mux.HandleFunc("PATCH "+brandBase+"/{id}", s.onBrand(manage, s.updateHandoffTopic))
 	mux.HandleFunc("DELETE "+base+"/{id}", s.inBrand(manage, s.deleteHandoffTopic))
+	mux.HandleFunc("DELETE "+brandBase+"/{id}", s.onBrand(manage, s.deleteHandoffTopic))
 }
 
 func (s *Server) listHandoffTopics(w http.ResponseWriter, r *http.Request) {

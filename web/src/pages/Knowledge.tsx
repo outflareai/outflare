@@ -1,3 +1,4 @@
+import { PickBrand } from "@/components/pick-brand";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { KnowledgeCollection, KnowledgeGap, KnowledgeItem, KnowledgeStats, KnowledgeVersion, Member } from "@outflare/sdk";
 import { api, errorMessage } from "../api";
@@ -5,7 +6,7 @@ import { ask, Button, confirmAction, Empty, ErrorText, field, Loading, Menu, Pag
 import { Icon, type IconName } from "../icons";
 import { ago, plural } from "../format";
 import { cn } from "@/lib/utils";
-import { useBrand } from "@/lib/brand";
+import { useBrand, pickedBrandId } from "@/lib/brand";
 import { track } from "@/lib/analytics";
 import { BrandBadge } from "@/components/brand-badge";
 import { Markdown, MarkdownEditor } from "@/components/markdown-editor";
@@ -69,8 +70,15 @@ type View =
 type StatusFilter = "" | "published" | "draft" | "due";
 type UseFilter = "" | "customers" | "help_centre" | "team";
 
-export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go?: (tab: "ai") => void }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+// Knowledge belongs to one brand.
+export function Knowledge(props: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go?: (tab: "ai") => void }) {
+  const { brand, active } = useBrand(props.ws);
+  if (!brand) return <PickBrand what="Knowledge articles" brands={active.length} />;
+  return <KnowledgePage key={brand.id} {...props} />;
+}
+
+function KnowledgePage({ ws, canManage, open, setOpen, go }: { ws: string; canManage: boolean; open?: string; setOpen: (id?: string) => void; go?: (tab: "ai") => void }) {
+  const { brand } = useBrand(ws);
   const [folders, setFolders] = useState<KnowledgeCollection[] | null>(null);
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
   // Suggested answers and conflicts waiting for a person.
@@ -85,14 +93,14 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
   const [tick, setTick] = useState(0);
 
   const loadFolders = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/knowledge/collections", { params: { path: { ws }, query: brandQuery } });
+    const { data } = await api.GET("/v1/brands/{brand}/knowledge/collections", { params: { path: { brand: pickedBrandId() } } });
     if (data) setFolders(data.data);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand?.id]);
   const loadStats = useCallback(async () => {
-    const { data } = await api.GET("/v1/workspaces/{ws}/knowledge/stats", { params: { path: { ws }, query: brandQuery } });
+    const { data } = await api.GET("/v1/brands/{brand}/knowledge/stats", { params: { path: { brand: pickedBrandId() } } });
     if (data) setStats(data);
-    const r = await api.GET("/v1/workspaces/{ws}/knowledge/suggestions", { params: { path: { ws }, query: brandQuery } });
+    const r = await api.GET("/v1/brands/{brand}/knowledge/suggestions", { params: { path: { brand: pickedBrandId() } } });
     if (r.data) setWaiting(r.data.counts.answers + r.data.counts.conflicts);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand?.id]);
@@ -121,8 +129,8 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Create", value: "ok", variant: "primary" }],
     });
     if (r?.choice !== "ok" || !r.value.trim()) return;
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/knowledge/collections", {
-      params: { path: { ws } },
+    const { data, error } = await api.POST("/v1/brands/{brand}/knowledge/collections", {
+      params: { path: { brand: pickedBrandId() } },
       body: { name: r.value.trim(), parent_id: parent, ...(brand && !parent ? { brand_id: brand.id } : {}) },
     });
     if (error) return toast(errorMessage(error), "error");
@@ -137,13 +145,13 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
       choices: [{ label: "Cancel", value: "cancel", variant: "ghost" }, { label: "Save", value: "ok", variant: "primary" }],
     });
     if (r?.choice !== "ok" || !r.value.trim() || r.value.trim() === f.name) return;
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/knowledge/collections/{id}", { params: { path: { ws, id: f.id } }, body: { name: r.value.trim() } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/knowledge/collections/{id}", { params: { path: { brand: pickedBrandId(), id: f.id } }, body: { name: r.value.trim() } });
     if (error) return toast(errorMessage(error), "error");
     loadFolders();
   }
 
   async function moveFolder(f: KnowledgeCollection, parent: string | null) {
-    const { error } = await api.PATCH("/v1/workspaces/{ws}/knowledge/collections/{id}", { params: { path: { ws, id: f.id } }, body: { parent_id: parent } });
+    const { error } = await api.PATCH("/v1/brands/{brand}/knowledge/collections/{id}", { params: { path: { brand: pickedBrandId(), id: f.id } }, body: { parent_id: parent } });
     if (error) return toast(errorMessage(error), "error");
     loadFolders();
   }
@@ -156,7 +164,7 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
       "Delete folder",
     );
     if (!ok) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/knowledge/collections/{id}", { params: { path: { ws, id: f.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/knowledge/collections/{id}", { params: { path: { brand: pickedBrandId(), id: f.id } } });
     if (error) return toast(errorMessage(error), "error");
     if (currentFolder === f.id) setView(parent ? { kind: "content", folder: parent.id } : { kind: "content" });
     refresh();
@@ -177,7 +185,7 @@ export function Knowledge({ ws, canManage, open, setOpen, go }: { ws: string; ca
         }}
         onCreated={async (id) => {
           if (draft.gap) {
-            await api.POST("/v1/workspaces/{ws}/knowledge/gaps/dismiss", { params: { path: { ws } }, body: { question: draft.gap, reason: "answered" } });
+            await api.POST("/v1/brands/{brand}/knowledge/gaps/dismiss", { params: { path: { brand: pickedBrandId() } }, body: { question: draft.gap, reason: "answered" } });
             setDraft((d) => ({ ...d, gap: undefined }));
           }
           setOpen(id);
@@ -422,12 +430,12 @@ function Overview({
   onOpen: (id: string) => void;
   onTest: () => void;
 }) {
-  const { query: brandQuery, brand } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [recent, setRecent] = useState<KnowledgeItem[] | null>(null);
   const [gaps, setGaps] = useState<KnowledgeGap[] | null>(null);
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/knowledge/items", { params: { path: { ws }, query: { ...brandQuery, limit: 5 } } }).then(({ data }) => data && setRecent(data.data));
-    void api.GET("/v1/workspaces/{ws}/knowledge/gaps", { params: { path: { ws }, query: brandQuery } }).then(({ data }) => data && setGaps(data.data.slice(0, 3)));
+    void api.GET("/v1/brands/{brand}/knowledge/items", { params: { path: { brand: pickedBrandId() }, query: { limit: 5 } } }).then(({ data }) => data && setRecent(data.data));
+    void api.GET("/v1/brands/{brand}/knowledge/gaps", { params: { path: { brand: pickedBrandId() } } }).then(({ data }) => data && setGaps(data.data.slice(0, 3)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws, brand?.id, tick]);
 
@@ -640,7 +648,7 @@ function Content({
   onStart: (kind: Kind, starter?: Starter) => void;
   onChanged: () => void;
 }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const bin = view.kind === "bin";
   const filters: Omit<Extract<View, { kind: "content" }>, "kind"> = view.kind === "content" ? view : {};
   const [q, setQ] = useState("");
@@ -650,13 +658,13 @@ function Content({
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const query: Record<string, string | number | boolean> = { ...brandQuery, limit: 200 };
+    const query: Record<string, string | number | boolean> = { limit: 200 };
     if (q.trim()) query.q = q.trim();
     if (filters.type) query.kind = filters.type;
     if (filters.folder) query.collection_id = filters.folder;
     if (bin) query.deleted = true;
     if (status === "published" || status === "draft") query.status = status;
-    const { data, error } = await api.GET("/v1/workspaces/{ws}/knowledge/items", { params: { path: { ws }, query } });
+    const { data, error } = await api.GET("/v1/brands/{brand}/knowledge/items", { params: { path: { brand: pickedBrandId() }, query } });
     if (error) return setError(errorMessage(error));
     setError("");
     setItems(data.data);
@@ -685,7 +693,7 @@ function Content({
     : "All content";
 
   async function restore(item: KnowledgeItem) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/knowledge/items/{id}/restore", { params: { path: { ws, id: item.id } } });
+    const { error } = await api.POST("/v1/brands/{brand}/knowledge/items/{id}/restore", { params: { path: { brand: pickedBrandId(), id: item.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Restored.");
     onChanged();
@@ -693,7 +701,7 @@ function Content({
 
   async function purge(item: KnowledgeItem) {
     if (!(await confirmAction(`Delete “${item.title}” for good?`, "It can't be brought back.", "Delete for good"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id: item.id }, query: { permanent: true } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id: item.id }, query: { permanent: true } } });
     if (error) return toast(errorMessage(error), "error");
     onChanged();
   }
@@ -843,11 +851,11 @@ function Tick({ on }: { on: boolean }) {
 // Unanswered questions: what people and AI asked that the knowledge
 // didn't answer, the most asked first, each one click from its answer.
 function Gaps({ ws, canManage, tick, onWrite, onChanged, onTest }: { ws: string; canManage: boolean; tick: number; onWrite: (q: string) => void; onChanged: () => void; onTest: () => void }) {
-  const { brand, query: brandQuery } = useBrand(ws);
+  const { brand } = useBrand(ws);
   const [gaps, setGaps] = useState<KnowledgeGap[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/knowledge/gaps", { params: { path: { ws }, query: brandQuery } }).then(({ data, error }) => {
+    void api.GET("/v1/brands/{brand}/knowledge/gaps", { params: { path: { brand: pickedBrandId() } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setGaps(data.data);
     });
@@ -855,7 +863,7 @@ function Gaps({ ws, canManage, tick, onWrite, onChanged, onTest }: { ws: string;
   }, [ws, brand?.id, tick]);
 
   async function dismiss(g: KnowledgeGap) {
-    const { error } = await api.POST("/v1/workspaces/{ws}/knowledge/gaps/dismiss", { params: { path: { ws } }, body: { question: g.question, reason: "ignored" } });
+    const { error } = await api.POST("/v1/brands/{brand}/knowledge/gaps/dismiss", { params: { path: { brand: pickedBrandId() } }, body: { question: g.question, reason: "ignored" } });
     if (error) return toast(errorMessage(error), "error");
     setGaps((list) => list?.filter((x) => x !== g) ?? null);
     toast("Dismissed. It comes back if someone asks again.");
@@ -976,7 +984,7 @@ function Peek({
   const tree = useMemo(() => folderTree(folders), [folders]);
 
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id } } }).then(({ data, error }) => {
+    void api.GET("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id } } }).then(({ data, error }) => {
       if (error) return setError(errorMessage(error));
       setItem(data);
     });
@@ -984,7 +992,7 @@ function Peek({
   }, [ws, id]);
 
   async function patch(body: Partial<Form>, done = "Saved.") {
-    const { data, error } = await api.PATCH("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id } }, body });
+    const { data, error } = await api.PATCH("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id } }, body });
     if (error) return toast(errorMessage(error), "error");
     setItem(data);
     toast(done);
@@ -994,7 +1002,7 @@ function Peek({
   async function remove() {
     if (!item) return;
     if (!(await confirmAction(`Delete “${item.title}”?`, "It goes to the bin, where you can restore it for 30 days.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Moved to the bin. You can restore it for 30 days.");
     onChanged();
@@ -1201,7 +1209,7 @@ function Editor({
         setSaved(JSON.stringify(f));
         return;
       }
-      const { data, error } = await api.GET("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id } } });
+      const { data, error } = await api.GET("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id } } });
       if (error) return setError(errorMessage(error));
       setItem(data);
       const f = toForm(data);
@@ -1241,8 +1249,8 @@ function Editor({
     setError("");
     const body = { ...form, title: form.title.trim(), ...(id ? {} : { kind }), ...(form.owner_id === null && !id ? { owner_id: undefined } : {}) };
     const res = id
-      ? await api.PATCH("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id } }, body })
-      : await api.POST("/v1/workspaces/{ws}/knowledge/items", { params: { path: { ws } }, body });
+      ? await api.PATCH("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id } }, body })
+      : await api.POST("/v1/brands/{brand}/knowledge/items", { params: { path: { brand: pickedBrandId() } }, body });
     setBusy(false);
     if (res.error || !res.data) return setError(errorMessage(res.error));
     const data = res.data as KnowledgeItem;
@@ -1262,7 +1270,7 @@ function Editor({
   async function remove() {
     if (!item) return;
     if (!(await confirmAction(`Delete “${item.title}”?`, "It goes to the bin, where you can restore it for 30 days.", "Delete"))) return;
-    const { error } = await api.DELETE("/v1/workspaces/{ws}/knowledge/items/{id}", { params: { path: { ws, id: item.id } } });
+    const { error } = await api.DELETE("/v1/brands/{brand}/knowledge/items/{id}", { params: { path: { brand: pickedBrandId(), id: item.id } } });
     if (error) return toast(errorMessage(error), "error");
     toast("Moved to the bin.");
     onClose();
@@ -1433,7 +1441,7 @@ function History({ ws, item, canManage, onClose, onRestored }: { ws: string; ite
   const [versions, setVersions] = useState<KnowledgeVersion[] | null>(null);
   const [shown, setShown] = useState<number | null>(null);
   useEffect(() => {
-    void api.GET("/v1/workspaces/{ws}/knowledge/items/{id}/versions", { params: { path: { ws, id: item.id } } }).then(({ data, error }) => {
+    void api.GET("/v1/brands/{brand}/knowledge/items/{id}/versions", { params: { path: { brand: pickedBrandId(), id: item.id } } }).then(({ data, error }) => {
       if (error) return toast(errorMessage(error), "error");
       setVersions(data.data);
       setShown(data.data[1]?.version ?? data.data[0]?.version ?? null);
@@ -1441,7 +1449,7 @@ function History({ ws, item, canManage, onClose, onRestored }: { ws: string; ite
   }, [ws, item.id]);
 
   async function restore(v: KnowledgeVersion) {
-    const { data, error } = await api.POST("/v1/workspaces/{ws}/knowledge/items/{id}/versions/{version}/restore", { params: { path: { ws, id: item.id, version: v.version } } });
+    const { data, error } = await api.POST("/v1/brands/{brand}/knowledge/items/{id}/versions/{version}/restore", { params: { path: { brand: pickedBrandId(), id: item.id, version: v.version } } });
     if (error) return toast(errorMessage(error), "error");
     toast(`Version ${v.version} is back, saved as version ${data.version}.`);
     onRestored(data);

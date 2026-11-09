@@ -23,7 +23,7 @@ func TestKnowledge(t *testing.T) {
 		t.Fatalf("folder = %v", policies)
 	}
 	product := owner.must(201, "POST", kb+"/collections", map[string]any{"name": "Product", "brand_id": "geonode"})
-	pricing := owner.must(201, "POST", kb+"/collections", map[string]any{"name": "Pricing", "parent_id": product["id"]})
+	pricing := owner.must(201, "POST", kb+"/collections?brand=geonode", map[string]any{"name": "Pricing", "parent_id": product["id"]})
 	if pricing["brand_id"] != geo || pricing["position"] != 0.0 {
 		t.Fatalf("sub folder = %v", pricing)
 	}
@@ -39,7 +39,7 @@ func TestKnowledge(t *testing.T) {
 		art["excerpt"] != "We refund any plan within 30 days." || art["owner_id"] == nil || art["body"] == nil {
 		t.Fatalf("article = %v", art)
 	}
-	snip := owner.must(201, "POST", kb+"/items", map[string]any{
+	snip := owner.must(201, "POST", kb+"/items?brand=geonode", map[string]any{
 		"kind": "snippet", "title": "Do you offer a free trial?", "body": "Yes, 7 days.", "visibility": "customers_ai", "collection_id": pricing["id"],
 	})
 	if snip["brand_id"] != geo {
@@ -51,25 +51,25 @@ func TestKnowledge(t *testing.T) {
 	owner.must(400, "POST", kb+"/items", map[string]any{"title": "x", "owner_id": "00000000-0000-0000-0000-000000000000"})
 	owner.must(201, "POST", kb+"/items", map[string]any{"title": "Repocket payouts", "body": "Paid monthly.", "brand_id": "repocket"})
 
-	// Lists: no body, filters, word search with prefixes, brands.
+	// Lists: one brand's, no body, filters, word search with prefixes.
 	l := owner.must(200, "GET", kb+"/items", nil)
-	if l["total"] != 3.0 || l["data"].([]any)[0].(map[string]any)["body"] != nil {
+	if l["total"] != 1.0 || l["data"].([]any)[0].(map[string]any)["body"] != nil {
 		t.Fatalf("list = %v", l)
 	}
 	if l := owner.must(200, "GET", kb+"/items?q=refu", nil)["data"].([]any); len(l) != 1 || l[0].(map[string]any)["id"] != art["id"] {
 		t.Fatalf("search = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/items?q=trial&kind=snippet&visibility=customers_ai", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/items?brand=geonode&q=trial&kind=snippet&visibility=customers_ai", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("filtered = %v", l)
 	}
 	if l := owner.must(200, "GET", kb+"/items?brand=geonode", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("by brand = %v", l)
 	}
-	if l := owner.must(200, "GET", kb+"/items?collection_id=none", nil)["data"].([]any); len(l) != 1 {
+	if l := owner.must(200, "GET", kb+"/items?brand=repocket&collection_id=none", nil)["data"].([]any); len(l) != 1 {
 		t.Fatalf("no folder = %v", l)
 	}
 	owner.must(400, "GET", kb+"/items?kind=page", nil)
-	if c := owner.must(200, "GET", kb+"/collections", nil)["data"].([]any); len(c) != 3 || c[0].(map[string]any)["item_count"] != 1.0 {
+	if c := owner.must(200, "GET", kb+"/collections", nil)["data"].([]any); len(c) != 1 || c[0].(map[string]any)["item_count"] != 1.0 {
 		t.Fatalf("folders = %v", c)
 	}
 
