@@ -6,6 +6,16 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.91.0] - 2026-11-10
+
+### Added
+
+- Redirect links can send their clicks to several pages: give each a weight for its share and an optional daily click cap, and once every page has had its clicks for the day, the rest go to the link's own page. Link scanners don't count against a cap.
+
+### Upgrading
+
+- runs migration 0511.
+
 ## [0.90.0] - 2026-11-10
 
 ### Added

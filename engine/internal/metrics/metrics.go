@@ -112,6 +112,10 @@ var (
 		Namespace: namespace, Subsystem: "redirect", Name: "click_writes_total",
 		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush) or dropped_full (too many waiting).",
 	}, []string{"outcome"})
+	redirectRoutes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "redirect", Name: "routes_total",
+		Help: "Redirect clicks on links with destinations, by where they went: destination (one of the link's weighted destinations) or fallback (every destination was capped or stopped, so the link's own page).",
+	}, []string{"outcome"})
 	redirectClickBuffer = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "click_buffer",
 		Help: "Redirect clicks waiting in this process to be written. Normal is a few hundred at most; it grows while the database can't take them.",
@@ -1009,7 +1013,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1157,6 +1161,10 @@ func RedirectClickWrites(outcome string, n int) {
 		redirectClickWrites.WithLabelValues(outcome).Add(float64(n))
 	}
 }
+
+// RedirectRoute counts a click on a link with destinations by where it
+// went: destination or fallback.
+func RedirectRoute(outcome string) { redirectRoutes.WithLabelValues(outcome).Inc() }
 
 // RedirectClickBuffer reports how many clicks wait to be written.
 func RedirectClickBuffer(n int) { redirectClickBuffer.Set(float64(n)) }

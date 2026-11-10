@@ -4462,6 +4462,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a redirect link's destinations
+         * @description Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
+         *     it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
+         *     link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+         */
+        get: operations["listTrackingLinkDestinations"];
+        /**
+         * Set a redirect link's destinations
+         * @description Scope: analytics.manage. Replaces the list: a destination with its `id` is changed and keeps today's count; one
+         *     without is added; one left out is taken off the link (its clicks still say where they went). An empty list sends
+         *     every click to the link's own page. Only a link with a redirect link takes destinations. Other servers follow
+         *     the change within a few minutes.
+         */
+        put: operations["setTrackingLinkDestinations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/traffic-source-templates": {
         parameters: {
             query?: never;
@@ -39177,6 +39213,25 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        TrackingLinkDestinations: {
+            /** Format: uuid */
+            link_id: string;
+            /** @description The link's own page, where clicks go when every destination is capped or stopped. */
+            fallback_url: string;
+            destinations: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                url: string;
+                weight: number;
+                /** @description Clicks a day it takes; null for no cap, 0 stops it. */
+                daily_click_cap: number | null;
+                /** @description Its clicks today (UTC), without link scanners and previews. */
+                clicks_today: number;
+                /** @description It takes clicks now: a weight above 0 and room in its cap. */
+                open: boolean;
+            }[];
+        };
         TrafficSourceParam: {
             /** @description The URL parameter, such as clickid. '' for none. */
             param: string;
@@ -66968,6 +67023,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackingLink"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackingLinkDestinations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The destinations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkDestinations"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setTrackingLinkDestinations: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    destinations: {
+                        /**
+                         * Format: uuid
+                         * @description One of the link's destinations, to change it; leave it out to add one.
+                         */
+                        id?: string;
+                        /** @description What reports call it; '' shows the page. */
+                        name?: string;
+                        /** @description The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does. */
+                        url: string;
+                        /** @description Its share of the clicks against the others' weights; 100 when left out, 0 sends it none. */
+                        weight?: number;
+                        /** @description Clicks a day it takes; null or left out for no cap, 0 stops it. */
+                        daily_click_cap?: number | null;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The destinations now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkDestinations"];
                 };
             };
             202: components["responses"]["MissionHeld"];

@@ -106,6 +106,29 @@ https://links.northpeak.example/l/k7m2pq9x
   may be printed. Turning `redirect_links` off doesn't remove the ones
   already made.
 
+### Destinations and daily caps
+
+A redirect link can send its clicks to several pages instead of one: two
+offers to compare, or a partner's page that takes only so many clicks a day.
+Each destination has:
+
+- a **weight**: its share of the clicks against the others' weights (100
+  when left out; 0 sends it none);
+- an optional **daily click cap**: how many clicks a day it takes, in UTC
+  until brands have a reporting time zone. A cap of 0 stops it.
+
+When every destination is capped or stopped, clicks go to the link's own
+page, the fallback. Destinations get the campaign's tags and can carry
+tokens, as the link's page does. Link scanners and previews go where a
+person would, but don't count against a cap.
+
+Caps are counted by every server together as it writes its clicks, so a
+redirect never waits for a count: a cap can be passed by the clicks that
+arrive in the moment before the servers' next write, not more. Changing a
+link's destinations keeps each destination's count for the day; one taken
+off the link is kept, so its clicks still say where they went. Other servers
+follow a change within a few minutes.
+
 ## Traffic sources and custom fields
 
 A traffic source is a network a brand buys clicks from, such as Taboola,
@@ -212,6 +235,7 @@ traffic their code didn't bring, or lose imported partner links.
 | `POST /v1/brands/{brand}/tracking-campaigns` | `analytics.manage` |
 | `GET`, `PATCH /v1/brands/{brand}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/brands/{brand}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
+| `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations` | `analytics.read`, `analytics.manage` |
 | `GET /v1/brands/{brand}/traffic-source-templates` | `analytics.read` |
 | `GET`, `POST /v1/brands/{brand}/traffic-sources` | `analytics.read`, `analytics.manage` |
 | `GET`, `PATCH /v1/brands/{brand}/traffic-sources/{id}` | `analytics.read`, `analytics.manage` |
@@ -228,11 +252,13 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 `get_tracking_campaign`, `create_tracking_campaign`,
 `update_tracking_campaign`, `list_tracking_links`, `create_tracking_link`,
+`list_tracking_link_destinations`, `set_tracking_link_destinations`,
 `list_traffic_source_templates`, `list_traffic_sources`,
 `create_traffic_source` and `update_traffic_source`.
 
 Each change is an audit action (and a product event): `tracking_campaign.created`,
 `tracking_campaign.updated`, `tracking_campaign.archived`,
 `tracking_campaign.restored`, `tracking_link.created`, `tracking_link.redirect_added`,
+`tracking_link.destinations_updated`,
 `traffic_source.created`, `traffic_source.updated`, `traffic_source.archived`
 and `traffic_source.restored`.

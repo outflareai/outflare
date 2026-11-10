@@ -139,6 +139,7 @@ type Server struct {
 	// waiting to be written (redirect_clicks.go).
 	redirects        redirectCache
 	clicks           clickBuffer
+	caps             capCounts
 	siteVisitorLimit *rateLimiter
 	// Help centre pages per reader's network, and what a reader may record
 	// (feedback, searches with no answer) per hour.
@@ -663,6 +664,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesTracking(mux)
 	s.routesCampaignLinks(mux)
 	s.routesTrafficSources(mux)
+	s.routesLinkDestinations(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)

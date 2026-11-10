@@ -2675,6 +2675,53 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     ({ brand, campaign, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/tracking-campaigns/{id}/links", { params: { path: { brand: b, id: campaign } }, body }))),
   );
 
+  server.registerTool(
+    "list_tracking_link_destinations",
+    {
+      title: "List a redirect link's destinations",
+      description:
+        "The pages a redirect link's clicks go to, each in proportion to its weight while it has room in its daily click cap, with today's clicks and whether it's open. When every one is capped or stopped, clicks go to the link's own page (fallback_url).",
+      inputSchema: { brand: brandRef, campaign: campaignRef, link: z.string().uuid().describe("The link's id (list_tracking_links).") },
+      annotations: read,
+    },
+    ({ brand, campaign, link }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations", { params: { path: { brand: b, id: campaign, link } } })),
+      ),
+  );
+
+  server.registerTool(
+    "set_tracking_link_destinations",
+    {
+      title: "Set a redirect link's destinations",
+      description:
+        "Replace the pages a redirect link sends its clicks to: each gets a share by weight and an optional daily click cap (0 stops it). Give a destination's id to change it and keep today's count; leave one out to take it off. An empty list sends every click to the link's own page.",
+      inputSchema: {
+        brand: brandRef,
+        campaign: campaignRef,
+        link: z.string().uuid().describe("The link's id (list_tracking_links)."),
+        destinations: z
+          .array(
+            z.object({
+              id: z.string().uuid().optional().describe("One of the link's destinations, to change it."),
+              name: z.string().max(120).optional(),
+              url: z.string().max(2000).describe("The page; it can carry tokens such as {click_id} and {field1}."),
+              weight: z.number().int().min(0).max(10000).optional().describe("Its share against the others' weights; 100 when left out."),
+              daily_click_cap: z.number().int().min(0).nullable().optional().describe("Clicks a day it takes (UTC); leave it out for no cap, 0 stops it."),
+            }),
+          )
+          .max(20),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, campaign, link, destinations }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.PUT("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations", { params: { path: { brand: b, id: campaign, link } }, body: { destinations } }),
+        ),
+      ),
+  );
+
   const trafficSourceParam = z.object({
     param: z.string().max(64).describe("The URL parameter, such as clickid; '' for none."),
     token: z.string().max(100).describe("What the network fills in, written as the network does, such as {click_id}; '' when the network adds the parameter itself."),

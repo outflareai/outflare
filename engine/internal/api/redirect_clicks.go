@@ -49,7 +49,10 @@ type redirectTarget struct {
 	campaign  trackingCampaignView
 	// source is the campaign's traffic source, nil without one.
 	source *campaignSource
-	until  time.Time
+	// dests are the link's weighted destinations, none for the link's own
+	// page only.
+	dests []linkDestination
+	until time.Time
 }
 
 type redirectCache struct {
@@ -108,6 +111,9 @@ func (s *Server) lookupRedirect(ctx context.Context, code string) (redirectTarge
 		return redirectTarget{}, nil
 	}
 	t.source = readCampaignSource(sourceID, clickParam, clickToken, costParam, costToken, params)
+	if err == nil {
+		t.dests, err = s.loadDestinations(ctx, t.link.ID, time.Now())
+	}
 	if brand != nil {
 		t.brand = *brand
 	}
@@ -125,6 +131,9 @@ type bufferedClick struct {
 	fields        map[string]string
 	sourceClickID string
 	costMicros    int64
+	// destinationID is the destination the click went to, "" for the
+	// link's own page.
+	destinationID string
 	bot           bool
 	at            time.Time
 	detail        clickDetail
@@ -263,8 +272,18 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 			refused[ws] = true
 		}
 	}
+	// Clicks over the quota aren't stored, so they don't count against a
+	// destination's cap either: release what this server held for them.
+	var kept []bufferedClick
+	for _, c := range batch {
+		if !refused[c.ws] {
+			kept = append(kept, c)
+		} else if c.destinationID != "" && !c.bot {
+			s.caps.settle(c.destinationID, capDay(c.at), 1, 0)
+		}
+	}
 	var (
-		membership, subID, referrer, fields, sourceClickID                                         []string
+		membership, subID, referrer, fields, sourceClickID, destination                            []string
 		cost                                                                                       []int64
 		ws, brand, link, key, ipHash, country, region, city, isp, device, deviceBrand, deviceModel []string
 		os, osVersion, browser, browserVersion, language                                           []string
@@ -291,6 +310,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 			f = []byte("{}")
 		}
 		fields, sourceClickID, cost = append(fields, string(f)), append(sourceClickID, c.sourceClickID), append(cost, c.costMicros)
+		destination = append(destination, c.destinationID)
 	}
 	if n := len(batch) - len(key); n > 0 {
 		metrics.RedirectClickWrites("refused_quota", n)
@@ -299,6 +319,7 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		return nil
 	}
 	var written, claimed int64
+	var settles []destinationSettle
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		// A click whose link or partner is gone (its workspace deleted
 		// meanwhile) is left out rather than failing the batch; a retried
@@ -306,31 +327,37 @@ func (s *Server) writeClicks(ctx context.Context, batch []bufferedClick) error {
 		tag, err := tx.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, brand_id, link_id, membership_id, sub_id, referrer_host,
 				click_key, likely_bot, clicked_at, ip_hash,
 				country, region, city, asn, isp, device, device_brand, device_model, os, os_version, browser, browser_version, language,
-				fields, source_click_id, cost_micros)
+				fields, source_click_id, cost_micros, destination_id)
 			SELECT t.ws::uuid, COALESCE(NULLIF(t.brand, '')::uuid, l.brand_id, m.brand_id), l.id, m.id, t.sub_id, t.referrer,
 				t.key, t.bot, t.at, t.ip_hash,
 				t.country, t.region, t.city, t.asn, t.isp, t.device, t.device_brand, t.device_model, t.os, t.os_version, t.browser, t.browser_version, t.language,
-				t.fields::jsonb, t.source_click_id, t.cost
+				t.fields::jsonb, t.source_click_id, t.cost, NULLIF(t.destination, '')::uuid
 			FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::bool[], $6::timestamptz[], $7::text[],
 				$8::text[], $9::text[], $10::text[], $11::bigint[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[],
-				$18::text[], $19::text[], $20::text[], $21::text[], $22::text[], $23::text[], $24::text[], $25::text[], $26::bigint[])
+				$18::text[], $19::text[], $20::text[], $21::text[], $22::text[], $23::text[], $24::text[], $25::text[], $26::bigint[], $27::text[])
 				AS t(ws, brand, link, key, bot, at, ip_hash, country, region, city, asn, isp, device, device_brand, device_model, os, os_version,
-					browser, browser_version, language, membership, sub_id, referrer, fields, source_click_id, cost)
+					browser, browser_version, language, membership, sub_id, referrer, fields, source_click_id, cost, destination)
 			LEFT JOIN tracking_links l ON t.link <> '' AND l.id = NULLIF(t.link, '')::uuid AND l.workspace_id = t.ws::uuid
 			LEFT JOIN partner_memberships m ON t.membership <> '' AND m.id = NULLIF(t.membership, '')::uuid AND m.workspace_id = t.ws::uuid
 			WHERE l.id IS NOT NULL OR m.id IS NOT NULL
 			ON CONFLICT (click_key) DO NOTHING`,
 			ws, brand, link, key, bot, at, ipHash, country, region, city, asn, isp, device, deviceBrand, deviceModel, os, osVersion,
-			browser, browserVersion, language, membership, subID, referrer, fields, sourceClickID, cost)
+			browser, browserVersion, language, membership, subID, referrer, fields, sourceClickID, cost, destination)
 		if err != nil {
 			return err
 		}
 		written = tag.RowsAffected()
+		if settles, err = countDestinationClicks(ctx, tx, kept); err != nil {
+			return err
+		}
 		claimed, err = applyClickClaims(ctx, tx, key)
 		return err
 	})
 	if err != nil {
 		return err
+	}
+	for _, d := range settles {
+		s.caps.settle(d.id, d.day, d.n, d.total)
 	}
 	metrics.RedirectClickWrites("written", int(written))
 	if gone := int64(len(key)) - written; gone > 0 {

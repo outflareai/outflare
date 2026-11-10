@@ -234,6 +234,8 @@ A program with no rules tracks only. For influencers on a fixed fee, log each fe
 Rewards are an append-only ledger: an amount never changes once written.
 
 - **Hold.** A new reward waits for the program's hold (`hold_days`), then is approved: on its own when `auto_approve` is on (checked every minute), otherwise by a person. A person can also approve or reject one before the hold ends, or many at once: pick them on Rewards, or use Approve all pending (`POST .../partner-rewards/bulk` with `ids`, or a `program` or `partner_id`, up to 1,000 a call). Each is recorded as if done alone, with its webhook.
+  Before acting, the dashboard calls bulk with `dry_run` and says what it will touch, counted by source: made by Outflare, imported and paid here, and imported but still paid by the old platform.
+  Imported rewards the old platform still pays are left out unless you include them (`include_held_at_source`), and are listed in `skipped` as `held_at_source`.
 - **Cost.** Approved cash and fees for partners become spend entries on the `affiliates` channel, so the CMO view counts them as cost.
 - **Refunds.** A refund rejects the sale's rewards still on hold. Approved or paid cash gets a negative `adjustment` entry, pro rata for a partial refund, which the next payout nets. An approved or fulfilled action gets a reversal entry (`partner_reward.reversed`) naming the action, so your system can take back what it gave.
 - **Adjustments.** `POST .../partners/{id}/adjustments` corrects a balance either way, with a note saying why.
@@ -259,6 +261,43 @@ Outflare has no PayPal, Wise or crypto integration and never stores bank details
 Deleting a partner's person record for good (`DELETE .../records/{record}`, for an erasure request) keeps what they earned and were paid, so commission totals and payout history still add up. Their memberships, rewards and payouts move to a new archived record named "Erased partner", with no name, email or identities. The membership is suspended and loses its payout method, note, sign-up answers and postback URL, but keeps its code and promo codes: the partner's links still lead to the program's landing page, without crediting anyone. Their referrals, conversions and portal sign-ins are erased.
 
 A payout's note and reference can hold the partner's name or email, so they are cleared too, unless the workspace's partner setting is off (Partners → Payouts → "Clear payout notes when a partner is deleted", or `PATCH .../partner-settings` with `erase_payout_notes`; on by default, and the same for every program). The payout's amount, dates and status always stay.
+
+## Partner pages and proof
+
+Partners → Partners finds any partner in the program, not only the newest page.
+Search matches a partner's code, promo codes, name and email, a partner's or their record's whole id, and an imported partner's id on the platform it came from (`GET .../partners?q=`).
+Pasting a whole partner id opens that partner.
+Sorting (`sort`: `newest`, `oldest`, `name`, `code`, `clicks`, `customers`, `sales`, `balance`, `paid`) also runs across every partner.
+
+Each partner has a page at `/{workspace}/{brand}/partners/{partner id}`, which the list and a customer's person page link to.
+It shows the partner's code and link, status, group, payout method, when and how they joined, and their totals: clicks, referrals, customers, sales, commission earned, on hold, approved, paid and due.
+Its tabs list their referrals (each customer, how they were credited, the first sale and lifetime sales), conversions, rewards, payouts and history.
+The history (`GET .../partners/{id}/activity`) comes from the audit log: joining, status, group and payout detail changes, rewards made, approved, rejected or reversed, and payouts made, paid or canceled, each with who did it.
+It names changed fields and never shows payout details.
+
+**Proof per reward.** Every reward has a Proof button, which opens the chain behind it (`GET .../partner-rewards/{id}/proof`):
+
+- the click or website visit that credited the partner, or the promo code or ref code that did;
+- the referral and the customer, with a link to their person page;
+- the sale or refund, with your own id for it, the brand's transaction, the payment source and when it happened;
+- the rule and rate that priced it, as it was when the reward was made;
+- who approved or rejected it, how (after the hold, by hand, by a refund) and when, with the note;
+- the payout it is in, with the date paid, the method and the reference.
+
+A link with no record shows why instead of being left out, such as "Credited by a promo code, so there is no click or visit".
+Rewards imported from another platform show that platform's ids for the partner, customer, commission, sale and payout.
+Outflare keeps the visit, the promo code and the rule from the moment a partner is credited.
+Rewards made before that show the rule as it is now, marked so, or "rule since replaced" when the program's rules were saved since.
+
+**Downloading proof.** A payout's Download proof, or Download proof on a partner's page with a date range, saves one row per reward with every link of its chain as columns (`GET .../partner-proofs/export` with `payout_id`, or `partner_id` and `from` and `to`; `format` `csv` or `json`; up to 10,000 rewards).
+It holds customers' names and emails but never payout details, and each download is in the audit log (`partner_proofs.exported`).
+
+**Rewards and Conversions.** Each reward row names its partner, customer, sale, rule, source (made by Outflare or imported), who decided it and its payout, and each conversion row its partner and customer.
+Both search by partner code or email, customer email or your id for the sale (`q`), and Rewards filters by status and source.
+A refund's correction links to the reward it takes back, and that reward shows what is left after it, such as "Paid, then taken back, net $0.00".
+
+**Who pays.** Until a program imported from another platform switches over, that platform still pays its imported commissions.
+The program's and each partner's totals say how much of what is on hold or approved Outflare pays and how much the old platform pays (`held_at_source` in `stats`).
 
 ## Partner portal
 
@@ -361,10 +400,13 @@ Every call below is under the brand, `/v1/brands/{brand}/`; the same calls under
 | `POST .../partner-rewards/{id}/fulfil` | conversions |
 | `POST .../partner-payouts`, `.../{id}/paid`, `.../{id}/cancel` | manage |
 | `GET .../partners/{id}/postbacks` / `GET .../partner-payouts/export` | read / manage |
+| `GET .../partners?q=&sort=`: find partners across every page | read |
+| `GET .../partners/{id}/activity`: a partner's history | read |
+| `GET .../partner-rewards/{id}/proof`, `GET .../partner-proofs/export` | read |
 | `POST .../partner-programs/{id}/imports` / `GET .../imports`, `.../imports/{import}` | manage / read |
 | `GET`/`POST /v1/partner-postbacks/{token}` | the postback secret |
 
-The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_programs`, `add_partner`, `report_partner_conversion`, `create_partner_payouts` and the rest.
+The MCP tools are listed in [mcp/README.md](../mcp/README.md): `list_partner_programs`, `add_partner`, `report_partner_conversion`, `create_partner_payouts`, `list_partner_activity`, `get_partner_reward_proof`, `export_partner_proofs` and the rest.
 
 ## Coming next
 

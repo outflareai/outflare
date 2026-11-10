@@ -6128,6 +6128,69 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, description: "The campaign's id, slug or ofc code.", schema: { type: string } }
+      - { name: link, in: path, required: true, description: The link's id., schema: { type: string, format: uuid } }
+    get:
+      operationId: listTrackingLinkDestinations
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List a redirect link's destinations
+      description: |
+        Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
+        it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
+        link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+      tags: [analytics]
+      responses:
+        "200":
+          description: The destinations.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkDestinations" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setTrackingLinkDestinations
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Set a redirect link's destinations
+      description: |
+        Scope: analytics.manage. Replaces the list: a destination with its `id` is changed and keeps today's count; one
+        without is added; one left out is taken off the link (its clicks still say where they went). An empty list sends
+        every click to the link's own page. Only a link with a redirect link takes destinations. Other servers follow
+        the change within a few minutes.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destinations]
+              properties:
+                destinations:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [url]
+                    properties:
+                      id: { type: string, format: uuid, description: "One of the link's destinations, to change it; leave it out to add one." }
+                      name: { type: string, maxLength: 120, description: "What reports call it; '' shows the page." }
+                      url: { type: string, maxLength: 2000, description: "The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does." }
+                      weight: { type: integer, minimum: 0, maximum: 10000, description: "Its share of the clicks against the others' weights; 100 when left out, 0 sends it none." }
+                      daily_click_cap: { type: [integer, "null"], minimum: 0, description: "Clicks a day it takes; null or left out for no cap, 0 stops it." }
+      responses:
+        "200":
+          description: The destinations now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkDestinations" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/traffic-source-templates:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
     get:
@@ -51160,6 +51223,25 @@ components:
         clicks: { type: integer, description: "Clicks on the redirect link, without link scanners and previews; 0 without one." }
         landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run." }
         created_at: { type: string, format: date-time }
+    TrackingLinkDestinations:
+      type: object
+      required: [link_id, fallback_url, destinations]
+      properties:
+        link_id: { type: string, format: uuid }
+        fallback_url: { type: string, description: "The link's own page, where clicks go when every destination is capped or stopped." }
+        destinations:
+          type: array
+          items:
+            type: object
+            required: [id, name, url, weight, daily_click_cap, clicks_today, open]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              url: { type: string }
+              weight: { type: integer }
+              daily_click_cap: { type: [integer, "null"], description: "Clicks a day it takes; null for no cap, 0 stops it." }
+              clicks_today: { type: integer, description: "Its clicks today (UTC), without link scanners and previews." }
+              open: { type: boolean, description: "It takes clicks now: a weight above 0 and room in its cap." }
     TrafficSourceParam:
       type: object
       required: [param, token]

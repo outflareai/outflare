@@ -436,6 +436,7 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `list_tracking_campaigns`, `get_tracking_campaign` | Campaigns with their tags, ofc code, landing link and link count; look one up by its ofc code. Take `brand`: they belong to one brand |
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
 | `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term, and optionally a short redirect link that counts clicks. A destination can carry tokens each click fills in, such as `{click_id}` and `{field1}` |
+| `list_tracking_link_destinations`, `set_tracking_link_destinations` | A redirect link's weighted destinations and daily click caps, with today's clicks; the link's own page takes the clicks once every destination is capped |
 | `list_traffic_source_templates`, `list_traffic_sources` | The networks Outflare has templates for, and the brand's traffic sources: which parameters carry each network's click id, cost and custom fields |
 | `create_traffic_source`, `update_traffic_source` | Add a traffic source from a template or by hand, change its parameters or postback, or archive it; a campaign that names it gets a campaign URL to paste into the network |
 | `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |

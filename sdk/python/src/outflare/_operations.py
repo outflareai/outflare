@@ -27359,6 +27359,28 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_tracking_link_destinations(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List a redirect link's destinations.
+
+        Scope: analytics.read. The pages the link's redirect clicks go to, each chosen in proportion to its weight while
+        it has room in its daily click cap, with today's clicks. When every one is capped or stopped, clicks go to the
+        link's own page (fallback_url). Caps count clicks per day in UTC, without link scanners and previews.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations",
+            path={"id": id, "link": link, "brand": brand},
+        )
+
     def list_tracking_links(
         self,
         id: str,
@@ -33813,6 +33835,35 @@ class Operations(_Mixin):
                 "unit_name": unit_name,
                 "unit_price_micros": unit_price_micros,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_tracking_link_destinations(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+        destinations: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a redirect link's destinations.
+
+        Scope: analytics.manage. Replaces the list: a destination with its `id` is changed and keeps today's count; one
+        without is added; one left out is taken off the link (its clicks still say where they went). An empty list sends
+        every click to the link's own page. Only a link with a redirect link takes destinations. Other servers follow
+        the change within a few minutes.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations",
+            path={"id": id, "link": link, "brand": brand},
+            body={"destinations": destinations},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )

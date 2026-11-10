@@ -108,7 +108,12 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	var cost string
 	c.fields, c.sourceClickID, cost = t.source.capture(r.URL.Query())
 	c.costMicros = costMicros(cost)
+	// A link with destinations sends the click to one of them, by weight
+	// and cap, or to its own page when every one is capped or stopped.
 	link := t.link
+	if d := s.route(t.dests, now, bot); d != nil {
+		link.URL, c.destinationID = d.url, d.id
+	}
 	if strings.ContainsAny(link.URL, "{%") {
 		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c, cost), trafficsources.DestinationTokens)
 	}
