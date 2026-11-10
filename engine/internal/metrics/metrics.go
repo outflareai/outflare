@@ -89,7 +89,7 @@ var (
 	}, []string{"network"})
 	redirectClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "clicks_total",
-		Help: "Clicks on campaign redirect links (/l/{code}), by outcome (counted, bot for a link scanner or preview, unknown for a code that isn't a link, error when the click couldn't be stored but the person was still sent on).",
+		Help: "Clicks on campaign redirect links (/l/{code}), by outcome (counted, bot for a link scanner or preview, unknown for a code that isn't a link, error when the link couldn't be looked up, dropped when too many clicks waited to be written; the person is sent on either way). Clicks are written in batches a moment later: see click_writes_total.",
 	}, []string{"outcome"})
 	pageVitals = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "ingest", Name: "page_vitals_total",
@@ -97,7 +97,7 @@ var (
 	}, []string{"outcome"})
 	redirectLandings = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "landings_total",
-		Help: "Page views on a site that carried a redirect click's key (ofclk), by outcome (claimed when the visit took the click, unmatched when the click was already claimed, as on a reload, or isn't the site's workspace's).",
+		Help: "Page views on a site that carried a redirect click's key (ofclk), by outcome (claimed when the visit took the click, pending when its click wasn't written yet and the landing waits for it, unmatched when the click was already claimed, as on a reload, isn't the site's workspace's, or no click took a waiting landing within an hour).",
 	}, []string{"outcome"})
 	inboxEvents = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "inbox", Name: "events_total",
@@ -106,6 +106,20 @@ var (
 	inboxBatch = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace, Subsystem: "inbox", Name: "batch_seconds",
 		Help: "Time to store one inbox row (a browser's batch of events).", Buckets: requestBuckets,
+	})
+
+	redirectClickWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "redirect", Name: "click_writes_total",
+		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush) or dropped_full (too many waiting).",
+	}, []string{"outcome"})
+	redirectClickBuffer = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace, Subsystem: "redirect", Name: "click_buffer",
+		Help: "Redirect clicks waiting in this process to be written. Normal is a few hundred at most; it grows while the database can't take them.",
+	})
+	redirectClickFlush = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace, Subsystem: "redirect", Name: "click_flush_seconds",
+		Help:    "Time to write one batch of up to 1,000 redirect clicks.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 	})
 
 	// Feature flags decided for websites (the tracking script) and servers
@@ -691,6 +705,7 @@ var (
 	// News watch: saved news searches run through the workspace's own
 	// web search connection.
 	coverageReviews   = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "reviews_total", Help: "Coverage AI reviews by bounded result status."}, []string{"status"})
+	mailPrivacyChecks = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "crm_mail", Name: "privacy_checks_total", Help: "Emails the workspace's AI model checked before team email sharing shows them, by outcome: work (shown to colleagues), private (kept to its owner), failed (the model call or its answer failed; the email stays private), no_ai (no AI connection) and budget (the AI limit was reached)."}, []string{"outcome"})
 	coverageChecks    = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "checks_total", Help: "Coverage page checks by observed condition."}, []string{"health"})
 	coverageFound     = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "found_total", Help: "Pages Presence discovery added to a brand's review list for the first time, by source (news, backlinks, link_prospects, social, ai_citations, web_search)."}, []string{"source"})
 	coverageSearches  = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: "coverage", Name: "search_runs_total", Help: "Presence web search runs by outcome (done, connector_needed, budget_reached, connector_invalid, connector_auth, connector_quota, connector_unavailable)."}, []string{"outcome"})
@@ -994,7 +1009,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1019,6 +1034,7 @@ var own = []prometheus.Collector{
 	redditSends,
 	redditChecks,
 	partnerClicks, partnerConversions, partnerRewards, partnerRewardsOverdue, partnerImports, partnerImportObjects, partnerPostbacks,
+	mailPrivacyChecks,
 	coverageChecks, coverageReviews, coverageFound, coverageSearches, competitorScans, competitorFound, competitorSuggest, opportunities, newsRuns, newsFound, newsReads, storyAIRuns,
 	quoteApprovalEmails, quoteApprovalPages, quoteApprovalDecisions,
 	automationRuns, automationLag,
@@ -1133,8 +1149,23 @@ func AdMacrosUnfilled(network string, n int) {
 // counted, bot, unknown or error.
 func RedirectClick(outcome string) { redirectClicks.WithLabelValues(outcome).Inc() }
 
+// RedirectClickWrites counts buffered redirect clicks by what happened when
+// their batch was written: written, refused_quota, link_gone, failed (the
+// batch goes back to wait) or dropped_full.
+func RedirectClickWrites(outcome string, n int) {
+	if n > 0 {
+		redirectClickWrites.WithLabelValues(outcome).Add(float64(n))
+	}
+}
+
+// RedirectClickBuffer reports how many clicks wait to be written.
+func RedirectClickBuffer(n int) { redirectClickBuffer.Set(float64(n)) }
+
+// RedirectClickFlush times writing one batch of clicks.
+func RedirectClickFlush(d time.Duration) { redirectClickFlush.Observe(d.Seconds()) }
+
 // RedirectLanding counts one page view carrying a redirect click's key, by
-// outcome: claimed or unmatched.
+// outcome: claimed, pending (its click not written yet) or unmatched.
 func RedirectLanding(outcome string) { redirectLandings.WithLabelValues(outcome).Inc() }
 
 // PageVitals counts page speed readings by outcome: stored, rejected or
@@ -1991,6 +2022,10 @@ func DesktopDevices(reporting, silent int64) {
 func DesktopPurged(n int64) { desktopPurged.Add(float64(n)) }
 
 // CoverageCheck records a bounded page-check outcome.
+// MailPrivacyCheck counts one email's privacy check before team sharing:
+// work, private, failed, no_ai or budget.
+func MailPrivacyCheck(outcome string) { mailPrivacyChecks.WithLabelValues(outcome).Inc() }
+
 func CoverageCheck(health string) { coverageChecks.WithLabelValues(health).Inc() }
 
 func CoverageReview(status string) { coverageReviews.WithLabelValues(status).Inc() }

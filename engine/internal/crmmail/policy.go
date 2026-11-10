@@ -19,8 +19,80 @@ type Policy struct {
 	InternalDomains  []string `json:"internal_domains"`
 	BlockedAddresses []string `json:"blocked_addresses"`
 	BlockedDomains   []string `json:"blocked_domains"`
-	Version          int      `json:"version"`
+	// PrivateLabels are Gmail labels whose mail is never captured, such as
+	// Personal or HR; the brand's and the person's own both apply.
+	PrivateLabels []string `json:"private_labels"`
+	// TeamSharing (brand policy only) makes the brand's members able to
+	// read each other's captured work mail, unless its owner made that
+	// contact private. It starts at TeamSharingFrom, a notice period after
+	// an owner switches it on, so everyone is told first.
+	TeamSharing     bool       `json:"team_sharing"`
+	TeamSharingFrom *time.Time `json:"team_sharing_from"`
+	// CaptureAllContacts (brand policy only) captures each enabled
+	// person's mail with any of the brand's CRM contacts and companies,
+	// not only the ones they picked, under the same filters.
+	CaptureAllContacts bool `json:"capture_all_contacts"`
+	Version            int  `json:"version"`
 }
+
+// TeamSharingNotice is how long after an owner switches team sharing on
+// it starts, so every member is told before their mail is shared.
+const TeamSharingNotice = 48 * time.Hour
+
+// DefaultPrivateLabels are the Gmail labels kept out of capture unless a
+// brand changes them.
+var DefaultPrivateLabels = []string{"Personal", "HR", "Legal", "Finance", "Medical"}
+
+// PrivateSenderDomains are payroll, HR, benefits, banking and expense
+// services: their mail is about a person's job, pay or money, never a
+// business relationship, so it is never captured while team sharing is
+// on. A brand adds its own (an accountant, a law firm) as blocked domains.
+var PrivateSenderDomains = []string{
+	"gusto.com", "deel.com", "rippling.com", "adp.com", "paychex.com", "justworks.com", "trinet.com", "remote.com", "oysterhr.com",
+	"bamboohr.com", "hibob.com", "personio.com", "workday.com", "namely.com",
+	"wise.com", "revolut.com", "mercury.com", "brex.com", "ramp.com", "expensify.com", "paypal.com",
+}
+
+// Labels are the Gmail labels a policy keeps out of capture: its own list,
+// or the defaults when it has never set one (an empty list means none).
+func (p Policy) Labels() []string {
+	if p.PrivateLabels == nil {
+		return DefaultPrivateLabels
+	}
+	return p.PrivateLabels
+}
+
+// ExcludeLabels is the Gmail search terms that leave out mail with any of
+// the policies' private labels. Gmail matches a label by its name in
+// lower case with spaces and slashes as hyphens.
+func ExcludeLabels(policies ...Policy) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range policies {
+		for _, l := range p.Labels() {
+			name := strings.NewReplacer(" ", "-", "/", "-", `"`, "").Replace(strings.ToLower(strings.TrimSpace(l)))
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, "-label:"+name)
+		}
+	}
+	return strings.Join(out, " ")
+}
+
+// TeamSharingOn reports whether a brand's team sharing has started at now.
+func (p Policy) TeamSharingOn(now time.Time) bool {
+	return p.TeamSharing && p.TeamSharingFrom != nil && !now.Before(*p.TeamSharingFrom)
+}
+
+// TeamShared is how a contact's mail is shared when its owner made no
+// choice for it and the brand's team sharing is on: in full, with the
+// brand's members.
+func TeamShared() Sharing {
+	return Sharing{Visibility: "full", Audience: "brand", ViewerIDs: []string{}}
+}
+
 type Sharing struct {
 	Visibility string   `json:"visibility"`
 	Audience   string   `json:"audience"`
@@ -32,7 +104,7 @@ func Private() Sharing {
 	return Sharing{Visibility: "private", Audience: "selected", ViewerIDs: []string{}}
 }
 func DefaultPolicy() Policy {
-	return Policy{InternalDomains: []string{}, BlockedAddresses: []string{}, BlockedDomains: []string{}}
+	return Policy{InternalDomains: []string{}, BlockedAddresses: []string{}, BlockedDomains: []string{}, PrivateLabels: slices.Clone(DefaultPrivateLabels)}
 }
 
 type Message struct {
@@ -113,6 +185,10 @@ func Eligible(m Message, brand, personal Policy, memberEmails, recordEmails, rec
 		if slices.Contains(brand.BlockedAddresses, p) || slices.Contains(personal.BlockedAddresses, p) || domainMatch(d, brand.BlockedDomains) || domainMatch(d, personal.BlockedDomains) {
 			return false
 		}
+		// With team sharing, payroll, HR, banking and expense services stay out.
+		if brand.TeamSharing && domainMatch(d, PrivateSenderDomains) {
+			return false
+		}
 		if p == m.OwnerEmail {
 			continue
 		}
@@ -163,4 +239,33 @@ func captureDomainMatch(domain string, rules []string) bool {
 		}
 	}
 	return false
+}
+
+// External is a message's participants outside the company: not its owner,
+// a member or the brand's internal domains. Every one of them must belong
+// to the CRM contact or company the message is captured on.
+func External(m Message, brand Policy, memberEmails []string) []string {
+	var out []string
+	for _, p := range m.Participants {
+		if p == m.OwnerEmail || slices.Contains(memberEmails, p) || domainMatch(Domain(p), brand.InternalDomains) || slices.Contains(out, p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// CaptureDomains is the company domains an address could belong to: its
+// own domain and each parent (mail.acme.example, then acme.example), never
+// a public mailbox service or a bare suffix.
+func CaptureDomains(address string) []string {
+	var out []string
+	for d := Domain(address); strings.Contains(d, "."); {
+		if CaptureDomainAllowed(d) {
+			out = append(out, d)
+		}
+		_, rest, _ := strings.Cut(d, ".")
+		d = rest
+	}
+	return out
 }

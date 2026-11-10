@@ -1,0 +1,17 @@
+id: trafficjunky
+name: "TrafficJunky"
+category: adult
+click_id: {param: aclid, token: "{ACLID}"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "{CampaignID}", field: 1}
+  - {name: "Campaign name", param: campaign_name, token: "{CampaignName}", field: 2}
+  - {name: "Spot ID", param: spot_id, token: "{SpotID}", field: 3}
+  - {name: "Site name", param: site, token: "{SiteName}", field: 4}
+  - {name: "Banner ID", param: banner_id, token: "{BanID}", field: 5}
+  - {name: "Ad ID", param: ad_id, token: "{AdID}", field: 6}
+postback: {url: "https://ads.trafficjunky.net/ct?a=REPLACE&member_id=REPLACE&cb={random}&cti={transaction_id}&ctv={payout}&ctd=REPLACE&aclid={source_click_id}", method: GET}
+note: "From trackers' TrafficJunky guides; check the postback against the one in your account."
+sources:
+  - https://doc.voluum.com/en/trafficjunky_traffic_source.html
+  - https://help.funnelflux.pro/en/article/tracking-setup-with-trafficjunky-1px844e/
+  - https://www.adsbridge.com/trackingtokens/trafficjunky-com/

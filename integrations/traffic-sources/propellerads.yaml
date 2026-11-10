@@ -1,0 +1,19 @@
+id: propellerads
+name: "PropellerAds"
+category: push_pop
+click_id: {param: clickid, token: "${SUBID}"}
+cost: {param: cost, token: "{cost}"}
+parameters:
+  - {name: "Zone ID", param: zone_id, token: "{zone_id}", field: 1}
+  - {name: "Subzone ID", param: subzone_id, token: "{subzone_id}", field: 2}
+  - {name: "Campaign ID", param: campaign_id, token: "{campaign_id}", field: 3}
+  - {name: "Banner ID", param: banner_id, token: "{bannerid}", field: 4}
+  - {name: "Country", param: country, token: "{country}", field: 5}
+  - {name: "OS", param: os, token: "{os}", field: 6}
+  - {name: "Zone type", param: zone_type, token: "{zone_type}", field: 7}
+postback: {url: "http://ad.propellerads.com/conversion.php?aid=REPLACE&pid=&tid=REPLACE&visitor_id={source_click_id}&payout={payout}", method: GET}
+note: "The macros available depend on the ad format. Add &goal=2 or &goal=3 to the postback to report another conversion level."
+sources:
+  - https://help.propellerads.com/en/articles/1954809-how-to-integrate-propellerads-s2s-conversion-tracking
+  - https://maxconv.com/docs/integrations/traffic-source/propellerads/
+  - https://help.redtrack.io/knowledgebase/propellerads/

@@ -25,6 +25,31 @@ const values = (raw: string) =>
     .split(/[\n,]/)
     .map((s) => s.trim())
     .filter(Boolean);
+const DEFAULT_LABELS = ["Personal", "HR", "Legal", "Finance", "Medical"];
+
+// What team sharing means for you, in plain words, so nobody's mail is
+// shared without them knowing.
+function TeamSharingNotice({ on, from }: { on: boolean; from: string | null }) {
+  if (!on || !from) return null;
+  const starts = new Date(from);
+  const started = starts.getTime() <= Date.now();
+  return (
+    <div className="space-y-1 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+      <p className="font-medium">
+        {started
+          ? "Team email sharing is on for this brand"
+          : `Team email sharing starts ${stamp(from)}`}
+      </p>
+      <p className="text-muted-foreground">
+        Your work email with CRM contacts {started ? "is" : "will be"} readable
+        by everyone on this brand. To keep a contact&rsquo;s email to yourself,
+        open it and set its email to private. Mail labelled Personal, HR, Legal,
+        Finance or Medical, and payroll, HR and banking mail, is never saved.
+      </p>
+    </div>
+  );
+}
+
 const privateRule = (): Sharing => ({
   visibility: "private",
   audience: "selected",
@@ -151,12 +176,24 @@ export function MailPrivacy({
         <header className="flex items-center gap-2 font-semibold">
           <ShieldCheck className="size-4" /> Email privacy
         </header>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Your personal mail is private until you share it on a CRM record.
-          Managers, admins and HR get no automatic access. Choose specific
-          people, including HR when appropriate, or share customer
-          correspondence with the brand.
-        </p>
+        <TeamSharingNotice
+          on={!!personal?.team_sharing}
+          from={personal?.team_sharing_from ?? null}
+        />
+        {personal?.capture_all_contacts && (
+          <p className="max-w-3xl rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+            This brand captures your work email with every CRM contact and
+            company, once you connect Gmail.
+          </p>
+        )}
+        {!personal?.team_sharing && (
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            Your personal mail is private until you share it on a CRM record.
+            Managers, admins and HR get no automatic access. Choose specific
+            people, including HR when appropriate, or share customer
+            correspondence with the brand.
+          </p>
+        )}
         <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
           Internal and mixed internal/customer conversations are excluded.
           Workspace members’ exact addresses are always treated as internal.
@@ -182,6 +219,12 @@ export function MailPrivacy({
               value={personal.blocked_domains}
               disabled={!canManage || busy}
               onChange={(v) => setPersonal({ ...personal, blocked_domains: v })}
+            />
+            <RuleInput
+              label="Never capture mail with these Gmail labels (on top of the brand's)"
+              value={personal.private_labels ?? []}
+              disabled={!canManage || busy}
+              onChange={(v) => setPersonal({ ...personal, private_labels: v })}
             />
             {canManage && (
               <Button disabled={busy} onClick={() => void save(false)}>
@@ -209,6 +252,67 @@ export function MailPrivacy({
         )}
         {policy && canManagePolicy && (
           <div className="space-y-3 border-t pt-4">
+            <div className="space-y-2 rounded-lg border p-3">
+              <label className="flex items-start gap-3 text-sm">
+                <input
+                  id="team-sharing"
+                  type="checkbox"
+                  className="mt-1"
+                  checked={policy.team_sharing}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setPolicy({ ...policy, team_sharing: e.target.checked })
+                  }
+                />
+                <span className="space-y-1">
+                  <span className="block font-medium">Team email sharing</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Everyone on this brand can read each other&rsquo;s work
+                    email with CRM contacts, so the history with a customer,
+                    partner or supplier isn&rsquo;t stuck in one inbox. It
+                    starts 48 hours after you save, and every member is told
+                    now. People can still mark a contact private. Mail with the
+                    Gmail labels below, and from payroll, HR, benefits, banking
+                    and expense services, is never saved. Each time someone
+                    reads a colleague&rsquo;s email it&rsquo;s recorded.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 border-t pt-3 text-sm">
+                <input
+                  id="capture-all"
+                  type="checkbox"
+                  className="mt-1"
+                  checked={!!policy.capture_all_contacts}
+                  disabled={busy}
+                  onChange={(e) =>
+                    setPolicy({
+                      ...policy,
+                      capture_all_contacts: e.target.checked,
+                    })
+                  }
+                />
+                <span className="space-y-1">
+                  <span className="block font-medium">
+                    Capture email with every CRM contact
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    Each person enabled for Gmail capture saves their email with
+                    any contact or company in this brand&rsquo;s CRM, not only
+                    the ones they picked. An email is saved only when everyone
+                    outside the company in it belongs to one contact, or one
+                    company. Newsletters and notifications are skipped, and
+                    every rule here still applies.
+                  </span>
+                </span>
+              </label>
+              <RuleInput
+                label="Never capture mail with these Gmail labels"
+                value={policy.private_labels ?? DEFAULT_LABELS}
+                disabled={busy}
+                onChange={(v) => setPolicy({ ...policy, private_labels: v })}
+              />
+            </div>
             <h3 className="text-sm font-medium">Brand safeguards</h3>
             <p className="text-xs text-muted-foreground">
               These rules apply to everyone in this brand. Editing them does not

@@ -4462,6 +4462,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/traffic-source-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List traffic-source templates
+         * @description Scope: analytics.read. The networks Outflare has templates for (integrations/traffic-sources): the URL parameter
+         *     that carries each network's click id and cost, the values worth reporting on with the network's token for each,
+         *     and where it takes a conversion postback. Start a traffic source from one with POST .../traffic-sources. Also
+         *     lists the tokens a destination and a postback can use.
+         */
+        get: operations["listTrafficSourceTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/traffic-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's traffic sources
+         * @description Scope: analytics.read. Where the brand buys clicks, by name, with how many campaigns use each.
+         */
+        get: operations["listTrafficSources"];
+        put?: never;
+        /**
+         * Add a traffic source
+         * @description Scope: analytics.manage. From a `template` (GET .../traffic-source-templates), whose values the other fields
+         *     change, or by hand. A template's postback that needs the brand's own value (REPLACE) is left off unless
+         *     `postback` fills it in: a postback with REPLACE in it can't be saved. Give a tracking campaign the source
+         *     (`traffic_source`), and its redirect clicks keep the source's parameters in their custom fields.
+         */
+        post: operations["createTrafficSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/traffic-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a traffic source
+         * @description Scope: analytics.read.
+         */
+        get: operations["getTrafficSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change, archive or restore a traffic source
+         * @description Scope: analytics.manage. `parameters` replaces the whole list. Its campaigns' clicks follow the change within a
+         *     few minutes. An archived source keeps its campaigns, but can't be given to another one.
+         */
+        patch: operations["updateTrafficSource"];
+        trace?: never;
+    };
     "/v1/brands/{brand}/attribution/settings": {
         parameters: {
             query?: never;
@@ -38832,10 +38917,7 @@ export interface components {
             program?: string;
             /** @description The partner's ref code. */
             ref?: string;
-            /**
-             * Format: uuid
-             * @description ref_click from a partner's short link.
-             */
+            /** @description ref_click from a partner's short link: a 16-character click key, or a uuid on links clicked before November 2026. */
             click_id?: string;
             promo_code?: string;
             /** @description Your own id for the customer. */
@@ -39044,6 +39126,11 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /**
+             * Format: uuid
+             * @description The brand's traffic source the campaign buys clicks from; null for none.
+             */
+            traffic_source_id: string | null;
         };
         TrackingCampaignInput: {
             name?: string;
@@ -39063,6 +39150,8 @@ export interface components {
             status?: "active" | "archived";
             /** @description Give new links a short redirect link unless a link says otherwise. Links made before keep what they have. */
             redirect_links?: boolean;
+            /** @description The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url. */
+            traffic_source?: string;
         };
         TrackingLink: {
             /** Format: uuid */
@@ -39079,12 +39168,102 @@ export interface components {
             tagged_url: string;
             /** @description The short redirect link (/l/{code}, on the workspace's tracking domain when it has one) that counts a click and sends the person to tagged_url; null when the link has none. Share it where the tracking snippet can't run. */
             redirect_url: string | null;
+            /** @description The redirect link with the campaign's traffic source parameters, each set to the network's token: the address to paste into the network. Null without a redirect link or a traffic source. */
+            campaign_url: string | null;
             /** @description Clicks on the redirect link, without link scanners and previews; 0 without one. */
             clicks: number;
             /** @description How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run. */
             landed: number;
             /** Format: date-time */
             created_at: string;
+        };
+        TrafficSourceParam: {
+            /** @description The URL parameter, such as clickid. '' for none. */
+            param: string;
+            /** @description What the network fills in, written as the network does, such as {click_id} or __CALLBACK_PARAM__; '' when the network adds the parameter itself (gclid). */
+            token: string;
+        };
+        TrafficSourceParameter: {
+            /** @description What reports call the field, such as Zone ID. */
+            name: string;
+            /** @description The URL parameter that carries it. */
+            param: string;
+            /** @description The network's token for it, shown in the campaign URL; '' when the network adds the parameter itself. */
+            token: string;
+            /** @description The custom field it fills, 1 to 20; {field1} to {field20} in tokens. */
+            field: number;
+            /** @description Other parameters that fill the field when param is missing, such as utm_source. */
+            aliases?: string[];
+        };
+        TrafficSourcePostback: {
+            /** @description Where the network takes a conversion, with Outflare's tokens such as {source_click_id} (the network's click id) and {payout|80%}; '' for none. */
+            url: string;
+            /** @enum {string} */
+            method: "GET" | "POST";
+        };
+        TrafficSourceTemplate: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            category: "search_social" | "native" | "push_pop" | "display" | "mobile" | "adult";
+            /** @description The Outflare connector that syncs the network's spend, if there is one. */
+            connector?: string;
+            currency: string;
+            click_id: components["schemas"]["TrafficSourceParam"];
+            cost: components["schemas"]["TrafficSourceParam"];
+            parameters: components["schemas"]["TrafficSourceParameter"][];
+            /** @description The network's postback, with REPLACE where the brand's own value goes; null when the network takes no postback URL. */
+            postback: components["schemas"]["TrafficSourcePostback"] | null;
+            /** @description Anything a person setting it up needs to know. */
+            note?: string;
+        };
+        TrafficSource: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            /** @description The template it was made from; '' for a custom source. */
+            template: string;
+            /** @description The currency of its costs, such as USD. */
+            currency: string;
+            click_id: components["schemas"]["TrafficSourceParam"];
+            cost: components["schemas"]["TrafficSourceParam"];
+            parameters: components["schemas"]["TrafficSourceParameter"][];
+            postback: components["schemas"]["TrafficSourcePostback"];
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description How many campaigns use it. */
+            campaigns: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TrafficSourceInput: {
+            /** @description A template's id to start from. Create only. */
+            template?: string;
+            /** @description The template's name when left out. */
+            name?: string;
+            currency?: string;
+            click_id?: components["schemas"]["TrafficSourceParam"];
+            cost?: components["schemas"]["TrafficSourceParam"];
+            /** @description The whole list; each parameter fills its own field. */
+            parameters?: components["schemas"]["TrafficSourceParameter"][];
+            postback?: {
+                /** @description Where the network takes a conversion, with Outflare's tokens; '' for none. */
+                url: string;
+                /**
+                 * @description GET when left out.
+                 * @enum {string}
+                 */
+                method?: "GET" | "POST";
+            };
+            /**
+             * @description Update only.
+             * @enum {string}
+             */
+            status?: "active" | "archived";
         };
         /**
          * @description Who an automation leaves out: people on any of these lists (smart
@@ -47894,7 +48073,7 @@ export interface components {
             /** @description Each task the AI model does and the model it uses now. */
             tasks: {
                 /** @enum {string} */
-                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "support_replies" | "coverage_review" | "journeys" | "pr_stories" | "brand_knowledge" | "telegram_matching" | "telegram_summaries";
+                task: "plan" | "turn" | "check_in" | "reply_labelling" | "classify_domain" | "ai_visibility" | "social_replies" | "social_posts" | "email_verification" | "fix_tickets" | "review_replies" | "link_page_reading" | "ab_tests" | "link_pitches" | "knowledge_answers" | "support_replies" | "coverage_review" | "journeys" | "pr_stories" | "brand_knowledge" | "telegram_matching" | "telegram_summaries" | "mail_privacy";
                 name: string;
                 description: string;
                 /** @description Null when no model can run yet. */
@@ -58054,11 +58233,33 @@ export interface components {
             internal_domains: string[];
             blocked_addresses: string[];
             blocked_domains: string[];
+            /** @description Gmail labels whose mail is never captured, such as Personal or HR. Left out (null), the defaults Personal, HR, Legal, Finance and Medical; an empty list means none. */
+            private_labels?: string[] | null;
+            /** @description Team email sharing: everyone who works on the brand can read each other's captured work email, unless its owner made that contact private. While on, payroll, HR, benefits, banking and expense services are never captured. Switching it on alerts every member (crm_mail.team_sharing) and starts it 48 hours later; switching it off is at once. */
+            team_sharing?: boolean;
+            /**
+             * Format: date-time
+             * @description When team sharing starts, set by the server when it is switched on.
+             */
+            readonly team_sharing_from?: string | null;
+            /** @description Capture each enabled person's Gmail with every CRM contact and company of the brand, not only the records they picked. The same filters apply, and a message is saved only when all its outside participants belong to one contact (or else one company). Switching it on or off syncs every connected mailbox again. */
+            capture_all_contacts?: boolean;
             version: number;
         };
         CRMMailPreferences: {
             blocked_addresses: string[];
             blocked_domains: string[];
+            /** @description Your own Gmail labels whose mail is never captured, on top of the brand's. Null keeps the defaults. */
+            private_labels?: string[] | null;
+            /** @description Whether the brand shares its members' work email with each other, read from the brand policy; a person can't set it here. */
+            readonly team_sharing?: boolean;
+            /**
+             * Format: date-time
+             * @description When the brand's team sharing starts or started.
+             */
+            readonly team_sharing_from?: string | null;
+            /** @description Whether the brand captures mail with every CRM contact, read from the brand policy; a person can't set it here. */
+            readonly capture_all_contacts?: boolean;
             version: number;
         };
         CRMMailRollout: {
@@ -66739,7 +66940,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The page, such as https://example.com/pricing. The campaign's landing page when left out. */
+                    /** @description The page, such as https://example.com/pricing. The campaign's landing page when left out. It can carry tokens a redirect click fills in, such as https://example.com/offer?sub={field1}&cid={click_id} (destination_tokens in GET .../traffic-source-templates); a word in braces that isn't a token is refused. */
                     url?: string;
                     /** @description utm_content: which ad, button or post, such as hero-cta. Cleaned to lowercase. */
                     content?: string;
@@ -66772,6 +66973,175 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrafficSourceTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Templates, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrafficSourceTemplate"][];
+                        /** @description The categories, in the order to show them. */
+                        categories: string[];
+                        /** @description Tokens a link's destination can carry, such as click_id and field1, filled in for each redirect click. */
+                        destination_tokens: string[];
+                        /** @description Tokens a postback to a traffic source can carry, such as source_click_id and payout. */
+                        postback_tokens: string[];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrafficSources: {
+        parameters: {
+            query?: {
+                status?: "active" | "archived";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Traffic sources. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrafficSource"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createTrafficSource: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrafficSourceInput"];
+            };
+        };
+        responses: {
+            /** @description The traffic source. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrafficSource"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getTrafficSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The traffic source. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrafficSource"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateTrafficSource: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrafficSourceInput"];
+            };
+        };
+        responses: {
+            /** @description The traffic source. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrafficSource"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

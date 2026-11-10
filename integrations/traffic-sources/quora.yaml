@@ -1,0 +1,14 @@
+id: quora
+name: "Quora Ads"
+category: search_social
+click_id: {param: qclid}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{{campaign.id}}", field: 1}
+  - {name: Ad set ID, param: of_adset, token: "{{adset.id}}", field: 2}
+  - {name: Ad ID, param: of_ad, token: "{{ad.id}}", field: 3}
+  - {name: Campaign name, param: utm_campaign, token: "{{campaign.name}}", field: 5}
+  - {name: Ad name, param: utm_content, token: "{{ad.name}}", field: 6}
+note: "{{ad.id}} and {{ad.name}} fill in only once the ad is saved."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

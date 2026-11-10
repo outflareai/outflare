@@ -446,7 +446,7 @@ func (s *seeder) valueFor(tbl string, c column) (string, any) {
 		return cast, "bravo.converted"
 	case "attribution_models.spec":
 		return cast, `{"base": "linear"}`
-	case "tracking_link_clicks.click_key":
+	case "tracking_link_clicks.click_key", "tracking_click_claims.click_key":
 		return cast, "bravo00000000000"
 	case "visitor_alerts.kind":
 		return cast, "hot"

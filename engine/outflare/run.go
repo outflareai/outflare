@@ -546,6 +546,13 @@ func Run(ctx context.Context, log *slog.Logger, cmd string, exts ...Extension) e
 			defer wg.Done()
 			geo.Run(ctx, 6*time.Hour)
 		}()
+		// Redirect link clicks are written in batches by the process that
+		// took them, and what is left is written at shutdown.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			apiServer.RunClicks(ctx)
+		}()
 	}
 	wg.Add(1)
 	go func() {

@@ -1,0 +1,14 @@
+id: smartnews
+name: "SmartNews"
+category: native
+click_id: {param: clickid, token: "{click_id}"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "{campaign_id}", field: 1}
+  - {name: "Ad group ID", param: ad_group_id, token: "{ad_group_id}", field: 2}
+  - {name: "Ad ID", param: ad_id, token: "{ad_id}", field: 3}
+  - {name: "Ad account ID", param: ad_account_id, token: "{ad_account_id}", field: 4}
+postback: {url: "https://log.smartnews-ads.com/conversion_api/v1/REPLACE?action_source=web&pixel_tag_id=REPLACE&event_name=REPLACE&click_id={source_click_id}", method: GET}
+note: "The path is your SmartNews partner name. SmartNews has no cost macro, and takes a conversion's value only through its POST Conversion API."
+sources:
+  - https://help-ads.smartnews.com/en/item-3457
+  - https://help-ads.smartnews.com/en/item-5499

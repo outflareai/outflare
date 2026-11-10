@@ -72,6 +72,10 @@ func TestRedirectLinks(t *testing.T) {
 			t.Fatalf("%s = %d", bad, rec.Code)
 		}
 	}
+	// Clicks are written in batches a moment after the redirect.
+	if err := e.srv.FlushClicks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	var stored, bots int
 	if err := e.pool.QueryRow(context.Background(), `SELECT count(*), count(*) FILTER (WHERE likely_bot) FROM tracking_link_clicks WHERE workspace_id = $1`, ws).Scan(&stored, &bots); err != nil || stored != 2 || bots != 1 {
 		t.Fatalf("clicks = %d, bots = %d, %v", stored, bots, err)

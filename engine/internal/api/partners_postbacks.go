@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/jobs"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/netguard"
+	"github.com/outflareai/outflare/engine/internal/tokens"
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
@@ -37,8 +37,6 @@ const jobPartnerPostback = "partners.postback"
 // postbackPlaceholders are what a postback URL may carry.
 var postbackPlaceholders = []string{"sub_id", "click_id", "conversion_id", "type", "event_name", "amount", "amount_cents",
 	"currency", "commission", "commission_cents", "status", "code", "program"}
-
-var placeholderRE = regexp.MustCompile(`\{([a-z_]+)\}`)
 
 // partnerPostbackClient calls partners' trackers. Tests swap it for one
 // that reaches their local server.
@@ -58,14 +56,20 @@ func checkPostbackURL(raw string) error {
 	if len(raw) > 2000 {
 		return errInvalid("postback_url is at most 2,000 characters")
 	}
-	u, err := url.Parse(placeholderRE.ReplaceAllString(raw, "x"))
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-		return errInvalid("postback_url is an https address of your own tracker, such as https://tracker.example/postback?clickid={sub_id}&payout={commission}")
+	return checkTokenURL("postback_url", raw, postbackPlaceholders, false,
+		"postback_url is an https address of your own tracker, such as https://tracker.example/postback?clickid={sub_id}&payout={commission}")
+}
+
+// checkTokenURL checks a URL template: an https address (or http, when
+// allowed) once its tokens are filled in, using only the tokens in known
+// (tokens.Check).
+func checkTokenURL(field, raw string, known []string, allowHTTP bool, hint string) error {
+	u, err := url.Parse(tokens.Re.ReplaceAllString(raw, "x"))
+	if err != nil || (u.Scheme != "https" && !(allowHTTP && u.Scheme == "http")) || u.Host == "" || u.User != nil {
+		return errInvalid(hint)
 	}
-	for _, m := range placeholderRE.FindAllStringSubmatch(raw, -1) {
-		if !slices.Contains(postbackPlaceholders, m[1]) {
-			return errInvalid("postback_url: {" + m[1] + "} isn't a placeholder; use " + strings.Join(postbackPlaceholders, ", "))
-		}
+	if err := tokens.Check(raw, known); err != nil {
+		return errInvalid(field + ": " + err.Error())
 	}
 	return nil
 }
@@ -98,9 +102,7 @@ func enqueuePartnerPostback(ctx context.Context, tx pgx.Tx, ws, membership, conv
 
 // postbackURL fills in a partner's template for a conversion.
 func postbackURL(tmpl string, values map[string]string) string {
-	return placeholderRE.ReplaceAllStringFunc(tmpl, func(m string) string {
-		return url.QueryEscape(values[m[1:len(m)-1]])
-	})
+	return tokens.Expand(tmpl, values)
 }
 
 func decimal(cents int64) string {
@@ -124,13 +126,14 @@ func (s *Server) partnerPostbackJob(ctx context.Context, job jobs.Job) error {
 	var conv string
 	var amount, commission int64
 	err := s.pool.QueryRow(ctx, `SELECT m.postback_url, m.id::text, m.code, p.slug, v.id::text, v.type, v.event_name, v.amount_cents, v.currency,
-			COALESCE(NULLIF(f.sub_id, ''), k.sub_id), f.click_id::text,
+			COALESCE(NULLIF(f.sub_id, ''), k.sub_id, NULLIF(kc.sub_id, '')), COALESCE(f.click_id::text, kc.click_key),
 			COALESCE((SELECT sum(w.amount_cents) FROM partner_rewards w WHERE w.conversion_id = v.id AND w.side = 'partner' AND w.kind IN ('cash', 'adjustment')), 0)::bigint,
 			CASE WHEN EXISTS (SELECT 1 FROM partner_rewards w WHERE w.conversion_id = v.id AND w.side = 'partner' AND w.status = 'pending') THEN 'pending' ELSE 'approved' END
 		FROM partner_postback_sends o
 		JOIN partner_memberships m ON m.id = o.membership_id JOIN partner_programs p ON p.id = m.program_id
 		JOIN partner_conversions v ON v.id = o.conversion_id JOIN partner_referrals f ON f.id = v.referral_id
 		LEFT JOIN partner_clicks k ON k.id = f.click_id
+		LEFT JOIN tracking_link_clicks kc ON kc.id = f.link_click_id
 		WHERE o.workspace_id = $1 AND o.id = $2 AND o.status = 'queued'`, ws, p.SendID).
 		Scan(&tmpl, &membership, &code, &program, &conv, &typ, &event, &amount, &currency, &subID, &clickID, &commission, &status)
 	if errors.Is(err, pgx.ErrNoRows) {

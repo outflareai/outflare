@@ -5,7 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/outflareai/outflare/engine/internal/track"
 )
@@ -142,4 +147,152 @@ func TestCRMMailPrivacy(t *testing.T) {
 			t.Error("missing event", name)
 		}
 	}
+}
+
+// Team sharing: an owner switches it on, every member is alerted, and it
+// starts after the notice period; then a contact's mail whose owner made no
+// choice is readable by the brand, a contact made private stays private, and
+// each read of a colleague's mail is recorded. Switching it off is at once.
+func TestCRMTeamMailSharing(t *testing.T) {
+	e := freshEnv(t)
+	ctx := context.Background()
+	owner, ws := setupOwner(t, e.h)
+	base := "/v1/workspaces/" + ws
+	rec := owner.must(201, "POST", base+"/records", map[string]any{"type": "person", "name": "Ana", "identities": []map[string]any{{"namespace": "email", "value": "ana@customer.example"}}})
+	brand := rec["brand_id"].(string)
+	id := rec["id"].(string)
+	root := "/v1/brands/" + brand + "/crm/mail"
+	messages := root + "/records/" + id + "/messages"
+	inv := owner.must(201, "POST", base+"/invites", map[string]any{"email": "employee@northpeak.example", "role": "operator"})
+	employee := &client{t: t, h: e.h}
+	employee.must(200, "POST", "/v1/invites/accept", map[string]any{"token": inv["token"], "name": "Employee", "password": "not-real-test-password"})
+	policy := owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "version": 0})
+	// Labels never set keep the defaults (Personal, HR, Legal, Finance, Medical).
+	if policy["private_labels"] != nil {
+		t.Fatalf("default labels: %v", policy)
+	}
+	raw := "From: ana@customer.example\r\nTo: employee@northpeak.example\r\nSubject: Reseller pricing\r\nMessage-ID: <pricing@customer.example>\r\n\r\n10 TB a month."
+	employee.must(200, "POST", messages, map[string]any{"raw": raw})
+	if len(owner.must(200, "GET", messages, nil)["data"].([]any)) != 0 {
+		t.Fatal("shared before team sharing")
+	}
+
+	// Only the brand policy switches it on, and the server says when it starts.
+	if p := employee.must(200, "PUT", root+"/preferences", map[string]any{"blocked_addresses": []string{}, "blocked_domains": []string{}, "team_sharing": true, "version": 0}); p["team_sharing"] != false {
+		t.Fatalf("a person switched team sharing on: %v", p)
+	}
+	on := owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{},
+		"team_sharing": true, "team_sharing_from": "2000-01-01T00:00:00Z", "version": 1})
+	from, err := time.Parse(time.RFC3339, on["team_sharing_from"].(string))
+	if err != nil || from.Before(time.Now().Add(47*time.Hour)) {
+		t.Fatalf("starts: %v %v", on, err)
+	}
+	var alerted int
+	if err := e.pool.QueryRow(ctx, `SELECT count(DISTINCT owner_id) FROM alerts WHERE workspace_id=$1 AND kind='crm_mail.team_sharing'`, ws).Scan(&alerted); err != nil || alerted != 2 {
+		t.Fatalf("alerted %d %v", alerted, err)
+	}
+	if len(owner.must(200, "GET", messages, nil)["data"].([]any)) != 0 {
+		t.Fatal("shared during the notice period")
+	}
+	// Every member sees it coming in their own settings.
+	if p := employee.must(200, "GET", root+"/preferences", nil); p["team_sharing"] != true || p["team_sharing_from"] != on["team_sharing_from"] {
+		t.Fatalf("member's view: %v", p)
+	}
+	// Saving the policy again keeps the start; the notice period passes.
+	again := owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "team_sharing": true, "version": 2})
+	if again["team_sharing_from"] != on["team_sharing_from"] {
+		t.Fatalf("start moved: %v", again)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE crm_mail_policy SET config = jsonb_set(config, '{team_sharing_from}', to_jsonb(now() - interval '1 minute')) WHERE brand_id=$1`, brand); err != nil {
+		t.Fatal(err)
+	}
+	// A private-looking email from the same contact.
+	offer := "From: ana@customer.example\r\nTo: employee@northpeak.example\r\nSubject: Offer letter\r\nMessage-ID: <offer@customer.example>\r\n\r\nWe'd like to offer you the role."
+	employee.must(200, "POST", messages, map[string]any{"raw": offer})
+	// Nothing is shown before the AI check has read it.
+	if got := owner.must(200, "GET", messages, nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("unchecked mail shown: %v", got)
+	}
+	var queued int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE kind='crm_mail.privacy_check' AND payload->>'brand_id'=$1`, brand).Scan(&queued); err != nil || queued == 0 {
+		t.Fatalf("check not queued: %d %v", queued, err)
+	}
+	// Without an AI connection nothing is checked, so nothing is shown.
+	if err := e.srv.RunMailPrivacyCheck(ctx, ws, brand); err != nil {
+		t.Fatal(err)
+	}
+	if got := owner.must(200, "GET", messages, nil)["data"].([]any); len(got) != 0 {
+		t.Fatalf("shown without a check: %v", got)
+	}
+	connectFakePrivacyModel(t, e, owner, ws)
+	if err := e.srv.RunMailPrivacyCheck(ctx, ws, brand); err != nil {
+		t.Fatal(err)
+	}
+	got := owner.must(200, "GET", messages, nil)["data"].([]any)
+	if len(got) != 1 || got[0].(map[string]any)["subject"] != "Reseller pricing" || got[0].(map[string]any)["visibility"] != "full" {
+		t.Fatalf("team read: %v", got)
+	}
+	// Its owner still sees both.
+	if mine := employee.must(200, "GET", messages, nil)["data"].([]any); len(mine) != 2 {
+		t.Fatalf("owner's view: %v", mine)
+	}
+	var spent int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM ai_calls WHERE workspace_id=$1 AND task='mail_privacy'`, ws).Scan(&spent); err != nil || spent != 2 {
+		t.Fatalf("ai calls %d %v", spent, err)
+	}
+	var viewed int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id=$1 AND action='crm_mail.viewed' AND target_id=$2`, ws, id).Scan(&viewed); err != nil || viewed != 1 {
+		t.Fatalf("viewed %d %v", viewed, err)
+	}
+	// Reading your own mail isn't recorded as a colleague's.
+	employee.must(200, "GET", messages, nil)
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE workspace_id=$1 AND action='crm_mail.viewed'`, ws).Scan(&viewed); err != nil || viewed != 1 {
+		t.Fatalf("own read recorded: %d %v", viewed, err)
+	}
+
+	// The contact's sharing says what really happens: shared with the brand.
+	if sh := employee.must(200, "GET", root+"/records/"+id+"/sharing", nil); sh["visibility"] != "full" || sh["audience"] != "brand" || sh["version"] != 0.0 {
+		t.Fatalf("effective sharing: %v", sh)
+	}
+	// The owner makes the contact private: it stays theirs.
+	employee.must(200, "PUT", root+"/records/"+id+"/sharing", map[string]any{"visibility": "private", "audience": "selected", "viewer_ids": []string{}, "version": 0})
+	if len(owner.must(200, "GET", messages, nil)["data"].([]any)) != 0 {
+		t.Fatal("private contact shared")
+	}
+	employee.must(200, "PUT", root+"/records/"+id+"/sharing", map[string]any{"visibility": "full", "audience": "brand", "viewer_ids": []string{}, "version": 1})
+
+	// Switching it off is at once, and tells everyone.
+	off := owner.must(200, "PUT", root+"/policy", map[string]any{"internal_domains": []string{"northpeak.example"}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "team_sharing": false, "version": 3})
+	if off["team_sharing_from"] != nil {
+		t.Fatalf("off: %v", off)
+	}
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM alerts WHERE workspace_id=$1 AND kind='crm_mail.team_sharing'`, ws).Scan(&alerted); err != nil || alerted != 4 {
+		t.Fatalf("alerts after off %d %v", alerted, err)
+	}
+	owner.must(400, "PUT", root+"/policy", map[string]any{"internal_domains": []string{}, "blocked_addresses": []string{}, "blocked_domains": []string{}, "private_labels": []string{`"quoted"`}, "version": 4})
+}
+
+// connectFakePrivacyModel connects a fake OpenAI that calls an email about
+// a job offer private and anything else work.
+func connectFakePrivacyModel(t *testing.T, e *env, owner *client, ws string) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" {
+			io.WriteString(w, `{"data":[{"id":"gpt-test"}]}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		verdict := "work"
+		if strings.Contains(string(body), "Offer letter") {
+			verdict = "private"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"model": "gpt-test", "choices": []any{map[string]any{"message": map[string]any{"role": "assistant",
+			"content": `{"verdict":"` + verdict + `"}`}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 300, "completion_tokens": 5}})
+	}))
+	t.Cleanup(srv.Close)
+	e.integrations.Client.BaseURLs["openai"] = srv.URL
+	conn := owner.must(201, "POST", "/v1/workspaces/"+ws+"/integrations", map[string]any{"connector": "openai", "credentials": map[string]any{"api_key": openAIKey}})
+	owner.must(200, "PUT", "/v1/workspaces/"+ws+"/ai-settings", map[string]any{"integration_id": conn["id"], "model": "gpt-test",
+		"input_cents_per_million": 10, "output_cents_per_million": 50, "monthly_limit_cents": 5000})
 }

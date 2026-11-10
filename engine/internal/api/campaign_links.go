@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/outflareai/outflare/engine/internal/auth"
+	"github.com/outflareai/outflare/engine/internal/tokens"
 	"github.com/outflareai/outflare/engine/internal/tracking"
+	"github.com/outflareai/outflare/engine/internal/trafficsources"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -65,6 +68,10 @@ type trackingCampaignView struct {
 	Landed    int       `json:"landed"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// TrafficSourceID is the brand's traffic source the campaign buys
+	// clicks from, nil without one.
+	TrafficSourceID *string `json:"traffic_source_id"`
+	source          *campaignSource
 }
 
 const trackingCampaignSelect = `
@@ -72,14 +79,20 @@ const trackingCampaignSelect = `
 	       c.landing_url, c.redirect_links, c.status, (SELECT count(*) FROM tracking_links l WHERE l.campaign_id = c.id)::int,
 	       (SELECT count(*) FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id WHERE l.campaign_id = c.id AND NOT k.likely_bot)::int,
 	       (SELECT count(*) FROM tracking_link_clicks k JOIN tracking_links l ON l.id = k.link_id WHERE l.campaign_id = c.id AND NOT k.likely_bot AND k.landed_at IS NOT NULL)::int,
-	       c.created_at, c.updated_at
+	       c.created_at, c.updated_at, ts.id::text, COALESCE(ts.click_id_param, ''), COALESCE(ts.click_id_token, ''),
+	       COALESCE(ts.cost_param, ''), COALESCE(ts.cost_token, ''), COALESCE(ts.parameters, '[]')
 	FROM tracking_campaigns c
+	LEFT JOIN tracker_traffic_sources ts ON ts.id = c.traffic_source_id AND ts.workspace_id = c.workspace_id
 	WHERE c.workspace_id = $1`
 
 func scanTrackingCampaign(row pgx.Row) (trackingCampaignView, error) {
 	var v trackingCampaignView
+	var clickParam, clickToken, costParam, costToken string
+	var params []byte
 	err := row.Scan(&v.ID, &v.Name, &v.Slug, &v.Code, &v.Channel, &v.Source, &v.Medium, &v.BrandID, &v.ObjectKind, &v.ObjectID,
-		&v.LandingURL, &v.RedirectLinks, &v.Status, &v.Links, &v.Clicks, &v.Landed, &v.CreatedAt, &v.UpdatedAt)
+		&v.LandingURL, &v.RedirectLinks, &v.Status, &v.Links, &v.Clicks, &v.Landed, &v.CreatedAt, &v.UpdatedAt,
+		&v.TrafficSourceID, &clickParam, &clickToken, &costParam, &costToken, &params)
+	v.source = readCampaignSource(v.TrafficSourceID, clickParam, clickToken, costParam, costToken, params)
 	if err == nil && v.LandingURL != "" {
 		v.LandingLink, _ = v.campaign().Link(v.LandingURL, "")
 	}
@@ -168,6 +181,9 @@ type trackingCampaignInput struct {
 	Status     *string `json:"status"`
 	// RedirectLinks makes new links redirect links unless a link says.
 	RedirectLinks *bool `json:"redirect_links"`
+	// TrafficSource is the id of one of the brand's traffic sources; ""
+	// takes it off.
+	TrafficSource *string `json:"traffic_source"`
 }
 
 // cleanLanding checks a landing page and drops tags it already had.
@@ -179,11 +195,27 @@ func cleanLanding(p *string) (*string, error) {
 	if v == "" {
 		return &v, nil
 	}
+	if err := checkDestinationTokens("landing_url", v); err != nil {
+		return nil, err
+	}
 	dest, err := utm.Destination(v)
 	if err != nil {
 		return nil, errInvalid("landing_url: " + err.Error())
 	}
 	return &dest, nil
+}
+
+// checkDestinationTokens checks the tokens in a destination, which a
+// redirect click fills in ({click_id}, {field1}). A destination without
+// braces has none to check.
+func checkDestinationTokens(field, raw string) error {
+	if !strings.ContainsAny(raw, "{}") {
+		return nil
+	}
+	if err := tokens.Check(raw, trafficsources.DestinationTokens); err != nil {
+		return errInvalid(field + ": " + err.Error())
+	}
+	return nil
 }
 
 func validCampaignName(p *string) (string, error) {
@@ -253,6 +285,10 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 	}
 	brand := &brandID
 	ctx := r.Context()
+	trafficSource, err := s.campaignTrafficSource(ctx, a.WorkspaceID, brandID, in.TrafficSource, nil)
+	if s.allocError(w, r, err) {
+		return
+	}
 	var id string
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var n int
@@ -263,10 +299,12 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 			return errInvalid("a workspace can have at most 5,000 campaigns; archive old ones and reuse them")
 		}
 		err := tx.QueryRow(ctx, `
-			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by, redirect_links)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false))
+			INSERT INTO tracking_campaigns (workspace_id, brand_id, name, slug, code, channel, source, medium, landing_url, created_by, redirect_links,
+				traffic_source_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, false), $12)
 			ON CONFLICT DO NOTHING RETURNING id::text`,
-			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID), in.RedirectLinks).Scan(&id)
+			a.WorkspaceID, brand, name, slug, utm.NewCode(), ch.ID, source, ch.Medium, deref(landing), nullIfEmpty(a.ActorID), in.RedirectLinks,
+			trafficSource).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict
 		}
@@ -274,7 +312,7 @@ func (s *Server) createTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "tracking_campaign.created", "tracking_campaign", id,
-			map[string]any{"channel": ch.ID, "brand_id": brand, "via": "manual"})
+			map[string]any{"channel": ch.ID, "brand_id": brand, "via": "manual", "traffic_source_id": trafficSource})
 	})
 	if errors.Is(err, errConflict) {
 		writeError(w, r, http.StatusConflict, "conflict", "another campaign already uses the slug "+slug+"; pick another slug or reuse that campaign")
@@ -330,22 +368,34 @@ func (s *Server) updateTrackingCampaign(w http.ResponseWriter, r *http.Request) 
 		brand = &id
 	}
 	ctx := r.Context()
+	trafficSource := cur.TrafficSourceID
+	if in.TrafficSource != nil || (cur.TrafficSourceID != nil && deref(brand) != deref(cur.BrandID)) {
+		var err error
+		trafficSource, err = s.campaignTrafficSource(ctx, a.WorkspaceID, deref(brand), in.TrafficSource, cur.TrafficSourceID)
+		if s.allocError(w, r, err) {
+			return
+		}
+	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tracking_campaigns SET name = COALESCE($3, name), landing_url = COALESCE($4, landing_url),
-				brand_id = $5, status = COALESCE($6, status), redirect_links = COALESCE($7, redirect_links), updated_at = now()
+				brand_id = $5, status = COALESCE($6, status), redirect_links = COALESCE($7, redirect_links), traffic_source_id = $8, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
-			a.WorkspaceID, cur.ID, name, landing, brand, in.Status, in.RedirectLinks); err != nil {
+			a.WorkspaceID, cur.ID, name, landing, brand, in.Status, in.RedirectLinks, trafficSource); err != nil {
 			return err
 		}
 		action := "tracking_campaign.updated"
 		if in.Status != nil && *in.Status != cur.Status {
 			action = map[string]string{"archived": "tracking_campaign.archived", "active": "tracking_campaign.restored"}[*in.Status]
 		}
-		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "tracking_campaign", cur.ID, map[string]any{"channel": cur.Channel, "brand_id": brand})
+		return record(ctx, tx, &a.principal, a.WorkspaceID, action, "tracking_campaign", cur.ID,
+			map[string]any{"channel": cur.Channel, "brand_id": brand, "traffic_source_id": trafficSource})
 	})
 	if s.allocError(w, r, err) {
 		return
+	}
+	if deref(trafficSource) != deref(cur.TrafficSourceID) {
+		s.redirects.clear()
 	}
 	if v, ok := s.findTrackingCampaign(w, r, a.WorkspaceID, cur.ID); ok {
 		writeJSON(w, http.StatusOK, v)
@@ -361,6 +411,10 @@ type trackingLinkView struct {
 	TaggedURL  string `json:"tagged_url"`
 	// RedirectURL is the link's short redirect link, nil when it has none.
 	RedirectURL *string `json:"redirect_url"`
+	// CampaignURL is the redirect link with the campaign's traffic source
+	// parameters, each set to the network's token: the address to paste
+	// into the network. Nil without a redirect link or a traffic source.
+	CampaignURL *string `json:"campaign_url"`
 	// Clicks on the redirect link, without automated ones.
 	Clicks int `json:"clicks"`
 	// Landed is how many of those clicks reached a page with the site's
@@ -411,7 +465,44 @@ func (v *trackingLinkView) finish(c trackingCampaignView, base string) {
 	if v.code != nil {
 		u := base + "/l/" + *v.code
 		v.RedirectURL = &u
+		if c.source != nil {
+			cu := c.source.campaignURL(u)
+			v.CampaignURL = &cu
+		}
 	}
+}
+
+// campaignTrafficSource resolves a campaign's traffic source on brand: the
+// one ref names ("" for none), or cur when ref is nil (a campaign moving
+// brands keeps it only if it is that brand's).
+func (s *Server) campaignTrafficSource(ctx context.Context, ws, brand string, ref, cur *string) (*string, error) {
+	id := cur
+	if ref != nil {
+		v := strings.TrimSpace(*ref)
+		if v == "" {
+			return nil, nil
+		}
+		id = &v
+	}
+	if id == nil {
+		return nil, nil
+	}
+	if !validUUID(*id) {
+		return nil, errInvalid("traffic_source is a traffic source's id")
+	}
+	var status string
+	err := s.pool.QueryRow(ctx, `SELECT status FROM tracker_traffic_sources WHERE workspace_id = $1 AND brand_id = $2 AND id = $3`, ws, brand, *id).Scan(&status)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows) && ref == nil:
+		return nil, errInvalid("the campaign's traffic source belongs to its old brand; name one of the new brand's as traffic_source, or \"\" for none")
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, errInvalid("traffic source not found on the campaign's brand")
+	case err != nil:
+		return nil, err
+	case status != "active" && ref != nil && (cur == nil || *cur != *id):
+		return nil, errInvalid("that traffic source is archived; restore it first")
+	}
+	return id, nil
 }
 
 func tagLink(c trackingCampaignView, l trackingLinkView) string {
@@ -448,6 +539,10 @@ func (s *Server) createTrackingLink(w http.ResponseWriter, r *http.Request) {
 	}
 	if raw == "" {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "url is required, since the campaign has no landing page")
+		return
+	}
+	if err := checkDestinationTokens("url", raw); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	dest, err := utm.Destination(raw)

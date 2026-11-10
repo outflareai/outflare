@@ -128,3 +128,8 @@ func (s *Server) QueuePartnershipSyncs(ctx context.Context) error {
 func (s *Server) RunAffiliateSync(ctx context.Context, ws, partner string) error {
 	return s.partnershipAffiliateJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"partner_id":"` + partner + `"}`)})
 }
+
+// RunMailPrivacyCheck runs one email privacy check for a brand.
+func (s *Server) RunMailPrivacyCheck(ctx context.Context, ws, brand string) error {
+	return s.crmMailPrivacyJob(ctx, jobs.Job{ID: 1, WorkspaceID: &ws, Payload: []byte(`{"brand_id":"` + brand + `"}`)})
+}

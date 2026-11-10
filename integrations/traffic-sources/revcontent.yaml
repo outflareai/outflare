@@ -1,0 +1,17 @@
+id: revcontent
+name: "Revcontent"
+category: native
+click_id: {param: clickid, token: "{conversion_uuid}"}
+parameters:
+  - {name: "Boost ID", param: boost_id, token: "{boost_id}", field: 1}
+  - {name: "Content ID", param: content_id, token: "{content_id}", field: 2}
+  - {name: "Widget ID", param: widget_id, token: "{widget_id}", field: 3}
+  - {name: "Traffic type", param: adv_targets, token: "{adv_targets}", field: 4}
+  - {name: "Site name", param: site_name, token: "{site_name}", field: 5}
+  - {name: "Country", param: country, token: "{country}", field: 6}
+postback: {url: "https://trends.revcontent.com/api/v1/conversion.php?api_key=REPLACE&rc_uuid={source_click_id}&amount={payout}", method: GET}
+note: "Revcontent adds rc_uuid to every link itself; don't add it by hand. It has no cost macro, and takes the conversion amount as a whole number."
+sources:
+  - https://help.revcontent.com/knowledge/server-to-server-s2s-conversion-tracking
+  - https://help.revcontent.com/knowledge/campaign-tracking-variables
+  - https://doc.voluum.com/en/revcontent_traffic_source.html

@@ -208,6 +208,23 @@ Outflare merges on its own in one case only: when your product sends a verified 
 
 `kinds=visit,message` narrows it. A company's timeline includes its people's (everyone linked to it), and each item's `record_id` says whose it is; `people=false` shows only the company's own. On the brand route it holds the brand's items and the ones no brand owns (an email sent outside a sequence); on the workspace route `brand=<id or handle>` does the same, and people limited to some brands only see their brands' items and shared ones. Pages are 50 items (up to 200 with `limit`); pass `next_cursor` as `cursor` for the next. Kind names don't change once shipped; new kinds may be added.
 
+## Email with your contacts
+
+A person can save their own email with a contact onto that contact: imported by hand, or captured from their Gmail once they connect it (`/v1/brands/{brand}/crm/mail/...`). It is stored encrypted, and only for whole conversations with that contact: mail with colleagues, mixed internal threads, blocked addresses and domains (the brand's and the person's own) and mail under a private Gmail label (Personal, HR, Legal, Finance and Medical unless the brand or person changes `private_labels`) are never saved. The filters run again on every read, so a new exclusion hides older mail at once.
+
+**Who can read it.** By default only its owner. The owner can share a contact's mail with chosen people or the whole brand, as "who and when" only or in full. No role, owner or admin included, reads someone's mail without that.
+
+**Capturing every contact.** By default each person picks the contacts and companies whose mail their Gmail capture saves. An owner or admin can switch on `capture_all_contacts` in the brand's policy instead: each person enabled for capture then saves their mail with any contact or company in the brand's CRM. An email is saved only when everyone outside the company in it belongs to one record: the contact whose address it is, or else the company whose domain it is (public mailbox services such as Gmail never count as a company). Mail that fits two contacts or two companies isn't saved, Gmail's promotions, social and forums tabs are skipped, and every filter above still applies. Switching it on or off syncs every connected mailbox again (`crm_mail.capture_all_changed`), and every member sees it in their own email settings.
+
+**Team email sharing.** An owner or admin can switch on `team_sharing` in the brand's policy, so everyone who works on the brand can read each other's work email with CRM contacts and the history with a customer, partner or supplier isn't stuck in one inbox. It starts 48 hours after it's switched on (`team_sharing_from`), and every member of the brand gets a `crm_mail.team_sharing` alert at once; switching it off is immediate and tells them again. While it's on:
+
+- A contact whose owner made no choice is shared in full with the brand, and its sharing setting says so; a contact its owner set private stays private.
+- Mail from payroll, HR, benefits, banking and expense services (such as Gusto, Deel, Rippling, Wise or Revolut) is never saved; add your own accountant and law firm as blocked domains.
+- Before a colleague sees an email, the workspace's own AI model (the cheapest of its provider, the "Email privacy check" task, within its AI limits) reads its subject and first lines. One about pay, a job offer, HR, a legal dispute, health or family stays its owner's, and so does one the model was unsure about or hasn't read yet. Without an AI connection colleagues see no shared email; emails a person shares on purpose aren't checked.
+- Each time someone reads a colleague's email it's recorded as `crm_mail.viewed` (who, whose and which contact, never what).
+
+Every member sees whether it's on, and from when, in their own email settings.
+
 ## Consent
 
 Consent is recorded per person, channel (`email`, `sms`, `push`, `whatsapp`, `in_app`), topic (a subscription topic's key such as `product_updates`, or none for the whole channel) and purpose (default `marketing`), with where it happened (`source`: `signup_form`, `preference_center`, `unsubscribe_link`, `import`) and what proves it (`evidence`, such as the form and its wording's version).

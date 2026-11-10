@@ -14,6 +14,7 @@ Before each of these, the engine asks the quota whether the workspace may have `
 | `records` | `POST .../records`, and each page of a CRM import | 1, or the page's size | `402 quota_exceeded`; an import ends as failed with the reason and error code `quota_exceeded` |
 | `emails_sent` | each sequence email, after its sending window | 1 | the email waits an hour and is tried again; it is never failed or blocked, and the enrollment's status reason is `quota_exceeded` meanwhile |
 | `tracked_events` | storing events: `POST .../customer-events`, `POST /v1/brands/{brand}/events` and the website snippet (`POST /v1/site/events`) | the events in the request | `402 quota_exceeded`; none of the request's events are stored, and the website snippet drops them |
+| `tracker_clicks` | writing a batch of [redirect link](campaign-links.md#redirect-links) clicks, a moment after the redirects | the batch's clicks for the workspace, leaving out likely bots | the person was already sent on; the clicks aren't stored |
 
 Records the engine makes on its own to keep data linked (a person from a website event, a deal from a reply) are not checked, so no activity is lost. Events are checked once, as they arrive: an event the brand inbox already took is stored even if the quota changes before a worker reaches it, and replaying held events isn't checked again. Outflare's own product events (the operator's events workspace) aren't checked.
 
@@ -39,7 +40,7 @@ func (e Ext) Setup(ctx context.Context, h *outflare.Host) error {
 
 - Return nil to allow, a `*outflare.QuotaError` to refuse, or any other error when the check itself fails. A failed check is logged, recorded as a `quota.check_failed` event and allowed: a broken checker never stops a workspace's work.
 - It is asked often (every email sent), so answer from memory or one quick query.
-- The resources are `outflare.QuotaBrands`, `QuotaMailboxes`, `QuotaTrackingDomains`, `QuotaRecords`, `QuotaEmailsSent` and `QuotaTrackedEvents`.
+- The resources are `outflare.QuotaBrands`, `QuotaMailboxes`, `QuotaTrackingDomains`, `QuotaRecords`, `QuotaEmailsSent`, `QuotaTrackedEvents` and `QuotaTrackerClicks`.
 
 ## Monitoring
 

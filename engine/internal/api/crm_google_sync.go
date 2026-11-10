@@ -145,6 +145,14 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	}()
 	a := &access{WorkspaceID: ws, Brand: brand}
 	a.UserID = owner
+	// The brand's and the person's policies and the members, without a record.
+	base, err := s.crmMailContext(ctx, a, owner, "")
+	if err != nil {
+		return err
+	}
+	// With capture of every contact on, mail is matched to a record after
+	// it is read; otherwise the search names the picked records.
+	all := base.brand.CaptureAllContacts
 	rows, err := s.pool.Query(ctx, `SELECT c.record_id::text FROM crm_mail_capture_targets c JOIN records r ON r.id=c.record_id AND r.workspace_id=c.workspace_id AND r.brand_id=c.brand_id WHERE c.workspace_id=$1 AND c.brand_id=$2 AND c.owner_id=$3 AND c.enabled AND r.deleted_at IS NULL AND r.merged_into IS NULL AND r.archived_at IS NULL ORDER BY c.record_id LIMIT 100`, ws, brand, owner)
 	if err != nil {
 		return err
@@ -153,7 +161,10 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	if err != nil {
 		return err
 	}
-	if len(targets) == 0 {
+	if all {
+		targets = nil
+	}
+	if len(targets) == 0 && !all {
 		return nil
 	}
 	contexts := map[string]mailContext{}
@@ -171,7 +182,7 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 			}
 		}
 	}
-	if len(terms) == 0 {
+	if len(terms) == 0 && !all {
 		return nil
 	}
 	raw, err := s.box.Open(sealed, []byte(payload.ID))
@@ -199,7 +210,15 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 		if last != nil && last.Add(-time.Hour).After(since) {
 			since = last.Add(-time.Hour)
 		}
-		credentials.Query = "after:" + strconv.FormatInt(since.Unix(), 10) + " -in:spam -in:trash -in:drafts -in:scheduled {" + strings.Join(terms, " ") + "}"
+		// Mail under a private label (Personal, HR, ...) is never fetched.
+		exclude := crmmail.ExcludeLabels(base.brand, base.personal)
+		credentials.Query = "after:" + strconv.FormatInt(since.Unix(), 10) + " -in:spam -in:trash -in:drafts -in:scheduled " + exclude
+		if all {
+			// Every contact: newsletters and notifications never match one.
+			credentials.Query += " -category:promotions -category:social -category:forums"
+		} else {
+			credentials.Query += " {" + strings.Join(terms, " ") + "}"
+		}
 		credentials.Started = time.Now()
 	}
 	if len(credentials.Query) > 16000 {
@@ -294,6 +313,11 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 			}
 			rec := ""
 			ambiguous := false
+			if all {
+				if rec, err = matchMailRecord(ctx, s.pool, ws, brand, base, m); err != nil {
+					return err
+				}
+			}
 			for _, id := range targets {
 				if contexts[id].eligible(m) {
 					if rec != "" {
@@ -319,7 +343,18 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 			}
 
 			m, err = crmmail.Parse(body, credentials.Grant.Email)
-			if err != nil || !contexts[rec].eligible(m) {
+			if err != nil {
+				continue
+			}
+			if all {
+				again, err := matchMailRecord(ctx, s.pool, ws, brand, base, m)
+				if err != nil {
+					return err
+				}
+				if again != rec {
+					continue
+				}
+			} else if !contexts[rec].eligible(m) {
 				continue
 			}
 			if millis, err := strconv.ParseInt(full.InternalDate, 10, 64); err == nil && millis > 0 {
@@ -347,6 +382,25 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 					}
 					return err
 				}
+				if all {
+					// Still capturing every contact, and still this one.
+					live, err := s.crmMailContextWith(ctx, tx, a, owner, "")
+					if err != nil {
+						return err
+					}
+					var active bool
+					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM crm_google_connections WHERE workspace_id=$1 AND id=$2 AND version=$3 AND status='connected')`, ws, payload.ID, generation).Scan(&active); err != nil {
+						return err
+					}
+					if !active || !live.brand.CaptureAllContacts {
+						return nil
+					}
+					again, err := matchMailRecord(ctx, tx, ws, brand, live, m)
+					if err != nil || again != rec {
+						return err
+					}
+					return s.storeCapturedMail(ctx, tx, id, ws, brand, owner, rec, cipher, sourceHash, m, &stored)
+				}
 				var active bool
 				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM crm_google_connections g JOIN crm_mail_capture_targets c ON c.workspace_id=g.workspace_id AND c.brand_id=g.brand_id AND c.owner_id=g.owner_id JOIN records r ON r.id=c.record_id AND r.workspace_id=c.workspace_id AND r.brand_id=c.brand_id WHERE g.workspace_id=$1 AND g.id=$2 AND g.version=$3 AND g.status='connected' AND c.record_id=$4 AND c.enabled AND r.deleted_at IS NULL AND r.merged_into IS NULL AND r.archived_at IS NULL)`, ws, payload.ID, generation, rec).Scan(&active); err != nil {
 					return err
@@ -362,15 +416,7 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 				if !live.eligible(m) {
 					return nil
 				}
-				tag, err := tx.Exec(ctx, `INSERT INTO crm_mail_messages(id,workspace_id,brand_id,owner_id,record_id,content_sealed,source_hash,occurred_at)SELECT $1,$2,$3,$4,$5,$6,$7,$8 WHERE NOT EXISTS(SELECT 1 FROM crm_mail_suppressions WHERE workspace_id=$2 AND brand_id=$3 AND owner_id=$4 AND source_hash=$7) ON CONFLICT(brand_id,owner_id,source_hash) DO NOTHING`, id, ws, brand, owner, rec, cipher, sourceHash, m.OccurredAt)
-				if err != nil {
-					return err
-				}
-				if tag.RowsAffected() == 0 {
-					return nil
-				}
-				stored++
-				return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "crm_mail.captured", TargetType: "crm_mail_message", TargetID: id, Data: map[string]any{"brand_id": brand}})
+				return s.storeCapturedMail(ctx, tx, id, ws, brand, owner, rec, cipher, sourceHash, m, &stored)
 			})
 			if err != nil {
 				return err
@@ -401,6 +447,20 @@ func (s *Server) crmGoogleSyncJob(ctx context.Context, job jobs.Job) (runErr err
 	}
 	return s.auditCRMGoogleSync(ctx, ws, brand, payload.ID, stored)
 }
+
+// storeCapturedMail saves one captured message, unless its owner deleted it before.
+func (s *Server) storeCapturedMail(ctx context.Context, tx pgx.Tx, id, ws, brand, owner, rec string, cipher []byte, sourceHash string, m crmmail.Message, stored *int) error {
+	tag, err := tx.Exec(ctx, `INSERT INTO crm_mail_messages(id,workspace_id,brand_id,owner_id,record_id,content_sealed,source_hash,occurred_at)SELECT $1,$2,$3,$4,$5,$6,$7,$8 WHERE NOT EXISTS(SELECT 1 FROM crm_mail_suppressions WHERE workspace_id=$2 AND brand_id=$3 AND owner_id=$4 AND source_hash=$7) ON CONFLICT(brand_id,owner_id,source_hash) DO NOTHING`, id, ws, brand, owner, rec, cipher, sourceHash, m.OccurredAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
+	}
+	*stored++
+	return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "crm_mail.captured", TargetType: "crm_mail_message", TargetID: id, Data: map[string]any{"brand_id": brand}})
+}
+
 func (s *Server) saveCRMGoogleProgress(ctx context.Context, ws, id string, generation int, c crmGoogleCredentials, finished *time.Time) (bool, error) {
 	raw, _ := json.Marshal(c)
 	sealed := s.box.Seal(raw, []byte(id))
@@ -417,6 +477,12 @@ func (s *Server) crmGoogleFailed(ctx context.Context, ws, id, code string, perma
 }
 func (s *Server) auditCRMGoogleSync(ctx context.Context, ws, brand, id string, stored int) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// New mail with team sharing on is checked before colleagues see it.
+		if stored > 0 {
+			if err := queueMailPrivacyIfShared(ctx, tx, ws, brand); err != nil {
+				return err
+			}
+		}
 		return audit.Record(ctx, tx, audit.Event{WorkspaceID: ws, ActorType: "system", Action: "crm_mail.synced", TargetType: "crm_mail_connection", TargetID: id, Data: map[string]any{"brand_id": brand, "stored_count": stored}})
 	})
 }

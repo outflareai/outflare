@@ -2612,6 +2612,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         slug: z.string().max(80).optional().describe("utm_campaign: lowercase letters, digits and hyphens. From the name when left out."),
         landing_url: z.string().max(2000).optional().describe("The page links go to by default."),
         redirect_links: z.boolean().optional().describe("Give new links a short redirect link that counts clicks, for places the tracking snippet can't run. Off by default."),
+        traffic_source: z.string().uuid().optional().describe("The brand's traffic source the campaign buys clicks from (list_traffic_sources). Its links then get a campaign_url to paste into the network, and their clicks keep the source's parameters."),
       },
       annotations: write,
     },
@@ -2630,6 +2631,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         landing_url: z.string().max(2000).optional(),
         status: z.enum(["active", "archived"]).optional(),
         redirect_links: z.boolean().optional().describe("Give new links a short redirect link. Links made before keep what they have."),
+        traffic_source: z.string().optional().describe("The id of one of the brand's traffic sources, or '' for none."),
       },
       annotations: write,
     },
@@ -2657,7 +2659,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       inputSchema: {
         brand: brandRef,
         campaign: campaignRef,
-        url: z.string().max(2000).optional().describe("The page, such as https://example.com/pricing. The campaign's landing page when left out."),
+        url: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe(
+            "The page, such as https://example.com/pricing. The campaign's landing page when left out. It can carry tokens each redirect click fills in, such as {click_id}, {source_click_id}, {country} and {field1} to {field20}: https://example.com/offer?sub={field1}&cid={click_id}.",
+          ),
         content: z.string().max(80).optional().describe("utm_content: which ad, button or post, such as hero-cta."),
         term: z.string().max(80).optional().describe("utm_term: the keyword, for search ads."),
         redirect: z.boolean().optional().describe("Also make a short redirect link that counts clicks. The campaign's redirect_links when left out."),
@@ -2665,6 +2673,82 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       annotations: { ...write, idempotentHint: true },
     },
     ({ brand, campaign, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/tracking-campaigns/{id}/links", { params: { path: { brand: b, id: campaign } }, body }))),
+  );
+
+  const trafficSourceParam = z.object({
+    param: z.string().max(64).describe("The URL parameter, such as clickid; '' for none."),
+    token: z.string().max(100).describe("What the network fills in, written as the network does, such as {click_id}; '' when the network adds the parameter itself."),
+  });
+  const trafficSourceFields = {
+    name: z.string().max(120).optional(),
+    currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+    click_id: trafficSourceParam.optional().describe("The parameter that carries the network's click id."),
+    cost: trafficSourceParam.optional().describe("The parameter that carries what the click cost."),
+    parameters: z
+      .array(
+        z.object({
+          name: z.string().max(60).describe("What reports call it, such as Zone ID."),
+          param: z.string().max(64),
+          token: z.string().max(100).default("").describe("The network's token for it; '' when the network adds the parameter itself."),
+          field: z.number().int().min(1).max(20).describe("The custom field it fills, 1 to 20; each parameter its own."),
+          aliases: z.array(z.string().max(64)).max(5).optional().describe("Other parameters that fill the field when param is missing."),
+        }),
+      )
+      .max(20)
+      .optional()
+      .describe("The values each click keeps, one custom field each. Replaces the whole list."),
+    postback: z
+      .object({ url: z.string().max(2000), method: z.enum(["GET", "POST"]).optional() })
+      .optional()
+      .describe("Where the network takes a conversion, with Outflare's tokens such as {source_click_id} and {payout}. Fill in every REPLACE first."),
+  };
+
+  server.registerTool(
+    "list_traffic_source_templates",
+    {
+      title: "List traffic-source templates",
+      description:
+        "The networks Outflare has templates for (Google, Meta, Taboola, MGID, PropellerAds and more): the parameters for each network's click id, cost and the values worth reporting on, with the network's tokens and its postback. Also lists the tokens a link's destination and a postback can use.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/traffic-source-templates", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "list_traffic_sources",
+    {
+      title: "List traffic sources",
+      description: "Where the brand buys clicks, with each source's parameters and how many campaigns use it.",
+      inputSchema: { brand: brandRef, status: z.enum(["active", "archived"]).optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/traffic-sources", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "create_traffic_source",
+    {
+      title: "Add a traffic source",
+      description:
+        "Add a network the brand buys clicks from, usually from a template (list_traffic_source_templates); the other fields change the template's values. " +
+        "Then give a tracking campaign the source, and its links' campaign_url is the address to paste into the network.",
+      inputSchema: { brand: brandRef, template: z.string().max(40).optional().describe("A template's id, such as taboola or propellerads."), ...trafficSourceFields },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/traffic-sources", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_traffic_source",
+    {
+      title: "Change a traffic source",
+      description: "Change a traffic source's parameters, postback or name, or archive or restore it. Its campaigns' clicks follow within a few minutes.",
+      inputSchema: { brand: brandRef, traffic_source: z.string().uuid(), ...trafficSourceFields, status: z.enum(["active", "archived"]).optional() },
+      annotations: write,
+    },
+    ({ brand, traffic_source, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/traffic-sources/{id}", { params: { path: { brand: b, id: traffic_source } }, body }))),
   );
 
   const attributionModel = z

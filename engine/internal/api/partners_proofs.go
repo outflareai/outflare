@@ -334,7 +334,8 @@ func rewardProofs(ctx context.Context, q partnerQuerier, ws string, f proofFilte
 	}
 	links, err := q.Query(ctx, `SELECT w.id::text, `+recordEmailSQL("m.record_id")+`,
 			f.id::text, f.via, f.status, f.created_at, f.first_sale_at, COALESCE(NULLIF(f.sub_id, ''), k.sub_id, ''), f.promo_code, f.session_id IS NOT NULL,
-			k.id::text, k.created_at, k.sub_id, k.referrer_host, COALESCE(k.external_id, ''),
+			COALESCE(k.id::text, kc.click_key), COALESCE(k.created_at, kc.clicked_at), COALESCE(k.sub_id, kc.sub_id), COALESCE(k.referrer_host, kc.referrer_host),
+			COALESCE(k.external_id, ''),
 			s.id::text, s.started_at, s.landing_url, s.ref, s.referrer_host, s.country, s.utm_source, s.utm_medium, s.utm_campaign, s.recorded,
 			COALESCE(uid.value, ''), v.event_name, v.payment_source, v.source, v.product_id, v.recurring, v.refund_of::text, t.id::text,
 			o.id::text, o.amount_cents, o.currency, o.created_at, o.paid_at, o.reference, COALESCE(m.payout_type, ''),
@@ -343,6 +344,7 @@ func rewardProofs(ctx context.Context, q partnerQuerier, ws string, f proofFilte
 		LEFT JOIN partner_conversions v ON v.id = w.conversion_id
 		LEFT JOIN partner_referrals f ON f.id = v.referral_id
 		LEFT JOIN partner_clicks k ON k.id = f.click_id
+		LEFT JOIN tracking_link_clicks kc ON kc.id = f.link_click_id
 		LEFT JOIN LATERAL (
 			SELECT s.id, s.started_at, s.landing_url, s.ref, s.referrer_host, s.country, s.utm_source, s.utm_medium, s.utm_campaign, true AS recorded
 			FROM site_sessions s WHERE s.id = f.session_id AND s.workspace_id = w.workspace_id

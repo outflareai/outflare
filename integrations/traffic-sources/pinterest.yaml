@@ -1,0 +1,14 @@
+id: pinterest
+name: "Pinterest Ads"
+category: search_social
+connector: pinterest_ads
+click_id: {param: epik}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{campaignid}", field: 1}
+  - {name: Ad set ID, param: of_adset, token: "{adgroupid}", field: 2}
+  - {name: Ad ID, param: of_ad, token: "{adid}", field: 3}
+  - {name: Keyword, param: utm_term, token: "{keyword}", field: 7}
+note: "Pinterest adds epik itself."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

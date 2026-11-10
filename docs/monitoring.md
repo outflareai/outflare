@@ -52,8 +52,11 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_ingest_events_total` | `outcome` (`accepted`, `rejected`, `capped`) | Website events the collector received: queued, refused for their shape, or turned away by a daily limit. |
 | `outflare_ad_tracking_arrivals_total` | `network` (an ad network, or `other`), `outcome` (`click_id`, `ad_ids`, `none`) | Landing pages from paid ads (a paid `utm_medium`) and how they were tracked: the network's click id, only the tracking template's ad ids, or neither. |
 | `outflare_ad_tracking_unfilled_macros_total` | `network` | Tracking template values that arrived as the macro itself, because the network didn't fill them in. |
-| `outflare_redirect_clicks_total` | `outcome` (`counted`, `bot`, `unknown`, `error`) | Clicks on campaign redirect links (`/l/{code}`): a person, a link scanner or preview, a code that isn't a link, or a click that couldn't be stored. |
-| `outflare_redirect_landings_total` | `outcome` (`claimed`, `unmatched`) | Page views carrying a redirect click's key (`ofclk`): the visit claimed the click, or the click was already claimed (a reload) or belongs to another workspace. |
+| `outflare_redirect_clicks_total` | `outcome` (`counted`, `bot`, `unknown`, `error`, `dropped`) | Clicks on campaign redirect links (`/l/{code}`): a person, a link scanner or preview, a code that isn't a link, a link that couldn't be looked up, or a click dropped because too many waited to be written. Clicks are written in batches a moment later. |
+| `outflare_redirect_click_writes_total` | `outcome` (`written`, `refused_quota`, `link_gone`, `failed`, `dropped_full`) | What happened to redirect clicks when their batch was written: written, over the workspace's click quota, their link gone, the batch failed and waits for the next flush, or dropped with too many waiting. |
+| `outflare_redirect_click_buffer` | | Redirect clicks waiting in a process to be written. |
+| `outflare_redirect_click_flush_seconds` | | Time to write one batch of up to 1,000 redirect clicks. |
+| `outflare_redirect_landings_total` | `outcome` (`claimed`, `pending`, `unmatched`) | Page views carrying a redirect click's key (`ofclk`): the visit claimed the click, its click wasn't written yet and the landing waits for it, or nothing took it (a reload, another workspace's key, or a waiting landing no click took within an hour). |
 | `outflare_inbox_events_total` | `outcome` (`stored`, `rejected`, `failed`) | Website events workers took from the inbox. `rejected` is an event the workspace refused (an unapproved name over the limit, a record conflict); `failed` is a batch that will be tried again. |
 | `outflare_inbox_batch_seconds` | | Time to store one batch from the inbox. |
 | `outflare_inbox_pending`, `outflare_inbox_oldest_seconds`, `outflare_inbox_failed` | | Website event batches waiting for a worker, how long the oldest has waited, and batches set aside after 5 failures. |
@@ -225,6 +228,8 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 ## Alerts
 
+- `OutflareRedirectClicksNotWritten` (warning): redirect link clicks have failed to be written for 10 minutes; people are still sent on.
+- `OutflareRedirectClickBacklog` (warning): over 20,000 redirect clicks have waited in one process for 5 minutes.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
 - `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.
 - `OutflareJobKindTakesWorkers`: one job kind has held over half the job workers for 10 minutes, so other jobs and, through the shared database connections, page loads wait.
@@ -411,3 +416,7 @@ warns about repeated retries or dead checks, and `OutflareJobBacklog` covers
 checks waiting for workers.
 
 Personal CRM Google capture uses the existing per-kind queue throughput, duration, lag and retry metrics (`crm_mail.google_sync`). Its dashboard panel shows outcomes; `OutflarePersonalGoogleCaptureFailing` and `OutflarePersonalGoogleCaptureDelayed` flag repeated failures or a delayed queue. No user, account or email data is placed in metric labels.
+
+The email privacy check (`crm_mail.privacy_check`) counts each email it reads in `outflare_crm_mail_privacy_checks_total{outcome}` (work, private, failed, no_ai, budget), on a panel beside Gmail capture.
+
+- `OutflareMailPrivacyChecksFailing` (warning): over twenty email privacy checks failed, found no AI model or hit the AI limit in an hour, so colleagues stop seeing new work email.

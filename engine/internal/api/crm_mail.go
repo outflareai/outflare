@@ -89,7 +89,18 @@ func mailConfig(ctx context.Context, q interface {
 	var config map[string]any
 	if errors.Is(err, pgx.ErrNoRows) {
 		if table == "crm_mail_sharing" {
-			raw, _ = json.Marshal(crmmail.Private())
+			// With no choice made, a contact's mail is private, or shared
+			// with the brand once its team sharing has started: say so.
+			share := crmmail.Private()
+			var brandRaw []byte
+			if e := q.QueryRow(ctx, `SELECT config FROM crm_mail_policy WHERE workspace_id=$1 AND brand_id=$2`, ws, brand).Scan(&brandRaw); e != nil && !errors.Is(e, pgx.ErrNoRows) {
+				return nil, e
+			}
+			var bp crmmail.Policy
+			if len(brandRaw) > 0 && json.Unmarshal(brandRaw, &bp) == nil && bp.TeamSharingOn(time.Now()) {
+				share = crmmail.TeamShared()
+			}
+			raw, _ = json.Marshal(share)
 		} else {
 			raw, _ = json.Marshal(crmmail.DefaultPolicy())
 		}
@@ -103,6 +114,20 @@ func mailConfig(ctx context.Context, q interface {
 	}
 	if table == "crm_mail_preferences" {
 		delete(config, "internal_domains")
+		// Everyone sees whether the brand shares work mail, and from when.
+		var brandRaw []byte
+		err := q.QueryRow(ctx, `SELECT config FROM crm_mail_policy WHERE workspace_id=$1 AND brand_id=$2`, ws, brand).Scan(&brandRaw)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		var bp crmmail.Policy
+		if len(brandRaw) > 0 {
+			if err := json.Unmarshal(brandRaw, &bp); err != nil {
+				return nil, err
+			}
+		}
+		config["team_sharing"], config["team_sharing_from"] = bp.TeamSharing, bp.TeamSharingFrom
+		config["capture_all_contacts"] = bp.CaptureAllContacts
 	}
 	config["version"] = version
 	return config, nil
@@ -195,6 +220,15 @@ func (s *Server) putCRMMailConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, 400, "invalid_request", "internal_domains are managed in the brand policy")
 			return
 		}
+		// A person's preferences show the brand's team sharing but never set it.
+		if table == "crm_mail_preferences" {
+			in.TeamSharing, in.CaptureAllContacts = false, false
+		}
+		if in.PrivateLabels, err = mailLabels(in.PrivateLabels); s.allocError(w, r, err) {
+			return
+		}
+		// When team sharing starts is the server's to say, never the caller's.
+		in.TeamSharingFrom = nil
 		config, version = in, in.Version
 	}
 	var out map[string]any
@@ -230,6 +264,38 @@ func (s *Server) putCRMMailConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if current["version"].(int) != version {
 			return errConflict
+		}
+		// Switching team sharing on starts it after the notice period, and
+		// tells every member of the brand now; switching it off is at once.
+		var sharingChanged bool
+		if table == "crm_mail_policy" {
+			p := config.(crmmail.Policy)
+			was, _ := current["team_sharing"].(bool)
+			switch {
+			case p.TeamSharing && !was:
+				from := time.Now().UTC().Add(crmmail.TeamSharingNotice).Truncate(time.Second)
+				p.TeamSharingFrom = &from
+				sharingChanged = true
+			case p.TeamSharing:
+				if v, _ := current["team_sharing_from"].(string); v != "" {
+					if at, err := time.Parse(time.RFC3339Nano, v); err == nil {
+						p.TeamSharingFrom = &at
+					}
+				}
+			case was:
+				sharingChanged = true
+			}
+			config = p
+			if sharingChanged {
+				if err := s.crmTeamSharingChanged(r.Context(), tx, a, p); err != nil {
+					return err
+				}
+			}
+			if was, _ := current["capture_all_contacts"].(bool); was != p.CaptureAllContacts {
+				if err := s.crmCaptureAllChanged(r.Context(), tx, a, p.CaptureAllContacts); err != nil {
+					return err
+				}
+			}
 		}
 		raw, _ := json.Marshal(config)
 		switch table {
@@ -293,10 +359,17 @@ func (s *Server) crmMailContextWith(ctx context.Context, q mailRowsQuery, a *acc
 		return c, err
 	}
 	c.members, err = pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
+	if err != nil || rec == "" {
 		return c, err
 	}
-	rows, err = q.Query(ctx, `SELECT namespace,lower(value) FROM record_identities WHERE workspace_id=$1 AND record_id=$2 AND namespace IN ('email','domain') AND (valid_to IS NULL OR valid_to>now())`, a.WorkspaceID, rec)
+	return c.forRecord(ctx, q, a.WorkspaceID, rec)
+}
+
+// forRecord is the same policies and members with one record's addresses
+// and company domains.
+func (c mailContext) forRecord(ctx context.Context, q mailRowsQuery, ws, rec string) (mailContext, error) {
+	c.emails, c.domains = nil, nil
+	rows, err := q.Query(ctx, `SELECT namespace,lower(value) FROM record_identities WHERE workspace_id=$1 AND record_id=$2 AND namespace IN ('email','domain') AND (valid_to IS NULL OR valid_to>now())`, ws, rec)
 	if err != nil {
 		return c, err
 	}
@@ -386,6 +459,9 @@ func (s *Server) importCRMMail(w http.ResponseWriter, r *http.Request) {
 		if !stored {
 			return nil
 		}
+		if err := queueMailPrivacyIfShared(r.Context(), tx, a.WorkspaceID, a.Brand); err != nil {
+			return err
+		}
 		return record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.imported", "crm_mail_message", id, map[string]any{"brand_id": a.Brand, "record_id": rec})
 	})
 	if s.allocError(w, r, err) {
@@ -425,19 +501,32 @@ func (s *Server) listCRMMail(w http.ResponseWriter, r *http.Request) {
 	var next *string
 	contexts := map[string]mailContext{}
 	shares := map[string]crmmail.Sharing{}
+	// With the brand's team sharing on, a contact whose owner made no
+	// choice is shared with the brand; one made private stays private.
+	var brandPolicy crmmail.Policy
+	if cfg, err := mailConfig(r.Context(), s.pool, "crm_mail_policy", a.WorkspaceID, a.Brand, "", ""); s.allocError(w, r, err) {
+		return
+	} else {
+		raw, _ := json.Marshal(cfg)
+		if err := json.Unmarshal(raw, &brandPolicy); s.allocError(w, r, err) {
+			return
+		}
+	}
+	teamShared := brandPolicy.TeamSharingOn(time.Now())
+	teamDefault := map[string]bool{}
 	for {
-		rows, err := s.pool.Query(r.Context(), `SELECT id::text,owner_id::text,content_sealed,occurred_at FROM crm_mail_messages WHERE workspace_id=$1 AND brand_id=$2 AND record_id=$3 AND ($4='' OR id<NULLIF($4,'')::uuid) AND EXISTS(SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id AND u.disabled_at IS NULL WHERE m.workspace_id=$1 AND m.user_id=crm_mail_messages.owner_id AND (m.brand_ids IS NULL OR cardinality(m.brand_ids)=0 OR $2::uuid=ANY(m.brand_ids))) ORDER BY id DESC LIMIT 200`, a.WorkspaceID, a.Brand, rec, before)
+		rows, err := s.pool.Query(r.Context(), `SELECT id::text,owner_id::text,content_sealed,occurred_at,privacy FROM crm_mail_messages WHERE workspace_id=$1 AND brand_id=$2 AND record_id=$3 AND ($4='' OR id<NULLIF($4,'')::uuid) AND EXISTS(SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id AND u.disabled_at IS NULL WHERE m.workspace_id=$1 AND m.user_id=crm_mail_messages.owner_id AND (m.brand_ids IS NULL OR cardinality(m.brand_ids)=0 OR $2::uuid=ANY(m.brand_ids))) ORDER BY id DESC LIMIT 200`, a.WorkspaceID, a.Brand, rec, before)
 		if s.allocError(w, r, err) {
 			return
 		}
 		type candidate struct {
-			id, owner string
-			sealed    []byte
-			at        time.Time
+			id, owner, privacy string
+			sealed             []byte
+			at                 time.Time
 		}
 		list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
 			var v candidate
-			err := row.Scan(&v.id, &v.owner, &v.sealed, &v.at)
+			err := row.Scan(&v.id, &v.owner, &v.sealed, &v.at, &v.privacy)
 			return v, err
 		})
 		if s.allocError(w, r, err) {
@@ -455,10 +544,19 @@ func (s *Server) listCRMMail(w http.ResponseWriter, r *http.Request) {
 				if err = json.Unmarshal(raw, &share); s.allocError(w, r, err) {
 					return
 				}
+				if chosen, _ := cfg["version"].(int); chosen == 0 && teamShared {
+					share = crmmail.TeamShared()
+					teamDefault[v.owner] = true
+				}
 				shares[v.owner] = share
 			}
 			visibility := crmmail.Visibility(v.owner, a.UserID, share)
 			if visibility == "private" {
+				continue
+			}
+			// Team sharing shows a colleague only email the AI check found to
+			// be about work; the owner's own choice to share isn't second-guessed.
+			if teamDefault[v.owner] && v.owner != a.UserID && v.privacy != "work" {
 				continue
 			}
 			c, ok := contexts[v.owner]
@@ -496,6 +594,28 @@ func (s *Server) listCRMMail(w http.ResponseWriter, r *http.Request) {
 		}
 		if next != nil || len(list) < 200 {
 			break
+		}
+	}
+	// Reading a colleague's mail is recorded: who read whose, on which
+	// contact, never what.
+	others := map[string]int{}
+	for _, item := range out {
+		if owner := item["owner_id"].(string); owner != a.UserID && item["visibility"] == "full" {
+			others[owner]++
+		}
+	}
+	if len(others) > 0 {
+		err := pgx.BeginFunc(r.Context(), s.pool, func(tx pgx.Tx) error {
+			for owner, n := range others {
+				if err := record(r.Context(), tx, &a.principal, a.WorkspaceID, "crm_mail.viewed", "record", rec,
+					map[string]any{"brand_id": a.Brand, "owner_id": owner, "messages": n}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if s.allocError(w, r, err) {
+			return
 		}
 	}
 	writeJSON(w, 200, map[string]any{"data": out, "next_cursor": nextCursor(pageBefore, next)})

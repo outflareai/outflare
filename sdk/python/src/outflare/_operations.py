@@ -8878,6 +8878,7 @@ class Operations(_Mixin):
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
+        traffic_source: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -8902,6 +8903,7 @@ class Operations(_Mixin):
                 "slug": slug,
                 "source": source,
                 "status": status,
+                "traffic_source": traffic_source,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -8935,6 +8937,49 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/tracking-campaigns/{id}/links",
             path={"id": id, "brand": brand},
             body={"redirect": redirect, "term": term, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_traffic_source(
+        self,
+        *,
+        brand: str | None = None,
+        click_id: dict[str, Any] | None = None,
+        cost: dict[str, Any] | None = None,
+        currency: str | None = None,
+        name: str | None = None,
+        parameters: list[dict[str, Any]] | None = None,
+        postback: dict[str, Any] | None = None,
+        status: Literal["active", "archived"] | None = None,
+        template: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a traffic source.
+
+        Scope: analytics.manage. From a `template` (GET .../traffic-source-templates), whose values the other fields
+        change, or by hand. A template's postback that needs the brand's own value (REPLACE) is left off unless
+        `postback` fills it in: a postback with REPLACE in it can't be saved. Give a tracking campaign the source
+        (`traffic_source`), and its redirect clicks keep the source's parameters in their custom fields.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/traffic-sources
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/traffic-sources",
+            path={"brand": brand},
+            body={
+                "click_id": click_id,
+                "cost": cost,
+                "currency": currency,
+                "name": name,
+                "parameters": parameters,
+                "postback": postback,
+                "status": status,
+                "template": template,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -18413,6 +18458,25 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def get_traffic_source(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a traffic source.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/traffic-sources/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/traffic-sources/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_transaction(
         self,
         transaction: str,
@@ -27312,6 +27376,47 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/tracking-campaigns/{id}/links",
             path={"id": id, "brand": brand},
+        )
+
+    def list_traffic_source_templates(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List traffic-source templates.
+
+        Scope: analytics.read. The networks Outflare has templates for (integrations/traffic-sources): the URL parameter
+        that carries each network's click id and cost, the values worth reporting on with the network's token for each,
+        and where it takes a conversion postback. Start a traffic source from one with POST .../traffic-sources. Also
+        lists the tokens a destination and a postback can use.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/traffic-source-templates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/traffic-source-templates",
+            path={"brand": brand},
+        )
+
+    def list_traffic_sources(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+    ) -> Any:
+        """List the brand's traffic sources.
+
+        Scope: analytics.read. Where the brand buys clicks, by name, with how many campaigns use each.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/traffic-sources
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/traffic-sources",
+            path={"brand": brand},
+            query={"status": status},
         )
 
     def list_transactions(
@@ -38135,7 +38240,11 @@ class Operations(_Mixin):
         brand: str | None = None,
         blocked_addresses: list[str],
         blocked_domains: list[str],
+        capture_all_contacts: bool | None = None,
         internal_domains: list[str],
+        private_labels: list[str] | None = None,
+        team_sharing: bool | None = None,
+        team_sharing_from: str | None = None,
         version: int,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -38152,7 +38261,11 @@ class Operations(_Mixin):
             body={
                 "blocked_addresses": blocked_addresses,
                 "blocked_domains": blocked_domains,
+                "capture_all_contacts": capture_all_contacts,
                 "internal_domains": internal_domains,
+                "private_labels": private_labels,
+                "team_sharing": team_sharing,
+                "team_sharing_from": team_sharing_from,
                 "version": version,
             },
             extra_body=extra_body,
@@ -39922,6 +40035,10 @@ class Operations(_Mixin):
         brand: str | None = None,
         blocked_addresses: list[str],
         blocked_domains: list[str],
+        capture_all_contacts: bool | None = None,
+        private_labels: list[str] | None = None,
+        team_sharing: bool | None = None,
+        team_sharing_from: str | None = None,
         version: int,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
@@ -39935,7 +40052,15 @@ class Operations(_Mixin):
             "PUT",
             "/v1/brands/{brand}/crm/mail/preferences",
             path={"brand": brand},
-            body={"blocked_addresses": blocked_addresses, "blocked_domains": blocked_domains, "version": version},
+            body={
+                "blocked_addresses": blocked_addresses,
+                "blocked_domains": blocked_domains,
+                "capture_all_contacts": capture_all_contacts,
+                "private_labels": private_labels,
+                "team_sharing": team_sharing,
+                "team_sharing_from": team_sharing_from,
+                "version": version,
+            },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -42054,6 +42179,7 @@ class Operations(_Mixin):
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
+        traffic_source: str | None = None,
         extra_body: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> Any:
@@ -42076,6 +42202,49 @@ class Operations(_Mixin):
                 "slug": slug,
                 "source": source,
                 "status": status,
+                "traffic_source": traffic_source,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_traffic_source(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        click_id: dict[str, Any] | None = None,
+        cost: dict[str, Any] | None = None,
+        currency: str | None = None,
+        name: str | None = None,
+        parameters: list[dict[str, Any]] | None = None,
+        postback: dict[str, Any] | None = None,
+        status: Literal["active", "archived"] | None = None,
+        template: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, archive or restore a traffic source.
+
+        Scope: analytics.manage. `parameters` replaces the whole list. Its campaigns' clicks follow the change within a
+        few minutes. An archived source keeps its campaigns, but can't be given to another one.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/traffic-sources/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/traffic-sources/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "click_id": click_id,
+                "cost": cost,
+                "currency": currency,
+                "name": name,
+                "parameters": parameters,
+                "postback": postback,
+                "status": status,
+                "template": template,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,

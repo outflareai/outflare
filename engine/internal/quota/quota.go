@@ -27,10 +27,14 @@ const (
 	Records         = "records"
 	EmailsSent      = "emails_sent"
 	TrackedEvents   = "tracked_events"
+	// TrackerClicks are clicks on redirect links, asked about per batch
+	// written. Over quota the redirect still happens; the clicks aren't
+	// stored. Clicks marked as likely bots aren't counted.
+	TrackerClicks = "tracker_clicks"
 )
 
 // Resources lists every resource, for metrics and docs.
-var Resources = []string{Brands, Mailboxes, TrackingDomains, Records, EmailsSent, TrackedEvents}
+var Resources = []string{Brands, Mailboxes, TrackingDomains, Records, EmailsSent, TrackedEvents, TrackerClicks}
 
 // A Checker decides whether a workspace may have n more of resource.
 // It is called often (every email sent), so it should answer from memory

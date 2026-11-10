@@ -1,0 +1,10 @@
+id: x
+name: "X Ads"
+category: search_social
+connector: x_ads
+click_id: {param: twclid}
+parameters: []
+note: "X adds twclid itself and has no macros for its ids, so name the campaign in each ad's link."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

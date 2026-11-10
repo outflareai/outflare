@@ -1,0 +1,20 @@
+id: exoclick
+name: "ExoClick"
+category: adult
+click_id: {param: clickid, token: "{conversions_tracking}"}
+cost: {param: cost, token: "{actual_cost}"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "{campaign_id}", field: 1}
+  - {name: "Variation ID", param: variation_id, token: "{variation_id}", field: 2}
+  - {name: "Zone ID", param: zone_id, token: "{zone_id}", field: 3}
+  - {name: "Site ID", param: site_id, token: "{site_id}", field: 4}
+  - {name: "Source host", param: src_hostname, token: "{src_hostname}", field: 5}
+  - {name: "Category ID", param: category_id, token: "{category_id}", field: 6}
+  - {name: "Country", param: country, token: "{country}", field: 7}
+  - {name: "Ad format", param: format, token: "{format}", field: 8}
+postback: {url: "http://s.magsrv.com/tag.php?goal=REPLACE&tag={source_click_id}&value={payout}", method: GET}
+note: "goal is the goal id from your ExoClick account; value counts only for goals with a dynamic value."
+sources:
+  - https://docs.exoclick.com/docs/conversion-tracking
+  - https://docs.exoclick.com/docs/redtrack-tracking
+  - https://doc.voluum.com/en/exoclick_traffic-source.html

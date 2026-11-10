@@ -6109,7 +6109,7 @@ paths:
             schema:
               type: object
               properties:
-                url: { type: string, maxLength: 2000, description: "The page, such as https://example.com/pricing. The campaign's landing page when left out." }
+                url: { type: string, maxLength: 2000, description: "The page, such as https://example.com/pricing. The campaign's landing page when left out. It can carry tokens a redirect click fills in, such as https://example.com/offer?sub={field1}&cid={click_id} (destination_tokens in GET .../traffic-source-templates); a word in braces that isn't a token is refused." }
                 content: { type: string, maxLength: 80, description: "utm_content: which ad, button or post, such as hero-cta. Cleaned to lowercase." }
                 term: { type: string, maxLength: 80, description: "utm_term: the keyword, for search ads." }
                 redirect: { type: boolean, description: "Give the link a short redirect link. The campaign's redirect_links when left out." }
@@ -6126,6 +6126,125 @@ paths:
               schema: { $ref: "#/components/schemas/TrackingLink" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/traffic-source-templates:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrafficSourceTemplates
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List traffic-source templates
+      description: |
+        Scope: analytics.read. The networks Outflare has templates for (integrations/traffic-sources): the URL parameter
+        that carries each network's click id and cost, the values worth reporting on with the network's token for each,
+        and where it takes a conversion postback. Start a traffic source from one with POST .../traffic-sources. Also
+        lists the tokens a destination and a postback can use.
+      tags: [analytics]
+      responses:
+        "200":
+          description: Templates, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, categories, destination_tokens, postback_tokens]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrafficSourceTemplate" } }
+                  categories: { type: array, items: { type: string }, description: "The categories, in the order to show them." }
+                  destination_tokens: { type: array, items: { type: string }, description: "Tokens a link's destination can carry, such as click_id and field1, filled in for each redirect click." }
+                  postback_tokens: { type: array, items: { type: string }, description: "Tokens a postback to a traffic source can carry, such as source_click_id and payout." }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/traffic-sources:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrafficSources
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the brand's traffic sources
+      description: "Scope: analytics.read. Where the brand buys clicks, by name, with how many campaigns use each."
+      tags: [analytics]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived] } }
+      responses:
+        "200":
+          description: Traffic sources.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrafficSource" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createTrafficSource
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a traffic source
+      description: |
+        Scope: analytics.manage. From a `template` (GET .../traffic-source-templates), whose values the other fields
+        change, or by hand. A template's postback that needs the brand's own value (REPLACE) is left off unless
+        `postback` fills it in: a postback with REPLACE in it can't be saved. Give a tracking campaign the source
+        (`traffic_source`), and its redirect clicks keep the source's parameters in their custom fields.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrafficSourceInput" }
+      responses:
+        "201":
+          description: The traffic source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrafficSource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/traffic-sources/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getTrafficSource
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get a traffic source
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The traffic source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrafficSource" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateTrafficSource
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change, archive or restore a traffic source
+      description: |
+        Scope: analytics.manage. `parameters` replaces the whole list. Its campaigns' clicks follow the change within a
+        few minutes. An archived source keeps its campaigns, but can't be given to another one.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrafficSourceInput" }
+      responses:
+        "200":
+          description: The traffic source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrafficSource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/attribution/settings:
@@ -50895,7 +51014,7 @@ components:
         recurring: { type: boolean, description: "Sales: a subscription renewal rather than a new purchase." }
         program: { type: string, description: "A program's id or slug, to keep the conversion to it." }
         ref: { type: string, description: The partner's ref code. }
-        click_id: { type: string, format: uuid, description: "ref_click from a partner's short link." }
+        click_id: { type: string, pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[a-z0-9]{16})$', description: "ref_click from a partner's short link: a 16-character click key, or a uuid on links clicked before November 2026." }
         promo_code: { type: string }
         customer_id: { type: string, maxLength: 200, description: Your own id for the customer. }
         email: { type: string }
@@ -50992,7 +51111,7 @@ components:
         created_at: { type: string, format: date-time }
     TrackingCampaign:
       type: object
-      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at]
+      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at, traffic_source_id]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -51013,6 +51132,7 @@ components:
         landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet, which claims a click from the ofclk the redirect adds." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        traffic_source_id: { type: [string, "null"], format: uuid, description: "The brand's traffic source the campaign buys clicks from; null for none." }
     TrackingCampaignInput:
       type: object
       properties:
@@ -51024,9 +51144,10 @@ components:
         landing_url: { type: string, maxLength: 2000, description: "The page links go to by default; '' for none." }
         status: { type: string, enum: [active, archived], description: Update only. }
         redirect_links: { type: boolean, description: "Give new links a short redirect link unless a link says otherwise. Links made before keep what they have." }
+        traffic_source: { type: string, description: "The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url." }
     TrackingLink:
       type: object
-      required: [id, campaign_id, url, content, term, tagged_url, redirect_url, clicks, landed, created_at]
+      required: [id, campaign_id, url, content, term, tagged_url, redirect_url, campaign_url, clicks, landed, created_at]
       properties:
         id: { type: string, format: uuid }
         campaign_id: { type: string, format: uuid }
@@ -51035,9 +51156,82 @@ components:
         term: { type: string, description: "utm_term; '' for none." }
         tagged_url: { type: string, description: "The link to share: the page with the campaign's tags." }
         redirect_url: { type: [string, "null"], description: "The short redirect link (/l/{code}, on the workspace's tracking domain when it has one) that counts a click and sends the person to tagged_url; null when the link has none. Share it where the tracking snippet can't run." }
+        campaign_url: { type: [string, "null"], description: "The redirect link with the campaign's traffic source parameters, each set to the network's token: the address to paste into the network. Null without a redirect link or a traffic source." }
         clicks: { type: integer, description: "Clicks on the redirect link, without link scanners and previews; 0 without one." }
         landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run." }
         created_at: { type: string, format: date-time }
+    TrafficSourceParam:
+      type: object
+      required: [param, token]
+      properties:
+        param: { type: string, maxLength: 64, description: "The URL parameter, such as clickid. '' for none." }
+        token: { type: string, maxLength: 100, description: "What the network fills in, written as the network does, such as {click_id} or __CALLBACK_PARAM__; '' when the network adds the parameter itself (gclid)." }
+    TrafficSourceParameter:
+      type: object
+      required: [name, param, token, field]
+      properties:
+        name: { type: string, maxLength: 60, description: "What reports call the field, such as Zone ID." }
+        param: { type: string, maxLength: 64, description: The URL parameter that carries it. }
+        token: { type: string, maxLength: 100, description: "The network's token for it, shown in the campaign URL; '' when the network adds the parameter itself." }
+        field: { type: integer, minimum: 1, maximum: 20, description: "The custom field it fills, 1 to 20; {field1} to {field20} in tokens." }
+        aliases: { type: array, maxItems: 5, items: { type: string, maxLength: 64 }, description: "Other parameters that fill the field when param is missing, such as utm_source." }
+    TrafficSourcePostback:
+      type: object
+      required: [url, method]
+      properties:
+        url: { type: string, maxLength: 2000, description: "Where the network takes a conversion, with Outflare's tokens such as {source_click_id} (the network's click id) and {payout|80%}; '' for none." }
+        method: { type: string, enum: [GET, POST] }
+    TrafficSourceTemplate:
+      type: object
+      required: [id, name, category, currency, click_id, cost, parameters, postback]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { type: string, enum: [search_social, native, push_pop, display, mobile, adult] }
+        connector: { type: string, description: "The Outflare connector that syncs the network's spend, if there is one." }
+        currency: { type: string }
+        click_id: { $ref: "#/components/schemas/TrafficSourceParam" }
+        cost: { $ref: "#/components/schemas/TrafficSourceParam" }
+        parameters: { type: array, items: { $ref: "#/components/schemas/TrafficSourceParameter" } }
+        postback:
+          oneOf:
+            - { $ref: "#/components/schemas/TrafficSourcePostback" }
+            - { type: "null" }
+          description: "The network's postback, with REPLACE where the brand's own value goes; null when the network takes no postback URL."
+        note: { type: string, description: "Anything a person setting it up needs to know." }
+    TrafficSource:
+      type: object
+      required: [id, brand_id, name, template, currency, click_id, cost, parameters, postback, status, campaigns, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        template: { type: string, description: "The template it was made from; '' for a custom source." }
+        currency: { type: string, description: "The currency of its costs, such as USD." }
+        click_id: { $ref: "#/components/schemas/TrafficSourceParam" }
+        cost: { $ref: "#/components/schemas/TrafficSourceParam" }
+        parameters: { type: array, items: { $ref: "#/components/schemas/TrafficSourceParameter" } }
+        postback: { $ref: "#/components/schemas/TrafficSourcePostback" }
+        status: { type: string, enum: [active, archived] }
+        campaigns: { type: integer, description: "How many campaigns use it." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TrafficSourceInput:
+      type: object
+      properties:
+        template: { type: string, description: "A template's id to start from. Create only." }
+        name: { type: string, maxLength: 120, description: "The template's name when left out." }
+        currency: { type: string, pattern: "^[A-Z]{3}$" }
+        click_id: { $ref: "#/components/schemas/TrafficSourceParam" }
+        cost: { $ref: "#/components/schemas/TrafficSourceParam" }
+        parameters: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/TrafficSourceParameter" }, description: "The whole list; each parameter fills its own field." }
+        postback:
+          type: object
+          required: [url]
+          properties:
+            url: { type: string, maxLength: 2000, description: "Where the network takes a conversion, with Outflare's tokens; '' for none." }
+            method: { type: string, enum: [GET, POST], description: GET when left out. }
+        status: { type: string, enum: [active, archived], description: Update only. }
     Exclusion:
       type: object
       description: |
@@ -58453,7 +58647,7 @@ components:
             type: object
             required: [task, name, description, model, price, price_source, custom]
             properties:
-              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests, link_pitches, knowledge_answers, support_replies, coverage_review, journeys, pr_stories, brand_knowledge, telegram_matching, telegram_summaries] }
+              task: { type: string, enum: [plan, turn, check_in, reply_labelling, classify_domain, ai_visibility, social_replies, social_posts, email_verification, fix_tickets, review_replies, link_page_reading, ab_tests, link_pitches, knowledge_answers, support_replies, coverage_review, journeys, pr_stories, brand_knowledge, telegram_matching, telegram_summaries, mail_privacy] }
               name: { type: string }
               description: { type: string }
               model: { type: [string, "null"], description: Null when no model can run yet. }
@@ -68863,6 +69057,22 @@ components:
           type: array
           items: *id001
           maxItems: 100
+        private_labels:
+          type: [array, "null"]
+          items: { type: string, maxLength: 100 }
+          maxItems: 50
+          description: Gmail labels whose mail is never captured, such as Personal or HR. Left out (null), the defaults Personal, HR, Legal, Finance and Medical; an empty list means none.
+        team_sharing:
+          type: boolean
+          description: "Team email sharing: everyone who works on the brand can read each other's captured work email, unless its owner made that contact private. While on, payroll, HR, benefits, banking and expense services are never captured. Switching it on alerts every member (crm_mail.team_sharing) and starts it 48 hours later; switching it off is at once."
+        team_sharing_from:
+          type: [string, "null"]
+          format: date-time
+          readOnly: true
+          description: When team sharing starts, set by the server when it is switched on.
+        capture_all_contacts:
+          type: boolean
+          description: "Capture each enabled person's Gmail with every CRM contact and company of the brand, not only the records they picked. The same filters apply, and a message is saved only when all its outside participants belong to one contact (or else one company). Switching it on or off syncs every connected mailbox again."
         version:
           type: integer
           minimum: 0
@@ -68882,6 +69092,24 @@ components:
           type: array
           items: *id001
           maxItems: 100
+        private_labels:
+          type: [array, "null"]
+          items: { type: string, maxLength: 100 }
+          maxItems: 50
+          description: Your own Gmail labels whose mail is never captured, on top of the brand's. Null keeps the defaults.
+        team_sharing:
+          type: boolean
+          readOnly: true
+          description: Whether the brand shares its members' work email with each other, read from the brand policy; a person can't set it here.
+        team_sharing_from:
+          type: [string, "null"]
+          format: date-time
+          readOnly: true
+          description: When the brand's team sharing starts or started.
+        capture_all_contacts:
+          type: boolean
+          readOnly: true
+          description: Whether the brand captures mail with every CRM contact, read from the brand policy; a person can't set it here.
         version:
           type: integer
           minimum: 0

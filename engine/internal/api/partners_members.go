@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"math/big"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 	"github.com/outflareai/outflare/engine/internal/customers"
 	"github.com/outflareai/outflare/engine/internal/metrics"
 	"github.com/outflareai/outflare/engine/internal/secrets"
+	"github.com/outflareai/outflare/engine/internal/tracking"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -101,7 +101,10 @@ type partnerView struct {
 
 // A partner's totals, in partnerSelect and in the sorts on them.
 const (
-	partnerClicksSQL    = `(SELECT count(*) FROM partner_clicks k WHERE k.membership_id = m.id)::int`
+	// Clicks from before the merge and imported ones are in partner_clicks;
+	// the rest are with redirect link clicks, likely bots left out.
+	partnerClicksSQL = `((SELECT count(*) FROM partner_clicks k WHERE k.membership_id = m.id) +
+	                 (SELECT count(*) FROM tracking_link_clicks k WHERE k.membership_id = m.id AND NOT k.likely_bot))::int`
 	partnerCustomersSQL = `(SELECT count(*) FROM partner_referrals f WHERE f.membership_id = m.id AND f.first_sale_at IS NOT NULL)::int`
 	partnerSalesSQL     = `COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END) FROM partner_conversions v
 	                 JOIN partner_referrals f ON f.id = v.referral_id WHERE f.membership_id = m.id AND v.type IN ('sale', 'refund')), 0)::bigint`
@@ -843,12 +846,12 @@ func (s *Server) partnerLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var (
-		id, status, progStatus, landing, slug, ccode, src, medium string
+		id, mbrand, status, progStatus, landing, slug, ccode, src, medium string
 	)
-	err = s.pool.QueryRow(ctx, `SELECT m.id::text, m.status, p.status, p.landing_url, COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, '')
+	err = s.pool.QueryRow(ctx, `SELECT m.id::text, COALESCE(m.brand_id::text, ''), m.status, p.status, p.landing_url, COALESCE(c.slug, ''), COALESCE(c.code, ''), COALESCE(c.source, ''), COALESCE(c.medium, '')
 		FROM partner_memberships m JOIN partner_programs p ON p.id = m.program_id LEFT JOIN tracking_campaigns c ON c.id = m.campaign_id
 		WHERE m.workspace_id = $1 AND lower(m.code) = lower($2) AND ($3 = '' OR m.brand_id = $3::uuid)
-		ORDER BY m.created_at LIMIT 1`, ws, code, brand).Scan(&id, &status, &progStatus, &landing, &slug, &ccode, &src, &medium)
+		ORDER BY m.created_at LIMIT 1`, ws, code, brand).Scan(&id, &mbrand, &status, &progStatus, &landing, &slug, &ccode, &src, &medium)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && landing == "" {
 		notFound()
 		return
@@ -876,17 +879,24 @@ func (s *Server) partnerLink(w http.ResponseWriter, r *http.Request) {
 	if u, err := url.Parse(r.Referer()); err == nil {
 		refHost = cutUTF8(strings.ToLower(u.Hostname()), 255)
 	}
-	ip := sha256.Sum256([]byte(ws + "|" + clientIP(r)))
-	var click string
-	if err := s.pool.QueryRow(ctx, `INSERT INTO partner_clicks (workspace_id, membership_id, sub_id, referrer_host, ip_hash) VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
-		ws, id, sub, refHost, ip[:]).Scan(&click); err != nil {
-		// The visitor still lands; the click is lost.
-		metrics.PartnerClick("error")
-		s.log.ErrorContext(ctx, "partners: store click", "err", err, "workspace_id", ws)
-		http.Redirect(w, r, dest, http.StatusFound)
-		return
+	// The click joins redirect link clicks: buffered, written a moment
+	// later with where it came from and a keyed address hash
+	// (redirect_clicks.go). Its key is the ref_click the partner's backend
+	// sends back, and ofclk for the landing page's script.
+	now := time.Now()
+	click := bufferedClick{ws: ws, brand: mbrand, membershipID: id, subID: sub, referrerHost: refHost,
+		key: utm.NewShortCode(clickKeyLen), bot: tracking.LikelyBot(r.UserAgent(), time.Time{}, now), at: now, detail: clickDetails(r)}
+	if ip, err := parseClientAddr(clientIP(r)); err == nil && s.box != nil {
+		click.ipHash = s.box.Sign("click_ip", ws+"|"+ip.Unmap().String())
 	}
-	metrics.PartnerClick("tracked")
+	kept := s.clicks.add(click)
+	if kept {
+		metrics.PartnerClick("tracked")
+	} else {
+		// Too many clicks wait to be written: the visitor still lands with
+		// the partner's code, and only the click is lost.
+		metrics.PartnerClick("error")
+	}
 	content := utm.Value(sub)
 	if utm.CheckContent(content) != nil {
 		content = ""
@@ -895,7 +905,10 @@ func (s *Server) partnerLink(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		tagged = dest
 	}
-	http.Redirect(w, r, addQuery(tagged, "ref_click", click), http.StatusFound)
+	if kept {
+		tagged = addQuery(addQuery(tagged, "ref_click", click.key), clickKeyParam, click.key)
+	}
+	http.Redirect(w, r, tagged, http.StatusFound)
 }
 
 // landingPage is the program's landing page, or to when it is a path or
@@ -963,7 +976,8 @@ func (s *Server) getPartnerProgramStats(w http.ResponseWriter, r *http.Request) 
 		       (SELECT count(*) FILTER (WHERE status = 'suspended') FROM m)::int,
 		       (SELECT count(*) FILTER (WHERE status = 'rejected') FROM m)::int,
 		       (SELECT count(*) FILTER (WHERE status = 'active' AND payout_method IS NULL) FROM m)::int,
-		       (SELECT count(*) FROM partner_clicks k JOIN m ON m.id = k.membership_id WHERE k.workspace_id = $1)::int,
+		       ((SELECT count(*) FROM partner_clicks k JOIN m ON m.id = k.membership_id WHERE k.workspace_id = $1) +
+		        (SELECT count(*) FROM tracking_link_clicks k JOIN m ON m.id = k.membership_id WHERE k.workspace_id = $1 AND NOT k.likely_bot))::int,
 		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1)::int,
 		       (SELECT count(*) FROM partner_referrals f JOIN m ON m.id = f.membership_id WHERE f.workspace_id = $1 AND f.first_sale_at IS NOT NULL)::int,
 		       COALESCE((SELECT sum(CASE WHEN v.type = 'sale' THEN v.amount_cents ELSE -v.amount_cents END) FROM partner_conversions v

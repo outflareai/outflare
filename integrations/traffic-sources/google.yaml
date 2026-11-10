@@ -1,0 +1,15 @@
+id: google
+name: "Google Ads"
+category: search_social
+connector: google_ads
+click_id: {param: gclid}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{campaignid}", field: 1}
+  - {name: Ad set ID, param: of_adset, token: "{adgroupid}", field: 2}
+  - {name: Ad ID, param: of_ad, token: "{creative}", field: 3}
+  - {name: Placement, param: of_placement, token: "{network}", field: 4}
+  - {name: Keyword, param: utm_term, token: "{keyword}", field: 7}
+note: "Keep auto-tagging on: Google adds gclid itself. Paste the parameters into the Final URL suffix."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

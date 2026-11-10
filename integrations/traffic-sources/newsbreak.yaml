@@ -1,0 +1,13 @@
+id: newsbreak
+name: "NewsBreak"
+category: native
+click_id: {param: nbclid, token: "__CALLBACK_PARAM__"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "__CAMPAIGN_ID__", field: 1}
+  - {name: "Campaign name", param: campaign, token: "__CAMPAIGN_NAME__", field: 2}
+  - {name: "Ad set ID", param: adset_id, token: "__FLIGHT_ID__", field: 3}
+note: "Don't use nb_cid as a parameter: NewsBreak keeps it for itself. It has no cost macro. NewsBreak's own help pages weren't reachable, so add the postback address from your account."
+sources:
+  - https://support.clickbank.com/en/articles/12462999-tracking-integration-newsbreak
+  - https://wecantrack.com/installation/newsbreak-ads-integration/
+  - https://help.clickflare.com/en/integrations/news-break-as-a-traffic-source

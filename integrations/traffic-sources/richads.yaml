@@ -1,0 +1,18 @@
+id: richads
+name: "RichAds"
+category: push_pop
+click_id: {param: clickid, token: "[CLICK_ID]"}
+cost: {param: cost, token: "[BID_PRICE]"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "[CAMPAIGN_ID]", field: 1}
+  - {name: "Creative ID", param: creative_id, token: "[CREATIVE_ID]", field: 2}
+  - {name: "Publisher ID", param: publisher_id, token: "[PUBLISHER_ID]", field: 3}
+  - {name: "Site ID", param: site_id, token: "[SITE_ID]", field: 4}
+  - {name: "Subscriber list ID", param: sub_list_id, token: "[SUB_LIST_ID]", field: 5}
+  - {name: "Zone ID", param: zone_id, token: "[ZONE_ID]", field: 6}
+  - {name: "Country", param: country, token: "[COUNTRY_CODE]", field: 7}
+  - {name: "OS", param: os, token: "[OS_ONLY]", field: 8}
+note: "For pops, the cost macro is [CPV_PRICE]. RichAds' postback address differs between accounts; copy it from your account and use {source_click_id} for its key."
+sources:
+  - https://support.richads.com/article/3865
+  - https://docs.richads.com/advertiser/overview.html

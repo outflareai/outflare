@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,8 +14,9 @@ import (
 
 	"github.com/outflareai/outflare/engine/internal/geoip"
 	"github.com/outflareai/outflare/engine/internal/metrics"
-	"github.com/outflareai/outflare/engine/internal/track"
+	"github.com/outflareai/outflare/engine/internal/tokens"
 	"github.com/outflareai/outflare/engine/internal/tracking"
+	"github.com/outflareai/outflare/engine/internal/trafficsources"
 	"github.com/outflareai/outflare/engine/internal/utm"
 )
 
@@ -76,43 +78,52 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var ws string
-	var c trackingCampaignView
-	l := trackingLinkView{}
-	err := s.pool.QueryRow(ctx, `SELECT l.workspace_id::text, l.id::text, l.url, l.content, l.term, c.id::text, c.code, c.channel, c.source, c.medium, c.slug
-		FROM tracking_links l JOIN tracking_campaigns c ON c.id = l.campaign_id WHERE l.redirect_code = $1`, code).
-		Scan(&ws, &l.ID, &l.URL, &l.Content, &l.Term, &c.ID, &c.Code, &c.Channel, &c.Source, &c.Medium, &c.Slug)
-	if errors.Is(err, pgx.ErrNoRows) {
+	now := time.Now()
+	t, ok := s.redirects.get(code, now)
+	if !ok {
+		var err error
+		if t, err = s.lookupRedirect(ctx, code); err != nil {
+			metrics.RedirectClick("error")
+			s.internal(w, r, err)
+			return
+		}
+		s.redirects.put(code, t, now)
+	}
+	if !t.found {
 		metrics.RedirectClick("unknown")
 		http.Error(w, "This link has expired or was never valid.", http.StatusNotFound)
 		return
 	}
-	if err != nil {
-		metrics.RedirectClick("error")
-		s.internal(w, r, err)
-		return
-	}
-	target := tagLink(c, l)
-	bot := tracking.LikelyBot(r.UserAgent(), time.Time{}, time.Now())
+	bot := tracking.LikelyBot(r.UserAgent(), time.Time{}, now)
 	key := utm.NewShortCode(clickKeyLen)
-	click := clickDetails(r)
-	if _, err := s.pool.Exec(ctx, `INSERT INTO tracking_link_clicks (workspace_id, link_id, click_key, likely_bot,
-			country, region, city, asn, isp, device, device_brand, device_model, os, os_version, browser, browser_version, language)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-		ws, l.ID, key, bot, click.place.Country, cutUTF8(click.place.Region, 200), cutUTF8(click.place.City, 200), int64(click.place.ASN), cutUTF8(click.place.Org, 200),
-		click.device, click.detail.brand, click.detail.model, click.os, cutUTF8(click.detail.osVersion, 20), click.browser, cutUTF8(click.detail.browserVersion, 20),
-		click.language); err != nil {
-		// The person still goes where the link says; only the count is lost.
-		metrics.RedirectClick("error")
-		track.Fail(ctx, s.log, track.Event{Name: "tracking_link.click_failed", Surface: "system", WorkspaceID: ws,
-			Props: map[string]any{"campaign_id": c.ID}}, "internal", err)
-	} else {
+	c := bufferedClick{ws: t.ws, brand: t.brand, linkID: t.link.ID, key: key, bot: bot, at: now, detail: clickDetails(r)}
+	if ip, err := parseClientAddr(clientIP(r)); err == nil && s.box != nil {
+		// A keyed hash per workspace: the same visitor's clicks match, and
+		// the address can't be read back from it.
+		c.ipHash = s.box.Sign("click_ip", t.ws+"|"+ip.Unmap().String())
+	}
+	// The traffic source's parameters fill the click's custom fields; a
+	// destination with tokens ({click_id}, {field1}) gets this click's
+	// values.
+	var cost string
+	c.fields, c.sourceClickID, cost = t.source.capture(r.URL.Query())
+	c.costMicros = costMicros(cost)
+	link := t.link
+	if strings.ContainsAny(link.URL, "{%") {
+		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c, cost), trafficsources.DestinationTokens)
+	}
+	target := tagLink(t.campaign, link)
+	// The click is written a moment later (RunClicks); the person goes on
+	// now. With the buffer full, the click is lost but the redirect isn't.
+	if s.clicks.add(c) {
 		if bot {
 			metrics.RedirectClick("bot")
 		} else {
 			metrics.RedirectClick("counted")
 		}
 		target = withParam(target, clickKeyParam, key)
+	} else {
+		metrics.RedirectClick("dropped")
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, target, http.StatusFound)
@@ -169,6 +180,23 @@ func claimRedirectClick(ctx context.Context, tx pgx.Tx, ws, key, session string,
 	}
 	if tag.RowsAffected() > 0 {
 		metrics.RedirectLanding("claimed")
+		return nil
+	}
+	if !clickKeyRe.MatchString(key) {
+		metrics.RedirectLanding("unmatched")
+		return nil
+	}
+	// The click may still be waiting to be written (redirect_clicks.go):
+	// the landing waits for it, once. A click already landed stays as it is.
+	tag, err = tx.Exec(ctx, `INSERT INTO tracking_click_claims (click_key, workspace_id, brand_id, session_id, landed_at)
+		SELECT $2, $1, s.brand_id, s.id, $4 FROM site_sessions s
+		WHERE s.id = $3 AND NOT EXISTS (SELECT 1 FROM tracking_link_clicks k WHERE k.click_key = $2)
+		ON CONFLICT (click_key) DO NOTHING`, ws, key, session, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		metrics.RedirectLanding("pending")
 	} else {
 		metrics.RedirectLanding("unmatched")
 	}

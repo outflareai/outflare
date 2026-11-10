@@ -1,0 +1,18 @@
+id: zeropark
+name: "Zeropark"
+category: push_pop
+click_id: {param: cid, token: "{cid}"}
+cost: {param: cost, token: "{visit_cost}"}
+parameters:
+  - {name: "Target ID", param: target, token: "{target}", field: 1}
+  - {name: "Source ID", param: source, token: "{source}", field: 2}
+  - {name: "Campaign ID", param: campaign_id, token: "{campaign_id}", field: 3}
+  - {name: "Campaign name", param: campaign_name, token: "{campaign_name}", field: 4}
+  - {name: "Creative", param: creative, token: "{creative_number}", field: 5}
+  - {name: "Country", param: geo, token: "{geo}", field: 6}
+  - {name: "Keyword", param: keyword, token: "{keyword}", field: 7}
+  - {name: "OS", param: os, token: "{os}", field: 8}
+note: "Zeropark's postback address differs between accounts; copy it from your account and use {source_click_id} for its cid."
+sources:
+  - https://doc.zeropark.com/article/tracking-tokens
+  - https://doc.zeropark.com/article/tracking-conversions

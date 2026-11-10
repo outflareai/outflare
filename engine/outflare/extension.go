@@ -288,6 +288,10 @@ const (
 	QuotaRecords         = quota.Records
 	QuotaEmailsSent      = quota.EmailsSent
 	QuotaTrackedEvents   = quota.TrackedEvents
+	// QuotaTrackerClicks is asked once per batch of redirect clicks
+	// written, a moment after the redirects. A refusal drops those clicks;
+	// the people were already sent on.
+	QuotaTrackerClicks = quota.TrackerClicks
 )
 
 // SetQuota lets q refuse work a workspace isn't allowed more of. Without

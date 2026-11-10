@@ -1,0 +1,15 @@
+id: applovin
+name: "AppLovin (Axon web)"
+category: display
+click_id: {param: aleid}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "{CAMPAIGN_ID}", field: 1}
+  - {name: "Campaign name", param: campaign_name, token: "{CAMPAIGN_NAME}", field: 2}
+  - {name: "Creative set ID", param: creative_set_id, token: "{CREATIVE_SET_ID}", field: 3}
+  - {name: "Creative set", param: creative_set, token: "{CREATIVE_SET}", field: 4}
+  - {name: "Ad type", param: ad_type, token: "{AD_TYPE}", field: 5}
+  - {name: "Event ID", param: event_id, token: "{EVENT_ID}", field: 6}
+note: "AppLovin adds aleid to the landing page itself. It has no cost macro, and takes conversions only through its Conversions API (a POST with your API token), not a postback URL."
+sources:
+  - https://support.applovin.com/en/growth/promoting-your-websites/track-and-optimize/tracking-url-macros
+  - https://support.applovin.com/en/growth/promoting-your-websites/api/conversions-api-for-partners

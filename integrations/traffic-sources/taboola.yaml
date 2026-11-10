@@ -1,0 +1,14 @@
+id: taboola
+name: "Taboola"
+category: native
+connector: taboola_ads
+click_id: {param: tblci}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{campaign_id}", field: 1}
+  - {name: Ad ID, param: of_ad, token: "{campaign_item_id}", field: 3}
+  - {name: Placement, param: of_placement, token: "{site_id}", field: 4}
+  - {name: Campaign name, param: utm_campaign, token: "{campaign_name}", field: 5}
+note: "Paste the parameters into the campaign's tracking code without a leading ? or &. Taboola adds tblci itself."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

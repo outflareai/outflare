@@ -89,10 +89,78 @@ https://links.northpeak.example/l/k7m2pq9x
   whether it looked automated, and what they say about it: the country,
   region, city and network, the device with its maker and model, the
   system and browser with their versions, and the language
-  ([where visitors are](website-tracking.md#where-visitors-are)).
+  ([where visitors are](website-tracking.md#where-visitors-are)). The
+  address is kept only as a keyed hash (`ip_hash`, an HMAC with the
+  server's key, per workspace), so one visitor's repeat clicks can be told
+  apart from many visitors' without the address being readable.
+- A redirect answers without waiting on the database: the link is kept in
+  memory, and its clicks are written in batches a moment later (within a
+  second). A landing page that reports its click first waits for it. A
+  server takes about a million clicks a day per workspace this way. If the
+  database is down, the clicks wait in the server's memory; past 100,000
+  waiting, new clicks are lost, but people are still sent on.
+- On a server with a plan quota (Outflare Cloud), clicks count against the
+  workspace's `tracker_clicks` quota, leaving out likely bots. Over it,
+  people are still sent on and the clicks aren't stored ([quotas](quotas.md)).
 - A redirect link keeps working when its campaign is archived, since it
   may be printed. Turning `redirect_links` off doesn't remove the ones
   already made.
+
+## Traffic sources and custom fields
+
+A traffic source is a network a brand buys clicks from, such as Taboola,
+MGID or PropellerAds. It says which URL parameters of a click carry:
+
+- the network's own click id (`click_id`), which a postback back to the
+  network names;
+- what the click cost (`cost`), in the source's currency;
+- up to twenty values worth reporting on, each into its own custom field
+  (1 to 20): a zone, a widget, a placement, a creative. A parameter can have
+  aliases (`utm_source`) that fill the same field when it's missing.
+
+Most sources start from a template: Outflare has templates for the 12
+networks with website ads it syncs and 13 more (MGID, Revcontent, NewsBreak,
+PropellerAds, Zeropark, ExoClick, Adsterra, TrafficJunky, RichAds,
+Pushground, MediaGo, SmartNews and AppLovin). Each template is a file in
+[`integrations/traffic-sources/`](../integrations/traffic-sources/README.md)
+with the network's tokens and where they come from; anyone can add one.
+Every field of a source made from a template can be changed.
+
+Give a campaign its source (`traffic_source`). Each of its links with a
+redirect link then has a `campaign_url`: the redirect link with the source's
+parameters, each set to the network's token, which is the address to paste
+into the network. Every click on it keeps the network's click id, the cost
+and the custom fields. A change to a source reaches its campaigns' clicks
+within a few minutes.
+
+A campaign without a source still keeps `sub1` to `sub20` in the custom
+fields of the same number, as most trackers do.
+
+A source's postback is where the network takes a conversion, with
+Outflare's tokens such as `{source_click_id}` (the network's click id) and
+`{payout}`. A template marks the values only the brand has (an account id,
+a key) as `REPLACE`; a source can't be saved with one left. Sending it is
+coming with tracker conversions.
+
+### Tokens in a destination
+
+A link's page can carry tokens each redirect click fills in, such as
+`https://northpeak.example/offer?sub={field1}&cid={click_id}`:
+
+| Token | Value |
+| --- | --- |
+| `{click_id}` | The click's key, also added as `ofclk` |
+| `{source_click_id}`, `{cost}` | The network's click id and the cost it reported |
+| `{field1}` to `{field20}` | The click's custom fields |
+| `{campaign}`, `{campaign_code}`, `{source}`, `{content}` | The campaign's slug and ofc code, its source and the link's content |
+| `{country}`, `{region}`, `{city}`, `{isp}`, `{asn}` | Where the visitor is |
+| `{device}`, `{os}`, `{browser}`, `{language}` | What they're on |
+
+A value is escaped for a URL's query string. Functions follow a pipe:
+`{field1|raw}` as it is, `{email|hash}` its SHA-256, and `{payout|80%}` a
+number scaled by a percentage. A word in braces that isn't a token is
+refused when the link is saved, so a typo doesn't leave a token unfilled.
+Partner postbacks use the same tokens and functions.
 
 ## Campaigns modules make for you
 
@@ -119,7 +187,8 @@ membership (`object_kind` `partner_program`), not per partner, because one
 partner can promote several brands and a campaign has one brand. Its name is
 the partner's ref code, so a partner's real name never appears in
 `utm_campaign`. A partner's short link (`/r/<code>`) adds `ref_click`, the
-click's id, after `ref`.
+click's key, after `ref`, and the same key as `ofclk`. Its clicks are kept
+with redirect link clicks, under the partner instead of a link.
 
 Two readers use these tags differently, on purpose:
 
@@ -143,6 +212,9 @@ traffic their code didn't bring, or lose imported partner links.
 | `POST /v1/brands/{brand}/tracking-campaigns` | `analytics.manage` |
 | `GET`, `PATCH /v1/brands/{brand}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/brands/{brand}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
+| `GET /v1/brands/{brand}/traffic-source-templates` | `analytics.read` |
+| `GET`, `POST /v1/brands/{brand}/traffic-sources` | `analytics.read`, `analytics.manage` |
+| `GET`, `PATCH /v1/brands/{brand}/traffic-sources/{id}` | `analytics.read`, `analytics.manage` |
 | `GET /l/{code}` (a redirect link) | Public |
 
 Owners, admins and operators have `analytics.manage`; viewers can read.
@@ -155,8 +227,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 
 The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 `get_tracking_campaign`, `create_tracking_campaign`,
-`update_tracking_campaign`, `list_tracking_links` and `create_tracking_link`.
+`update_tracking_campaign`, `list_tracking_links`, `create_tracking_link`,
+`list_traffic_source_templates`, `list_traffic_sources`,
+`create_traffic_source` and `update_traffic_source`.
 
 Each change is an audit action (and a product event): `tracking_campaign.created`,
 `tracking_campaign.updated`, `tracking_campaign.archived`,
-`tracking_campaign.restored`, `tracking_link.created` and `tracking_link.redirect_added`.
+`tracking_campaign.restored`, `tracking_link.created`, `tracking_link.redirect_added`,
+`traffic_source.created`, `traffic_source.updated`, `traffic_source.archived`
+and `traffic_source.restored`.

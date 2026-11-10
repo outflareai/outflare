@@ -1,0 +1,13 @@
+id: linkedin
+name: "LinkedIn Ads"
+category: search_social
+connector: linkedin_ads
+click_id: {param: li_fat_id}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "CAMPAIGN_ID", field: 1}
+  - {name: Ad ID, param: of_ad, token: "CREATIVE_ID", field: 3}
+  - {name: Campaign name, param: utm_campaign, token: "CAMPAIGN_NAME", field: 5}
+note: "Choose CAMPAIGN_ID, CAMPAIGN_NAME and CREATIVE_ID as dynamic values in the campaign's URL parameters rather than typing them."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

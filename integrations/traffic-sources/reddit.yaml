@@ -1,0 +1,15 @@
+id: reddit
+name: "Reddit Ads"
+category: search_social
+connector: reddit_ads
+click_id: {param: rdt_cid}
+parameters:
+  - {name: Campaign ID, param: of_campaign, token: "{{CAMPAIGN_ID}}", field: 1}
+  - {name: Ad set ID, param: of_adset, token: "{{ADGROUP_ID}}", field: 2}
+  - {name: Ad ID, param: of_ad, token: "{{AD_ID}}", field: 3}
+  - {name: Campaign name, param: utm_campaign, token: "{{CAMPAIGN_NAME}}", field: 5}
+  - {name: Ad name, param: utm_content, token: "{{AD_NAME}}", field: 6}
+note: "Reddit adds rdt_cid itself, and doesn't let you change a live ad's URL parameters."
+# The macros are the ones engine/internal/adtrack verified for the site
+# script's tracking templates; a test checks the two agree.
+sources: [engine/internal/adtrack/adtrack.go]

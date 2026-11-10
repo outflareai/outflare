@@ -136,6 +136,9 @@ func TestVisitPlaceAndDevice(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("redirect = %d", rec.Code)
 	}
+	if err := e.srv.FlushClicks(ctx); err != nil {
+		t.Fatal(err)
+	}
 	var p place
 	if err := e.pool.QueryRow(ctx, `SELECT country, region, city, isp, asn, device, device_brand, device_model, os, os_version, browser, browser_version, language
 		FROM tracking_link_clicks WHERE workspace_id = $1`, ws).

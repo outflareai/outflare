@@ -435,7 +435,9 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `get_tracking_taxonomy` | The channels campaign links can be in, with each one's utm_medium and usual sources |
 | `list_tracking_campaigns`, `get_tracking_campaign` | Campaigns with their tags, ofc code, landing link and link count; look one up by its ofc code. Take `brand`: they belong to one brand |
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
-| `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term, and optionally a short redirect link that counts clicks |
+| `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term, and optionally a short redirect link that counts clicks. A destination can carry tokens each click fills in, such as `{click_id}` and `{field1}` |
+| `list_traffic_source_templates`, `list_traffic_sources` | The networks Outflare has templates for, and the brand's traffic sources: which parameters carry each network's click id, cost and custom fields |
+| `create_traffic_source`, `update_traffic_source` | Add a traffic source from a template or by hand, change its parameters or postback, or archive it; a campaign that names it gets a campaign URL to paste into the network |
 | `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |
 | `list_attribution_models`, `create_attribution_model`, `update_attribution_model`, `archive_attribution_model` | The workspace's own attribution models: windows per channel, channels left out, position weights and half-life, each change a new version |
 | `list_conversion_definitions`, `create_conversion_definition`, `update_conversion_definition`, `archive_conversion_definition`, `list_conversion_presets`, `add_conversion_preset` | What the workspace counts as a conversion: an event, filters, a value and each ad network's name for it, with presets by kind of business |

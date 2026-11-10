@@ -28,7 +28,8 @@ Outflare never holds or sends money. It works out what each partner is owed, and
 ## Links
 
 - **The short link** is `/r/<code>` on your [tracking domain](website-tracking.md), or `/r/<workspace-id>/<code>` on the Outflare server until you add one.
-  - It counts the click and sends the visitor to the program's landing page, tagged with the partner's campaign, `ref=<code>` and `ref_click=<click id>`.
+  - It counts the click and sends the visitor to the program's landing page, tagged with the partner's campaign, `ref=<code>` and `ref_click=<click id>` (also as `ofclk`, so the website snippet ties the visit to the click).
+  - The click id is a 16-character key; links clicked before November 2026 have a uuid, and both are taken as `click_id`. Clicks are kept with [redirect link](campaign-links.md#redirect-links) clicks: written a moment after the click, with the visitor's region, city, network and device, and a keyed hash of their address, never the address. Clicks from link scanners and previews are kept but not counted.
   - `?sub=<sub-id>` keeps the partner's own sub-id, as `utm_content` and on the click.
   - `?to=/blog/post` (or a full address on the same site) lands on another page. Other sites are ignored, so the link can't be used as an open redirect.
   - When the partner or program isn't active, the link still lands, untagged and uncounted.
@@ -149,7 +150,7 @@ Affiliates who run their own tracker (Voluum, RedTrack, Binom and the like) want
 | Placeholder | Value |
 | --- | --- |
 | `{sub_id}` | The sub on the partner's link (`/r/ana?sub=...`), usually their own click id |
-| `{click_id}` | Outflare's click id |
+| `{click_id}` | Outflare's click id (the `ref_click` the link added) |
 | `{conversion_id}`, `{type}`, `{event_name}` | The conversion: `signup`, `sale`, `refund` or `custom` and its event name |
 | `{amount}`, `{amount_cents}`, `{currency}` | The sale's amount (`49.90`), in cents, and its currency |
 | `{commission}`, `{commission_cents}` | The partner's cash for it (negative for a refund's reversal) |

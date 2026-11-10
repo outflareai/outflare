@@ -115,7 +115,7 @@ func (in *conversionInput) check(now time.Time) error {
 		return errInvalid("currency is a three-letter code such as USD")
 	case in.Ref != "" && !partnerCodeRE.MatchString(in.Ref), in.PromoCode != "" && !partnerCodeRE.MatchString(in.PromoCode):
 		return errInvalid("ref and promo_code are partner codes: letters, digits, hyphens and underscores")
-	case in.ClickID != "" && !validUUID(in.ClickID):
+	case in.ClickID != "" && !validUUID(in.ClickID) && !clickKeyRe.MatchString(in.ClickID):
 		return errInvalid("click_id is the ref_click value from a partner link")
 	case in.RecordID != "" && !validUUID(in.RecordID):
 		return errInvalid("record_id is a record's id")
@@ -539,11 +539,27 @@ func (c *conversionRun) named(ctx context.Context) (m *membershipRow, via, click
 		}
 	}
 	if in.ClickID != "" {
-		// A click counts inside its program's credit window.
-		if click, err = optMembership(tx.QueryRow(ctx, `SELECT `+membershipCols+` JOIN partner_clicks k ON k.membership_id = m.id
-			WHERE m.workspace_id = $1 AND k.id = $2 AND k.created_at >= $3::timestamptz - make_interval(days => p.credit_window_days)`,
-			ws, in.ClickID, c.in.at)); err != nil {
+		// A click counts inside its program's credit window. Clicks from
+		// before the click tables merged have a uuid; the rest are a click
+		// key, written a moment after the click.
+		q := `SELECT ` + membershipCols + ` JOIN tracking_link_clicks k ON k.membership_id = m.id
+			WHERE m.workspace_id = $1 AND k.workspace_id = $1 AND k.click_key = $2 AND k.clicked_at >= $3::timestamptz - make_interval(days => p.credit_window_days)`
+		if validUUID(in.ClickID) {
+			q = `SELECT ` + membershipCols + ` JOIN partner_clicks k ON k.membership_id = m.id
+			WHERE m.workspace_id = $1 AND k.id = $2::uuid AND k.created_at >= $3::timestamptz - make_interval(days => p.credit_window_days)`
+		}
+		if click, err = optMembership(tx.QueryRow(ctx, q, ws, in.ClickID, c.in.at)); err != nil {
 			return
+		}
+		// A click a moment old may still be waiting to be written on this
+		// server, as when a partner tests their link and postback at once.
+		if click == nil && !validUUID(in.ClickID) && c.s.clicks.len() > 0 {
+			if err = c.s.FlushClicks(ctx); err != nil {
+				return
+			}
+			if click, err = optMembership(tx.QueryRow(ctx, q, ws, in.ClickID, c.in.at)); err != nil {
+				return
+			}
 		}
 	}
 	inProgram := func(x *membershipRow) bool {
@@ -752,9 +768,13 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 	c.res.PartnerID = &m.id
 	if f == nil {
 		f = &referralRow{membershipID: m.id}
-		var click *string
-		if clickID != "" {
+		// A uuid is a click from partner_clicks; a click key one from
+		// tracking_link_clicks.
+		var click, clickKey *string
+		if validUUID(clickID) {
 			click = &clickID
+		} else if clickID != "" {
+			clickKey = &clickID
 		}
 		promo := ""
 		if via == "promo_code" {
@@ -765,9 +785,11 @@ func (c *conversionRun) leadOrSale(ctx context.Context) error {
 			}
 		}
 		err := tx.QueryRow(ctx, `INSERT INTO partner_referrals (workspace_id, program_id, membership_id, record_id, via, click_id, sub_id, created_at,
-			session_id, promo_code)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, LEAST(now(), $8), $9, $10) ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
-			c.ws, m.programID, m.id, rec, via, click, cutUTF8(in.SubID, 100), in.at, session, promo).Scan(&f.id)
+			session_id, promo_code, link_click_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, LEAST(now(), $8), $9, $10,
+				(SELECT id FROM tracking_link_clicks WHERE workspace_id = $1 AND click_key = $11 AND membership_id = $3))
+			ON CONFLICT (program_id, record_id) DO NOTHING RETURNING id::text`,
+			c.ws, m.programID, m.id, rec, via, click, cutUTF8(in.SubID, 100), in.at, session, promo, clickKey).Scan(&f.id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errConflict // another conversion bound them first; the caller retries
 		}

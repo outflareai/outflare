@@ -133,8 +133,12 @@ type Server struct {
 	// Browser events, per visitor address and per site key.
 	siteIPLimit, siteKeyLimit *rateLimiter
 	// Browser events go through site_event_inbox (RunSiteInbox stores them).
-	siteInbox        bool
-	inboxWake        chan struct{}
+	siteInbox bool
+	inboxWake chan struct{}
+	// Redirect links: their destinations in memory, and their clicks
+	// waiting to be written (redirect_clicks.go).
+	redirects        redirectCache
+	clicks           clickBuffer
 	siteVisitorLimit *rateLimiter
 	// Help centre pages per reader's network, and what a reader may record
 	// (feedback, searches with no answer) per hour.
@@ -404,6 +408,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		cookieReports:    &cookies.Reporter{Pool: pool},
 		siteInbox:        opts.SiteInbox,
 		inboxWake:        make(chan struct{}, 1),
+		clicks:           clickBuffer{wake: make(chan struct{}, 1)},
 		mcp:              opts.MCP,
 		mcpTransport:     newMCPTransport(),
 		privacyURL:       opts.PrivacyURL,
@@ -657,6 +662,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesReports(mux)
 	s.routesTracking(mux)
 	s.routesCampaignLinks(mux)
+	s.routesTrafficSources(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)

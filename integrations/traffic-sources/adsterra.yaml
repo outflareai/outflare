@@ -1,0 +1,18 @@
+id: adsterra
+name: "Adsterra"
+category: push_pop
+click_id: {param: clickid, token: "##SUB_ID_SHORT(action)##"}
+cost: {param: cost, token: "##COST_CPC##"}
+parameters:
+  - {name: "Placement ID", param: placement_id, token: "##PLACEMENT_ID##", field: 1}
+  - {name: "Zone ID", param: zone_id, token: "##ZONE_ID##", field: 2}
+  - {name: "Publisher ID", param: publisher_id, token: "##PUBLISHER_ID##", field: 3}
+  - {name: "Campaign ID", param: campaign_id, token: "##CAMPAIGN_ID##", field: 4}
+  - {name: "Banner ID", param: banner_id, token: "##BANNER_ID##", field: 5}
+  - {name: "Country", param: country, token: "##COUNTRY_CODE##", field: 6}
+  - {name: "OS", param: os, token: "##USER_OS##", field: 7}
+postback: {url: "http://www.pbterra.com/name/REPLACE/at?subid_short={source_click_id}&atpay={payout}", method: GET}
+note: "The postback path is your Adsterra login, and takes payouts in US dollars. For CPM campaigns, ##COST_CPM## is the cost per thousand."
+sources:
+  - https://help-advertisers.adsterra.com/en/articles/4575920-what-are-the-available-tokens
+  - https://help-advertisers.adsterra.com/en/articles/4575914-how-do-i-setup-postback

@@ -6,6 +6,25 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.90.0] - 2026-11-10
+
+### Added
+
+- Team email sharing: an owner can let everyone on a brand read each other's work email with CRM contacts. Everyone is told 48 hours first, your own AI model keeps HR, pay and other private email back, anyone can keep a contact private, Personal or HR-labelled and payroll or banking mail is never saved, and each read of a colleague's email is recorded.
+- Traffic sources for redirect links: add the network you buy clicks from (25 templates, such as Taboola, MGID and PropellerAds), and each link shows the address to paste into it. Clicks keep the network's click id, the cost and up to 20 custom fields, and a link's page can carry tokens such as `{click_id}` or `{field1}`.
+
+### Changed
+
+- Gmail capture can now save email with every CRM contact and company on a brand, not only the ones each person picked. An owner switches it on; an email is saved only when everyone outside the company in it belongs to one contact or company, and newsletters are skipped.
+- Partner short links now keep the same details as redirect links: where the visitor is, their device, and a keyed hash of their address. Clicks from link scanners and previews no longer count toward a partner's clicks. The click id a link adds (`ref_click`) is now a 16-character key; ids from older links still work as `click_id`.
+- Redirect links answer faster and take far more clicks: each redirect no longer waits on the database, and clicks are written in batches a moment later. A server takes about a million clicks a day per workspace. Each click also keeps a keyed hash of the visitor's address, never the address itself, so repeat clicks can be told apart.
+
+### Upgrading
+
+- runs migration 0509.
+- runs migration 0508.
+- runs migration 0510.
+
 ## [0.89.0] - 2026-11-09
 
 ### Added

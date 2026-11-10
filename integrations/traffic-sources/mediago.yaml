@@ -1,0 +1,18 @@
+id: mediago
+name: "MediaGo"
+category: native
+click_id: {param: tracking_id, token: "${TRACKING_ID}"}
+cost: {param: cost, token: "${CPC}"}
+parameters:
+  - {name: "Campaign ID", param: campaign_id, token: "${CAMPAIGN_ID}", field: 1}
+  - {name: "Campaign name", param: campaign_name, token: "${CAMPAIGN_NAME}", field: 2}
+  - {name: "Ad ID", param: ad_id, token: "${AD_ID}", field: 3}
+  - {name: "Asset ID", param: asset_id, token: "${ASSET_ID}", field: 4}
+  - {name: "Site ID", param: site_id, token: "${SITE_ID}", field: 5}
+  - {name: "Publisher", param: publisher, token: "${PUBLISHER_NAME}", field: 6}
+  - {name: "Platform", param: platform, token: "${PLATFORM}", field: 7}
+postback: {url: "https://sync.mediago.io/api/bidder/postback?trackingid={source_click_id}&conversiontype=REPLACE&conversionprice={payout}&includeintotalconversion=1", method: GET}
+note: "conversiontype is MediaGo's code for the conversion, such as 8 for a purchase or 10 for a lead."
+sources:
+  - https://cdn.mediago.io/js/docs/platform/utm-params.html
+  - https://cdn.mediago.io/js/docs/platform/s2s-conversion-postback.html
