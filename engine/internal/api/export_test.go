@@ -41,6 +41,14 @@ func SetPartnerPostbackClient(c *http.Client) func() {
 	return func() { partnerPostbackClient = old }
 }
 
+// SetSourcePostbackClient swaps the client postbacks to traffic sources
+// use. It returns the undo.
+func SetSourcePostbackClient(c *http.Client) func() {
+	old := sourcePostbackClient
+	sourcePostbackClient = c
+	return func() { sourcePostbackClient = old }
+}
+
 // ApproveDuePartnerRewards runs one pass of the loop that approves rewards
 // whose hold ended.
 func (s *Server) ApproveDuePartnerRewards(ctx context.Context) error {

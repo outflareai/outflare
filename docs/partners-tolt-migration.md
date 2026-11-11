@@ -42,7 +42,9 @@ Each run reads the whole Tolt program and brings in what isn't in Outflare yet. 
 
 Importing sends no reward webhooks, so your system never grants an old reward twice. New partners do send `partner.created`.
 
-On a later run, a partner's status follows Tolt unless someone changed it in Outflare, and a commission still pending in Outflare follows Tolt (approved, paid or rejected). A commission Tolt rejects after Outflare approved it is listed under issues, for you to correct with an adjustment.
+On a later run, a partner's status follows Tolt unless someone changed it in Outflare, and a commission still pending in Outflare follows Tolt (approved, paid or rejected).
+A partner who changed their email in Tolt gets the new address on their record, listed under issues as `email_changed`.
+It replaces the old one (kept in the record's history) when that was the record's only email and nobody verified it; beside a verified email or several, it is added and the others stay. A commission Tolt rejects after Outflare approved it is listed under issues, for you to correct with an adjustment.
 
 Each run lists what it couldn't bring over, by Tolt id and reason (never names or addresses):
 

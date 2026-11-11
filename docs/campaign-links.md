@@ -106,6 +106,146 @@ https://links.northpeak.example/l/k7m2pq9x
   may be printed. Turning `redirect_links` off doesn't remove the ones
   already made.
 
+### Own domains, redirect modes and fallback pages
+
+Tracker features (destinations, rule-based paths and the redirect modes
+below) work only on a brand's own verified tracking domain, so one
+customer's traffic never shares a domain's reputation with another's. Add
+one under Domains; a link's redirect link uses it once it's verified. On the
+shared domain, a click on any redirect link goes to the link's own page with
+a 302, so links already shared keep working; the destinations and paths
+calls say `needs_domain` until the brand has a domain.
+
+A campaign's `redirect_mode` says how its redirect links send people on:
+
+| Mode | What happens |
+| --- | --- |
+| `302` | The default, and the fastest. |
+| `307` | The same, for tools that expect a 307. |
+| `meta` | A page that moves on at once and sends no referrer: the destination sees no referring site. |
+| `double_meta` | Two such pages, the second on the tracking domain, so even browsers that ignore the referrer policy send none. |
+
+A redirect code that doesn't exist on a tracking domain (mistyped, or from a
+deleted link) shows a not found page, or goes to the domain's fallback page:
+`PUT /v1/brands/{brand}/tracking-domains/{id}/fallback`.
+
+### Conversions by click id
+
+A conversion on an offer the brand doesn't own (an affiliate network's, a
+partner's shop) never reaches the site's script. Its network says so instead,
+with a postback: a server-to-server call naming the click.
+
+1. Add a **postback source** for the network. Outflare shows its postback URL
+   once, on the brand's own tracking domain:
+   `https://go.northpeak.example/t/<secret>?cid={click_id}&payout={payout}&txid={transaction_id}&currency={currency}&status={status}`.
+2. Send the click to the network with its key: put `{click_id}` in the
+   destination's URL where the network takes your sub id
+   (`https://network.example/offer?sub1={click_id}`).
+3. Give the network the postback URL with its own macros in place of the
+   ones in braces (its sub id macro for `{click_id}`).
+
+A source made from an **affiliate-network template**
+(`GET /v1/brands/{brand}/affiliate-network-templates`, data in
+`integrations/affiliate-networks/`) skips steps 2 and 3: its postback URL comes
+written in the network's macros (`?cid={sub1}&payout={payout_amount}&txid={conversion_id}`
+for Everflow), and its click id parameter (`sub1`) is added to the URL of each
+of its offers. The catalogue has Everflow, TUNE, CAKE, Affise and impact.com,
+the platforms most networks run on, and networks such as ClickBank, MaxBounty,
+CrakRevenue and Admitad.
+
+Each postback (GET, or POST as a form or JSON) writes a conversion to the
+click ledger with the click it credits, even when no person is known; when
+the click's visit knew the person, it also goes on their timeline as
+`tracker.converted`. It takes `cid` (or `clickid`, `click_id`, `subid`),
+`payout` (or `sum`, `revenue`, `amount`), `currency`, `txid` (or
+`transaction_id`, `orderid`), `type` (such as `lead` or `sale`), `status`
+(`approved`, `pending` or `declined`) and `p1` to `p20`.
+
+A source has:
+
+- an **IP allowlist**, when the network publishes the addresses it calls from;
+- a **click expiry**: how long after its click a conversion still counts
+  (30 days unless set);
+- a **duplicate policy** for a transaction id seen before: ignore it, record
+  a new conversion, update the one recorded (a status change), or add its
+  payout (an upsell). Without a transaction id, the click and type stand in
+  for it.
+
+Postbacks answer only on the brand's own verified tracking domain, at up to
+6,000 a minute per source. Rotating a source's secret retires its old URL at
+once.
+
+When a network can't send a server postback, a **pixel** on the thank-you page
+does the same from the browser: `<img src="https://go.northpeak.example/t/<secret>/pixel?cid={sub1}&payout={payout}">`,
+or a script, `<script src="https://go.northpeak.example/t/<secret>/pixel.js?cid={sub1}"></script>`,
+with the network's own macros in braces. It always answers with an image, and
+its `X-Outflare-Outcome` header says what happened. A pixel's URL is in the
+page, so anyone can read it: prefer a postback for payouts that matter. A
+source with an IP allowlist takes no pixels.
+
+The **conversion log** (`GET /v1/brands/{brand}/tracker-conversion-log`) keeps
+every postback and pixel call of the last 30 days: what it sent, what Outflare
+answered and why (an unknown or expired click, a bad parameter, the wrong
+domain, an address off the allowlist). A call whose secret names no source
+has no brand to show it to and isn't kept. A recorded conversion is the
+`tracker_conversion.created` webhook, and a change to one
+`tracker_conversion.updated`, each with the conversion's click, payout,
+status and person.
+
+**Uploads** record conversions in bulk: up to 1,000 as JSON
+(`POST /v1/brands/{brand}/tracker-conversions`) or 10,000 as a CSV file whose
+first row names the columns (`.../tracker-conversions/csv?source=<id>`). A row
+with a click id records a conversion; a row with only a transaction id updates
+the status or payout of the conversion with that id, as networks report
+approvals and reversals days later. The answer says what happened to each row.
+
+### Offers
+
+An **offer** is a page the brand sends clicks to, usually on an affiliate
+network (`POST /v1/brands/{brand}/offers`). It has:
+
+- a **URL**, which can carry tokens. Its network (a postback source) adds its
+  click id parameter unless the URL carries `{click_id}`; `missing_click_id`
+  says when neither does, so postbacks couldn't name the click;
+- a **payout** and currency, with **payouts by country** before it. With
+  `payout_mode` `postback`, a conversion takes the payout its postback sends,
+  and the offer's when it sends none; with `fixed`, always the offer's;
+- a **conversion type** for postbacks that name none, such as `lead`;
+- an optional **daily cap** on clicks or conversions (declined ones don't
+  count), and a **fallback offer** that takes its clicks while it is capped.
+  With no fallback, or one that is capped too, clicks go to the link's other
+  destinations, then its own page.
+
+Give a link's destination an `offer_id` instead of a `url` to send it to an
+offer. The destination keeps the offer's URL, and a new URL on the offer goes
+to every destination at once. An offer that is a destination can't be
+archived. Each conversion says the offer its click went to (`offer_id`, and
+`?offer=` on the ledger). A conversion cap counts every server's conversions
+within a minute, so a few clicks past it can still go to the offer.
+
+### Landers
+
+A **lander** is a page clicks go to before an offer: a review, a quiz, an
+advertorial (`POST /v1/brands/{brand}/landers`). Give a link's destination a
+`lander_id` beside the offers it leads to. A list of destinations (a path's,
+or the link's own) with landers sends each click to one of its landers, by
+weight, and the lander's calls to action to the list's other destinations:
+
+- `https://go.northpeak.example/click` goes to one of them by weight;
+- `https://go.northpeak.example/click/2` goes to the second of them while it
+  is open, else by weight. A lander has 1 to 100 calls to action (`ctas`).
+
+The lander gets the click id as `ofclk` (and in `{click_id}`), and its page
+carries `<script src="https://go.northpeak.example/click.js" async></script>`,
+which adds it to the page's links to `/click`. Nothing is stored in the
+browser. A call to action goes on only for a click Outflare sent to a lander
+in the last day, on the brand's own tracking domain; anything else (a
+bookmarked button, a scraper) gets the domain's fallback page. Each lander
+click is kept (`GET /v1/brands/{brand}/lander-clicks`), with its call to
+action and where it went, and gives the click the offer it went to, so its
+conversions get that offer's payout. Lander clicks count against the
+destinations' and offers' daily caps.
+
 ### Destinations and daily caps
 
 A redirect link can send its clicks to several pages instead of one: two
@@ -128,6 +268,44 @@ arrive in the moment before the servers' next write, not more. Changing a
 link's destinations keeps each destination's count for the day; one taken
 off the link is kept, so its clicks still say where they went. Other servers
 follow a change within a few minutes.
+
+### Rule-based paths
+
+A path sends the clicks that match its conditions to destinations of its
+own: mobile visitors in the US to one offer, a lab's IP range to a test page,
+returning visitors to a thank-you page. A click takes the first active path,
+in order, whose conditions all match and that has an open destination; a
+path whose destinations are all capped is passed over. Then come the link's
+default destinations, then its own page.
+
+Conditions combine with AND, and the values in one condition with OR:
+"country is US or CA, and device is mobile". Each is `is` or `is_not` on:
+
+| Field | Values |
+| --- | --- |
+| `country`, `region`, `city` | Where the visitor is; countries as two-letter codes |
+| `isp`, `asn` | The visitor's network, by name or number |
+| `device`, `device_brand`, `os`, `os_version`, `browser`, `browser_version`, `language` | What they're on |
+| `referrer` | The referring site's host, such as `news.example` |
+| `ip` | Addresses or ranges, such as `203.0.113.0/24` |
+| `weekday`, `hour` | `mon` to `sun` and `0` to `23`, UTC until brands have a reporting time zone |
+| `visitor` | `unique`, or `returning` within a day. Each server remembers the visitors it saw, by the keyed address hash, so one whose clicks reach different servers can count as new |
+| `field1` to `field20` | The click's custom fields |
+
+Text matches whole values, without regard to case. A link has up to 10
+paths, each with up to 20 conditions and 20 destinations.
+
+### Flows
+
+A **flow** is a set of rule-based paths and default destinations (pages,
+offers and landers) that many links share (`POST /v1/brands/{brand}/flows`).
+Give a link the flow (`PUT .../links/{link}/flow` with its `flow_id`) and the
+link routes by the flow's paths and destinations instead of its own, which
+are kept for when the flow is taken off (`flow_id` null). An edit to the
+flow's paths (`PUT .../flows/{id}/paths`) or destinations
+(`PUT .../flows/{id}/destinations`) changes every link that uses it; the flow
+says how many do (`links`). A cap on a flow's destination counts the clicks
+of all of them. A flow that links use can't be archived.
 
 ## Traffic sources and custom fields
 
@@ -164,6 +342,27 @@ Outflare's tokens such as `{source_click_id}` (the network's click id) and
 `{payout}`. A template marks the values only the brand has (an account id,
 a key) as `REPLACE`; a source can't be saved with one left. Sending it is
 coming with tracker conversions.
+
+### Conversions back to the traffic source
+
+A traffic source with a postback URL is told of each tracker conversion on
+its campaigns' clicks, for networks with no conversion API (push, pop,
+native). Its `postback_rules` say which ones and with what payout:
+
+- `share`: the percentage of the payout sent (100 by default), and
+  `decimals` (2) it is rounded to;
+- `min_payout`: smaller payouts, after the share, aren't sent;
+- `types` (every type when empty) and `statuses` (`approved` by default)
+  sent;
+- `resend`: a conversion is sent again when its status or payout changes,
+  such as an approval days later or a reversal.
+
+Each state of a conversion is sent once, from a job, with the tokens of the
+postback URL filled in (`{source_click_id}`, `{payout}`, `{status}` and the
+rest). A send is tried up to five times when the network can't be reached or
+answers 429 or 5xx, never follows a redirect and only reaches public
+addresses. `GET .../traffic-sources/{id}/postbacks` lists the sends with the
+URL called and what the network answered.
 
 ### Tokens in a destination
 
@@ -236,9 +435,25 @@ traffic their code didn't bring, or lose imported partner links.
 | `GET`, `PATCH /v1/brands/{brand}/tracking-campaigns/{id}` (id, slug or code) | `analytics.read`, `analytics.manage` |
 | `GET`, `POST /v1/brands/{brand}/tracking-campaigns/{id}/links` | `analytics.read`, `analytics.manage` |
 | `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations` | `analytics.read`, `analytics.manage` |
+| `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths` | `analytics.read`, `analytics.manage` |
+| `PUT /v1/brands/{brand}/tracking-domains/{id}/fallback` | `mailboxes.manage` |
+| `GET`, `POST /v1/brands/{brand}/postback-sources`; `GET`, `PATCH .../{id}`; `POST .../{id}/rotate` | `analytics.read`, `analytics.manage` |
+| `GET /v1/brands/{brand}/tracker-conversions` (filter by `source`, `campaign`, `status`, `offer`) | `analytics.read` |
+| `GET /v1/brands/{brand}/affiliate-network-templates` | `analytics.read` |
+| `GET`, `POST /v1/brands/{brand}/offers`; `GET`, `PATCH .../{id}` | `analytics.read`, `analytics.manage` |
+| `GET`, `POST /v1/brands/{brand}/landers`; `GET`, `PATCH .../{id}` | `analytics.read`, `analytics.manage` |
+| `GET`, `POST /v1/brands/{brand}/flows`; `GET`, `PATCH .../{id}`; `PUT .../{id}/destinations`, `PUT .../{id}/paths` | `analytics.read`, `analytics.manage` |
+| `GET`, `PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow` | `analytics.read`, `analytics.manage` |
+| `GET /v1/brands/{brand}/lander-clicks` (filter by `lander`, `click_id`) | `analytics.read` |
+| `GET /click`, `GET /click/{n}`, `GET /click.js` (a lander's calls to action, on the brand's tracking domain) | Public |
+| `POST /v1/brands/{brand}/tracker-conversions`, `POST .../tracker-conversions/csv` | `analytics.manage` |
+| `GET /v1/brands/{brand}/tracker-conversion-log` (filter by `source`, `via`, `outcome`, `click_id`) | `analytics.read` |
+| `GET`, `POST /t/{secret}` (a postback, on the brand's tracking domain) | Public |
+| `GET /t/{secret}/pixel`, `GET /t/{secret}/pixel.js` | Public |
 | `GET /v1/brands/{brand}/traffic-source-templates` | `analytics.read` |
 | `GET`, `POST /v1/brands/{brand}/traffic-sources` | `analytics.read`, `analytics.manage` |
 | `GET`, `PATCH /v1/brands/{brand}/traffic-sources/{id}` | `analytics.read`, `analytics.manage` |
+| `GET /v1/brands/{brand}/traffic-sources/{id}/postbacks` (filter by `status`) | `analytics.read` |
 | `GET /l/{code}` (a redirect link) | Public |
 
 Owners, admins and operators have `analytics.manage`; viewers can read.
@@ -253,12 +468,24 @@ The MCP tools are `get_tracking_taxonomy`, `list_tracking_campaigns`,
 `get_tracking_campaign`, `create_tracking_campaign`,
 `update_tracking_campaign`, `list_tracking_links`, `create_tracking_link`,
 `list_tracking_link_destinations`, `set_tracking_link_destinations`,
-`list_traffic_source_templates`, `list_traffic_sources`,
+`list_tracking_link_paths`, `set_tracking_link_paths`, `set_tracking_domain_fallback`,
+`list_postback_sources`, `create_postback_source`, `update_postback_source`,
+`rotate_postback_source`, `list_tracker_conversions`, `upload_tracker_conversions`, `list_tracker_conversion_log`,
+`list_affiliate_network_templates`, `list_offers`, `get_offer`, `create_offer`, `update_offer`,
+`list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks`,
+`list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow`,
+`list_traffic_source_templates`, `list_traffic_sources`, `list_traffic_source_postbacks`,
 `create_traffic_source` and `update_traffic_source`.
 
 Each change is an audit action (and a product event): `tracking_campaign.created`,
 `tracking_campaign.updated`, `tracking_campaign.archived`,
 `tracking_campaign.restored`, `tracking_link.created`, `tracking_link.redirect_added`,
-`tracking_link.destinations_updated`,
+`tracking_link.destinations_updated`, `tracking_link.paths_updated`, `tracking_domain.fallback_set`,
+`postback_source.created`, `postback_source.updated`, `postback_source.archived`, `postback_source.restored`,
+`postback_source.rotated`, `tracker_conversion.created`, `tracker_conversion.updated`, `tracker_conversion.uploaded`,
+`tracker_offer.created`, `tracker_offer.updated`, `tracker_offer.archived`, `tracker_offer.restored`,
+`tracker_lander.created`, `tracker_lander.updated`, `tracker_lander.archived`, `tracker_lander.restored`,
+`tracker_flow.created`, `tracker_flow.updated`, `tracker_flow.archived`, `tracker_flow.restored`, `tracker_flow.paths_updated`,
+`tracker_flow.destinations_updated`, `tracking_link.flow_set`,
 `traffic_source.created`, `traffic_source.updated`, `traffic_source.archived`
 and `traffic_source.restored`.

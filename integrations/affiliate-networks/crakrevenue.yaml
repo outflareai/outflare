@@ -1,0 +1,16 @@
+id: crakrevenue
+name: "CrakRevenue"
+kind: network
+click_id_param: aff_sub
+macros:
+  cid: "{aff_sub}"
+  payout: "{payout}"
+  txid: "{transaction_id}-{goal_id}"
+  currency: "{currency}"
+  type: "{goal_id}"
+note: "Postbacks are set per offer under Postbacks options; for one global postback ask your affiliate manager or support. {transaction_id} is the click session id, so it is combined with {goal_id}; there is no status macro."
+sources:
+  - https://intercom.help/crakrevenue/en/articles/792030-how-to-setup-a-postback
+  - https://doc.voluum.com/article/crakrevenue-and-voluum
+  - https://help.redtrack.io/knowledgebase/kb/automation/integrated-affiliate-networks/crakrevenue/
+  - https://www.clickflare.com/docs/en/integrations/crakrevenue-click-flare-integration-guide

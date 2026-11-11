@@ -1,0 +1,14 @@
+id: admitad
+name: "Admitad"
+kind: network
+click_id_param: subid4
+macros:
+  cid: "[[[subid4]]]"
+  payout: "[[[payment_sum]]]"
+  txid: "[[[action_id]]]"
+  currency: "[[[currency]]]"
+  status: "[[[payment_status]]]"
+  type: "[[[type]]]"
+note: "Add it under Tools > Postback URL in Advanced mode with GET, for the Created and Confirmed statuses. [[[payment_sum]]] is your earnings (not the order amount) in the program's currency; [[[type]]] is lead or sale."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/admitad-click-flare-integration-guide

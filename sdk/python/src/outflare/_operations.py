@@ -1836,6 +1836,30 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def approve_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Approve a link order.
+
+        Scope: coverage.approve. A signed-in person only, and only the brand's
+        designated approver. Freezes the quoted donor amount. A budget tagged
+        link_orders for this currency, when present, is a hard cap; a miss is
+        409. No budget means there is no cap. Allowed from quoted or negotiating.
+
+        Needs: the coverage.approve scope.
+        POST /v1/brands/{brand}/link-orders/{id}/approve
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/approve",
+            path={"id": id, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
     def approve_link_pitch(
         self,
         pitch: str,
@@ -3299,6 +3323,29 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/email-provider-domains/{id}/check",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def check_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Queue a live-link check.
+
+        Scope: coverage.manage. Enqueues the existing coverage.check job for the
+        order's placement. Updating last_check_* from the job lands in a later
+        change. The order must already be published.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/check
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/check",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -6296,6 +6343,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_flow(
+        self,
+        *,
+        brand: str | None = None,
+        destinations: list[dict[str, Any]] | None = None,
+        name: str,
+        paths: list[dict[str, Any]] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a flow.
+
+        Scope: analytics.manage. A flow is a reusable set of rule-based paths and default destinations (pages, offers and
+        landers), as a link has. Give links the flow with PUT .../links/{link}/flow, and they route by it instead of their
+        own; an edit to the flow changes every one of them. Caps on a flow's destinations count the clicks of every link
+        that routes by it.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/flows
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/flows",
+            path={"brand": brand},
+            body={"destinations": destinations, "name": name, "paths": paths},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_help_centre(
         self,
         *,
@@ -6808,6 +6884,37 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def create_lander(
+        self,
+        *,
+        brand: str | None = None,
+        ctas: int | None = None,
+        name: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a lander.
+
+        Scope: analytics.manage. `name` and `url` are required. A lander is a page clicks go to before an offer: make it a
+        link's destination with `lander_id`, beside the offers it leads to. Its calls to action link to `click_url` (an
+        offer or page of the same list, by weight) or one of `cta_urls` (the Nth of them), and the page carries `script`,
+        which adds the click id (ofclk) to those links. A call to action goes on only for a click Outflare sent to a lander
+        in the last day, on the brand's own tracking domain; anything else gets the domain's fallback page.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/landers
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/landers",
+            path={"brand": brand},
+            body={"ctas": ctas, "name": name, "status": status, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def create_lead_list(
         self,
         *,
@@ -6859,6 +6966,113 @@ class Operations(_Mixin):
                 "verified_emails_only": verified_emails_only,
                 "verify": verify,
                 "build": build,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_link_order(
+        self,
+        *,
+        brand: str | None = None,
+        donor_profile_id: str,
+        guarantee_days: int | None = None,
+        notes: str | None = None,
+        owner_user_id: str | None = None,
+        rel_requested: str | None = None,
+        replaces_order_id: str | None = None,
+        slot_type: str | None = None,
+        target_url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Request a link order.
+
+        Scope: coverage.manage. Opens a requested order against a catalog donor.
+        The guarantee window defaults to the catalog row, then to 30 days.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders",
+            path={"brand": brand},
+            body={
+                "donor_profile_id": donor_profile_id,
+                "guarantee_days": guarantee_days,
+                "notes": notes,
+                "owner_user_id": owner_user_id,
+                "rel_requested": rel_requested,
+                "replaces_order_id": replaces_order_id,
+                "slot_type": slot_type,
+                "target_url": target_url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_link_order_catalog(
+        self,
+        *,
+        brand: str | None = None,
+        archived: bool | None = None,
+        casino_allowed: bool | None = None,
+        country: str | None = None,
+        domain: str | None = None,
+        domain_rating: int | None = None,
+        duration: str | None = None,
+        duration_days: int | None = None,
+        guarantee_days: int | None = None,
+        languages: list[str] | None = None,
+        name: str | None = None,
+        niches: list[str] | None = None,
+        notes: str | None = None,
+        pbn: bool | None = None,
+        prices: list[dict[str, Any]] | None = None,
+        rel_offered: list[str] | None = None,
+        slot_types: list[str] | None = None,
+        tat_days: int | None = None,
+        traffic: int | None = None,
+        vendor_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a donor to the catalog.
+
+        Scope: coverage.manage. Finds or creates the coverage publisher for the
+        domain and upserts one donor profile. A domain already in the catalog is
+        updated, not duplicated. Prices replace the current published rate for
+        each currency. Amounts are the donor price only; there is no commission
+        or margin.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/catalog
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/catalog",
+            path={"brand": brand},
+            body={
+                "archived": archived,
+                "casino_allowed": casino_allowed,
+                "country": country,
+                "domain": domain,
+                "domain_rating": domain_rating,
+                "duration": duration,
+                "duration_days": duration_days,
+                "guarantee_days": guarantee_days,
+                "languages": languages,
+                "name": name,
+                "niches": niches,
+                "notes": notes,
+                "pbn": pbn,
+                "prices": prices,
+                "rel_offered": rel_offered,
+                "slot_types": slot_types,
+                "tat_days": tat_days,
+                "traffic": traffic,
+                "vendor_id": vendor_id,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -7116,6 +7330,58 @@ class Operations(_Mixin):
                 "query": query,
                 "status": status,
                 "time_range": time_range,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_offer(
+        self,
+        *,
+        brand: str | None = None,
+        cap_kind: Literal["clicks", "conversions"] | None = None,
+        conversion_type: str | None = None,
+        country_payouts: dict[str, Any] | None = None,
+        currency: str | None = None,
+        daily_cap: int | None = None,
+        fallback_offer_id: str | None = None,
+        name: str | None = None,
+        payout: str | None = None,
+        payout_mode: Literal["postback", "fixed"] | None = None,
+        source_id: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add an offer.
+
+        Scope: analytics.manage. `name` and `url` are required. An offer is a page clicks go to, usually on an affiliate network: give a link's
+        destination its `offer_id`. Its network's click id parameter (the postback source's click_id_param) is added to
+        its URL unless the URL carries {click_id}. A conversion on its click gets its payout (by the click's country) when
+        the postback sends none, or always when payout_mode is fixed. A daily cap counts clicks or conversions; once it is
+        reached, clicks go to the fallback offer, or to the link's other destinations.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/offers
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/offers",
+            path={"brand": brand},
+            body={
+                "cap_kind": cap_kind,
+                "conversion_type": conversion_type,
+                "country_payouts": country_payouts,
+                "currency": currency,
+                "daily_cap": daily_cap,
+                "fallback_offer_id": fallback_offer_id,
+                "name": name,
+                "payout": payout,
+                "payout_mode": payout_mode,
+                "source_id": source_id,
+                "status": status,
+                "url": url,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -7655,6 +7921,53 @@ class Operations(_Mixin):
                 "run_weekday": run_weekday,
                 "runner": runner,
                 "token_id": token_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def create_postback_source(
+        self,
+        *,
+        brand: str | None = None,
+        click_expiry_days: int | None = None,
+        click_id_param: str | None = None,
+        currency: str | None = None,
+        duplicate_policy: Literal["ignore", "new", "update", "add"] | None = None,
+        ip_allowlist: list[str] | None = None,
+        name: str | None = None,
+        network: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Add a postback source.
+
+        Scope: analytics.manage. Returns `postback_url` once: give it to the network. With `network` (a template from
+        GET .../affiliate-network-templates) it is written in the network's macros; otherwise put the network's own
+        macros in place of {click_id} (the ofclk the redirect added, which the network got as your sub id), {payout} and
+        the rest. A
+        postback is GET or POST (query, form or JSON) to https://<the brand's tracking domain>/t/<secret> with `cid` (or
+        clickid, click_id, subid), `payout` (or sum, revenue, amount), `currency`, `txid` (or transaction_id, orderid),
+        `type`, `status` (approved, pending or declined) and `p1` to `p20`. It answers only on the brand's own verified
+        tracking domain.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/postback-sources
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/postback-sources",
+            path={"brand": brand},
+            body={
+                "click_expiry_days": click_expiry_days,
+                "click_id_param": click_id_param,
+                "currency": currency,
+                "duplicate_policy": duplicate_policy,
+                "ip_allowlist": ip_allowlist,
+                "name": name,
+                "network": network,
+                "status": status,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -8875,6 +9188,7 @@ class Operations(_Mixin):
         landing_url: str | None = None,
         name: str | None = None,
         redirect_links: bool | None = None,
+        redirect_mode: Literal["302", "307", "meta", "double_meta"] | None = None,
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
@@ -8900,6 +9214,7 @@ class Operations(_Mixin):
                 "landing_url": landing_url,
                 "name": name,
                 "redirect_links": redirect_links,
+                "redirect_mode": redirect_mode,
                 "slug": slug,
                 "source": source,
                 "status": status,
@@ -8951,6 +9266,7 @@ class Operations(_Mixin):
         name: str | None = None,
         parameters: list[dict[str, Any]] | None = None,
         postback: dict[str, Any] | None = None,
+        postback_rules: dict[str, Any] | None = None,
         status: Literal["active", "archived"] | None = None,
         template: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -8977,6 +9293,7 @@ class Operations(_Mixin):
                 "name": name,
                 "parameters": parameters,
                 "postback": postback,
+                "postback_rules": postback_rules,
                 "status": status,
                 "template": template,
             },
@@ -9123,6 +9440,35 @@ class Operations(_Mixin):
                 "rule_ids": rule_ids,
                 "url": url,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def credit_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        reason: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Credit a lost link order.
+
+        Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+        only, and only the brand's designated approver. Allowed on a lost order
+        when a replacement is not possible (no open replacement). Records a
+        credit invoice and a reversal when the order was already paid. It never
+        sends money.
+
+        Needs: the coverage.approve scope.
+        POST /v1/brands/{brand}/link-orders/{id}/credit
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/credit",
+            path={"id": id, "brand": brand},
+            body={"reason": reason},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -15340,6 +15686,25 @@ class Operations(_Mixin):
             query={"event": event, "page": page, "days": days},
         )
 
+    def get_flow(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a flow.
+
+        Scope: analytics.read. With its paths and destinations, and today's clicks on each.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flows/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flows/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_health(
         self,
     ) -> Any:
@@ -15823,6 +16188,25 @@ class Operations(_Mixin):
             path={"id": id, "brand": brand},
         )
 
+    def get_lander(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a lander.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/landers/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/landers/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_lead(
         self,
         id: str,
@@ -15895,6 +16279,106 @@ class Operations(_Mixin):
         return self._call(
             "GET",
             "/v1/brands/{brand}/link-building/settings",
+            path={"brand": brand},
+        )
+
+    def get_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a link order.
+
+        Scope: coverage.read.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/{id}",
+            path={"id": id, "brand": brand},
+        )
+
+    def get_link_order_budget(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get the link-order budget.
+
+        Scope: coverage.finance.read. The current period's coverage budgets tagged
+        link_orders, with committed and spent already applied, one cap per currency.
+        Missing a budget means there is no cap for that currency.
+
+        Needs: the coverage.finance.read scope.
+        GET /v1/brands/{brand}/link-orders/budget
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/budget",
+            path={"brand": brand},
+        )
+
+    def get_link_order_catalog_item(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a catalog row.
+
+        Scope: coverage.read. One donor profile, including archived rows. The item path is /catalog/items/{id} so it does not collide with /link-orders/{id}/... on the Go mux.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/catalog/items/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/catalog/items/{id}",
+            path={"id": id, "brand": brand},
+        )
+
+    def get_link_order_settings(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get link order settings.
+
+        Scope: coverage.read. The person who may approve a paid link order
+        and mark it paid, and the domain-rating band used to find an
+        equivalent donor when a link is lost. Until someone saves settings,
+        approver_user_id is null and equivalent_dr_band is 10. Approve and
+        Paid stay blocked until an approver is set.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/settings
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/settings",
+            path={"brand": brand},
+        )
+
+    def get_link_order_summary(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Summarize link orders.
+
+        Scope: coverage.read. Counts by status, and donor amounts by currency.
+        Committed is approved plus published not yet paid; spent is paid and
+        verified; lost is lost. USD and EUR are never summed.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/summary
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/summary",
             path={"brand": brand},
         )
 
@@ -16263,6 +16747,25 @@ class Operations(_Mixin):
             path={"search": search, "brand": brand},
         )
 
+    def get_offer(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get an offer.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/offers/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/offers/{id}",
+            path={"id": id, "brand": brand},
+        )
+
     def get_onboarding(
         self,
         *,
@@ -16531,6 +17034,25 @@ class Operations(_Mixin):
             "GET",
             "/v1/playbooks/{id}",
             path={"id": id},
+        )
+
+    def get_postback_source(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get a postback source.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/postback-sources/{id}
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/postback-sources/{id}",
+            path={"id": id, "brand": brand},
         )
 
     def get_pricing_history(
@@ -18439,6 +18961,26 @@ class Operations(_Mixin):
             query={"return": return_},
         )
 
+    def get_tracking_link_flow(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """Get the flow a redirect link routes by.
+
+        Scope: analytics.read.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow",
+            path={"id": id, "link": link, "brand": brand},
+        )
+
     def get_tracking_taxonomy(
         self,
         *,
@@ -18891,6 +19433,34 @@ class Operations(_Mixin):
             query={"list": list},
             content=content,
             content_type="text/csv",
+            idempotency_key=idempotency_key,
+        )
+
+    def import_link_order_catalog(
+        self,
+        *,
+        brand: str | None = None,
+        csv: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Import catalog rows from CSV.
+
+        Scope: coverage.manage. The first row is the header and must include domain.
+        A repeated domain updates the existing profile. A bad row is listed in
+        errors and does not abort the rest of the file. Send text/csv, or JSON
+        with a csv field so agents can pass a string. Amounts are the donor price
+        only.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/catalog/import
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/catalog/import",
+            path={"brand": brand},
+            body={"csv": csv},
+            extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
 
@@ -20038,6 +20608,27 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/ads/tracking-templates",
             path={"ws": ws},
             query={"network": network},
+        )
+
+    def list_affiliate_network_templates(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List affiliate-network templates.
+
+        Scope: analytics.read. The affiliate networks and network platforms Outflare has templates for
+        (integrations/affiliate-networks): the parameter in their offer links that carries the click id, and their macro
+        for each value Outflare's postback reads. Make a postback source from one with `network`, and its postback URL
+        comes written in the network's macros.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/affiliate-network-templates
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/affiliate-network-templates",
+            path={"brand": brand},
         )
 
     def list_agent_apps(
@@ -23320,6 +23911,26 @@ class Operations(_Mixin):
             query={"status": status},
         )
 
+    def list_flows(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["active", "archived", "all"] | None = None,
+    ) -> Any:
+        """List the brand's flows.
+
+        Scope: analytics.read. The brand's reusable paths and destinations, by name, with how many links route by each.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/flows
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/flows",
+            path={"brand": brand},
+            query={"status": status},
+        )
+
     def list_funnel_people(
         self,
         *,
@@ -24109,6 +24720,50 @@ class Operations(_Mixin):
             path={"brand": brand},
         )
 
+    def list_lander_clicks(
+        self,
+        *,
+        brand: str | None = None,
+        lander: str | None = None,
+        click_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List lander clicks.
+
+        Scope: analytics.read. Clicks on the brand's landers' calls to action, newest first, with where each went.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/lander-clicks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/lander-clicks",
+            path={"brand": brand},
+            query={"lander": lander, "click_id": click_id, "limit": limit, "cursor": cursor, "fields": fields},
+        )
+
+    def list_landers(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["active", "archived", "all"] | None = None,
+    ) -> Any:
+        """List the brand's landers.
+
+        Scope: analytics.read. The pages the brand sends tracker clicks to before its offers, by name, with their click URLs and today's lander clicks.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/landers
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/landers",
+            path={"brand": brand},
+            query={"status": status},
+        )
+
     def list_lead_list_members(
         self,
         id: str,
@@ -24233,6 +24888,93 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/link-building/assets",
             path={"brand": brand},
+        )
+
+    def list_link_order_catalog(
+        self,
+        *,
+        brand: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+        fields: list[str] | None = None,
+        q: str | None = None,
+        pbn: bool | None = None,
+        niche: str | None = None,
+        archived: Literal["true", "false", "all"] | None = None,
+    ) -> Any:
+        """List the link-order catalog.
+
+        Scope: coverage.read. Donor profiles for paid link orders, newest first.
+        Page with cursor=next_cursor. Archived rows are omitted unless archived=true
+        or archived=all. Prices are the current published coverage rates, in minor units.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/catalog
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/catalog",
+            path={"brand": brand},
+            query={
+                "cursor": cursor,
+                "limit": limit,
+                "fields": fields,
+                "q": q,
+                "pbn": pbn,
+                "niche": niche,
+                "archived": archived,
+            },
+        )
+
+    def list_link_order_history(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List a link order's history.
+
+        Scope: coverage.read. Oldest first.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders/{id}/history
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders/{id}/history",
+            path={"id": id, "brand": brand},
+        )
+
+    def list_link_orders(
+        self,
+        *,
+        brand: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+        fields: list[str] | None = None,
+        status: str | None = None,
+        donor_profile_id: str | None = None,
+        q: str | None = None,
+    ) -> Any:
+        """List link orders.
+
+        Scope: coverage.read. Newest first. Page with cursor=next_cursor.
+
+        Needs: the coverage.read scope.
+        GET /v1/brands/{brand}/link-orders
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/link-orders",
+            path={"brand": brand},
+            query={
+                "cursor": cursor,
+                "limit": limit,
+                "fields": fields,
+                "status": status,
+                "donor_profile_id": donor_profile_id,
+                "q": q,
+            },
         )
 
     def list_link_pitches(
@@ -24804,6 +25546,27 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/news-searches",
             path={"brand": brand},
             query={"purpose": purpose},
+        )
+
+    def list_offers(
+        self,
+        *,
+        brand: str | None = None,
+        status: Literal["active", "archived", "all"] | None = None,
+        source: str | None = None,
+    ) -> Any:
+        """List the brand's offers.
+
+        Scope: analytics.read. The pages the brand sends tracker clicks to, by name, with today's clicks and conversions against their caps.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/offers
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/offers",
+            path={"brand": brand},
+            query={"status": status, "source": source},
         )
 
     def list_option_sets(
@@ -25399,6 +26162,24 @@ class Operations(_Mixin):
             "GET",
             "/v1/workspaces/{ws}/playbooks",
             path={"ws": ws},
+        )
+
+    def list_postback_sources(
+        self,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List the brand's postback sources.
+
+        Scope: analytics.read. Where the brand's tracker conversions come from: affiliate networks, offers' trackers, its own backend. The secret postback URL is shown only when a source is made or rotated.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/postback-sources
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/postback-sources",
+            path={"brand": brand},
         )
 
     def list_pr_experts(
@@ -27315,6 +28096,66 @@ class Operations(_Mixin):
             query={"target": target, "limit": limit, "fields": fields, "cursor": cursor},
         )
 
+    def list_tracker_conversion_log(
+        self,
+        *,
+        brand: str | None = None,
+        source: str | None = None,
+        via: Literal["postback", "pixel"] | None = None,
+        outcome: str | None = None,
+        click_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List the tracker conversion log.
+
+        Scope: analytics.read. Every postback and pixel call the brand's postback sources made in the last 30 days,
+        newest first: what it sent, what Outflare answered (status) and why (outcome and reason), so you can see why a
+        network's conversion wasn't recorded. Calls with an unknown secret have no brand and aren't kept.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracker-conversion-log
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracker-conversion-log",
+            path={"brand": brand},
+            query={
+                "source": source,
+                "via": via,
+                "outcome": outcome,
+                "click_id": click_id,
+                "limit": limit,
+                "cursor": cursor,
+                "fields": fields,
+            },
+        )
+
+    def list_tracker_conversions(
+        self,
+        *,
+        brand: str | None = None,
+        source: str | None = None,
+        campaign: str | None = None,
+        status: Literal["approved", "pending", "declined"] | None = None,
+        offer: str | None = None,
+        before: str | None = None,
+    ) -> Any:
+        """List tracker conversions.
+
+        Scope: analytics.read. The click ledger: every conversion a postback source reported, with the click it credits, newest first, 100 a page (pass the last one's converted_at as before).
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracker-conversions
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracker-conversions",
+            path={"brand": brand},
+            query={"source": source, "campaign": campaign, "status": status, "offer": offer, "before": before},
+        )
+
     def list_tracking_campaigns(
         self,
         *,
@@ -27381,6 +28222,28 @@ class Operations(_Mixin):
             path={"id": id, "link": link, "brand": brand},
         )
 
+    def list_tracking_link_paths(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+    ) -> Any:
+        """List a redirect link's rule-based paths.
+
+        Scope: analytics.read. The link's paths in order, each with its conditions and its destinations with today's
+        clicks. A click takes the first active path whose conditions all match and that has an open destination;
+        otherwise the link's default destinations (GET .../destinations), then the link's own page.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths",
+            path={"id": id, "link": link, "brand": brand},
+        )
+
     def list_tracking_links(
         self,
         id: str,
@@ -27398,6 +28261,32 @@ class Operations(_Mixin):
             "GET",
             "/v1/brands/{brand}/tracking-campaigns/{id}/links",
             path={"id": id, "brand": brand},
+        )
+
+    def list_traffic_source_postbacks(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        status: Literal["queued", "sent", "failed"] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        fields: list[str] | None = None,
+    ) -> Any:
+        """List conversions sent back to a traffic source.
+
+        Scope: analytics.read. Each tracker conversion on the source's campaigns that its postback_rules send, newest
+        first: the payout sent, the URL called, and what the network answered. Sends are made by a job, retried up to five
+        times when the network can't be reached or answers 429 or 5xx, and never follow a redirect.
+
+        Needs: the analytics.read scope.
+        GET /v1/brands/{brand}/traffic-sources/{id}/postbacks
+        """
+        return self._call(
+            "GET",
+            "/v1/brands/{brand}/traffic-sources/{id}/postbacks",
+            path={"id": id, "brand": brand},
+            query={"status": status, "limit": limit, "cursor": cursor, "fields": fields},
         )
 
     def list_traffic_source_templates(
@@ -27829,6 +28718,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def mark_link_order_lost(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        notes: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark a link order lost.
+
+        Scope: coverage.manage. Allowed from published, paid, or verified.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/lost
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/lost",
+            path={"id": id, "brand": brand},
+            body={"notes": notes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def mark_partner_payout_paid(
         self,
         id: str,
@@ -28036,6 +28950,31 @@ class Operations(_Mixin):
             "/v1/workspaces/{ws}/tracking-domains/{id}",
             path={"id": id, "ws": ws},
             body={"brand_id": brand_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def negotiate_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        notes: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark a link order as negotiating.
+
+        Scope: coverage.manage. Allowed from quoted.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/negotiate
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/negotiate",
+            path={"id": id, "brand": brand},
+            body={"notes": notes},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -28456,6 +29395,31 @@ class Operations(_Mixin):
             "POST",
             "/v1/workspaces/{ws}/staff-accounts/{id}/telegram/sync/pause",
             path={"id": id, "ws": ws},
+            idempotency_key=idempotency_key,
+        )
+
+    def pay_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Mark a link order paid.
+
+        Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+        only, and only the brand's designated approver. Allowed after publication
+        and a passing live-link check (the link is on the page and the target
+        matches). Records a coverage invoice and payment for the frozen donor
+        amount; it never sends money. Allowed from published or verified.
+
+        Needs: the coverage.approve scope.
+        POST /v1/brands/{brand}/link-orders/{id}/pay
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/pay",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 
@@ -29150,6 +30114,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def publish_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        proof_url: str | None = None,
+        published_url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Publish a link order.
+
+        Scope: coverage.manage. Records the live URL, creates or reuses a paid
+        coverage placement (the same URL and inventory is not added twice), and
+        moves the order to published. Allowed from approved.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/publish
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/publish",
+            path={"id": id, "brand": brand},
+            body={"proof_url": proof_url, "published_url": published_url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def push_supplier_mailboxes(
         self,
         id: str,
@@ -29427,6 +30419,34 @@ class Operations(_Mixin):
                 "resolution_minutes": resolution_minutes,
                 "timezone": timezone,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def quote_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        amount_minor: int,
+        currency: Literal["USD", "EUR"],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Quote a link order.
+
+        Scope: coverage.manage. Sets the quoted donor price and moves the order
+        to quoted. Allowed from requested, quoted, or negotiating. Amounts are
+        the donor price only, in minor units.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/quote
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/quote",
+            path={"id": id, "brand": brand},
+            body={"amount_minor": amount_minor, "currency": currency},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -30683,6 +31703,35 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def replace_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        donor_profile_id: str,
+        notes: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Open a replacement order.
+
+        Scope: coverage.manage. Opens a new requested order that takes the place
+        of a lost one. One open (not lost) replacement is allowed at a time.
+        Cycles are rejected. Pass the replacement donor in donor_profile_id;
+        searching for an equivalent donor is a later change.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/replace
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/replace",
+            path={"id": id, "brand": brand},
+            body={"donor_profile_id": donor_profile_id, "notes": notes},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def replace_sequence_steps(
         self,
         id: str,
@@ -31800,6 +32849,27 @@ class Operations(_Mixin):
         return self._call(
             "POST",
             "/v1/brands/{brand}/partner-programs/{id}/postback",
+            path={"id": id, "brand": brand},
+            idempotency_key=idempotency_key,
+        )
+
+    def rotate_postback_source(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Give a postback source a new secret.
+
+        Scope: analytics.manage. Returns the new postback URL once; the old one stops working at once.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/postback-sources/{id}/rotate
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/postback-sources/{id}/rotate",
             path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
@@ -33567,6 +34637,56 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_flow_destinations(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        destinations: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a flow's default destinations.
+
+        Scope: analytics.manage. Replaces the list, as for a link's destinations, for every link that routes by the flow.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/flows/{id}/destinations
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/flows/{id}/destinations",
+            path={"id": id, "brand": brand},
+            body={"destinations": destinations},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_flow_paths(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        paths: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a flow's paths.
+
+        Scope: analytics.manage. Replaces the paths, in order, as for a link's, for every link that routes by the flow.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/flows/{id}/paths
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/flows/{id}/paths",
+            path={"id": id, "brand": brand},
+            body={"paths": paths},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_journey_step_secret(
         self,
         id: str,
@@ -33839,6 +34959,31 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def set_tracking_domain_fallback(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        url: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set where unknown redirect links on a tracking domain go.
+
+        Scope: mailboxes.manage. A redirect code that doesn't exist on the domain (mistyped, or from a deleted link) goes to this page instead of a not found page. '' takes it off.
+
+        Needs: the mailboxes.manage scope.
+        PUT /v1/brands/{brand}/tracking-domains/{id}/fallback
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/tracking-domains/{id}/fallback",
+            path={"id": id, "brand": brand},
+            body={"url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def set_tracking_link_destinations(
         self,
         id: str,
@@ -33864,6 +35009,66 @@ class Operations(_Mixin):
             "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations",
             path={"id": id, "link": link, "brand": brand},
             body={"destinations": destinations},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_tracking_link_flow(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+        flow_id: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Make a redirect link route by a flow.
+
+        Scope: analytics.manage. The link then routes by the flow's paths and destinations instead of its own, which are
+        kept: flow_id null makes it route by its own again. Other servers follow the change within a few minutes.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow",
+            path={"id": id, "link": link, "brand": brand},
+            body={"flow_id": flow_id},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def set_tracking_link_paths(
+        self,
+        id: str,
+        link: str,
+        *,
+        brand: str | None = None,
+        paths: list[dict[str, Any]],
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Set a redirect link's rule-based paths.
+
+        Scope: analytics.manage. Replaces the list, in order (the first match wins): a path with its `id` is changed, one
+        without is added, one left out is taken off the link with its destinations (their clicks keep them). Each path's
+        `destinations` work as the link's default destinations do: ids keep a destination and its count. Conditions
+        combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
+        device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
+        referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
+        both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+        matches whole values, without regard to case.
+
+        Needs: the analytics.manage scope.
+        PUT /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths
+        """
+        return self._call(
+            "PUT",
+            "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths",
+            path={"id": id, "link": link, "brand": brand},
+            body={"paths": paths},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -39091,6 +40296,32 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_flow(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        name: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Rename, archive or restore a flow.
+
+        Scope: analytics.manage. A flow that links route by can't be archived.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/flows/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/flows/{id}",
+            path={"id": id, "brand": brand},
+            body={"name": name, "status": status},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_help_centre(
         self,
         id: str,
@@ -39584,6 +40815,34 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_lander(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        ctas: int | None = None,
+        name: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, archive or restore a lander.
+
+        Scope: analytics.manage. A new URL goes to every destination that is the lander at once. A lander that is a destination can't be archived.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/landers/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/landers/{id}",
+            path={"id": id, "brand": brand},
+            body={"ctas": ctas, "name": name, "status": status, "url": url},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_lead(
         self,
         id: str,
@@ -39747,6 +41006,142 @@ class Operations(_Mixin):
                 "weekly_budget_percent": weekly_budget_percent,
                 "weekly_reads": weekly_reads,
             },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        donor_profile_id: str | None = None,
+        guarantee_days: int | None = None,
+        notes: str | None = None,
+        owner_user_id: str | None = None,
+        rel_requested: str | None = None,
+        slot_type: str | None = None,
+        target_url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update a link order.
+
+        Scope: coverage.manage. Fields that are still mutable before publication.
+        After approval the donor amount cannot change. Paid, verified, and lost
+        orders cannot be edited.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/link-orders/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/link-orders/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "donor_profile_id": donor_profile_id,
+                "guarantee_days": guarantee_days,
+                "notes": notes,
+                "owner_user_id": owner_user_id,
+                "rel_requested": rel_requested,
+                "slot_type": slot_type,
+                "target_url": target_url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_link_order_catalog_item(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        archived: bool | None = None,
+        casino_allowed: bool | None = None,
+        country: str | None = None,
+        domain: str | None = None,
+        domain_rating: int | None = None,
+        duration: str | None = None,
+        duration_days: int | None = None,
+        guarantee_days: int | None = None,
+        languages: list[str] | None = None,
+        name: str | None = None,
+        niches: list[str] | None = None,
+        notes: str | None = None,
+        pbn: bool | None = None,
+        prices: list[dict[str, Any]] | None = None,
+        rel_offered: list[str] | None = None,
+        slot_types: list[str] | None = None,
+        tat_days: int | None = None,
+        traffic: int | None = None,
+        vendor_id: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Update a catalog row.
+
+        Scope: coverage.manage. Send only what changes. Domain cannot change.
+        Prices, when sent, replace the current published rate for those currencies.
+
+        Needs: the coverage.manage scope.
+        PATCH /v1/brands/{brand}/link-orders/catalog/items/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/link-orders/catalog/items/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "archived": archived,
+                "casino_allowed": casino_allowed,
+                "country": country,
+                "domain": domain,
+                "domain_rating": domain_rating,
+                "duration": duration,
+                "duration_days": duration_days,
+                "guarantee_days": guarantee_days,
+                "languages": languages,
+                "name": name,
+                "niches": niches,
+                "notes": notes,
+                "pbn": pbn,
+                "prices": prices,
+                "rel_offered": rel_offered,
+                "slot_types": slot_types,
+                "tat_days": tat_days,
+                "traffic": traffic,
+                "vendor_id": vendor_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_link_order_settings(
+        self,
+        *,
+        brand: str | None = None,
+        approver_user_id: str | None = None,
+        equivalent_dr_band: int | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change link order settings.
+
+        Scope: coverage.approve. A signed-in person only; API tokens cannot
+        call this. Send only what changes. approver_user_id must be a member
+        of this workspace who can approve coverage (owners and admins by
+        default). Send null to clear the approver. equivalent_dr_band is the
+        width of the rating band used to suggest an equivalent donor (1 to
+        50, default 10, so a donor rated 54 is matched with 50-59). Each
+        brand sets its own approver; the engine does not hard-code a person.
+
+        Needs: the coverage.approve scope.
+        PATCH /v1/brands/{brand}/link-orders/settings
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/link-orders/settings",
+            path={"brand": brand},
+            body={"approver_user_id": approver_user_id, "equivalent_dr_band": equivalent_dr_band},
             extra_body=extra_body,
             idempotency_key=idempotency_key,
         )
@@ -40203,6 +41598,55 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def update_offer(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        cap_kind: Literal["clicks", "conversions"] | None = None,
+        conversion_type: str | None = None,
+        country_payouts: dict[str, Any] | None = None,
+        currency: str | None = None,
+        daily_cap: int | None = None,
+        fallback_offer_id: str | None = None,
+        name: str | None = None,
+        payout: str | None = None,
+        payout_mode: Literal["postback", "fixed"] | None = None,
+        source_id: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, archive or restore an offer.
+
+        Scope: analytics.manage. A new URL goes to every destination that sends to the offer at once. An offer that is a destination can't be archived.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/offers/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/offers/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "cap_kind": cap_kind,
+                "conversion_type": conversion_type,
+                "country_payouts": country_payouts,
+                "currency": currency,
+                "daily_cap": daily_cap,
+                "fallback_offer_id": fallback_offer_id,
+                "name": name,
+                "payout": payout,
+                "payout_mode": payout_mode,
+                "source_id": source_id,
+                "status": status,
+                "url": url,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
     def update_onboarding(
         self,
         *,
@@ -40615,6 +42059,47 @@ class Operations(_Mixin):
                 "run_weekday": run_weekday,
                 "runner": runner,
                 "token_id": token_id,
+            },
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def update_postback_source(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        click_expiry_days: int | None = None,
+        click_id_param: str | None = None,
+        currency: str | None = None,
+        duplicate_policy: Literal["ignore", "new", "update", "add"] | None = None,
+        ip_allowlist: list[str] | None = None,
+        name: str | None = None,
+        network: str | None = None,
+        status: Literal["active", "archived"] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Change, archive or restore a postback source.
+
+        Scope: analytics.manage. An archived source's postback URL stops answering.
+
+        Needs: the analytics.manage scope.
+        PATCH /v1/brands/{brand}/postback-sources/{id}
+        """
+        return self._call(
+            "PATCH",
+            "/v1/brands/{brand}/postback-sources/{id}",
+            path={"id": id, "brand": brand},
+            body={
+                "click_expiry_days": click_expiry_days,
+                "click_id_param": click_id_param,
+                "currency": currency,
+                "duplicate_policy": duplicate_policy,
+                "ip_allowlist": ip_allowlist,
+                "name": name,
+                "network": network,
+                "status": status,
             },
             extra_body=extra_body,
             idempotency_key=idempotency_key,
@@ -42227,6 +43712,7 @@ class Operations(_Mixin):
         landing_url: str | None = None,
         name: str | None = None,
         redirect_links: bool | None = None,
+        redirect_mode: Literal["302", "307", "meta", "double_meta"] | None = None,
         slug: str | None = None,
         source: str | None = None,
         status: Literal["active", "archived"] | None = None,
@@ -42250,6 +43736,7 @@ class Operations(_Mixin):
                 "landing_url": landing_url,
                 "name": name,
                 "redirect_links": redirect_links,
+                "redirect_mode": redirect_mode,
                 "slug": slug,
                 "source": source,
                 "status": status,
@@ -42270,6 +43757,7 @@ class Operations(_Mixin):
         name: str | None = None,
         parameters: list[dict[str, Any]] | None = None,
         postback: dict[str, Any] | None = None,
+        postback_rules: dict[str, Any] | None = None,
         status: Literal["active", "archived"] | None = None,
         template: str | None = None,
         extra_body: dict[str, Any] | None = None,
@@ -42294,6 +43782,7 @@ class Operations(_Mixin):
                 "name": name,
                 "parameters": parameters,
                 "postback": postback,
+                "postback_rules": postback_rules,
                 "status": status,
                 "template": template,
             },
@@ -42489,6 +43978,63 @@ class Operations(_Mixin):
             idempotency_key=idempotency_key,
         )
 
+    def upload_tracker_conversions(
+        self,
+        *,
+        brand: str | None = None,
+        conversions: list[dict[str, Any]],
+        source: str,
+        extra_body: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Upload tracker conversions.
+
+        Scope: analytics.manage. Records up to 1,000 conversions for one of the brand's postback sources, row by row,
+        following its duplicate policy and click expiry. A row with `click_id` (the ofclk) records a conversion; a row
+        with only `transaction_id` updates the `status` or `payout` of the source's conversion with that transaction id,
+        as networks report approvals and reversals later. Rows take the postback's names (`click_id`, `transaction_id`,
+        `payout`, `currency`, `type`, `status`, `converted_at`, `params` with p1 to p20). The answer says what happened to
+        each row; one refused row doesn't stop the others.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/tracker-conversions
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracker-conversions",
+            path={"brand": brand},
+            body={"conversions": conversions, "source": source},
+            extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def upload_tracker_conversions_csv(
+        self,
+        *,
+        brand: str | None = None,
+        source: str,
+        content: str | bytes,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Upload tracker conversions as CSV.
+
+        Scope: analytics.manage. Up to 10,000 rows of a CSV file whose first row names the columns: click_id,
+        transaction_id, payout, currency, type, status, converted_at and p1 to p20 (any order, any case). Rows work as in
+        the JSON upload.
+
+        Needs: the analytics.manage scope.
+        POST /v1/brands/{brand}/tracker-conversions/csv
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/tracker-conversions/csv",
+            path={"brand": brand},
+            query={"source": source},
+            content=content,
+            content_type="text/csv",
+            idempotency_key=idempotency_key,
+        )
+
     def upsert_lead(
         self,
         *,
@@ -42580,6 +44126,28 @@ class Operations(_Mixin):
             path={"fix": fix, "brand": brand},
             body={"note": note},
             extra_body=extra_body,
+            idempotency_key=idempotency_key,
+        )
+
+    def verify_link_order(
+        self,
+        id: str,
+        *,
+        brand: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Any:
+        """Verify a published link.
+
+        Scope: coverage.manage. Allowed from published or paid when the last
+        live-link check has passed.
+
+        Needs: the coverage.manage scope.
+        POST /v1/brands/{brand}/link-orders/{id}/verify
+        """
+        return self._call(
+            "POST",
+            "/v1/brands/{brand}/link-orders/{id}/verify",
+            path={"id": id, "brand": brand},
             idempotency_key=idempotency_key,
         )
 

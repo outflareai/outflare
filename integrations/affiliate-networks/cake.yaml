@@ -1,0 +1,14 @@
+id: cake
+name: "CAKE"
+kind: platform
+click_id_param: s2
+macros:
+  cid: "#s2#"
+  payout: "#price#"
+  txid: "#leadid#"
+note: "Paste the postback into the offer's Testing & Tracking tab, Postback URL field (per offer). #price# carries no currency and CAKE has no status or event-name token for affiliates, so set the payout currency in the tracker."
+sources:
+  - https://support.getcake.com/support/solutions/articles/13000118573-how-to-use-conversion-pixel-tokens
+  - https://support.getcake.com/support/solutions/articles/5000593201-how-to-implement-a-tune-hasoffers-postback-url
+  - https://doc.voluum.com/en/tracking_payout.html
+  - https://www.clickflare.com/docs/en/integrations/cake-click-flare-integration-guide

@@ -1,0 +1,13 @@
+id: buygoods
+name: "BuyGoods"
+kind: network
+click_id_param: subid
+macros:
+  cid: "{SUBID}"
+  payout: "{COMMISSION_AMOUNT}"
+  txid: "{ORDERID}"
+  type: "{CONV_TYPE}"
+note: "Add the postback under Postback Pixels (profile menu) for all offers, or in one product's Settings > Postback pixels tab, not both. Payouts are in USD; {CONV_TYPE} (frontend or upsell) is not in BuyGoods' official macro list, so test it before relying on it."
+sources:
+  - https://help.redtrack.io/knowledgebase/kb/automation/integrated-affiliate-networks/buygoods-9054/
+  - https://www.clickflare.com/docs/en/integrations/buygoods-click-flare-integration-guide

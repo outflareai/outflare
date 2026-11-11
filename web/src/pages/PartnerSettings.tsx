@@ -368,6 +368,7 @@ const importReasons: Record<string, string> = {
   link_param_added: "a link parameter the program now reads too (Settings → Other link parameters)",
   extra_link: "a partner's second link (their code is the first)",
   code_changed: "the code was taken or not allowed, so the partner got a new one",
+  email_changed: "the partner's email changed in Tolt, so their record has the new one",
   partner_missing: "its partner didn't come over",
   partner_unavailable: "a partner other objects name, but Tolt couldn't give them either",
   customer_missing: "its customer didn't come over",

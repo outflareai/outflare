@@ -9,6 +9,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { OutflareError, ok, type MissionClient } from "@outflare/sdk";
 import { z } from "zod";
 import { registerCoverageTools } from "./coverage.js";
+import { registerLinkOrderTools } from "./link-orders.js";
 import { registerBrandTools } from "./brands.js";
 import { registerSetupTools } from "./setup.js";
 import { registerQueryTools } from "./query.js";
@@ -315,6 +316,7 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
   registerInsightTools(server, gtm, () => ws, readOnly, call);
   registerRedditTools(server, gtm, () => ws, readOnly, call);
   registerCoverageTools(server, gtm, readOnly, call);
+  registerLinkOrderTools(server, gtm, readOnly, call);
   registerBrandTools(server, gtm, () => ws, readOnly, call);
   registerSetupTools(server, gtm, () => ws, readOnly, call);
   registerRecordTools(server, gtm, () => ws, readOnly, call);
@@ -2613,6 +2615,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         landing_url: z.string().max(2000).optional().describe("The page links go to by default."),
         redirect_links: z.boolean().optional().describe("Give new links a short redirect link that counts clicks, for places the tracking snippet can't run. Off by default."),
         traffic_source: z.string().uuid().optional().describe("The brand's traffic source the campaign buys clicks from (list_traffic_sources). Its links then get a campaign_url to paste into the network, and their clicks keep the source's parameters."),
+        redirect_mode: z
+          .enum(["302", "307", "meta", "double_meta"])
+          .optional()
+          .describe("How its redirect links send people on: 302 (default), 307, meta or double_meta (both send no referrer). Modes other than 302 work only on the brand's own tracking domain."),
       },
       annotations: write,
     },
@@ -2632,6 +2638,10 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
         status: z.enum(["active", "archived"]).optional(),
         redirect_links: z.boolean().optional().describe("Give new links a short redirect link. Links made before keep what they have."),
         traffic_source: z.string().optional().describe("The id of one of the brand's traffic sources, or '' for none."),
+        redirect_mode: z
+          .enum(["302", "307", "meta", "double_meta"])
+          .optional()
+          .describe("How its redirect links send people on: 302 (default), 307, meta or double_meta (both send no referrer). Modes other than 302 work only on the brand's own tracking domain."),
       },
       annotations: write,
     },
@@ -2705,7 +2715,13 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
             z.object({
               id: z.string().uuid().optional().describe("One of the link's destinations, to change it."),
               name: z.string().max(120).optional(),
-              url: z.string().max(2000).describe("The page; it can carry tokens such as {click_id} and {field1}."),
+              url: z.string().max(2000).optional().describe("The page; it can carry tokens such as {click_id} and {field1}. Required unless offer_id is given."),
+              offer_id: z.string().uuid().optional().describe("Send it to one of the brand's active offers (list_offers) instead of url."),
+              lander_id: z
+                .string()
+                .uuid()
+                .optional()
+                .describe("Make it one of the brand's active landers (list_landers) instead of url: clicks go to the landers first, and their calls to action to the other destinations."),
               weight: z.number().int().min(0).max(10000).optional().describe("Its share against the others' weights; 100 when left out."),
               daily_click_cap: z.number().int().min(0).nullable().optional().describe("Clicks a day it takes (UTC); leave it out for no cap, 0 stops it."),
             }),
@@ -2718,6 +2734,466 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       call(() =>
         onBrand(brand, (b) =>
           gtm.PUT("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/destinations", { params: { path: { brand: b, id: campaign, link } }, body: { destinations } }),
+        ),
+      ),
+  );
+
+  const pathCondition = z.object({
+    field: z
+      .enum([
+        "country", "region", "city", "isp", "asn", "device", "device_brand", "os", "os_version", "browser", "browser_version", "language", "referrer", "ip", "weekday", "hour", "visitor",
+        "field1", "field2", "field3", "field4", "field5", "field6", "field7", "field8", "field9", "field10", "field11", "field12", "field13", "field14", "field15", "field16", "field17", "field18", "field19", "field20",
+      ])
+      .describe("What to test: where the visitor is, their network and device, the referring site, the IP, the day and hour (UTC), a first or returning visit, or a custom field."),
+    op: z.enum(["is", "is_not"]),
+    values: z
+      .array(z.string().max(200))
+      .min(1)
+      .max(100)
+      .describe("Matches any of them: country codes such as US, IP ranges such as 203.0.113.0/24, hours 0-23 and days mon-sun (UTC), unique or returning."),
+  });
+
+  server.registerTool(
+    "list_tracking_link_paths",
+    {
+      title: "List a redirect link's rule-based paths",
+      description:
+        "A redirect link's paths in order, each with its conditions and destinations. A click takes the first active path whose conditions all match and that has an open destination, then the link's default destinations, then its own page.",
+      inputSchema: { brand: brandRef, campaign: campaignRef, link: z.string().uuid().describe("The link's id (list_tracking_links).") },
+      annotations: read,
+    },
+    ({ brand, campaign, link }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths", { params: { path: { brand: b, id: campaign, link } } }))),
+  );
+
+  server.registerTool(
+    "set_tracking_link_paths",
+    {
+      title: "Set a redirect link's rule-based paths",
+      description:
+        "Replace a redirect link's paths, in order (the first match wins). Each has conditions (AND between them, OR between a condition's values) and its own weighted destinations with daily caps. Give ids to keep paths and destinations; leave one out to take it off.",
+      inputSchema: {
+        brand: brandRef,
+        campaign: campaignRef,
+        link: z.string().uuid().describe("The link's id (list_tracking_links)."),
+        paths: z
+          .array(
+            z.object({
+              id: z.string().uuid().optional(),
+              name: z.string().max(120).optional(),
+              active: z.boolean().optional(),
+              conditions: z.array(pathCondition).min(1).max(20),
+              destinations: z
+                .array(
+                  z.object({
+                    id: z.string().uuid().optional(),
+                    name: z.string().max(120).optional(),
+                    url: z.string().max(2000).optional().describe("Required unless offer_id is given."),
+                    offer_id: z.string().uuid().optional().describe("One of the brand's active offers, instead of url."),
+                    lander_id: z.string().uuid().optional().describe("One of the brand's active landers, instead of url."),
+                    weight: z.number().int().min(0).max(10000).optional(),
+                    daily_click_cap: z.number().int().min(0).nullable().optional(),
+                  }),
+                )
+                .min(1)
+                .max(20),
+            }),
+          )
+          .max(10),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, campaign, link, paths }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths", { params: { path: { brand: b, id: campaign, link } }, body: { paths } })),
+      ),
+  );
+
+  const postbackSourceFields = {
+    name: z.string().max(120).optional().describe("Such as the affiliate network's name."),
+    ip_allowlist: z.array(z.string()).max(50).optional().describe("Addresses or ranges postbacks must come from, such as 203.0.113.0/24; empty for any."),
+    duplicate_policy: z
+      .enum(["ignore", "new", "update", "add"])
+      .optional()
+      .describe("What a transaction id seen before does: ignore it (default), record a new conversion, update the one recorded, or add its payout (upsells)."),
+    click_expiry_days: z.number().int().min(1).max(365).optional().describe("How long after its click a conversion still counts; 30 by default."),
+    currency: z.string().optional().describe("The currency of payouts that don't say, such as USD."),
+    network: z
+      .string()
+      .max(40)
+      .optional()
+      .describe("An affiliate-network template's id (list_affiliate_network_templates), so the postback URL comes in the network's macros; '' for a custom source."),
+    click_id_param: z
+      .string()
+      .max(64)
+      .optional()
+      .describe("The parameter in the network's offer links that carries the click id, such as sub1; the template's when left out, '' for none."),
+  };
+
+  server.registerTool(
+    "list_postback_sources",
+    {
+      title: "List postback sources",
+      description: "Where the brand's tracker conversions come from (affiliate networks, offers' trackers, its backend), with how many conversions each recorded.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/postback-sources", { params: { path: { brand: b } } }))),
+  );
+
+  server.registerTool(
+    "create_postback_source",
+    {
+      title: "Add a postback source",
+      description:
+        "Make a secret postback URL on the brand's tracking domain for a network to call on each conversion. Returns postback_url once: give it to the network with its own macros in place of {click_id} (the ofclk, sent to the network as your sub id), {payout} and the rest.",
+      inputSchema: { brand: brandRef, ...postbackSourceFields, name: z.string().max(120) },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/postback-sources", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_postback_source",
+    {
+      title: "Change a postback source",
+      description: "Change a postback source's allowlist, duplicate policy, click expiry or currency, or archive it (its URL stops answering).",
+      inputSchema: { brand: brandRef, source: z.string().uuid(), ...postbackSourceFields, status: z.enum(["active", "archived"]).optional() },
+      annotations: write,
+    },
+    ({ brand, source, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/postback-sources/{id}", { params: { path: { brand: b, id: source } }, body }))),
+  );
+
+  server.registerTool(
+    "rotate_postback_source",
+    {
+      title: "Give a postback source a new secret",
+      description: "Returns a new postback URL once; the old one stops working at once. Use it when a postback URL leaked.",
+      inputSchema: { brand: brandRef, source: z.string().uuid() },
+      annotations: write,
+    },
+    ({ brand, source }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/postback-sources/{id}/rotate", { params: { path: { brand: b, id: source } } }))),
+  );
+
+  server.registerTool(
+    "list_tracker_conversion_log",
+    {
+      title: "List the tracker conversion log",
+      description:
+        "Every postback and pixel call the brand's postback sources made in the last 30 days, with what it sent, what Outflare answered and why: use it to find why a network's conversion wasn't recorded (an unknown click, an expired one, a bad parameter, the wrong domain).",
+      inputSchema: {
+        brand: brandRef,
+        source: z.string().uuid().optional(),
+        via: z.enum(["postback", "pixel"]).optional(),
+        outcome: z.string().max(40).optional().describe("Such as accepted, unknown_click, expired_click, invalid or ip_refused."),
+        click_id: z.string().max(32).optional().describe("Calls that named this click key."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-conversion-log", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "upload_tracker_conversions",
+    {
+      title: "Upload tracker conversions",
+      description:
+        "Record up to 1,000 conversions for one of the brand's postback sources, such as a network's report. A row with click_id (the ofclk) records a conversion; a row with only transaction_id updates that conversion's status or payout. The answer says what happened to each row.",
+      inputSchema: {
+        brand: brandRef,
+        source: z.string().uuid().describe("The postback source they came from (list_postback_sources)."),
+        conversions: z
+          .array(
+            z.object({
+              click_id: z.string().optional(),
+              transaction_id: z.string().max(200).optional(),
+              payout: z.number().min(0).optional(),
+              currency: z.string().optional(),
+              type: z.string().optional().describe("Such as lead or sale."),
+              status: z.enum(["approved", "pending", "declined"]).optional(),
+              converted_at: z.string().optional().describe("When it happened; now when left out."),
+            }),
+          )
+          .min(1)
+          .max(1000),
+      },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/tracker-conversions", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "list_tracker_conversions",
+    {
+      title: "List tracker conversions",
+      description: "The click ledger: conversions postback sources reported, each with the redirect click it credits, its payout, status and the person when known, newest first.",
+      inputSchema: {
+        brand: brandRef,
+        source: z.string().uuid().optional(),
+        campaign: z.string().uuid().optional().describe("A tracking campaign's id."),
+        status: z.enum(["approved", "pending", "declined"]).optional(),
+        offer: z.string().uuid().optional().describe("An offer's id."),
+        before: z.string().optional().describe("The converted_at of the last one you have, for the next page."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/tracker-conversions", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "list_affiliate_network_templates",
+    {
+      title: "List affiliate-network templates",
+      description:
+        "The affiliate networks and platforms Outflare has templates for (Everflow, TUNE, CAKE, Affise, impact.com, ClickBank, MaxBounty and more): the parameter in their offer links that carries the click id, and their macro for each postback value. Make a postback source with network set to one.",
+      inputSchema: { brand: brandRef },
+      annotations: read,
+    },
+    ({ brand }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/affiliate-network-templates", { params: { path: { brand: b } } }))),
+  );
+
+  const offerFields = {
+    name: z.string().max(120).optional(),
+    url: z.string().max(2000).optional().describe("The offer's page; it can carry tokens such as {click_id}. Its network's click id parameter is added unless it does."),
+    source_id: z.string().optional().describe("The postback source (affiliate network) it pays through (list_postback_sources); '' for none."),
+    payout_mode: z.enum(["postback", "fixed"]).optional().describe("postback (default): the postback's payout, else this one; fixed: always this one."),
+    payout: z.number().min(0).optional().describe("In the currency's main unit, such as 12.5."),
+    currency: z.string().optional().describe("Such as USD."),
+    country_payouts: z.record(z.string(), z.number().min(0)).optional().describe('Payouts by two-letter country code, before payout, such as {"US": 3.25}. Replaces the list.'),
+    conversion_type: z.string().max(40).optional().describe("The type a postback that names none gets, such as lead."),
+    daily_cap: z.number().int().min(0).nullable().optional().describe("Clicks or conversions a day (UTC) it takes; null for no cap, 0 stops it."),
+    cap_kind: z.enum(["clicks", "conversions"]).optional().describe("What the cap counts; conversions when left out."),
+    fallback_offer_id: z.string().optional().describe("Another of the brand's active offers, which takes its clicks while it is capped; '' for none."),
+  };
+
+  server.registerTool(
+    "list_offers",
+    {
+      title: "List offers",
+      description: "The pages the brand sends tracker clicks to, with their payouts, caps and today's clicks and conversions.",
+      inputSchema: {
+        brand: brandRef,
+        status: z.enum(["active", "archived", "all"]).optional(),
+        source: z.string().uuid().optional().describe("Only one postback source's offers."),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/offers", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_offer",
+    {
+      title: "Get an offer",
+      description: "One offer, with today's clicks and conversions against its cap and how many link destinations send to it.",
+      inputSchema: { brand: brandRef, offer: z.string().uuid() },
+      annotations: read,
+    },
+    ({ brand, offer }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/offers/{id}", { params: { path: { brand: b, id: offer } } }))),
+  );
+
+  server.registerTool(
+    "create_offer",
+    {
+      title: "Add an offer",
+      description:
+        "Add a page clicks go to, usually on an affiliate network, with its payout, payouts by country, daily cap and fallback offer. Send a link's clicks to it with set_tracking_link_destinations and offer_id.",
+      inputSchema: { brand: brandRef, ...offerFields, name: z.string().max(120), url: z.string().max(2000) },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/offers", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_offer",
+    {
+      title: "Change an offer",
+      description: "Change an offer, or archive it. A new URL goes to every destination that sends to it; an offer that is a destination can't be archived.",
+      inputSchema: { brand: brandRef, offer: z.string().uuid(), ...offerFields, status: z.enum(["active", "archived"]).optional() },
+      annotations: write,
+    },
+    ({ brand, offer, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/offers/{id}", { params: { path: { brand: b, id: offer } }, body }))),
+  );
+
+  const landerFields = {
+    name: z.string().max(120).optional(),
+    url: z.string().max(2000).optional().describe("The lander's page; it can carry tokens such as {click_id}."),
+    ctas: z.number().int().min(1).max(100).optional().describe("How many calls to action it has; 1 when left out."),
+  };
+
+  server.registerTool(
+    "list_landers",
+    {
+      title: "List landers",
+      description: "The pages the brand sends tracker clicks to before its offers, with the click URLs their calls to action link to and today's lander clicks.",
+      inputSchema: { brand: brandRef, status: z.enum(["active", "archived", "all"]).optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/landers", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_lander",
+    {
+      title: "Get a lander",
+      description: "One lander, with its click URLs (/click and /click/1 to /click/N) and the script tag its page carries.",
+      inputSchema: { brand: brandRef, lander: z.string().uuid() },
+      annotations: read,
+    },
+    ({ brand, lander }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/landers/{id}", { params: { path: { brand: b, id: lander } } }))),
+  );
+
+  server.registerTool(
+    "create_lander",
+    {
+      title: "Add a lander",
+      description:
+        "Add a page clicks go to before an offer, such as a review or a quiz. Make it a link's destination with set_tracking_link_destinations and lander_id, beside the offers it leads to; its calls to action link to the click_url or cta_urls it returns, and its page carries the script.",
+      inputSchema: { brand: brandRef, ...landerFields, name: z.string().max(120), url: z.string().max(2000) },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/landers", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_lander",
+    {
+      title: "Change a lander",
+      description: "Change a lander, or archive it. A new URL goes to every destination that is the lander; a lander that is a destination can't be archived.",
+      inputSchema: { brand: brandRef, lander: z.string().uuid(), ...landerFields, status: z.enum(["active", "archived"]).optional() },
+      annotations: write,
+    },
+    ({ brand, lander, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/landers/{id}", { params: { path: { brand: b, id: lander } }, body }))),
+  );
+
+  server.registerTool(
+    "list_lander_clicks",
+    {
+      title: "List lander clicks",
+      description: "Clicks on the brand's landers' calls to action, newest first, with the call to action and the offer or page each went to.",
+      inputSchema: {
+        brand: brandRef,
+        lander: z.string().uuid().optional(),
+        click_id: z.string().max(32).optional().describe("The lander clicks of one redirect click."),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/lander-clicks", { params: { path: { brand: b }, query } }))),
+  );
+
+  const flowDestination = z.object({
+    id: z.string().uuid().optional().describe("One of the flow's destinations, to change it."),
+    name: z.string().max(120).optional(),
+    url: z.string().max(2000).optional().describe("The page; required unless offer_id or lander_id is given."),
+    offer_id: z.string().uuid().optional().describe("One of the brand's active offers (list_offers)."),
+    lander_id: z.string().uuid().optional().describe("One of the brand's active landers (list_landers)."),
+    weight: z.number().int().min(0).max(10000).optional(),
+    daily_click_cap: z.number().int().min(0).nullable().optional(),
+  });
+  const flowPath = z.object({
+    id: z.string().uuid().optional(),
+    name: z.string().max(120).optional(),
+    active: z.boolean().optional(),
+    conditions: z.array(pathCondition).min(1).max(20),
+    destinations: z.array(flowDestination).min(1).max(20),
+  });
+
+  server.registerTool(
+    "list_flows",
+    {
+      title: "List flows",
+      description: "The brand's reusable paths and destinations, each with how many campaign links route by it.",
+      inputSchema: { brand: brandRef, status: z.enum(["active", "archived", "all"]).optional() },
+      annotations: read,
+    },
+    ({ brand, ...query }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flows", { params: { path: { brand: b }, query } }))),
+  );
+
+  server.registerTool(
+    "get_flow",
+    {
+      title: "Get a flow",
+      description: "One flow, with its paths, destinations and today's clicks on each.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid() },
+      annotations: read,
+    },
+    ({ brand, flow }) => call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/flows/{id}", { params: { path: { brand: b, id: flow } } }))),
+  );
+
+  server.registerTool(
+    "create_flow",
+    {
+      title: "Add a flow",
+      description:
+        "Add a reusable set of rule-based paths and default destinations (pages, offers, landers). Give links it with set_tracking_link_flow; an edit to the flow then changes every one of them.",
+      inputSchema: { brand: brandRef, name: z.string().max(120), paths: z.array(flowPath).max(10).optional(), destinations: z.array(flowDestination).max(20).optional() },
+      annotations: write,
+    },
+    ({ brand, ...body }) => call(() => onBrand(brand, (b) => gtm.POST("/v1/brands/{brand}/flows", { params: { path: { brand: b } }, body }))),
+  );
+
+  server.registerTool(
+    "update_flow",
+    {
+      title: "Rename or archive a flow",
+      description: "Rename a flow, or archive or restore it. A flow that links route by can't be archived.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid(), name: z.string().max(120).optional(), status: z.enum(["active", "archived"]).optional() },
+      annotations: write,
+    },
+    ({ brand, flow, ...body }) =>
+      call(() => onBrand(brand, (b) => gtm.PATCH("/v1/brands/{brand}/flows/{id}", { params: { path: { brand: b, id: flow } }, body }))),
+  );
+
+  server.registerTool(
+    "set_flow_destinations",
+    {
+      title: "Set a flow's default destinations",
+      description: "Replace a flow's default destinations for every link that routes by it. Give ids to keep destinations and today's counts.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid(), destinations: z.array(flowDestination).max(20) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, flow, destinations }) =>
+      call(() =>
+        onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/flows/{id}/destinations", { params: { path: { brand: b, id: flow } }, body: { destinations } })),
+      ),
+  );
+
+  server.registerTool(
+    "set_flow_paths",
+    {
+      title: "Set a flow's paths",
+      description: "Replace a flow's rule-based paths, in order (the first match wins), for every link that routes by it.",
+      inputSchema: { brand: brandRef, flow: z.string().uuid(), paths: z.array(flowPath).max(10) },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, flow, paths }) =>
+      call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/flows/{id}/paths", { params: { path: { brand: b, id: flow } }, body: { paths } }))),
+  );
+
+  server.registerTool(
+    "set_tracking_link_flow",
+    {
+      title: "Make a redirect link route by a flow",
+      description: "Make a redirect link route by one of the brand's flows instead of its own paths and destinations (which are kept), or by its own again with flow_id null.",
+      inputSchema: {
+        brand: brandRef,
+        campaign: campaignRef,
+        link: z.string().uuid().describe("The link's id (list_tracking_links)."),
+        flow_id: z.string().uuid().nullable().describe("One of the brand's active flows (list_flows), or null."),
+      },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, campaign, link, flow_id }) =>
+      call(() =>
+        onBrand(brand, (b) =>
+          gtm.PUT("/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow", { params: { path: { brand: b, id: campaign, link } }, body: { flow_id } }),
         ),
       ),
   );
@@ -2748,7 +3224,36 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
       .object({ url: z.string().max(2000), method: z.enum(["GET", "POST"]).optional() })
       .optional()
       .describe("Where the network takes a conversion, with Outflare's tokens such as {source_click_id} and {payout}. Fill in every REPLACE first."),
+    postback_rules: z
+      .object({
+        share: z.number().int().min(0).max(1000).optional().describe("The percentage of the payout sent; 100 by default."),
+        decimals: z.number().int().min(0).max(6).optional(),
+        min_payout: z.number().min(0).optional().describe("The smallest payout sent, after the share."),
+        types: z.array(z.string()).max(20).optional().describe("The conversion types sent; empty for every type."),
+        statuses: z.array(z.enum(["approved", "pending", "declined"])).optional().describe("The statuses sent; approved by default."),
+        resend: z.boolean().optional().describe("Send a conversion again when its status or payout changes."),
+      })
+      .optional()
+      .describe("Which tracker conversions the postback is sent for, and with what payout. Only the rules given change."),
   };
+
+  server.registerTool(
+    "list_traffic_source_postbacks",
+    {
+      title: "List conversions sent back to a traffic source",
+      description: "Each tracker conversion sent to a traffic source's postback URL, newest first: the payout sent, the URL called and what the network answered.",
+      inputSchema: {
+        brand: brandRef,
+        source: z.string().uuid().describe("The traffic source's id (list_traffic_sources)."),
+        status: z.enum(["queued", "sent", "failed"]).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        cursor: z.string().optional(),
+      },
+      annotations: read,
+    },
+    ({ brand, source, ...query }) =>
+      call(() => onBrand(brand, (b) => gtm.GET("/v1/brands/{brand}/traffic-sources/{id}/postbacks", { params: { path: { brand: b, id: source }, query } }))),
+  );
 
   server.registerTool(
     "list_traffic_source_templates",
@@ -8343,6 +8848,18 @@ export function createServer({ client: gtm, workspace, readOnly = false, brand: 
     },
     ({ tracking_domain_id, brand_id }) =>
       call(() => gtm.PATCH("/v1/workspaces/{ws}/tracking-domains/{id}", { params: { path: { ws, id: tracking_domain_id } }, body: { brand_id } })),
+  );
+
+  server.registerTool(
+    "set_tracking_domain_fallback",
+    {
+      title: "Set where unknown redirect links on a tracking domain go",
+      description: "A redirect code that doesn't exist on the domain (mistyped, or from a deleted link) goes to this page instead of a not found page. '' takes it off.",
+      inputSchema: { brand: brandRef, tracking_domain_id: id, url: z.string().max(2000).describe("A full address, such as https://example.com/, or '' for none.") },
+      annotations: { ...write, idempotentHint: true },
+    },
+    ({ brand, tracking_domain_id, url }) =>
+      call(() => onBrand(brand, (b) => gtm.PUT("/v1/brands/{brand}/tracking-domains/{id}/fallback", { params: { path: { brand: b, id: tracking_domain_id } }, body: { url } }))),
   );
 
   server.registerTool(

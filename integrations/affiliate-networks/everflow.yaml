@@ -1,0 +1,13 @@
+id: everflow
+name: "Everflow"
+kind: platform
+click_id_param: sub1
+macros:
+  cid: "{sub1}"
+  payout: "{payout_amount}"
+  txid: "{conversion_id}"
+  type: "{event_name}"
+note: "Set the postback in the network's Everflow portal under Postbacks > + Postback (Global or offer-specific). Payout is in the offer's currency and partner postbacks have no currency or status macro; use {conversion_id}, not {transaction_id} (Everflow's own click id), as the transaction id."
+sources:
+  - https://helpdesk.everflow.io/customer/your-guide-to-parameters-macros
+  - https://www.clickflare.com/docs/en/integrations/everflow-click-flare-integration-guide

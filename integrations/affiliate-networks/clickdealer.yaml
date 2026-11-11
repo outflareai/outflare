@@ -1,0 +1,11 @@
+id: clickdealer
+name: "ClickDealer"
+kind: network
+click_id_param: s2
+macros:
+  cid: "#s2#"
+  payout: "#price#"
+  txid: "#leadid#"
+note: "Set it under Tools > Global postback (Global S2S postback URL). #price# has no currency and there is no status or event-name token."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/clickdealer-click-flare-integration-guide

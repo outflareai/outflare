@@ -140,7 +140,10 @@ type Server struct {
 	redirects        redirectCache
 	clicks           clickBuffer
 	caps             capCounts
+	visitors         visitorMemory
 	siteVisitorLimit *rateLimiter
+	// postbackLimit caps tracker conversion postbacks per source.
+	postbackLimit *rateLimiter
 	// Help centre pages per reader's network, and what a reader may record
 	// (feedback, searches with no answer) per hour.
 	helpIPLimit    *rateLimiter
@@ -396,6 +399,7 @@ func NewServer(pool *pgxpool.Pool, log *slog.Logger, opts Options) *Server {
 		siteIPLimit:      &rateLimiter{name: "site_ip", limit: 300, window: time.Minute},
 		siteKeyLimit:     &rateLimiter{name: "site_key", limit: 6000, window: time.Minute},
 		siteVisitorLimit: &rateLimiter{name: "site_visitor", limit: 600, window: time.Minute},
+		postbackLimit:    &rateLimiter{name: "tracker_postback", limit: 6000, window: time.Minute},
 		helpIPLimit:      &rateLimiter{name: "help_ip", limit: 300, window: time.Minute},
 		toolsIPLimit:     &rateLimiter{name: "tools_ip", limit: 20, window: time.Minute},
 		helpWriteLimit:   &rateLimiter{name: "help_write", limit: 30, window: time.Hour},
@@ -612,6 +616,7 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesLinkProspects(mux)
 	s.routesNews(mux)
 	s.routesBrandCoverage(mux)
+	s.routesLinkOrders(mux)
 	s.routesStories(mux)
 	s.routesStoriesAI(mux)
 	s.routesQuoteApprovals(mux)
@@ -665,6 +670,15 @@ func (s *Server) buildHandler() http.Handler {
 	s.routesCampaignLinks(mux)
 	s.routesTrafficSources(mux)
 	s.routesLinkDestinations(mux)
+	s.routesLinkPaths(mux)
+	s.routesRedirectModes(mux)
+	s.routesTrackerConversions(mux)
+	s.routesTrackerUploads(mux)
+	s.routesTrackerConversionLog(mux)
+	s.routesTrackerOffers(mux)
+	s.routesTrackerLanders(mux)
+	s.routesTrackerFlows(mux)
+	s.routesSourcePostbacks(mux)
 	s.routesPartners(mux)
 	s.routesAttribution(mux)
 	s.routesAttributionModels(mux)

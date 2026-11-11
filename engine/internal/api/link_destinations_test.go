@@ -14,6 +14,17 @@ import (
 	"github.com/outflareai/outflare/engine/internal/track"
 )
 
+// ownTrackingDomain gives a brand a verified tracking domain, where its
+// tracker links' features run, and returns its host.
+func ownTrackingDomain(t *testing.T, e *env, ws, brand, host string) string {
+	t.Helper()
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO tracking_domains (workspace_id, brand_id, domain, status, verified_at)
+		VALUES ($1, $2, $3, 'verified', now())`, ws, brand, host); err != nil {
+		t.Fatal(err)
+	}
+	return host
+}
+
 // Weighted destinations and daily click caps on a redirect link
 // (plans/ad-tracker.md, T4a).
 func TestLinkDestinations(t *testing.T) {
@@ -27,6 +38,7 @@ func TestLinkDestinations(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "/v1/brands/" + brand
+	host := ownTrackingDomain(t, e, ws, brand, "go.northpeak.example")
 	c := owner.must(201, "POST", base+"/tracking-campaigns", map[string]any{
 		"name": "Offers spring", "channel": "paid_ads", "source": "acme", "redirect_links": true,
 	})
@@ -40,6 +52,7 @@ func TestLinkDestinations(t *testing.T) {
 	follow := func(code, ua string) *url.URL {
 		t.Helper()
 		req := httptest.NewRequest("GET", "/l/"+code, nil)
+		req.Host = host
 		req.Header.Set("User-Agent", ua)
 		rec := httptest.NewRecorder()
 		e.h.ServeHTTP(rec, req)
@@ -66,7 +79,7 @@ func TestLinkDestinations(t *testing.T) {
 		map[string]any{"name": "Offer C", "url": "https://northpeak.example/c", "weight": 0},
 	}})
 	ds := got["destinations"].([]any)
-	if len(ds) != 3 || got["fallback_url"] != "https://northpeak.example/fallback" || ds[0].(map[string]any)["weight"] != float64(100) ||
+	if len(ds) != 3 || got["fallback_url"] != "https://northpeak.example/fallback" || got["needs_domain"] != false || ds[0].(map[string]any)["weight"] != float64(100) ||
 		ds[0].(map[string]any)["open"] != true || ds[1].(map[string]any)["open"] != false || ds[2].(map[string]any)["open"] != false {
 		t.Fatalf("destinations: %v", got)
 	}

@@ -63,6 +63,7 @@ var Kept = []Ref{
 	// What partners earned and were paid: see erasedPartner.
 	{"partner_memberships", "record_id"}, {"partner_rewards", "recipient_id"},
 	{"customer_events", "account_id"}, {"deals", "record_id"}, {"payment_subscriptions", "record_id"}, {"transactions", "record_id"},
+	{"tracker_conversions", "record_id"},
 	{"seo_competitors", "record_id"}, {"suppressions", "record_id"}, {"site_visitors", "account_id"},
 	// A suggestion that someone's chat might be theirs: the chat is the
 	// account's, and is matched again.

@@ -55,7 +55,11 @@ Every Outflare metric starts with `outflare_`, so it is easy to keep only those 
 | `outflare_redirect_clicks_total` | `outcome` (`counted`, `bot`, `unknown`, `error`, `dropped`) | Clicks on campaign redirect links (`/l/{code}`): a person, a link scanner or preview, a code that isn't a link, a link that couldn't be looked up, or a click dropped because too many waited to be written. Clicks are written in batches a moment later. |
 | `outflare_redirect_click_writes_total` | `outcome` (`written`, `refused_quota`, `link_gone`, `failed`, `dropped_full`) | What happened to redirect clicks when their batch was written: written, over the workspace's click quota, their link gone, the batch failed and waits for the next flush, or dropped with too many waiting. |
 | `outflare_redirect_click_buffer` | | Redirect clicks waiting in a process to be written. |
-| `outflare_redirect_routes_total` | `outcome` (`destination`, `fallback`) | Clicks on redirect links with weighted destinations, by where they went: one of the destinations, or the link's own page because every destination was capped or stopped. A cap reached is normal, so this has a panel and no alert. |
+| `outflare_tracker_postbacks_total` | `outcome` (`accepted`, `duplicate`, `updated`, `unknown_source`, `wrong_domain`, `ip_refused`, `invalid`, `unknown_click`, `expired_click`, `rate_limited`, `error`) | Tracker conversion postbacks from brands' networks, by what happened. |
+| `outflare_tracker_source_postbacks_total` | `outcome` (`queued`, `filtered`, `sent`, `retried`, `rejected`, `unreachable`, `invalid`) | Tracker conversions sent back to traffic sources' postback URLs, by what happened. |
+| `outflare_tracker_lander_clicks_total` | `outcome` (`routed`, `fallback`, `unknown_click`, `wrong_domain`, `error`) | Clicks on landers' calls to action (`/click`), by where they went. |
+| `outflare_tracker_conversion_rows_total` | `via` (`pixel`, `api`, `csv`), `outcome` | Tracker conversions from pixels and uploads, by how they came and what happened. |
+| `outflare_redirect_routes_total` | `outcome` (`path`, `destination`, `fallback`, `shared_domain`) | Clicks on redirect links with destinations, by where they went: a rule-based path's destination, one of the default destinations, the link's own page because every destination was capped or stopped, or the link's own page because the click came on the shared domain, where tracker features are off. A cap reached is normal, so this has a panel and no alert. |
 | `outflare_redirect_click_flush_seconds` | | Time to write one batch of up to 1,000 redirect clicks. |
 | `outflare_redirect_landings_total` | `outcome` (`claimed`, `pending`, `unmatched`) | Page views carrying a redirect click's key (`ofclk`): the visit claimed the click, its click wasn't written yet and the landing waits for it, or nothing took it (a reload, another workspace's key, or a waiting landing no click took within an hour). |
 | `outflare_inbox_events_total` | `outcome` (`stored`, `rejected`, `failed`) | Website events workers took from the inbox. `rejected` is an event the workspace refused (an unapproved name over the limit, a record conflict); `failed` is a batch that will be tried again. |
@@ -231,6 +235,9 @@ The database numbers are read when Prometheus scrapes, at most once every 10 sec
 
 - `OutflareRedirectClicksNotWritten` (warning): redirect link clicks have failed to be written for 10 minutes; people are still sent on.
 - `OutflareRedirectClickBacklog` (warning): over 20,000 redirect clicks have waited in one process for 5 minutes.
+- `OutflareTrackerPostbacksFailing` (warning): tracker conversion postbacks have failed to be recorded for 10 minutes.
+- `OutflareTrackerSourcePostbacksFailing` (warning): conversions sent back to traffic sources have been given up on (unreachable or an invalid URL) for 30 minutes.
+- `OutflareTrackerLanderClicksFailing` (warning): lander clicks (`/click`) have failed for 10 minutes, so visitors on landers reach the fallback page instead of an offer.
 - `OutflareGeoFilesStale` (warning): a server's DB-IP city or network file is over 40 days old, so new visits and clicks get older city and network data.
 - `OutflareGeoDownloadsFailing` (info): DB-IP file downloads failed at every check for a day; the files in use stay until they're stale.
 - `OutflareJobKindTakesWorkers`: one job kind has held over half the job workers for 10 minutes, so other jobs and, through the shared database connections, page loads wait.

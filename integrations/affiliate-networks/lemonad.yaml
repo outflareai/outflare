@@ -1,0 +1,11 @@
+id: lemonad
+name: "Lemonad"
+kind: network
+click_id_param: clickid
+macros:
+  cid: "[lemonads_clickid]"
+  payout: "[lemonads_payout_dot]"
+note: "Set it under My account > Global postback. No transaction id is passed, so repeat conversions on one click can't be told apart."
+sources:
+  - https://doc.voluum.com/article/lemonads-and-voluum
+  - https://help.redtrack.io/knowledgebase/kb/automation/integrated-affiliate-networks/lemonads/

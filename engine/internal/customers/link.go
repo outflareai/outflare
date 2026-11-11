@@ -359,6 +359,8 @@ type Ref struct{ Table, Column string }
 var Follows = []Ref{
 	// Money they paid or got back moves with them to the record kept.
 	{"transactions", "record_id"},
+	// Tracker conversions are revenue to the brand, like transactions.
+	{"tracker_conversions", "record_id"},
 	{"partner_proposals", "record_id"},
 	{"crm_activities", "record_id"},
 	{"crm_mail_capture_targets", "record_id"}, {"crm_mail_messages", "record_id"}, {"crm_mail_sharing", "record_id"},

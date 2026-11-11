@@ -1,0 +1,11 @@
+id: dr_cash
+name: "Dr.Cash"
+kind: network
+click_id_param: sub1
+macros:
+  cid: "{sub1}"
+  payout: "{payment}"
+  txid: "{uuid}"
+note: "Set it under Settings > Global postback and tick Conversion confirmation only. There is no currency or status macro; status is chosen by which events you tick."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/dr-cash-click-flare-integration-guide

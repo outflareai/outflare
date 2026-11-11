@@ -6174,11 +6174,12 @@ paths:
                   maxItems: 20
                   items:
                     type: object
-                    required: [url]
                     properties:
                       id: { type: string, format: uuid, description: "One of the link's destinations, to change it; leave it out to add one." }
                       name: { type: string, maxLength: 120, description: "What reports call it; '' shows the page." }
-                      url: { type: string, maxLength: 2000, description: "The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does." }
+                      url: { type: string, maxLength: 2000, description: "The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does. Required unless offer_id is given." }
+                      offer_id: { type: string, format: uuid, description: "Send it to one of the brand's active offers (GET .../offers) instead of url: its URL is the offer's, with the click id its network takes, and the offer's cap and fallback apply." }
+                      lander_id: { type: string, format: uuid, description: "Make it one of the brand's active landers (GET .../landers) instead of url. A list with landers sends each click to one of its landers, and the landers' calls to action (/click, /click/N) to its other destinations." }
                       weight: { type: integer, minimum: 0, maximum: 10000, description: "Its share of the clicks against the others' weights; 100 when left out, 0 sends it none." }
                       daily_click_cap: { type: [integer, "null"], minimum: 0, description: "Clicks a day it takes; null or left out for no cap, 0 stops it." }
       responses:
@@ -6190,6 +6191,809 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, description: "The campaign's id, slug or ofc code.", schema: { type: string } }
+      - { name: link, in: path, required: true, description: The link's id., schema: { type: string, format: uuid } }
+    get:
+      operationId: getTrackingLinkFlow
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get the flow a redirect link routes by
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The link's flow.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkFlow" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setTrackingLinkFlow
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Make a redirect link route by a flow
+      description: |
+        Scope: analytics.manage. The link then routes by the flow's paths and destinations instead of its own, which are
+        kept: flow_id null makes it route by its own again. Other servers follow the change within a few minutes.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flow_id]
+              properties:
+                flow_id: { type: [string, "null"], format: uuid, description: "One of the brand's active flows; null for none." }
+      responses:
+        "200":
+          description: The link's flow now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, description: "The campaign's id, slug or ofc code.", schema: { type: string } }
+      - { name: link, in: path, required: true, description: The link's id., schema: { type: string, format: uuid } }
+    get:
+      operationId: listTrackingLinkPaths
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List a redirect link's rule-based paths
+      description: |
+        Scope: analytics.read. The link's paths in order, each with its conditions and its destinations with today's
+        clicks. A click takes the first active path whose conditions all match and that has an open destination;
+        otherwise the link's default destinations (GET .../destinations), then the link's own page.
+      tags: [analytics]
+      responses:
+        "200":
+          description: The paths.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkPaths" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setTrackingLinkPaths
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Set a redirect link's rule-based paths
+      description: |
+        Scope: analytics.manage. Replaces the list, in order (the first match wins): a path with its `id` is changed, one
+        without is added, one left out is taken off the link with its destinations (their clicks keep them). Each path's
+        `destinations` work as the link's default destinations do: ids keep a destination and its count. Conditions
+        combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
+        device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
+        referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
+        both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+        matches whole values, without regard to case.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths:
+                  type: array
+                  maxItems: 10
+                  items:
+                    type: object
+                    required: [conditions, destinations]
+                    properties:
+                      id: { type: string, format: uuid, description: "One of the link's paths, to change it; leave it out to add one." }
+                      name: { type: string, maxLength: 120 }
+                      active: { type: boolean, description: "Off skips the path; true when left out." }
+                      conditions: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/TrackingPathCondition" } }
+                      destinations:
+                        type: array
+                        minItems: 1
+                        maxItems: 20
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string, maxLength: 120 }
+                            url: { type: string, maxLength: 2000, description: "Required unless offer_id is given." }
+                            offer_id: { type: string, format: uuid, description: "One of the brand's active offers, instead of url." }
+                            lander_id: { type: string, format: uuid, description: "One of the brand's active landers, instead of url." }
+                            weight: { type: integer, minimum: 0, maximum: 10000 }
+                            daily_click_cap: { type: [integer, "null"], minimum: 0 }
+      responses:
+        "200":
+          description: The paths now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingLinkPaths" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracking-domains/{id}/fallback:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setTrackingDomainFallback
+      x-outflare-access: { scope: mailboxes.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Set where unknown redirect links on a tracking domain go
+      description: "Scope: mailboxes.manage. A redirect code that doesn't exist on the domain (mistyped, or from a deleted link) goes to this page instead of a not found page. '' takes it off."
+      tags: [tracking]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, maxLength: 2000, description: "A full address, such as https://northpeak.example/; '' for none." }
+      responses:
+        "200":
+          description: The tracking domain.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackingDomain" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/affiliate-network-templates:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listAffiliateNetworkTemplates
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List affiliate-network templates
+      description: |
+        Scope: analytics.read. The affiliate networks and network platforms Outflare has templates for
+        (integrations/affiliate-networks): the parameter in their offer links that carries the click id, and their macro
+        for each value Outflare's postback reads. Make a postback source from one with `network`, and its postback URL
+        comes written in the network's macros.
+      tags: [analytics]
+      responses:
+        "200":
+          description: Templates, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, kinds]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/AffiliateNetworkTemplate" } }
+                  kinds: { type: array, items: { type: string } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/flows:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listFlows
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the brand's flows
+      description: "Scope: analytics.read. The brand's reusable paths and destinations, by name, with how many links route by each."
+      tags: [analytics]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived, all] }, description: "active when left out." }
+      responses:
+        "200":
+          description: Flows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerFlow" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createFlow
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a flow
+      description: |
+        Scope: analytics.manage. A flow is a reusable set of rule-based paths and default destinations (pages, offers and
+        landers), as a link has. Give links the flow with PUT .../links/{link}/flow, and they route by it instead of their
+        own; an edit to the flow changes every one of them. Caps on a flow's destinations count the clicks of every link
+        that routes by it.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 120 }
+                paths: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/TrackingPathInput" } }
+                destinations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/TrackingDestinationInput" } }
+      responses:
+        "201":
+          description: The flow.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/flows/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getFlow
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get a flow
+      description: "Scope: analytics.read. With its paths and destinations, and today's clicks on each."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The flow.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerFlow" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateFlow
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Rename, archive or restore a flow
+      description: "Scope: analytics.manage. A flow that links route by can't be archived."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 120 }
+                status: { type: string, enum: [active, archived] }
+      responses:
+        "200":
+          description: The flow.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/flows/{id}/destinations:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setFlowDestinations
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Set a flow's default destinations
+      description: "Scope: analytics.manage. Replaces the list, as for a link's destinations, for every link that routes by the flow."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [destinations]
+              properties:
+                destinations: { type: array, maxItems: 20, items: { $ref: "#/components/schemas/TrackingDestinationInput" } }
+      responses:
+        "200":
+          description: The flow now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/flows/{id}/paths:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setFlowPaths
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Set a flow's paths
+      description: "Scope: analytics.manage. Replaces the paths, in order, as for a link's, for every link that routes by the flow."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths: { type: array, maxItems: 10, items: { $ref: "#/components/schemas/TrackingPathInput" } }
+      responses:
+        "200":
+          description: The flow now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerFlow" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/landers:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listLanders
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the brand's landers
+      description: "Scope: analytics.read. The pages the brand sends tracker clicks to before its offers, by name, with their click URLs and today's lander clicks."
+      tags: [analytics]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived, all] }, description: "active when left out." }
+      responses:
+        "200":
+          description: Landers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerLander" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createLander
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a lander
+      description: |
+        Scope: analytics.manage. `name` and `url` are required. A lander is a page clicks go to before an offer: make it a
+        link's destination with `lander_id`, beside the offers it leads to. Its calls to action link to `click_url` (an
+        offer or page of the same list, by weight) or one of `cta_urls` (the Nth of them), and the page carries `script`,
+        which adds the click id (ofclk) to those links. A call to action goes on only for a click Outflare sent to a lander
+        in the last day, on the brand's own tracking domain; anything else gets the domain's fallback page.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerLanderInput" }
+      responses:
+        "201":
+          description: The lander.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerLander" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/landers/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getLander
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get a lander
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The lander.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerLander" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateLander
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change, archive or restore a lander
+      description: "Scope: analytics.manage. A new URL goes to every destination that is the lander at once. A lander that is a destination can't be archived."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerLanderInput" }
+      responses:
+        "200":
+          description: The lander.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerLander" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/lander-clicks:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listLanderClicks
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List lander clicks
+      description: "Scope: analytics.read. Clicks on the brand's landers' calls to action, newest first, with where each went."
+      tags: [analytics]
+      parameters:
+        - { name: lander, in: query, schema: { type: string, format: uuid } }
+        - { name: click_id, in: query, schema: { type: string }, description: "The lander clicks of one redirect click." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Lander clicks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LanderClick" } }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/offers:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listOffers
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the brand's offers
+      description: "Scope: analytics.read. The pages the brand sends tracker clicks to, by name, with today's clicks and conversions against their caps."
+      tags: [analytics]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, archived, all] }, description: "active when left out." }
+        - { name: source, in: query, schema: { type: string, format: uuid }, description: "Only the offers of one postback source." }
+      responses:
+        "200":
+          description: Offers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerOffer" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createOffer
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add an offer
+      description: |
+        Scope: analytics.manage. `name` and `url` are required. An offer is a page clicks go to, usually on an affiliate network: give a link's
+        destination its `offer_id`. Its network's click id parameter (the postback source's click_id_param) is added to
+        its URL unless the URL carries {click_id}. A conversion on its click gets its payout (by the click's country) when
+        the postback sends none, or always when payout_mode is fixed. A daily cap counts clicks or conversions; once it is
+        reached, clicks go to the fallback offer, or to the link's other destinations.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerOfferInput" }
+      responses:
+        "201":
+          description: The offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerOffer" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/offers/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getOffer
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get an offer
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerOffer" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateOffer
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change, archive or restore an offer
+      description: "Scope: analytics.manage. A new URL goes to every destination that sends to the offer at once. An offer that is a destination can't be archived."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TrackerOfferInput" }
+      responses:
+        "200":
+          description: The offer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerOffer" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/postback-sources:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listPostbackSources
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the brand's postback sources
+      description: "Scope: analytics.read. Where the brand's tracker conversions come from: affiliate networks, offers' trackers, its own backend. The secret postback URL is shown only when a source is made or rotated."
+      tags: [analytics]
+      responses:
+        "200":
+          description: Postback sources, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/PostbackSource" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createPostbackSource
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a postback source
+      description: |
+        Scope: analytics.manage. Returns `postback_url` once: give it to the network. With `network` (a template from
+        GET .../affiliate-network-templates) it is written in the network's macros; otherwise put the network's own
+        macros in place of {click_id} (the ofclk the redirect added, which the network got as your sub id), {payout} and
+        the rest. A
+        postback is GET or POST (query, form or JSON) to https://<the brand's tracking domain>/t/<secret> with `cid` (or
+        clickid, click_id, subid), `payout` (or sum, revenue, amount), `currency`, `txid` (or transaction_id, orderid),
+        `type`, `status` (approved, pending or declined) and `p1` to `p20`. It answers only on the brand's own verified
+        tracking domain.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostbackSourceInput" }
+      responses:
+        "201":
+          description: The source, with its postback URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostbackSource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/postback-sources/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPostbackSource
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: Get a postback source
+      description: "Scope: analytics.read."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostbackSource" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updatePostbackSource
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change, archive or restore a postback source
+      description: "Scope: analytics.manage. An archived source's postback URL stops answering."
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PostbackSourceInput" }
+      responses:
+        "200":
+          description: The source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostbackSource" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/postback-sources/{id}/rotate:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rotatePostbackSource
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Give a postback source a new secret
+      description: "Scope: analytics.manage. Returns the new postback URL once; the old one stops working at once."
+      tags: [analytics]
+      responses:
+        "200":
+          description: The source, with its new postback URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PostbackSource" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracker-conversions:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrackerConversions
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List tracker conversions
+      description: "Scope: analytics.read. The click ledger: every conversion a postback source reported, with the click it credits, newest first, 100 a page (pass the last one's converted_at as before)."
+      tags: [analytics]
+      parameters:
+        - { name: source, in: query, schema: { type: string, format: uuid } }
+        - { name: campaign, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [approved, pending, declined] } }
+        - { name: offer, in: query, schema: { type: string, format: uuid } }
+        - { name: before, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Conversions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerConversion" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: uploadTrackerConversions
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Upload tracker conversions
+      description: |
+        Scope: analytics.manage. Records up to 1,000 conversions for one of the brand's postback sources, row by row,
+        following its duplicate policy and click expiry. A row with `click_id` (the ofclk) records a conversion; a row
+        with only `transaction_id` updates the `status` or `payout` of the source's conversion with that transaction id,
+        as networks report approvals and reversals later. Rows take the postback's names (`click_id`, `transaction_id`,
+        `payout`, `currency`, `type`, `status`, `converted_at`, `params` with p1 to p20). The answer says what happened to
+        each row; one refused row doesn't stop the others.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, conversions]
+              properties:
+                source: { type: string, format: uuid, description: "The postback source the conversions came from." }
+                conversions:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    type: object
+                    properties:
+                      click_id: { type: string, description: "The click's key (ofclk); leave it out to update by transaction_id." }
+                      transaction_id: { type: string, maxLength: 200 }
+                      payout: { oneOf: [{ type: number }, { type: string }] }
+                      currency: { type: string }
+                      type: { type: string }
+                      status: { type: string, enum: [approved, pending, declined] }
+                      converted_at: { type: string, description: "When it happened, such as 2026-11-10T09:30:00Z; now when left out." }
+                      params: { type: object, additionalProperties: { type: string }, description: "p1 to p20." }
+      responses:
+        "200":
+          description: What happened to each row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerConversionUpload" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracker-conversions/csv:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    post:
+      operationId: uploadTrackerConversionsCSV
+      x-outflare-access: { scope: analytics.manage, brand: true }
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - { name: source, in: query, required: true, schema: { type: string, format: uuid }, description: "The postback source the conversions came from." }
+      summary: Upload tracker conversions as CSV
+      description: |
+        Scope: analytics.manage. Up to 10,000 rows of a CSV file whose first row names the columns: click_id,
+        transaction_id, payout, currency, type, status, converted_at and p1 to p20 (any order, any case). Rows work as in
+        the JSON upload.
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: { type: string }
+      responses:
+        "200":
+          description: What happened to each row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TrackerConversionUpload" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/tracker-conversion-log:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listTrackerConversionLog
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List the tracker conversion log
+      description: |
+        Scope: analytics.read. Every postback and pixel call the brand's postback sources made in the last 30 days,
+        newest first: what it sent, what Outflare answered (status) and why (outcome and reason), so you can see why a
+        network's conversion wasn't recorded. Calls with an unknown secret have no brand and aren't kept.
+      tags: [analytics]
+      parameters:
+        - { name: source, in: query, schema: { type: string, format: uuid } }
+        - { name: via, in: query, schema: { type: string, enum: [postback, pixel] } }
+        - { name: outcome, in: query, schema: { type: string }, description: "accepted, duplicate, updated, wrong_domain, ip_refused, invalid, unknown_click, expired_click, rate_limited or error." }
+        - { name: click_id, in: query, schema: { type: string }, description: "Calls that named this click key." }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Calls.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrackerConversionCall" } }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/traffic-source-templates:
     parameters: [{ $ref: "#/components/parameters/BrandID" }]
@@ -6266,6 +7070,38 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "202": { $ref: "#/components/responses/MissionHeld" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/traffic-sources/{id}/postbacks:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listTrafficSourcePostbacks
+      x-outflare-access: { scope: analytics.read, brand: true }
+      summary: List conversions sent back to a traffic source
+      description: |
+        Scope: analytics.read. Each tracker conversion on the source's campaigns that its postback_rules send, newest
+        first: the payout sent, the URL called, and what the network answered. Sends are made by a job, retried up to five
+        times when the network can't be reached or answers 429 or 5xx, and never follow a redirect.
+      tags: [analytics]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [queued, sent, failed] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Fields" }
+      responses:
+        "200":
+          description: Sends.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/TrafficSourcePostbackSend" } }
+                  next_cursor: { type: [string, "null"] }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         default: { $ref: "#/components/responses/Error" }
   /v1/brands/{brand}/traffic-sources/{id}:
     parameters:
@@ -11905,6 +12741,665 @@ paths:
                 oneOf:
                   - { $ref: "#/components/schemas/Queued" }
                   - { $ref: "#/components/schemas/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/settings:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getBrandLinkOrderSettings
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Get link order settings
+      description: |
+        Scope: coverage.read. The person who may approve a paid link order
+        and mark it paid, and the domain-rating band used to find an
+        equivalent donor when a link is lost. Until someone saves settings,
+        approver_user_id is null and equivalent_dr_band is 10. Approve and
+        Paid stay blocked until an approver is set.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderSettings" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandLinkOrderSettings
+      x-outflare-access: { scope: coverage.approve, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Change link order settings
+      description: |
+        Scope: coverage.approve. A signed-in person only; API tokens cannot
+        call this. Send only what changes. approver_user_id must be a member
+        of this workspace who can approve coverage (owners and admins by
+        default). Send null to clear the approver. equivalent_dr_band is the
+        width of the rating band used to suggest an equivalent donor (1 to
+        50, default 10, so a donor rated 54 is matched with 50-59). Each
+        brand sets its own approver; the engine does not hard-code a person.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approver_user_id: { type: [string, "null"], format: uuid }
+                equivalent_dr_band: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderSettings" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/catalog:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandLinkOrderCatalog
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: List the link-order catalog
+      description: |
+        Scope: coverage.read. Donor profiles for paid link orders, newest first.
+        Page with cursor=next_cursor. Archived rows are omitted unless archived=true
+        or archived=all. Prices are the current published coverage rates, in minor units.
+      tags: [coverage]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { name: q, in: query, schema: { type: string }, description: "Filter by domain." }
+        - { name: pbn, in: query, schema: { type: boolean } }
+        - { name: niche, in: query, schema: { type: string } }
+        - { name: archived, in: query, schema: { type: string, enum: ["true", "false", "all"] }, description: "Default omits archived rows." }
+      responses:
+        "200":
+          description: A page of catalog rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkOrderDonor" } }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandLinkOrderCatalog
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Add a donor to the catalog
+      description: |
+        Scope: coverage.manage. Finds or creates the coverage publisher for the
+        domain and upserts one donor profile. A domain already in the catalog is
+        updated, not duplicated. Prices replace the current published rate for
+        each currency. Amounts are the donor price only; there is no commission
+        or margin.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinkOrderDonorWrite" }
+      responses:
+        "201":
+          description: The catalog row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderDonor" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/catalog/import:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    post:
+      operationId: importBrandLinkOrderCatalog
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Import catalog rows from CSV
+      description: |
+        Scope: coverage.manage. The first row is the header and must include domain.
+        A repeated domain updates the existing profile. A bad row is listed in
+        errors and does not abort the rest of the file. Send text/csv, or JSON
+        with a csv field so agents can pass a string. Amounts are the donor price
+        only.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+          application/json:
+            schema:
+              type: object
+              required: [csv]
+              properties:
+                csv: { type: string, description: "The CSV file contents, including the header row." }
+      responses:
+        "200":
+          description: How many rows were created or updated, and any row errors.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderCatalogImport" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/catalog/items/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandLinkOrderCatalogItem
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Get a catalog row
+      description: "Scope: coverage.read. One donor profile, including archived rows. The item path is /catalog/items/{id} so it does not collide with /link-orders/{id}/... on the Go mux."
+      tags: [coverage]
+      responses:
+        "200":
+          description: The catalog row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderDonor" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandLinkOrderCatalogItem
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Update a catalog row
+      description: |
+        Scope: coverage.manage. Send only what changes. Domain cannot change.
+        Prices, when sent, replace the current published rate for those currencies.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LinkOrderDonorWrite" }
+      responses:
+        "200":
+          description: The catalog row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderDonor" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/summary:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getBrandLinkOrderSummary
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Summarize link orders
+      description: |
+        Scope: coverage.read. Counts by status, and donor amounts by currency.
+        Committed is approved plus published not yet paid; spent is paid and
+        verified; lost is lost. USD and EUR are never summed.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The summary.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderSummary" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/budget:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: getBrandLinkOrderBudget
+      x-outflare-access: { scope: coverage.finance.read, brand: true }
+      summary: Get the link-order budget
+      description: |
+        Scope: coverage.finance.read. The current period's coverage budgets tagged
+        link_orders, with committed and spent already applied, one cap per currency.
+        Missing a budget means there is no cap for that currency.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The current budgets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrderBudget" }
+        "403": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders:
+    parameters: [{ $ref: "#/components/parameters/BrandID" }]
+    get:
+      operationId: listBrandLinkOrders
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: List link orders
+      description: "Scope: coverage.read. Newest first. Page with cursor=next_cursor."
+      tags: [coverage]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { $ref: "#/components/parameters/Fields" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/LinkOrderStatus" } }
+        - { name: donor_profile_id, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, schema: { type: string }, description: "Filter by domain, target URL, or published URL." }
+      responses:
+        "200":
+          description: A page of orders.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, next_cursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkOrder" } }
+                  next_cursor: { $ref: "#/components/schemas/NextCursor" }
+        default: { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Request a link order
+      description: |
+        Scope: coverage.manage. Opens a requested order against a catalog donor.
+        The guarantee window defaults to the catalog row, then to 30 days.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [donor_profile_id, target_url]
+              properties:
+                donor_profile_id: { type: string, format: uuid }
+                target_url: { type: string }
+                slot_type: { type: string }
+                rel_requested: { type: string }
+                guarantee_days: { type: [integer, "null"] }
+                notes: { type: [string, "null"] }
+                owner_user_id: { type: [string, "null"], format: uuid }
+                replaces_order_id: { type: [string, "null"], format: uuid }
+      responses:
+        "201":
+          description: The new order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrandLinkOrder
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: Get a link order
+      description: "Scope: coverage.read."
+      tags: [coverage]
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Update a link order
+      description: |
+        Scope: coverage.manage. Fields that are still mutable before publication.
+        After approval the donor amount cannot change. Paid, verified, and lost
+        orders cannot be edited.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                donor_profile_id: { type: string, format: uuid }
+                target_url: { type: string }
+                slot_type: { type: [string, "null"] }
+                rel_requested: { type: [string, "null"] }
+                guarantee_days: { type: [integer, "null"] }
+                notes: { type: [string, "null"] }
+                owner_user_id: { type: [string, "null"], format: uuid }
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/history:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listBrandLinkOrderHistory
+      x-outflare-access: { scope: coverage.read, brand: true }
+      summary: List a link order's history
+      description: "Scope: coverage.read. Oldest first."
+      tags: [coverage]
+      responses:
+        "200":
+          description: The events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/LinkOrderEvent" } }
+        "404": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/quote:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: quoteBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Quote a link order
+      description: |
+        Scope: coverage.manage. Sets the quoted donor price and moves the order
+        to quoted. Allowed from requested, quoted, or negotiating. Amounts are
+        the donor price only, in minor units.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount_minor, currency]
+              properties:
+                amount_minor: { type: integer, format: int64, minimum: 0 }
+                currency: { type: string, enum: [USD, EUR] }
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/negotiate:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: negotiateBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Mark a link order as negotiating
+      description: "Scope: coverage.manage. Allowed from quoted."
+      tags: [coverage]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: [string, "null"] }
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/approve:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveBrandLinkOrder
+      x-outflare-access: { scope: coverage.approve, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Approve a link order
+      description: |
+        Scope: coverage.approve. A signed-in person only, and only the brand's
+        designated approver. Freezes the quoted donor amount. A budget tagged
+        link_orders for this currency, when present, is a hard cap; a miss is
+        409. No budget means there is no cap. Allowed from quoted or negotiating.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/publish:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: publishBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Publish a link order
+      description: |
+        Scope: coverage.manage. Records the live URL, creates or reuses a paid
+        coverage placement (the same URL and inventory is not added twice), and
+        moves the order to published. Allowed from approved.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [published_url]
+              properties:
+                published_url: { type: string }
+                proof_url: { type: string }
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/check:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Queue a live-link check
+      description: |
+        Scope: coverage.manage. Enqueues the existing coverage.check job for the
+        order's placement. Updating last_check_* from the job lands in a later
+        change. The order must already be published.
+      tags: [coverage]
+      responses:
+        "202":
+          description: The check was queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued, placement_id]
+                properties:
+                  queued: { type: boolean }
+                  placement_id: { type: string, format: uuid }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/pay:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: payBrandLinkOrder
+      x-outflare-access: { scope: coverage.approve, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Mark a link order paid
+      description: |
+        Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+        only, and only the brand's designated approver. Allowed after publication
+        and a passing live-link check (the link is on the page and the target
+        matches). Records a coverage invoice and payment for the frozen donor
+        amount; it never sends money. Allowed from published or verified.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The order, now paid, with a payment row.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/verify:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: verifyBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Verify a published link
+      description: |
+        Scope: coverage.manage. Allowed from published or paid when the last
+        live-link check has passed.
+      tags: [coverage]
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/lost:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: markBrandLinkOrderLost
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Mark a link order lost
+      description: "Scope: coverage.manage. Allowed from published, paid, or verified."
+      tags: [coverage]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: [string, "null"] }
+      responses:
+        "200":
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/replace:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: replaceBrandLinkOrder
+      x-outflare-access: { scope: coverage.manage, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Open a replacement order
+      description: |
+        Scope: coverage.manage. Opens a new requested order that takes the place
+        of a lost one. One open (not lost) replacement is allowed at a time.
+        Cycles are rejected. Pass the replacement donor in donor_profile_id;
+        searching for an equivalent donor is a later change.
+      tags: [coverage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [donor_profile_id]
+              properties:
+                donor_profile_id: { type: string, format: uuid }
+                notes: { type: [string, "null"] }
+      responses:
+        "200":
+          description: The new requested order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/brands/{brand}/link-orders/{id}/credit:
+    parameters:
+      - { $ref: "#/components/parameters/BrandID" }
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: creditBrandLinkOrder
+      x-outflare-access: { scope: coverage.approve, brand: true }
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      summary: Credit a lost link order
+      description: |
+        Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+        only, and only the brand's designated approver. Allowed on a lost order
+        when a replacement is not possible (no open replacement). Records a
+        credit invoice and a reversal when the order was already paid. It never
+        sends money.
+      tags: [coverage]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: [string, "null"] }
+      responses:
+        "200":
+          description: The order, with a credit payment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkOrder" }
+        "202": { $ref: "#/components/responses/MissionHeld" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -47579,6 +49074,30 @@ webhooks:
             schema: { $ref: "#/components/schemas/WebhookEvent" }
       responses:
         "200": { description: Any 2xx answer means received; anything else is retried. }
+  tracker_conversion.created:
+    post:
+      operationId: webhook_tracker_conversion_created
+      summary: "A postback source reported a conversion, by postback, pixel or upload, and it was recorded in the click ledger. data has conversion_id, source_id, click_key, campaign_id, link_id, transaction_id, type, status (approved, pending or declined), payout (in the currency's main unit, as a string), currency, record_id (the person, when known), postbacks, converted_at, clicked_at and offer_id (the offer its click went to)."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
+  tracker_conversion.updated:
+    post:
+      operationId: webhook_tracker_conversion_updated
+      summary: "A tracker conversion changed: a repeated transaction id updated it or added to its payout, or an upload changed its status or payout. data is as for tracker_conversion.created, as it is now."
+      tags: [webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Any 2xx answer means received; anything else is retried. }
   partner_conversion.created:
     post:
       operationId: webhook_partner_conversion_created
@@ -49024,7 +50543,7 @@ components:
       required: [id, type, created_at, workspace_id, actor, target, request_id, data]
       properties:
         id: { type: string, description: "Unique per event, and the webhook-id header. Use it to ignore repeats.", example: evt_48213 }
-        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, ad_campaign.paused, ad_campaign.resumed, ad_campaign.budget_changed, ads.paused_all, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, agent_run.created, agent_run.updated, agent_run.paused, agent_run.resumed, agent_run.stopped, agent_run.completed, action.held, action.approved, action.rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, record.unmerged, batch.undone, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, content.approved, content.delivered, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, lifecycle.moved, transaction.created, transaction.updated, transaction.deleted, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, coverage_record.deleted, workspace.updated, webhook.test] }
+        type: { type: string, enum: [lead.replied, lead.unsubscribed, inbox.replied, inbox.updated, inbox.classified, lead.bounced, mailbox.auto_paused, lead.created, lead.updated, lead.deleted, leads.imported, suppressions.added, suppression.removed, lead_list.created, lead_list.leads_added, lead_list.run_started, lead_list.build_done, lead_list.build_failed, lead_list.refresh_done, lead_list.refresh_failed, lead_list.enrich_done, lead_list.enrich_failed, import.done, import.failed, sequence.created, sequence.updated, sequence.activated, sequence.paused, sequence.archived, sequence.deleted, sequence.steps_updated, sequence.leads_enrolled, enrollment.stopped, mailbox.imported, mailbox.updated, mailbox.paused, mailbox.resumed, mailbox.stage_changed, mailbox.deleted, domain.added, domain.paused, domain.resumed, domain.removed, email.queued, email.sent, email.delivered, email.bounced, email.complained, email.failed, email.suppressed, email.cancelled, email.unsubscribed, email.opened, email.clicked, email.preferences_changed, email_domain.verified, email_domain.verification_failed, email_provider.events_failed, email_template.published, meeting.created, meeting.updated, meeting.deleted, deal.created, deal.updated, deal.deleted, spend.recorded, integration.connected, integration.updated, integration.disconnected, connect_request.created, deploy.detected, deploy.failed, digest.ready, ai_budget.warned, ai_budget.reached, connection_limit.warned, connection_limit.reached, ad_campaign.paused, ad_campaign.resumed, ad_campaign.budget_changed, ads.paused_all, experiment.started, experiment.concluded, mission.created, mission.updated, mission.submitted, mission.approved, mission.paused, mission.resumed, mission.stopped, mission.completed, mission.action_held, mission.action_approved, mission.action_rejected, agent_run.created, agent_run.updated, agent_run.paused, agent_run.resumed, agent_run.stopped, agent_run.completed, action.held, action.approved, action.rejected, playbook.started, playbook_automation.created, playbook_automation.updated, playbook_automation.approved, playbook_automation.paused, playbook_automation.held, playbook_automation.ran, playbook_automation.deleted, infra.plan_created, infra.plan_approved, infra.ordered, infra.order_failed, infra.domains_bought, infra.mailbox_joined, infra.plan_warming, infra.plan_ready, infra.plan_cancelled, fix.found, fix.updated, fix.started, fix.verify_requested, fix.confirmed, fix.reopened, record.created, record.bulk_created, record.bulk_updated, record.updated, record.merged, identity.verified, identity.closed, relationship.added, relationship.ended, consent.granted, consent.withdrawn, consent.bulk_withdrawn, privacy_export.ready, record.soft_deleted, deletion.restored, record.unmerged, batch.undone, brand.created, brand.updated, knowledge.created, knowledge.updated, knowledge.deleted, knowledge.restored, content.approved, content.delivered, email_broadcast.created, email_broadcast.started, email_broadcast.sent, email_broadcast.failed, email_broadcast.cancelled, journey.created, journey.updated, journey_run.entered, journey_run.exited, rule.created, rule.updated, rule.activated, rule.paused, rule.archived, rule.fired, lifecycle.moved, transaction.created, transaction.updated, transaction.deleted, brand_setup.installed, brand_setup.install_failed, install.issue_opened, install.issue_resolved, seo_site.created, seo_site.verified, seo_site.unverified, seo_site.deleted, crawl.started, crawl.stopped, crawl.done, link_pitch.drafted, link_pitch.approved, link_pitch.rejected, link_prospect.overdue, backlink.new, backlink.lost, backlink.regained, competitor.page_removed, competitor_link.new, outbound_link.broken, asset.published, mention.found, link_prospect.found, link_prospect.checked, link_prospect.excluded, link_prospect.pitched, link_prospect.replied, link_prospect.agreed, link_prospect.live, link_prospect.declined, link_prospect.removed, link_prospect.reopened, link_prospect.updated, link_prospect.deleted, social_action.drafted, social_action.approved, social_action.rejected, social_action.done, social_action.failed, review.posted, review.replied, review.reply_drafted, review_momentum.changed, alert.raised, visitor.became_hot, partner_program.created, partner_program.updated, partner_program.rules_updated, partner.created, partner.updated, partner_referral.created, tracker_conversion.created, tracker_conversion.updated, partner_conversion.created, partner_reward.created, partner_reward.approved, partner_reward.rejected, partner_reward.reversed, partner_reward.fulfilled, partner_payout.created, partner_payout.paid, partner_payout.canceled, coverage_record.created, coverage_record.updated, coverage_record.imported, coverage_record.check_queued, coverage_record.checked, coverage_record.review_queued, coverage_record.reviewed, coverage_record.approved, coverage_record.discovered, coverage_record.confirmed, coverage_record.deleted, workspace.updated, webhook.test] }
         created_at: { type: string, format: date-time }
         workspace_id: { type: string, format: uuid }
         actor: { $ref: "#/components/schemas/WebhookRef" }
@@ -50664,7 +52183,7 @@ components:
                     description: |
                       incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
                       extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
-                      code), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
+                      code), email_changed (a later run brought over the partner's new email), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
                       give by id either; message has the HTTP status), partner_id_missing (a promo code names no partner
                       under a field the import reads; message lists its fields), partners_unlisted (the platform reported
                       more partners than came over; message has the counts and whether any of the others has referrals),
@@ -51174,7 +52693,7 @@ components:
         created_at: { type: string, format: date-time }
     TrackingCampaign:
       type: object
-      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at, traffic_source_id]
+      required: [id, name, slug, code, channel, source, medium, brand_id, object_kind, object_id, landing_url, landing_link, redirect_links, status, links, clicks, landed, created_at, updated_at, traffic_source_id, redirect_mode]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -51196,6 +52715,7 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         traffic_source_id: { type: [string, "null"], format: uuid, description: "The brand's traffic source the campaign buys clicks from; null for none." }
+        redirect_mode: { $ref: "#/components/schemas/RedirectMode" }
     TrackingCampaignInput:
       type: object
       properties:
@@ -51208,6 +52728,7 @@ components:
         status: { type: string, enum: [active, archived], description: Update only. }
         redirect_links: { type: boolean, description: "Give new links a short redirect link unless a link says otherwise. Links made before keep what they have." }
         traffic_source: { type: string, description: "The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url." }
+        redirect_mode: { $ref: "#/components/schemas/RedirectMode" }
     TrackingLink:
       type: object
       required: [id, campaign_id, url, content, term, tagged_url, redirect_url, campaign_url, clicks, landed, created_at]
@@ -51223,25 +52744,280 @@ components:
         clicks: { type: integer, description: "Clicks on the redirect link, without link scanners and previews; 0 without one." }
         landed: { type: integer, description: "How many of those clicks reached a page running the website tracking snippet; the rest left before the page loaded, or landed where the snippet doesn't run." }
         created_at: { type: string, format: date-time }
-    TrackingLinkDestinations:
+    TrackingPathCondition:
       type: object
-      required: [link_id, fallback_url, destinations]
+      required: [field, op, values]
+      properties:
+        field:
+          type: string
+          enum: [country, region, city, isp, asn, device, device_brand, os, os_version, browser, browser_version, language, referrer, ip, weekday, hour, visitor,
+            field1, field2, field3, field4, field5, field6, field7, field8, field9, field10, field11, field12, field13, field14, field15, field16, field17, field18, field19, field20]
+        op: { type: string, enum: [is, is_not] }
+        values: { type: array, minItems: 1, maxItems: 100, items: { type: string, maxLength: 200 }, description: "The condition matches any of them." }
+    TrackingLinkPaths:
+      type: object
+      required: [link_id, paths, needs_domain]
       properties:
         link_id: { type: string, format: uuid }
+        needs_domain: { type: boolean, description: "The brand has no verified tracking domain, so the paths aren't used." }
+        paths:
+          type: array
+          items:
+            type: object
+            required: [id, name, active, conditions, destinations]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              active: { type: boolean }
+              conditions: { type: array, items: { $ref: "#/components/schemas/TrackingPathCondition" } }
+              destinations: { $ref: "#/components/schemas/TrackingLinkDestinations/properties/destinations" }
+    RedirectMode:
+      type: string
+      enum: ["302", "307", meta, double_meta]
+      description: |
+        How the campaign's redirect links send people on: 302 (the default, fastest), 307, meta (a page that moves on at
+        once and sends no referrer) or double_meta (two such pages, so even browsers that ignore the referrer policy send
+        none). Modes other than 302, destinations and paths work only on the brand's own verified tracking domain; on the
+        shared domain every click goes to the link's own page with a 302.
+    TrackingLinkDestinations:
+      type: object
+      required: [link_id, fallback_url, destinations, needs_domain]
+      properties:
+        link_id: { type: string, format: uuid }
+        needs_domain: { type: boolean, description: "The brand has no verified tracking domain, so the destinations aren't used: tracker links run only on the workspace's own domains." }
         fallback_url: { type: string, description: "The link's own page, where clicks go when every destination is capped or stopped." }
         destinations:
           type: array
           items:
             type: object
-            required: [id, name, url, weight, daily_click_cap, clicks_today, open]
+            required: [id, name, url, weight, daily_click_cap, clicks_today, open, offer_id, offer_name, lander_id, lander_name]
             properties:
               id: { type: string, format: uuid }
               name: { type: string }
-              url: { type: string }
+              url: { type: string, description: "The page; for an offer, the offer's URL (kept in step with it)." }
+              offer_id: { type: [string, "null"], format: uuid, description: "The offer it sends to; null for a page of its own." }
+              offer_name: { type: [string, "null"] }
+              lander_id: { type: [string, "null"], format: uuid, description: "The lander it is; null for none." }
+              lander_name: { type: [string, "null"] }
               weight: { type: integer }
               daily_click_cap: { type: [integer, "null"], description: "Clicks a day it takes; null for no cap, 0 stops it." }
               clicks_today: { type: integer, description: "Its clicks today (UTC), without link scanners and previews." }
-              open: { type: boolean, description: "It takes clicks now: a weight above 0 and room in its cap." }
+              open: { type: boolean, description: "It takes clicks now: a weight above 0 and room in its cap. For an offer, its own cap_reached (GET .../offers) says whether the offer still takes them." }
+    PostbackSource:
+      type: object
+      required: [id, brand_id, name, token_hint, ip_allowlist, duplicate_policy, click_expiry_days, currency, status, network, click_id_param, postback_query, conversions, created_at, updated_at, needs_domain]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        token_hint: { type: string, description: "The secret's first characters, to tell sources apart." }
+        ip_allowlist: { type: array, items: { type: string }, description: "Addresses or ranges postbacks must come from; empty for any." }
+        duplicate_policy: { type: string, enum: [ignore, new, update, add], description: "What a transaction id seen before does: ignore it, record a new conversion, update the one recorded, or add its payout (upsells)." }
+        click_expiry_days: { type: integer, description: "How long after its click a conversion still counts." }
+        currency: { type: string, description: "The currency of payouts that don't say." }
+        status: { type: string, enum: [active, archived] }
+        network: { type: string, description: "The affiliate-network template it follows (GET .../affiliate-network-templates); '' for a custom source." }
+        click_id_param: { type: string, description: "The parameter in its offer links that carries the click id, added to the URLs of its offers that don't carry {click_id}; '' adds none." }
+        postback_query: { type: string, description: "The postback URL's query in the network's macros, such as cid={sub1}&payout={payout}; Outflare's own token names for a custom source." }
+        conversions: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        postback_url: { type: string, description: "The URL to give the network: the secret and postback_query; only when the source is made or rotated." }
+        needs_domain: { type: boolean, description: "The brand has no verified tracking domain, where postbacks answer." }
+    PostbackSourceInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 120 }
+        ip_allowlist: { type: array, maxItems: 50, items: { type: string } }
+        duplicate_policy: { type: string, enum: [ignore, new, update, add] }
+        click_expiry_days: { type: integer, minimum: 1, maximum: 365 }
+        currency: { type: string }
+        status: { type: string, enum: [active, archived], description: Update only. }
+        network: { type: string, maxLength: 40, description: "An affiliate-network template's id, so the postback URL carries its macros and its offers its click id parameter; '' for a custom source." }
+        click_id_param: { type: string, maxLength: 64, description: "The parameter in its offer links that carries the click id, such as sub1; the template's when left out, '' for none." }
+    TrackerConversionUpload:
+      type: object
+      required: [accepted, updated, duplicate, failed, rows]
+      properties:
+        accepted: { type: integer }
+        updated: { type: integer }
+        duplicate: { type: integer }
+        failed: { type: integer }
+        rows:
+          type: array
+          items:
+            type: object
+            required: [row, outcome]
+            properties:
+              row: { type: integer, description: "Its place in the upload, from 1." }
+              outcome: { type: string, enum: [accepted, updated, duplicate, failed] }
+              conversion_id: { type: string, format: uuid }
+              error: { type: string, description: "Why a failed row wasn't recorded." }
+    TrackerConversionCall:
+      type: object
+      required: [id, source_id, conversion_id, via, method, request, click_key, status, outcome, reason, duration_ms, request_id, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        conversion_id: { type: [string, "null"], format: uuid, description: "The conversion it recorded or updated." }
+        via: { type: string, enum: [postback, pixel] }
+        method: { type: string, enum: [GET, POST] }
+        request: { type: object, additionalProperties: { type: string }, description: "The parameters it sent (up to 40, each cut to 200 characters)." }
+        click_key: { type: string }
+        status: { type: integer, description: "What Outflare answered; a pixel always answers 200." }
+        outcome: { type: string }
+        reason: { type: string, description: "Why it wasn't recorded, in words." }
+        duration_ms: { type: integer }
+        request_id: { type: string }
+        created_at: { type: string, format: date-time }
+    TrackerConversion:
+      type: object
+      required: [id, source_id, click_key, campaign_id, link_id, offer_id, clicked_at, transaction_id, type, status, payout, currency, params, record_id, postbacks, converted_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        source_id: { type: string, format: uuid }
+        click_key: { type: string, description: The redirect click it credits (its ofclk). }
+        campaign_id: { type: [string, "null"], format: uuid }
+        link_id: { type: [string, "null"], format: uuid }
+        offer_id: { type: [string, "null"], format: uuid, description: "The offer its click went to." }
+        clicked_at: { type: string, format: date-time }
+        transaction_id: { type: string, description: "The network's transaction id, or the click key and type when it sent none." }
+        type: { type: string, description: "Such as conversion, lead or sale." }
+        status: { type: string, enum: [approved, pending, declined] }
+        payout: { type: string, description: "In the currency's main unit, such as 12.5." }
+        currency: { type: string }
+        params: { type: object, additionalProperties: { type: string }, description: "p1 to p20, by number." }
+        record_id: { type: [string, "null"], format: uuid, description: "The person, when the click's visit knew them." }
+        postbacks: { type: integer, description: "How many postbacks named its transaction id." }
+        converted_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TrackerOffer:
+      type: object
+      required: [id, brand_id, name, url, source_id, payout_mode, payout, currency, country_payouts, conversion_type, daily_cap, cap_kind, fallback_offer_id, status, missing_click_id, tracking_url, clicks_today, conversions_today, cap_reached, destinations, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        url: { type: string, description: "The offer's page, which can carry tokens such as {click_id} and {field1}." }
+        source_id: { type: [string, "null"], format: uuid, description: "The postback source (affiliate network) it pays through." }
+        payout_mode: { type: string, enum: [postback, fixed], description: "postback: what the postback says, else this payout; fixed: this payout, whatever the postback says." }
+        payout: { type: string, description: "In the currency's main unit, such as 12.5." }
+        currency: { type: string }
+        country_payouts: { type: object, additionalProperties: { type: string }, description: "Payouts by the click's country, such as {\"US\": \"3.25\"}, before payout." }
+        conversion_type: { type: string, description: "The type a postback that names none gets; '' leaves it as conversion." }
+        daily_cap: { type: [integer, "null"], description: "Clicks or conversions a day (UTC) it takes; null for no cap, 0 stops it." }
+        cap_kind: { type: string, enum: [clicks, conversions] }
+        fallback_offer_id: { type: [string, "null"], format: uuid, description: "Where its clicks go while it is capped." }
+        status: { type: string, enum: [active, archived] }
+        missing_click_id: { type: boolean, description: "The URL carries no {click_id} and its network adds none, so a postback can't name the click." }
+        tracking_url: { type: string, description: "The URL a click goes to: url with the click id its network takes added." }
+        clicks_today: { type: integer, description: "Its clicks today (UTC), without link scanners and previews." }
+        conversions_today: { type: integer, description: "Its conversions today (UTC), without declined ones." }
+        cap_reached: { type: boolean }
+        destinations: { type: integer, description: "How many link destinations send to it." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TrackerOfferInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 120 }
+        url: { type: string, maxLength: 2000, description: "The offer's page; it can carry tokens such as {click_id}." }
+        source_id: { type: string, description: "One of the brand's postback sources (its affiliate network); '' for none." }
+        payout_mode: { type: string, enum: [postback, fixed] }
+        payout: { type: [number, string], description: "In the currency's main unit, such as 12.50." }
+        currency: { type: string }
+        country_payouts: { type: object, maxProperties: 250, additionalProperties: { type: [number, string] }, description: "Payouts by two-letter country code; replaces the list." }
+        conversion_type: { type: string, maxLength: 40 }
+        daily_cap: { type: [integer, "null"], minimum: 0 }
+        cap_kind: { type: string, enum: [clicks, conversions], description: "conversions when left out." }
+        fallback_offer_id: { type: string, description: "Another of the brand's active offers; '' for none." }
+        status: { type: string, enum: [active, archived], description: "Update only. An offer that is a link's destination can't be archived." }
+    TrackingDestinationInput:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: "One of these destinations, to change it and keep today's count; leave it out to add one." }
+        name: { type: string, maxLength: 120 }
+        url: { type: string, maxLength: 2000, description: "The page, which can carry tokens such as {click_id}. Required unless offer_id or lander_id is given." }
+        offer_id: { type: string, format: uuid, description: "One of the brand's active offers, instead of url." }
+        lander_id: { type: string, format: uuid, description: "One of the brand's active landers, instead of url." }
+        weight: { type: integer, minimum: 0, maximum: 10000, description: "100 when left out; 0 sends it no clicks." }
+        daily_click_cap: { type: [integer, "null"], minimum: 0 }
+    TrackingPathInput:
+      type: object
+      required: [conditions, destinations]
+      properties:
+        id: { type: string, format: uuid, description: "One of these paths, to change it; leave it out to add one." }
+        name: { type: string, maxLength: 120 }
+        active: { type: boolean, description: "Off skips the path; true when left out." }
+        conditions: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/TrackingPathCondition" } }
+        destinations: { type: array, minItems: 1, maxItems: 20, items: { $ref: "#/components/schemas/TrackingDestinationInput" } }
+    TrackerFlow:
+      type: object
+      required: [id, brand_id, name, status, links, paths, destinations, needs_domain, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        status: { type: string, enum: [active, archived] }
+        links: { type: integer, description: "How many campaign links route by it: an edit changes them all." }
+        paths: { $ref: "#/components/schemas/TrackingLinkPaths/properties/paths" }
+        destinations: { $ref: "#/components/schemas/TrackingLinkDestinations/properties/destinations" }
+        needs_domain: { type: boolean, description: "The brand has no verified tracking domain, so the flow isn't used." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TrackingLinkFlow:
+      type: object
+      required: [link_id, flow_id]
+      properties:
+        link_id: { type: string, format: uuid }
+        flow_id: { type: [string, "null"], format: uuid, description: "The flow the link routes by; null for its own paths and destinations." }
+    TrackerLander:
+      type: object
+      required: [id, brand_id, name, url, ctas, status, click_url, cta_urls, script, lander_clicks_today, destinations, needs_domain, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        brand_id: { type: string, format: uuid }
+        name: { type: string }
+        url: { type: string, description: "The lander's page; it can carry tokens such as {click_id}, and gets the click id as ofclk." }
+        ctas: { type: integer, description: "How many calls to action it has." }
+        status: { type: string, enum: [active, archived] }
+        click_url: { type: string, description: "Where a call to action links to go on to an offer or page of the lander's list, by weight: https://<tracking domain>/click." }
+        cta_urls: { type: array, items: { type: string }, description: "Where each call to action links to go to the Nth offer or page of the list: .../click/1 to .../click/N." }
+        script: { type: string, description: "The script tag the lander's page carries: it adds the click id to its links to /click. It stores nothing in the browser." }
+        lander_clicks_today: { type: integer, description: "Clicks on its calls to action today (UTC), without link scanners and previews." }
+        destinations: { type: integer, description: "How many link destinations it is." }
+        needs_domain: { type: boolean, description: "The brand has no verified tracking domain, where /click answers." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TrackerLanderInput:
+      type: object
+      properties:
+        name: { type: string, maxLength: 120 }
+        url: { type: string, maxLength: 2000 }
+        ctas: { type: integer, minimum: 1, maximum: 100, description: "1 when left out." }
+        status: { type: string, enum: [active, archived], description: "Update only. A lander that is a link's destination can't be archived." }
+    LanderClick:
+      type: object
+      required: [id, lander_id, click_key, cta, destination_id, offer_id, likely_bot, clicked_at]
+      properties:
+        id: { type: string }
+        lander_id: { type: [string, "null"], format: uuid }
+        click_key: { type: string, description: "The redirect click it continues (its ofclk)." }
+        cta: { type: integer, description: "The call to action, from /click/N; 0 for /click." }
+        destination_id: { type: [string, "null"], format: uuid, description: "Where it went; null for the link's own page." }
+        offer_id: { type: [string, "null"], format: uuid }
+        likely_bot: { type: boolean }
+        clicked_at: { type: string, format: date-time }
+    AffiliateNetworkTemplate:
+      type: object
+      required: [id, name, kind, click_id_param, macros]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [platform, network], description: "platform: software many networks run on; network: one network." }
+        click_id_param: { type: string, description: "The parameter in the network's offer links where the click id goes, such as sub1." }
+        macros: { type: object, additionalProperties: { type: string }, description: "The network's macro for each postback value it has: cid, payout, txid, currency, status and type." }
+        note: { type: string }
     TrafficSourceParam:
       type: object
       required: [param, token]
@@ -51283,7 +53059,7 @@ components:
         note: { type: string, description: "Anything a person setting it up needs to know." }
     TrafficSource:
       type: object
-      required: [id, brand_id, name, template, currency, click_id, cost, parameters, postback, status, campaigns, created_at, updated_at]
+      required: [id, brand_id, name, template, currency, click_id, cost, parameters, postback, postback_rules, status, campaigns, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: string, format: uuid }
@@ -51294,6 +53070,7 @@ components:
         cost: { $ref: "#/components/schemas/TrafficSourceParam" }
         parameters: { type: array, items: { $ref: "#/components/schemas/TrafficSourceParameter" } }
         postback: { $ref: "#/components/schemas/TrafficSourcePostback" }
+        postback_rules: { $ref: "#/components/schemas/TrafficSourcePostbackRules" }
         status: { type: string, enum: [active, archived] }
         campaigns: { type: integer, description: "How many campaigns use it." }
         created_at: { type: string, format: date-time }
@@ -51313,7 +53090,42 @@ components:
           properties:
             url: { type: string, maxLength: 2000, description: "Where the network takes a conversion, with Outflare's tokens; '' for none." }
             method: { type: string, enum: [GET, POST], description: GET when left out. }
+        postback_rules:
+          type: object
+          description: "The send-back rules to change; the others stay."
+          properties:
+            share: { type: integer, minimum: 0, maximum: 1000 }
+            decimals: { type: integer, minimum: 0, maximum: 6 }
+            min_payout: { type: [number, string] }
+            types: { type: array, maxItems: 20, items: { type: string } }
+            statuses: { type: array, items: { type: string, enum: [approved, pending, declined] } }
+            resend: { type: boolean }
         status: { type: string, enum: [active, archived], description: Update only. }
+    TrafficSourcePostbackRules:
+      type: object
+      required: [share, decimals, min_payout, types, statuses, resend]
+      description: "Which tracker conversions on the source's campaigns its postback is sent for, and with what payout. Each state of a conversion is sent once."
+      properties:
+        share: { type: integer, description: "The percentage of the payout sent: 100 (the default) sends it all." }
+        decimals: { type: integer, description: "The decimals the payout sent is rounded to; 2 by default." }
+        min_payout: { type: string, description: "The smallest payout sent, after the share; smaller conversions aren't sent." }
+        types: { type: array, items: { type: string }, description: "The conversion types sent; empty for every type." }
+        statuses: { type: array, items: { type: string, enum: [approved, pending, declined] }, description: "The statuses sent; approved by default." }
+        resend: { type: boolean, description: "Send a conversion again when its status or payout changes." }
+    TrafficSourcePostbackSend:
+      type: object
+      required: [id, conversion_id, status, payout, url, http_status, error, attempts, sent_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        conversion_id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, sent, failed] }
+        payout: { type: string, description: "The payout sent: the source's share, rounded." }
+        url: { type: string, description: "The URL called, filled in." }
+        http_status: { type: [integer, "null"] }
+        error: { type: string }
+        attempts: { type: integer }
+        sent_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
     Exclusion:
       type: object
       description: |
@@ -57481,6 +59293,174 @@ components:
       properties:
         value: { type: string }
         links: { type: integer }
+    LinkOrderSettings:
+      type: object
+      required: [approver_user_id, equivalent_dr_band, updated_at, updated_by]
+      properties:
+        approver_user_id: { type: [string, "null"], format: uuid, description: "The workspace member who may approve a link order and mark it paid. Null until set, which leaves Approve and Paid blocked." }
+        equivalent_dr_band: { type: integer, minimum: 1, maximum: 50, description: "Width of the domain-rating band used to suggest an equivalent donor; default 10." }
+        updated_at: { type: [string, "null"], format: date-time }
+        updated_by: { type: [string, "null"], format: uuid, description: "The actor who last saved the settings." }
+    LinkOrderStatus:
+      type: string
+      enum: [requested, quoted, negotiating, approved, published, paid, verified, lost]
+    LinkOrderMoney:
+      type: object
+      required: [currency, amount_minor]
+      properties:
+        currency: { type: string, enum: [USD, EUR] }
+        amount_minor: { type: integer, format: int64, description: "The donor price, in minor units. There is no commission or margin." }
+    LinkOrderDonor:
+      type: object
+      required: [id, publisher_id, domain, pbn, country, languages, niches, casino_allowed, rel_offered, slot_types, duration, duration_days, tat_days, guarantee_days, vendor_id, source, domain_rating, traffic, spam_score, metrics_at, metrics_source, notes, archived_at, prices, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        publisher_id: { type: string, format: uuid }
+        domain: { type: string }
+        pbn: { type: boolean, description: "A manual flag. Nothing here detects a PBN automatically." }
+        country: { type: string }
+        languages: { type: array, items: { type: string } }
+        niches: { type: array, items: { type: string } }
+        casino_allowed: { type: boolean }
+        rel_offered: { type: array, items: { type: string } }
+        slot_types: { type: array, items: { type: string } }
+        duration: { type: string }
+        duration_days: { type: [integer, "null"] }
+        tat_days: { type: [integer, "null"] }
+        guarantee_days: { type: [integer, "null"] }
+        vendor_id: { type: string }
+        source: { type: string, enum: [manual, csv, competitor_gap] }
+        domain_rating: { type: [integer, "null"] }
+        traffic: { type: [integer, "null"], format: int64 }
+        spam_score: { type: [number, "null"] }
+        metrics_at: { type: [string, "null"], format: date-time }
+        metrics_source: { type: string }
+        notes: { type: string }
+        archived_at: { type: [string, "null"], format: date-time }
+        prices: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LinkOrderDonorWrite:
+      type: object
+      properties:
+        domain: { type: string, description: "Required on create. Cannot change later." }
+        name: { type: string, description: "Used only when the publisher's company is created." }
+        pbn: { type: boolean }
+        country: { type: [string, "null"] }
+        languages: { type: array, items: { type: string } }
+        niches: { type: array, items: { type: string } }
+        casino_allowed: { type: [boolean, "null"] }
+        rel_offered: { type: array, items: { type: string } }
+        slot_types: { type: array, items: { type: string } }
+        duration: { type: [string, "null"] }
+        duration_days: { type: [integer, "null"] }
+        tat_days: { type: [integer, "null"] }
+        guarantee_days: { type: [integer, "null"] }
+        vendor_id: { type: [string, "null"] }
+        notes: { type: [string, "null"] }
+        domain_rating: { type: [integer, "null"] }
+        traffic: { type: [integer, "null"], format: int64 }
+        archived: { type: boolean }
+        prices: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" } }
+    LinkOrderCatalogImport:
+      type: object
+      required: [created, updated, errors]
+      properties:
+        created: { type: integer }
+        updated: { type: integer }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [row, domain, error]
+            properties:
+              row: { type: integer, description: "1-based line number, counting the header." }
+              domain: { type: string }
+              error: { type: string }
+    LinkOrder:
+      type: object
+      required: [id, publisher_id, donor_profile_id, domain, status, target_url, slot_type, rel_requested, quoted_amount_minor, quoted_currency, donor_amount_minor, currency, guarantee_days, guarantee_until, published_url, proof_url, published_at, placement_id, agreement_id, invoice_id, payment_id, credit_payment_id, replaces_order_id, owner_user_id, last_check_at, last_check_live, last_check_target_match, last_check_rel, last_check_anchor, approved_by, approved_at, paid_by, paid_at, lost_at, lost_reason, notes, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        publisher_id: { type: string, format: uuid }
+        donor_profile_id: { type: string, format: uuid }
+        domain: { type: string }
+        status: { $ref: "#/components/schemas/LinkOrderStatus" }
+        target_url: { type: string }
+        slot_type: { type: string }
+        rel_requested: { type: string }
+        quoted_amount_minor: { type: [integer, "null"], format: int64 }
+        quoted_currency: { type: [string, "null"], enum: [USD, EUR, null] }
+        donor_amount_minor: { type: [integer, "null"], format: int64, description: "Frozen at approval. The donor price only." }
+        currency: { type: [string, "null"], enum: [USD, EUR, null] }
+        guarantee_days: { type: [integer, "null"] }
+        guarantee_until: { type: [string, "null"], format: date-time }
+        published_url: { type: string }
+        proof_url: { type: string }
+        published_at: { type: [string, "null"], format: date-time }
+        placement_id: { type: [string, "null"], format: uuid }
+        agreement_id: { type: [string, "null"], format: uuid }
+        invoice_id: { type: [string, "null"], format: uuid }
+        payment_id: { type: [string, "null"], format: uuid }
+        credit_payment_id: { type: [string, "null"], format: uuid }
+        replaces_order_id: { type: [string, "null"], format: uuid }
+        owner_user_id: { type: [string, "null"], format: uuid }
+        last_check_at: { type: [string, "null"], format: date-time }
+        last_check_live: { type: [boolean, "null"] }
+        last_check_target_match: { type: [boolean, "null"] }
+        last_check_rel: { type: string }
+        last_check_anchor: { type: string }
+        approved_by: { type: [string, "null"], format: uuid }
+        approved_at: { type: [string, "null"], format: date-time }
+        paid_by: { type: [string, "null"], format: uuid }
+        paid_at: { type: [string, "null"], format: date-time }
+        lost_at: { type: [string, "null"], format: date-time }
+        lost_reason: { type: string }
+        notes: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LinkOrderEvent:
+      type: object
+      required: [id, order_id, action, from_status, to_status, actor_id, payload, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        action: { type: string }
+        from_status: { type: [string, "null"] }
+        to_status: { type: [string, "null"] }
+        actor_id: { type: [string, "null"], format: uuid }
+        payload: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    LinkOrderSummary:
+      type: object
+      required: [counts, committed, spent, lost]
+      properties:
+        counts:
+          type: object
+          additionalProperties: { type: integer }
+          description: "How many orders are in each status."
+        committed: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" }, description: "Approved plus published, not yet paid, by currency." }
+        spent: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" }, description: "Paid and verified, by currency." }
+        lost: { type: array, items: { $ref: "#/components/schemas/LinkOrderMoney" }, description: "Lost donor amounts, by currency." }
+    LinkOrderBudget:
+      type: object
+      required: [budgets]
+      properties:
+        budgets:
+          type: array
+          items:
+            type: object
+            required: [budget_id, title, currency, amount_minor, starts_on, ends_on, committed, spent, remaining]
+            properties:
+              budget_id: { type: string, format: uuid }
+              title: { type: string }
+              currency: { type: string, enum: [USD, EUR] }
+              amount_minor: { type: integer, format: int64 }
+              starts_on: { type: string, format: date }
+              ends_on: { type: string, format: date }
+              committed: { type: integer, format: int64 }
+              spent: { type: integer, format: int64 }
+              remaining: { type: integer, format: int64 }
     LinkBuildingSettings:
       type: object
       required: [pitch_cooldown_days, weekly_reads, weekly_budget_percent, recheck_days, updated_at]
@@ -64418,7 +66398,7 @@ components:
         updated_at: { type: string, format: date-time }
     TrackingDomain:
       type: object
-      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error, partner_program_id, help_centre_id, brand_id]
+      required: [id, domain, status, error, target, last_checked_at, verified_at, created_at, dns_install, dns_connections, https_status, https_error, partner_program_id, help_centre_id, brand_id, fallback_url]
       properties:
         id: { type: string, format: uuid }
         brand_id: { type: [string, "null"], format: uuid, description: "The brand whose links it carries: its email links use it, never another brand's." }
@@ -64438,6 +66418,7 @@ components:
         https_error: { type: string, description: "What to fix when https_status is failed, or why it is still pending." }
         partner_program_id: { type: [string, "null"], format: uuid, description: "The partner program whose portal the domain serves (at its root); null for the workspace's email and partner links." }
         help_centre_id: { type: [string, "null"], format: uuid, description: "The help centre the domain serves (at its root)." }
+        fallback_url: { type: string, description: "Where a redirect code that doesn't exist on the domain goes; '' for a not found page." }
     EnrollmentStatus:
       type: string
       enum: [active, completed, stopped, unsubscribed, bounced, replied, blocked, failed]

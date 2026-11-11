@@ -1,0 +1,12 @@
+id: performcb
+name: "Perform[cb]"
+kind: network
+click_id_param: subid2
+macros:
+  cid: "{subid2}"
+  payout: "{payout}"
+  type: "{event_name}"
+note: "For CPA traffic the click id goes in subid2 (CPI/CPE app offers use subid1). Add postbacks in the Tracking Pixels tab, scoped Global, Offer, Offer Group or Vertical; there is no transaction id, currency or status token."
+sources:
+  - https://support.performcb.com/support/solutions/articles/4000161596-welcome-to-perform-cb-partner-quick-start-guide
+  - https://support.performcb.com/support/solutions/articles/4000154213-setting-up-a-voluum-postback

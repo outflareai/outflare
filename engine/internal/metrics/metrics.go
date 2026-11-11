@@ -112,9 +112,25 @@ var (
 		Namespace: namespace, Subsystem: "redirect", Name: "click_writes_total",
 		Help: "Redirect clicks by what happened when their batch was written: written, refused_quota (the workspace's click quota), link_gone, failed (the batch waits for the next flush) or dropped_full (too many waiting).",
 	}, []string{"outcome"})
+	trackerSourcePostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "source_postbacks_total",
+		Help: "Conversions sent back to traffic sources' postback URLs, by outcome: queued, filtered (the source's rules don't send it), sent, retried, or why one failed: rejected (the network refused it), unreachable, or invalid (the URL).",
+	}, []string{"outcome"})
+	trackerLanderClicks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "lander_clicks_total",
+		Help: "Clicks on landers' calls to action (/click) by outcome: routed (to an offer or page of the lander's list), fallback (none open, so the link's own page), or why one went to the domain's fallback page: unknown_click, wrong_domain, or error.",
+	}, []string{"outcome"})
+	trackerPostbacks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "postbacks_total",
+		Help: "Tracker conversion postbacks by outcome: accepted, duplicate (ignored), updated (a repeated transaction id updated or added to), or why one was refused: unknown_source, wrong_domain, ip_refused, invalid, unknown_click, expired_click, rate_limited, or error.",
+	}, []string{"outcome"})
+	trackerConversionRows = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: namespace, Subsystem: "tracker", Name: "conversion_rows_total",
+		Help: "Tracker conversions from pixels and uploads, by how they came (pixel, api, csv) and outcome: accepted, updated, duplicate, failed (a row the upload refused), or for a pixel why it was refused (unknown_source, wrong_domain, ip_refused, rate_limited, invalid, unknown_click, expired_click, error).",
+	}, []string{"via", "outcome"})
 	redirectRoutes = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "routes_total",
-		Help: "Redirect clicks on links with destinations, by where they went: destination (one of the link's weighted destinations) or fallback (every destination was capped or stopped, so the link's own page).",
+		Help: "Redirect clicks on links with destinations, by where they went: path (a destination of the first rule-based path that matched), destination (one of the link's default destinations), fallback (every destination was capped or stopped, so the link's own page) or shared_domain (the click came on the shared domain, where tracker features are off, so the link's own page).",
 	}, []string{"outcome"})
 	redirectClickBuffer = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace, Subsystem: "redirect", Name: "click_buffer",
@@ -1013,7 +1029,7 @@ var (
 var own = []prometheus.Collector{
 	httpRequests, httpDuration, httpInFlight, httpRateLimited,
 	jobsDone, jobDuration, jobWait, jobsActive, jobsReaped, workers,
-	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
+	siteEvents, pageVitals, inboxEvents, inboxBatch, redirectClicks, redirectLandings, redirectClickWrites, redirectRoutes, trackerPostbacks, trackerLanderClicks, trackerSourcePostbacks, trackerConversionRows, redirectClickBuffer, redirectClickFlush, paidArrivals, adMacrosUnfilled,
 	flagRequests, flagDuration, flagCache, abResults, abResultsDuration,
 	consentRequests, consentDuration, consentChoices,
 	cookieScans, cookieScanPages, cookieScanFound, cookieScanDuration, cookieReports, cookieNew,
@@ -1162,8 +1178,25 @@ func RedirectClickWrites(outcome string, n int) {
 	}
 }
 
+// TrackerConversionRow counts a tracker conversion from a pixel or an
+// upload.
+func TrackerConversionRow(via, outcome string) {
+	trackerConversionRows.WithLabelValues(via, outcome).Inc()
+}
+
+// TrackerSourcePostback counts a conversion sent back to a traffic source
+// by outcome.
+func TrackerSourcePostback(outcome string) { trackerSourcePostbacks.WithLabelValues(outcome).Inc() }
+
+// TrackerLanderClick counts a click on a lander's call to action by
+// outcome.
+func TrackerLanderClick(outcome string) { trackerLanderClicks.WithLabelValues(outcome).Inc() }
+
+// TrackerPostback counts a tracker conversion postback by outcome.
+func TrackerPostback(outcome string) { trackerPostbacks.WithLabelValues(outcome).Inc() }
+
 // RedirectRoute counts a click on a link with destinations by where it
-// went: destination or fallback.
+// went: path, destination, fallback or shared_domain.
 func RedirectRoute(outcome string) { redirectRoutes.WithLabelValues(outcome).Inc() }
 
 // RedirectClickBuffer reports how many clicks wait to be written.

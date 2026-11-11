@@ -63,7 +63,11 @@ type trafficSourceView struct {
 	Cost       trafficsources.Param       `json:"cost"`
 	Parameters []trafficsources.Parameter `json:"parameters"`
 	Postback   trafficSourcePostback      `json:"postback"`
-	Status     string                     `json:"status"`
+	// PostbackRules say which conversions the postback is sent for, and
+	// with what payout (T7).
+	PostbackRules sourcePostbackRules `json:"postback_rules"`
+	minMicros     int64
+	Status        string `json:"status"`
 	// Campaigns is how many campaigns use the source, so a change to it
 	// can say what it affects.
 	Campaigns int       `json:"campaigns"`
@@ -73,7 +77,8 @@ type trafficSourceView struct {
 
 const trafficSourceSelect = `
 	SELECT t.id::text, t.brand_id::text, t.name, t.template, t.currency, t.click_id_param, t.click_id_token, t.cost_param, t.cost_token,
-	       t.parameters, t.postback_url, t.postback_method, t.status,
+	       t.parameters, t.postback_url, t.postback_method, t.postback_share, t.postback_decimals, t.postback_min_micros, t.postback_types,
+	       t.postback_statuses, t.postback_resend, t.status,
 	       (SELECT count(*) FROM tracking_campaigns c WHERE c.traffic_source_id = t.id)::int, t.created_at, t.updated_at
 	FROM tracker_traffic_sources t
 	WHERE t.workspace_id = $1 AND t.brand_id = $2`
@@ -82,7 +87,15 @@ func scanTrafficSource(row pgx.Row) (trafficSourceView, error) {
 	var v trafficSourceView
 	var params []byte
 	err := row.Scan(&v.ID, &v.BrandID, &v.Name, &v.Template, &v.Currency, &v.ClickID.Param, &v.ClickID.Token, &v.Cost.Param, &v.Cost.Token,
-		&params, &v.Postback.URL, &v.Postback.Method, &v.Status, &v.Campaigns, &v.CreatedAt, &v.UpdatedAt)
+		&params, &v.Postback.URL, &v.Postback.Method, &v.PostbackRules.Share, &v.PostbackRules.Decimals, &v.minMicros, &v.PostbackRules.Types,
+		&v.PostbackRules.Statuses, &v.PostbackRules.Resend, &v.Status, &v.Campaigns, &v.CreatedAt, &v.UpdatedAt)
+	v.PostbackRules.MinPayout = formatMicros(v.minMicros)
+	if v.PostbackRules.Types == nil {
+		v.PostbackRules.Types = []string{}
+	}
+	if v.PostbackRules.Statuses == nil {
+		v.PostbackRules.Statuses = []string{}
+	}
 	if err == nil {
 		err = json.Unmarshal(params, &v.Parameters)
 	}
@@ -155,7 +168,9 @@ type trafficSourceInput struct {
 	Cost       *trafficsources.Param       `json:"cost"`
 	Parameters *[]trafficsources.Parameter `json:"parameters"`
 	Postback   *trafficSourcePostback      `json:"postback"`
-	Status     *string                     `json:"status"`
+	// PostbackRules change the send-back rules given; the others stay.
+	PostbackRules *sourcePostbackRulesInput `json:"postback_rules"`
+	Status        *string                   `json:"status"`
 }
 
 var currencyCodeRe = regexp.MustCompile(`^[A-Z]{3}$`)
@@ -189,6 +204,9 @@ func (in trafficSourceInput) apply(v *trafficSourceView) error {
 	}
 	if in.Status != nil {
 		v.Status = *in.Status
+	}
+	if err := in.PostbackRules.apply(&v.PostbackRules, &v.minMicros); err != nil {
+		return err
 	}
 	if v.Postback.Method == "" {
 		v.Postback.Method = "GET"
@@ -246,7 +264,8 @@ func (s *Server) createTrafficSource(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	v := trafficSourceView{Currency: "USD", Status: "active", Parameters: []trafficsources.Parameter{}}
+	v := trafficSourceView{Currency: "USD", Status: "active", Parameters: []trafficsources.Parameter{},
+		PostbackRules: sourcePostbackRules{Share: 100, Decimals: 2, MinPayout: "0", Types: []string{}, Statuses: []string{"approved"}}}
 	if in.Status != nil {
 		writeError(w, r, http.StatusBadRequest, "invalid_request", "a new traffic source is active; archive it with PATCH")
 		return
@@ -287,10 +306,12 @@ func (s *Server) createTrafficSource(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO tracker_traffic_sources (workspace_id, brand_id, name, template, currency, click_id_param, click_id_token,
-				cost_param, cost_token, parameters, postback_url, postback_method, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id::text`,
+				cost_param, cost_token, parameters, postback_url, postback_method, created_by,
+				postback_share, postback_decimals, postback_min_micros, postback_types, postback_statuses, postback_resend)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) RETURNING id::text`,
 			a.WorkspaceID, a.Brand, v.Name, v.Template, v.Currency, v.ClickID.Param, v.ClickID.Token, v.Cost.Param, v.Cost.Token,
-			params, v.Postback.URL, v.Postback.Method, nullIfEmpty(a.ActorID)).Scan(&id); err != nil {
+			params, v.Postback.URL, v.Postback.Method, nullIfEmpty(a.ActorID),
+			v.PostbackRules.Share, v.PostbackRules.Decimals, v.minMicros, v.PostbackRules.Types, v.PostbackRules.Statuses, v.PostbackRules.Resend).Scan(&id); err != nil {
 			return err
 		}
 		return record(ctx, tx, &a.principal, a.WorkspaceID, "traffic_source.created", "traffic_source", id,
@@ -335,10 +356,13 @@ func (s *Server) updateTrafficSource(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE tracker_traffic_sources SET name = $3, currency = $4, click_id_param = $5, click_id_token = $6, cost_param = $7,
-				cost_token = $8, parameters = $9, postback_url = $10, postback_method = $11, status = $12, updated_at = now()
+				cost_token = $8, parameters = $9, postback_url = $10, postback_method = $11, status = $12,
+				postback_share = $13, postback_decimals = $14, postback_min_micros = $15, postback_types = $16, postback_statuses = $17,
+				postback_resend = $18, updated_at = now()
 			WHERE workspace_id = $1 AND id = $2`,
 			a.WorkspaceID, cur.ID, v.Name, v.Currency, v.ClickID.Param, v.ClickID.Token, v.Cost.Param, v.Cost.Token,
-			params, v.Postback.URL, v.Postback.Method, v.Status); err != nil {
+			params, v.Postback.URL, v.Postback.Method, v.Status,
+			v.PostbackRules.Share, v.PostbackRules.Decimals, v.minMicros, v.PostbackRules.Types, v.PostbackRules.Statuses, v.PostbackRules.Resend); err != nil {
 			return err
 		}
 		action := "traffic_source.updated"

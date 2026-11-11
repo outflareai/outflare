@@ -1,0 +1,11 @@
+id: adcombo
+name: "AdCombo"
+kind: network
+click_id_param: clickid
+macros:
+  cid: "{clickid}"
+  payout: "{revenue}"
+  txid: "{trans_id}"
+note: "Paste the URL into the global postback page's Postback for lead field only (separate fields exist for hold and reject), or into a campaign's Postback/Pixel tab. There is no currency macro, so set the payout currency in the tracker."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/adcombo-click-flare-integration-guide

@@ -4498,6 +4498,543 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/flow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the flow a redirect link routes by
+         * @description Scope: analytics.read.
+         */
+        get: operations["getTrackingLinkFlow"];
+        /**
+         * Make a redirect link route by a flow
+         * @description Scope: analytics.manage. The link then routes by the flow's paths and destinations instead of its own, which are
+         *     kept: flow_id null makes it route by its own again. Other servers follow the change within a few minutes.
+         */
+        put: operations["setTrackingLinkFlow"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracking-campaigns/{id}/links/{link}/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a redirect link's rule-based paths
+         * @description Scope: analytics.read. The link's paths in order, each with its conditions and its destinations with today's
+         *     clicks. A click takes the first active path whose conditions all match and that has an open destination;
+         *     otherwise the link's default destinations (GET .../destinations), then the link's own page.
+         */
+        get: operations["listTrackingLinkPaths"];
+        /**
+         * Set a redirect link's rule-based paths
+         * @description Scope: analytics.manage. Replaces the list, in order (the first match wins): a path with its `id` is changed, one
+         *     without is added, one left out is taken off the link with its destinations (their clicks keep them). Each path's
+         *     `destinations` work as the link's default destinations do: ids keep a destination and its count. Conditions
+         *     combine with AND, and a condition's values with OR. Fields: country (two-letter code), region, city, isp, asn,
+         *     device (desktop, mobile, tablet), device_brand, os, os_version, browser, browser_version, language, referrer (the
+         *     referring site's host), ip (addresses or ranges such as 203.0.113.0/24), weekday (mon to sun) and hour (0 to 23),
+         *     both UTC, visitor (unique, or returning within a day, as this server saw them), and field1 to field20. Text
+         *     matches whole values, without regard to case.
+         */
+        put: operations["setTrackingLinkPaths"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracking-domains/{id}/fallback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set where unknown redirect links on a tracking domain go
+         * @description Scope: mailboxes.manage. A redirect code that doesn't exist on the domain (mistyped, or from a deleted link) goes to this page instead of a not found page. '' takes it off.
+         */
+        put: operations["setTrackingDomainFallback"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/affiliate-network-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List affiliate-network templates
+         * @description Scope: analytics.read. The affiliate networks and network platforms Outflare has templates for
+         *     (integrations/affiliate-networks): the parameter in their offer links that carries the click id, and their macro
+         *     for each value Outflare's postback reads. Make a postback source from one with `network`, and its postback URL
+         *     comes written in the network's macros.
+         */
+        get: operations["listAffiliateNetworkTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's flows
+         * @description Scope: analytics.read. The brand's reusable paths and destinations, by name, with how many links route by each.
+         */
+        get: operations["listFlows"];
+        put?: never;
+        /**
+         * Add a flow
+         * @description Scope: analytics.manage. A flow is a reusable set of rule-based paths and default destinations (pages, offers and
+         *     landers), as a link has. Give links the flow with PUT .../links/{link}/flow, and they route by it instead of their
+         *     own; an edit to the flow changes every one of them. Caps on a flow's destinations count the clicks of every link
+         *     that routes by it.
+         */
+        post: operations["createFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/flows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a flow
+         * @description Scope: analytics.read. With its paths and destinations, and today's clicks on each.
+         */
+        get: operations["getFlow"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename, archive or restore a flow
+         * @description Scope: analytics.manage. A flow that links route by can't be archived.
+         */
+        patch: operations["updateFlow"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/flows/{id}/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a flow's default destinations
+         * @description Scope: analytics.manage. Replaces the list, as for a link's destinations, for every link that routes by the flow.
+         */
+        put: operations["setFlowDestinations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/flows/{id}/paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a flow's paths
+         * @description Scope: analytics.manage. Replaces the paths, in order, as for a link's, for every link that routes by the flow.
+         */
+        put: operations["setFlowPaths"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/landers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's landers
+         * @description Scope: analytics.read. The pages the brand sends tracker clicks to before its offers, by name, with their click URLs and today's lander clicks.
+         */
+        get: operations["listLanders"];
+        put?: never;
+        /**
+         * Add a lander
+         * @description Scope: analytics.manage. `name` and `url` are required. A lander is a page clicks go to before an offer: make it a
+         *     link's destination with `lander_id`, beside the offers it leads to. Its calls to action link to `click_url` (an
+         *     offer or page of the same list, by weight) or one of `cta_urls` (the Nth of them), and the page carries `script`,
+         *     which adds the click id (ofclk) to those links. A call to action goes on only for a click Outflare sent to a lander
+         *     in the last day, on the brand's own tracking domain; anything else gets the domain's fallback page.
+         */
+        post: operations["createLander"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/landers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a lander
+         * @description Scope: analytics.read.
+         */
+        get: operations["getLander"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change, archive or restore a lander
+         * @description Scope: analytics.manage. A new URL goes to every destination that is the lander at once. A lander that is a destination can't be archived.
+         */
+        patch: operations["updateLander"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/lander-clicks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List lander clicks
+         * @description Scope: analytics.read. Clicks on the brand's landers' calls to action, newest first, with where each went.
+         */
+        get: operations["listLanderClicks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/offers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's offers
+         * @description Scope: analytics.read. The pages the brand sends tracker clicks to, by name, with today's clicks and conversions against their caps.
+         */
+        get: operations["listOffers"];
+        put?: never;
+        /**
+         * Add an offer
+         * @description Scope: analytics.manage. `name` and `url` are required. An offer is a page clicks go to, usually on an affiliate network: give a link's
+         *     destination its `offer_id`. Its network's click id parameter (the postback source's click_id_param) is added to
+         *     its URL unless the URL carries {click_id}. A conversion on its click gets its payout (by the click's country) when
+         *     the postback sends none, or always when payout_mode is fixed. A daily cap counts clicks or conversions; once it is
+         *     reached, clicks go to the fallback offer, or to the link's other destinations.
+         */
+        post: operations["createOffer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/offers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an offer
+         * @description Scope: analytics.read.
+         */
+        get: operations["getOffer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change, archive or restore an offer
+         * @description Scope: analytics.manage. A new URL goes to every destination that sends to the offer at once. An offer that is a destination can't be archived.
+         */
+        patch: operations["updateOffer"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/postback-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the brand's postback sources
+         * @description Scope: analytics.read. Where the brand's tracker conversions come from: affiliate networks, offers' trackers, its own backend. The secret postback URL is shown only when a source is made or rotated.
+         */
+        get: operations["listPostbackSources"];
+        put?: never;
+        /**
+         * Add a postback source
+         * @description Scope: analytics.manage. Returns `postback_url` once: give it to the network. With `network` (a template from
+         *     GET .../affiliate-network-templates) it is written in the network's macros; otherwise put the network's own
+         *     macros in place of {click_id} (the ofclk the redirect added, which the network got as your sub id), {payout} and
+         *     the rest. A
+         *     postback is GET or POST (query, form or JSON) to https://<the brand's tracking domain>/t/<secret> with `cid` (or
+         *     clickid, click_id, subid), `payout` (or sum, revenue, amount), `currency`, `txid` (or transaction_id, orderid),
+         *     `type`, `status` (approved, pending or declined) and `p1` to `p20`. It answers only on the brand's own verified
+         *     tracking domain.
+         */
+        post: operations["createPostbackSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/postback-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a postback source
+         * @description Scope: analytics.read.
+         */
+        get: operations["getPostbackSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change, archive or restore a postback source
+         * @description Scope: analytics.manage. An archived source's postback URL stops answering.
+         */
+        patch: operations["updatePostbackSource"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/postback-sources/{id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give a postback source a new secret
+         * @description Scope: analytics.manage. Returns the new postback URL once; the old one stops working at once.
+         */
+        post: operations["rotatePostbackSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracker-conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List tracker conversions
+         * @description Scope: analytics.read. The click ledger: every conversion a postback source reported, with the click it credits, newest first, 100 a page (pass the last one's converted_at as before).
+         */
+        get: operations["listTrackerConversions"];
+        put?: never;
+        /**
+         * Upload tracker conversions
+         * @description Scope: analytics.manage. Records up to 1,000 conversions for one of the brand's postback sources, row by row,
+         *     following its duplicate policy and click expiry. A row with `click_id` (the ofclk) records a conversion; a row
+         *     with only `transaction_id` updates the `status` or `payout` of the source's conversion with that transaction id,
+         *     as networks report approvals and reversals later. Rows take the postback's names (`click_id`, `transaction_id`,
+         *     `payout`, `currency`, `type`, `status`, `converted_at`, `params` with p1 to p20). The answer says what happened to
+         *     each row; one refused row doesn't stop the others.
+         */
+        post: operations["uploadTrackerConversions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracker-conversions/csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload tracker conversions as CSV
+         * @description Scope: analytics.manage. Up to 10,000 rows of a CSV file whose first row names the columns: click_id,
+         *     transaction_id, payout, currency, type, status, converted_at and p1 to p20 (any order, any case). Rows work as in
+         *     the JSON upload.
+         */
+        post: operations["uploadTrackerConversionsCSV"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/tracker-conversion-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the tracker conversion log
+         * @description Scope: analytics.read. Every postback and pixel call the brand's postback sources made in the last 30 days,
+         *     newest first: what it sent, what Outflare answered (status) and why (outcome and reason), so you can see why a
+         *     network's conversion wasn't recorded. Calls with an unknown secret have no brand and aren't kept.
+         */
+        get: operations["listTrackerConversionLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/brands/{brand}/traffic-source-templates": {
         parameters: {
             query?: never;
@@ -4548,6 +5085,32 @@ export interface paths {
          *     (`traffic_source`), and its redirect clicks keep the source's parameters in their custom fields.
          */
         post: operations["createTrafficSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/traffic-sources/{id}/postbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List conversions sent back to a traffic source
+         * @description Scope: analytics.read. Each tracker conversion on the source's campaigns that its postback_rules send, newest
+         *     first: the payout sent, the URL called, and what the network answered. Sends are made by a job, retried up to five
+         *     times when the network can't be reached or answers 429 or 5xx, and never follow a redirect.
+         */
+        get: operations["listTrafficSourcePostbacks"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8825,6 +9388,525 @@ export interface paths {
          * @description Scope: seo.manage. Queues OutflareBot's light look at a tracked competitor (robots.txt, its sitemaps and its home page, obeying robots.txt), at most once an hour. It costs nothing; numbers come from the SEO connections' weekly snapshot.
          */
         post: operations["checkBrandSEOCompetitor"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get link order settings
+         * @description Scope: coverage.read. The person who may approve a paid link order
+         *     and mark it paid, and the domain-rating band used to find an
+         *     equivalent donor when a link is lost. Until someone saves settings,
+         *     approver_user_id is null and equivalent_dr_band is 10. Approve and
+         *     Paid stay blocked until an approver is set.
+         */
+        get: operations["getBrandLinkOrderSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change link order settings
+         * @description Scope: coverage.approve. A signed-in person only; API tokens cannot
+         *     call this. Send only what changes. approver_user_id must be a member
+         *     of this workspace who can approve coverage (owners and admins by
+         *     default). Send null to clear the approver. equivalent_dr_band is the
+         *     width of the rating band used to suggest an equivalent donor (1 to
+         *     50, default 10, so a donor rated 54 is matched with 50-59). Each
+         *     brand sets its own approver; the engine does not hard-code a person.
+         */
+        patch: operations["updateBrandLinkOrderSettings"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List the link-order catalog
+         * @description Scope: coverage.read. Donor profiles for paid link orders, newest first.
+         *     Page with cursor=next_cursor. Archived rows are omitted unless archived=true
+         *     or archived=all. Prices are the current published coverage rates, in minor units.
+         */
+        get: operations["listBrandLinkOrderCatalog"];
+        put?: never;
+        /**
+         * Add a donor to the catalog
+         * @description Scope: coverage.manage. Finds or creates the coverage publisher for the
+         *     domain and upserts one donor profile. A domain already in the catalog is
+         *     updated, not duplicated. Prices replace the current published rate for
+         *     each currency. Amounts are the donor price only; there is no commission
+         *     or margin.
+         */
+        post: operations["createBrandLinkOrderCatalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/catalog/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import catalog rows from CSV
+         * @description Scope: coverage.manage. The first row is the header and must include domain.
+         *     A repeated domain updates the existing profile. A bad row is listed in
+         *     errors and does not abort the rest of the file. Send text/csv, or JSON
+         *     with a csv field so agents can pass a string. Amounts are the donor price
+         *     only.
+         */
+        post: operations["importBrandLinkOrderCatalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/catalog/items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a catalog row
+         * @description Scope: coverage.read. One donor profile, including archived rows. The item path is /catalog/items/{id} so it does not collide with /link-orders/{id}/... on the Go mux.
+         */
+        get: operations["getBrandLinkOrderCatalogItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a catalog row
+         * @description Scope: coverage.manage. Send only what changes. Domain cannot change.
+         *     Prices, when sent, replace the current published rate for those currencies.
+         */
+        patch: operations["updateBrandLinkOrderCatalogItem"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Summarize link orders
+         * @description Scope: coverage.read. Counts by status, and donor amounts by currency.
+         *     Committed is approved plus published not yet paid; spent is paid and
+         *     verified; lost is lost. USD and EUR are never summed.
+         */
+        get: operations["getBrandLinkOrderSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the link-order budget
+         * @description Scope: coverage.finance.read. The current period's coverage budgets tagged
+         *     link_orders, with committed and spent already applied, one cap per currency.
+         *     Missing a budget means there is no cap for that currency.
+         */
+        get: operations["getBrandLinkOrderBudget"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * List link orders
+         * @description Scope: coverage.read. Newest first. Page with cursor=next_cursor.
+         */
+        get: operations["listBrandLinkOrders"];
+        put?: never;
+        /**
+         * Request a link order
+         * @description Scope: coverage.manage. Opens a requested order against a catalog donor.
+         *     The guarantee window defaults to the catalog row, then to 30 days.
+         */
+        post: operations["createBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a link order
+         * @description Scope: coverage.read.
+         */
+        get: operations["getBrandLinkOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a link order
+         * @description Scope: coverage.manage. Fields that are still mutable before publication.
+         *     After approval the donor amount cannot change. Paid, verified, and lost
+         *     orders cannot be edited.
+         */
+        patch: operations["updateBrandLinkOrder"];
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a link order's history
+         * @description Scope: coverage.read. Oldest first.
+         */
+        get: operations["listBrandLinkOrderHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quote a link order
+         * @description Scope: coverage.manage. Sets the quoted donor price and moves the order
+         *     to quoted. Allowed from requested, quoted, or negotiating. Amounts are
+         *     the donor price only, in minor units.
+         */
+        post: operations["quoteBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/negotiate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a link order as negotiating
+         * @description Scope: coverage.manage. Allowed from quoted.
+         */
+        post: operations["negotiateBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a link order
+         * @description Scope: coverage.approve. A signed-in person only, and only the brand's
+         *     designated approver. Freezes the quoted donor amount. A budget tagged
+         *     link_orders for this currency, when present, is a hard cap; a miss is
+         *     409. No budget means there is no cap. Allowed from quoted or negotiating.
+         */
+        post: operations["approveBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish a link order
+         * @description Scope: coverage.manage. Records the live URL, creates or reuses a paid
+         *     coverage placement (the same URL and inventory is not added twice), and
+         *     moves the order to published. Allowed from approved.
+         */
+        post: operations["publishBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue a live-link check
+         * @description Scope: coverage.manage. Enqueues the existing coverage.check job for the
+         *     order's placement. Updating last_check_* from the job lands in a later
+         *     change. The order must already be published.
+         */
+        post: operations["checkBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a link order paid
+         * @description Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+         *     only, and only the brand's designated approver. Allowed after publication
+         *     and a passing live-link check (the link is on the page and the target
+         *     matches). Records a coverage invoice and payment for the frozen donor
+         *     amount; it never sends money. Allowed from published or verified.
+         */
+        post: operations["payBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify a published link
+         * @description Scope: coverage.manage. Allowed from published or paid when the last
+         *     live-link check has passed.
+         */
+        post: operations["verifyBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/lost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a link order lost
+         * @description Scope: coverage.manage. Allowed from published, paid, or verified.
+         */
+        post: operations["markBrandLinkOrderLost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open a replacement order
+         * @description Scope: coverage.manage. Opens a new requested order that takes the place
+         *     of a lost one. One open (not lost) replacement is allowed at a time.
+         *     Cycles are rejected. Pass the replacement donor in donor_profile_id;
+         *     searching for an equivalent donor is a later change.
+         */
+        post: operations["replaceBrandLinkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/brands/{brand}/link-orders/{id}/credit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Credit a lost link order
+         * @description Scope: coverage.approve, plus coverage.finance.manage. A signed-in person
+         *     only, and only the brand's designated approver. Allowed on a lost order
+         *     when a replacement is not possible (no open replacement). Records a
+         *     credit invoice and a reversal when the order was already paid. It never
+         *     sends money.
+         */
+        post: operations["creditBrandLinkOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -35483,6 +36565,40 @@ export interface webhooks {
         patch?: never;
         trace?: never;
     };
+    "tracker_conversion.created": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A postback source reported a conversion, by postback, pixel or upload, and it was recorded in the click ledger. data has conversion_id, source_id, click_key, campaign_id, link_id, transaction_id, type, status (approved, pending or declined), payout (in the currency's main unit, as a string), currency, record_id (the person, when known), postbacks, converted_at, clicked_at and offer_id (the offer its click went to). */
+        post: operations["webhook_tracker_conversion_created"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "tracker_conversion.updated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A tracker conversion changed: a repeated transaction id updated it or added to its payout, or an upload changed its status or payout. data is as for tracker_conversion.created, as it is now. */
+        post: operations["webhook_tracker_conversion_updated"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "partner_conversion.created": {
         parameters: {
             query?: never;
@@ -36390,7 +37506,7 @@ export interface components {
              */
             id: string;
             /** @enum {string} */
-            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "coverage_record.deleted" | "workspace.updated" | "webhook.test";
+            type: "lead.replied" | "lead.unsubscribed" | "inbox.replied" | "inbox.updated" | "inbox.classified" | "lead.bounced" | "mailbox.auto_paused" | "lead.created" | "lead.updated" | "lead.deleted" | "leads.imported" | "suppressions.added" | "suppression.removed" | "lead_list.created" | "lead_list.leads_added" | "lead_list.run_started" | "lead_list.build_done" | "lead_list.build_failed" | "lead_list.refresh_done" | "lead_list.refresh_failed" | "lead_list.enrich_done" | "lead_list.enrich_failed" | "import.done" | "import.failed" | "sequence.created" | "sequence.updated" | "sequence.activated" | "sequence.paused" | "sequence.archived" | "sequence.deleted" | "sequence.steps_updated" | "sequence.leads_enrolled" | "enrollment.stopped" | "mailbox.imported" | "mailbox.updated" | "mailbox.paused" | "mailbox.resumed" | "mailbox.stage_changed" | "mailbox.deleted" | "domain.added" | "domain.paused" | "domain.resumed" | "domain.removed" | "email.queued" | "email.sent" | "email.delivered" | "email.bounced" | "email.complained" | "email.failed" | "email.suppressed" | "email.cancelled" | "email.unsubscribed" | "email.opened" | "email.clicked" | "email.preferences_changed" | "email_domain.verified" | "email_domain.verification_failed" | "email_provider.events_failed" | "email_template.published" | "meeting.created" | "meeting.updated" | "meeting.deleted" | "deal.created" | "deal.updated" | "deal.deleted" | "spend.recorded" | "integration.connected" | "integration.updated" | "integration.disconnected" | "connect_request.created" | "deploy.detected" | "deploy.failed" | "digest.ready" | "ai_budget.warned" | "ai_budget.reached" | "connection_limit.warned" | "connection_limit.reached" | "ad_campaign.paused" | "ad_campaign.resumed" | "ad_campaign.budget_changed" | "ads.paused_all" | "experiment.started" | "experiment.concluded" | "mission.created" | "mission.updated" | "mission.submitted" | "mission.approved" | "mission.paused" | "mission.resumed" | "mission.stopped" | "mission.completed" | "mission.action_held" | "mission.action_approved" | "mission.action_rejected" | "agent_run.created" | "agent_run.updated" | "agent_run.paused" | "agent_run.resumed" | "agent_run.stopped" | "agent_run.completed" | "action.held" | "action.approved" | "action.rejected" | "playbook.started" | "playbook_automation.created" | "playbook_automation.updated" | "playbook_automation.approved" | "playbook_automation.paused" | "playbook_automation.held" | "playbook_automation.ran" | "playbook_automation.deleted" | "infra.plan_created" | "infra.plan_approved" | "infra.ordered" | "infra.order_failed" | "infra.domains_bought" | "infra.mailbox_joined" | "infra.plan_warming" | "infra.plan_ready" | "infra.plan_cancelled" | "fix.found" | "fix.updated" | "fix.started" | "fix.verify_requested" | "fix.confirmed" | "fix.reopened" | "record.created" | "record.bulk_created" | "record.bulk_updated" | "record.updated" | "record.merged" | "identity.verified" | "identity.closed" | "relationship.added" | "relationship.ended" | "consent.granted" | "consent.withdrawn" | "consent.bulk_withdrawn" | "privacy_export.ready" | "record.soft_deleted" | "deletion.restored" | "record.unmerged" | "batch.undone" | "brand.created" | "brand.updated" | "knowledge.created" | "knowledge.updated" | "knowledge.deleted" | "knowledge.restored" | "content.approved" | "content.delivered" | "email_broadcast.created" | "email_broadcast.started" | "email_broadcast.sent" | "email_broadcast.failed" | "email_broadcast.cancelled" | "journey.created" | "journey.updated" | "journey_run.entered" | "journey_run.exited" | "rule.created" | "rule.updated" | "rule.activated" | "rule.paused" | "rule.archived" | "rule.fired" | "lifecycle.moved" | "transaction.created" | "transaction.updated" | "transaction.deleted" | "brand_setup.installed" | "brand_setup.install_failed" | "install.issue_opened" | "install.issue_resolved" | "seo_site.created" | "seo_site.verified" | "seo_site.unverified" | "seo_site.deleted" | "crawl.started" | "crawl.stopped" | "crawl.done" | "link_pitch.drafted" | "link_pitch.approved" | "link_pitch.rejected" | "link_prospect.overdue" | "backlink.new" | "backlink.lost" | "backlink.regained" | "competitor.page_removed" | "competitor_link.new" | "outbound_link.broken" | "asset.published" | "mention.found" | "link_prospect.found" | "link_prospect.checked" | "link_prospect.excluded" | "link_prospect.pitched" | "link_prospect.replied" | "link_prospect.agreed" | "link_prospect.live" | "link_prospect.declined" | "link_prospect.removed" | "link_prospect.reopened" | "link_prospect.updated" | "link_prospect.deleted" | "social_action.drafted" | "social_action.approved" | "social_action.rejected" | "social_action.done" | "social_action.failed" | "review.posted" | "review.replied" | "review.reply_drafted" | "review_momentum.changed" | "alert.raised" | "visitor.became_hot" | "partner_program.created" | "partner_program.updated" | "partner_program.rules_updated" | "partner.created" | "partner.updated" | "partner_referral.created" | "tracker_conversion.created" | "tracker_conversion.updated" | "partner_conversion.created" | "partner_reward.created" | "partner_reward.approved" | "partner_reward.rejected" | "partner_reward.reversed" | "partner_reward.fulfilled" | "partner_payout.created" | "partner_payout.paid" | "partner_payout.canceled" | "coverage_record.created" | "coverage_record.updated" | "coverage_record.imported" | "coverage_record.check_queued" | "coverage_record.checked" | "coverage_record.review_queued" | "coverage_record.reviewed" | "coverage_record.approved" | "coverage_record.discovered" | "coverage_record.confirmed" | "coverage_record.deleted" | "workspace.updated" | "webhook.test";
             /** Format: date-time */
             created_at: string;
             /** Format: uuid */
@@ -38355,7 +39471,7 @@ export interface components {
                     /**
                      * @description incomplete, no_email, link_param (a link's parameter isn't ref or via, which the website script reads),
                      *     extra_link (a partner's second link: their code is the first), code_changed (the partner got a new
-                     *     code), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
+                     *     code), email_changed (a later run brought over the partner's new email), partner_missing, partner_unavailable (a partner other objects name that the platform couldn't
                      *     give by id either; message has the HTTP status), partner_id_missing (a promo code names no partner
                      *     under a field the import reads; message lists its fields), partners_unlisted (the platform reported
                      *     more partners than came over; message has the counts and whether any of the others has referrals),
@@ -39167,6 +40283,7 @@ export interface components {
              * @description The brand's traffic source the campaign buys clicks from; null for none.
              */
             traffic_source_id: string | null;
+            redirect_mode: components["schemas"]["RedirectMode"];
         };
         TrackingCampaignInput: {
             name?: string;
@@ -39188,6 +40305,7 @@ export interface components {
             redirect_links?: boolean;
             /** @description The id of one of the brand's active traffic sources; '' for none. Its redirect clicks then keep the source's parameters in their custom fields, and its links get a campaign_url. */
             traffic_source?: string;
+            redirect_mode?: components["schemas"]["RedirectMode"];
         };
         TrackingLink: {
             /** Format: uuid */
@@ -39213,24 +40331,433 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        TrackingPathCondition: {
+            /** @enum {string} */
+            field: "country" | "region" | "city" | "isp" | "asn" | "device" | "device_brand" | "os" | "os_version" | "browser" | "browser_version" | "language" | "referrer" | "ip" | "weekday" | "hour" | "visitor" | "field1" | "field2" | "field3" | "field4" | "field5" | "field6" | "field7" | "field8" | "field9" | "field10" | "field11" | "field12" | "field13" | "field14" | "field15" | "field16" | "field17" | "field18" | "field19" | "field20";
+            /** @enum {string} */
+            op: "is" | "is_not";
+            /** @description The condition matches any of them. */
+            values: string[];
+        };
+        TrackingLinkPaths: {
+            /** Format: uuid */
+            link_id: string;
+            /** @description The brand has no verified tracking domain, so the paths aren't used. */
+            needs_domain: boolean;
+            paths: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                active: boolean;
+                conditions: components["schemas"]["TrackingPathCondition"][];
+                destinations: components["schemas"]["TrackingLinkDestinations"]["destinations"];
+            }[];
+        };
+        /**
+         * @description How the campaign's redirect links send people on: 302 (the default, fastest), 307, meta (a page that moves on at
+         *     once and sends no referrer) or double_meta (two such pages, so even browsers that ignore the referrer policy send
+         *     none). Modes other than 302, destinations and paths work only on the brand's own verified tracking domain; on the
+         *     shared domain every click goes to the link's own page with a 302.
+         * @enum {string}
+         */
+        RedirectMode: "302" | "307" | "meta" | "double_meta";
         TrackingLinkDestinations: {
             /** Format: uuid */
             link_id: string;
+            /** @description The brand has no verified tracking domain, so the destinations aren't used: tracker links run only on the workspace's own domains. */
+            needs_domain: boolean;
             /** @description The link's own page, where clicks go when every destination is capped or stopped. */
             fallback_url: string;
             destinations: {
                 /** Format: uuid */
                 id: string;
                 name: string;
+                /** @description The page; for an offer, the offer's URL (kept in step with it). */
                 url: string;
+                /**
+                 * Format: uuid
+                 * @description The offer it sends to; null for a page of its own.
+                 */
+                offer_id: string | null;
+                offer_name: string | null;
+                /**
+                 * Format: uuid
+                 * @description The lander it is; null for none.
+                 */
+                lander_id: string | null;
+                lander_name: string | null;
                 weight: number;
                 /** @description Clicks a day it takes; null for no cap, 0 stops it. */
                 daily_click_cap: number | null;
                 /** @description Its clicks today (UTC), without link scanners and previews. */
                 clicks_today: number;
-                /** @description It takes clicks now: a weight above 0 and room in its cap. */
+                /** @description It takes clicks now: a weight above 0 and room in its cap. For an offer, its own cap_reached (GET .../offers) says whether the offer still takes them. */
                 open: boolean;
             }[];
+        };
+        PostbackSource: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            /** @description The secret's first characters, to tell sources apart. */
+            token_hint: string;
+            /** @description Addresses or ranges postbacks must come from; empty for any. */
+            ip_allowlist: string[];
+            /**
+             * @description What a transaction id seen before does: ignore it, record a new conversion, update the one recorded, or add its payout (upsells).
+             * @enum {string}
+             */
+            duplicate_policy: "ignore" | "new" | "update" | "add";
+            /** @description How long after its click a conversion still counts. */
+            click_expiry_days: number;
+            /** @description The currency of payouts that don't say. */
+            currency: string;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description The affiliate-network template it follows (GET .../affiliate-network-templates); '' for a custom source. */
+            network: string;
+            /** @description The parameter in its offer links that carries the click id, added to the URLs of its offers that don't carry {click_id}; '' adds none. */
+            click_id_param: string;
+            /** @description The postback URL's query in the network's macros, such as cid={sub1}&payout={payout}; Outflare's own token names for a custom source. */
+            postback_query: string;
+            conversions: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The URL to give the network: the secret and postback_query; only when the source is made or rotated. */
+            postback_url?: string;
+            /** @description The brand has no verified tracking domain, where postbacks answer. */
+            needs_domain: boolean;
+        };
+        PostbackSourceInput: {
+            name?: string;
+            ip_allowlist?: string[];
+            /** @enum {string} */
+            duplicate_policy?: "ignore" | "new" | "update" | "add";
+            click_expiry_days?: number;
+            currency?: string;
+            /**
+             * @description Update only.
+             * @enum {string}
+             */
+            status?: "active" | "archived";
+            /** @description An affiliate-network template's id, so the postback URL carries its macros and its offers its click id parameter; '' for a custom source. */
+            network?: string;
+            /** @description The parameter in its offer links that carries the click id, such as sub1; the template's when left out, '' for none. */
+            click_id_param?: string;
+        };
+        TrackerConversionUpload: {
+            accepted: number;
+            updated: number;
+            duplicate: number;
+            failed: number;
+            rows: {
+                /** @description Its place in the upload, from 1. */
+                row: number;
+                /** @enum {string} */
+                outcome: "accepted" | "updated" | "duplicate" | "failed";
+                /** Format: uuid */
+                conversion_id?: string;
+                /** @description Why a failed row wasn't recorded. */
+                error?: string;
+            }[];
+        };
+        TrackerConversionCall: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            source_id: string;
+            /**
+             * Format: uuid
+             * @description The conversion it recorded or updated.
+             */
+            conversion_id: string | null;
+            /** @enum {string} */
+            via: "postback" | "pixel";
+            /** @enum {string} */
+            method: "GET" | "POST";
+            /** @description The parameters it sent (up to 40, each cut to 200 characters). */
+            request: {
+                [key: string]: string;
+            };
+            click_key: string;
+            /** @description What Outflare answered; a pixel always answers 200. */
+            status: number;
+            outcome: string;
+            /** @description Why it wasn't recorded, in words. */
+            reason: string;
+            duration_ms: number;
+            request_id: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        TrackerConversion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            source_id: string;
+            /** @description The redirect click it credits (its ofclk). */
+            click_key: string;
+            /** Format: uuid */
+            campaign_id: string | null;
+            /** Format: uuid */
+            link_id: string | null;
+            /**
+             * Format: uuid
+             * @description The offer its click went to.
+             */
+            offer_id: string | null;
+            /** Format: date-time */
+            clicked_at: string;
+            /** @description The network's transaction id, or the click key and type when it sent none. */
+            transaction_id: string;
+            /** @description Such as conversion, lead or sale. */
+            type: string;
+            /** @enum {string} */
+            status: "approved" | "pending" | "declined";
+            /** @description In the currency's main unit, such as 12.5. */
+            payout: string;
+            currency: string;
+            /** @description p1 to p20, by number. */
+            params: {
+                [key: string]: string;
+            };
+            /**
+             * Format: uuid
+             * @description The person, when the click's visit knew them.
+             */
+            record_id: string | null;
+            /** @description How many postbacks named its transaction id. */
+            postbacks: number;
+            /** Format: date-time */
+            converted_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TrackerOffer: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            /** @description The offer's page, which can carry tokens such as {click_id} and {field1}. */
+            url: string;
+            /**
+             * Format: uuid
+             * @description The postback source (affiliate network) it pays through.
+             */
+            source_id: string | null;
+            /**
+             * @description postback: what the postback says, else this payout; fixed: this payout, whatever the postback says.
+             * @enum {string}
+             */
+            payout_mode: "postback" | "fixed";
+            /** @description In the currency's main unit, such as 12.5. */
+            payout: string;
+            currency: string;
+            /** @description Payouts by the click's country, such as {"US": "3.25"}, before payout. */
+            country_payouts: {
+                [key: string]: string;
+            };
+            /** @description The type a postback that names none gets; '' leaves it as conversion. */
+            conversion_type: string;
+            /** @description Clicks or conversions a day (UTC) it takes; null for no cap, 0 stops it. */
+            daily_cap: number | null;
+            /** @enum {string} */
+            cap_kind: "clicks" | "conversions";
+            /**
+             * Format: uuid
+             * @description Where its clicks go while it is capped.
+             */
+            fallback_offer_id: string | null;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description The URL carries no {click_id} and its network adds none, so a postback can't name the click. */
+            missing_click_id: boolean;
+            /** @description The URL a click goes to: url with the click id its network takes added. */
+            tracking_url: string;
+            /** @description Its clicks today (UTC), without link scanners and previews. */
+            clicks_today: number;
+            /** @description Its conversions today (UTC), without declined ones. */
+            conversions_today: number;
+            cap_reached: boolean;
+            /** @description How many link destinations send to it. */
+            destinations: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TrackerOfferInput: {
+            name?: string;
+            /** @description The offer's page; it can carry tokens such as {click_id}. */
+            url?: string;
+            /** @description One of the brand's postback sources (its affiliate network); '' for none. */
+            source_id?: string;
+            /** @enum {string} */
+            payout_mode?: "postback" | "fixed";
+            /** @description In the currency's main unit, such as 12.50. */
+            payout?: number | string;
+            currency?: string;
+            /** @description Payouts by two-letter country code; replaces the list. */
+            country_payouts?: {
+                [key: string]: number | string;
+            };
+            conversion_type?: string;
+            daily_cap?: number | null;
+            /**
+             * @description conversions when left out.
+             * @enum {string}
+             */
+            cap_kind?: "clicks" | "conversions";
+            /** @description Another of the brand's active offers; '' for none. */
+            fallback_offer_id?: string;
+            /**
+             * @description Update only. An offer that is a link's destination can't be archived.
+             * @enum {string}
+             */
+            status?: "active" | "archived";
+        };
+        TrackingDestinationInput: {
+            /**
+             * Format: uuid
+             * @description One of these destinations, to change it and keep today's count; leave it out to add one.
+             */
+            id?: string;
+            name?: string;
+            /** @description The page, which can carry tokens such as {click_id}. Required unless offer_id or lander_id is given. */
+            url?: string;
+            /**
+             * Format: uuid
+             * @description One of the brand's active offers, instead of url.
+             */
+            offer_id?: string;
+            /**
+             * Format: uuid
+             * @description One of the brand's active landers, instead of url.
+             */
+            lander_id?: string;
+            /** @description 100 when left out; 0 sends it no clicks. */
+            weight?: number;
+            daily_click_cap?: number | null;
+        };
+        TrackingPathInput: {
+            /**
+             * Format: uuid
+             * @description One of these paths, to change it; leave it out to add one.
+             */
+            id?: string;
+            name?: string;
+            /** @description Off skips the path; true when left out. */
+            active?: boolean;
+            conditions: components["schemas"]["TrackingPathCondition"][];
+            destinations: components["schemas"]["TrackingDestinationInput"][];
+        };
+        TrackerFlow: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description How many campaign links route by it: an edit changes them all. */
+            links: number;
+            paths: components["schemas"]["TrackingLinkPaths"]["paths"];
+            destinations: components["schemas"]["TrackingLinkDestinations"]["destinations"];
+            /** @description The brand has no verified tracking domain, so the flow isn't used. */
+            needs_domain: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TrackingLinkFlow: {
+            /** Format: uuid */
+            link_id: string;
+            /**
+             * Format: uuid
+             * @description The flow the link routes by; null for its own paths and destinations.
+             */
+            flow_id: string | null;
+        };
+        TrackerLander: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            brand_id: string;
+            name: string;
+            /** @description The lander's page; it can carry tokens such as {click_id}, and gets the click id as ofclk. */
+            url: string;
+            /** @description How many calls to action it has. */
+            ctas: number;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** @description Where a call to action links to go on to an offer or page of the lander's list, by weight: https://<tracking domain>/click. */
+            click_url: string;
+            /** @description Where each call to action links to go to the Nth offer or page of the list: .../click/1 to .../click/N. */
+            cta_urls: string[];
+            /** @description The script tag the lander's page carries: it adds the click id to its links to /click. It stores nothing in the browser. */
+            script: string;
+            /** @description Clicks on its calls to action today (UTC), without link scanners and previews. */
+            lander_clicks_today: number;
+            /** @description How many link destinations it is. */
+            destinations: number;
+            /** @description The brand has no verified tracking domain, where /click answers. */
+            needs_domain: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TrackerLanderInput: {
+            name?: string;
+            url?: string;
+            /** @description 1 when left out. */
+            ctas?: number;
+            /**
+             * @description Update only. A lander that is a link's destination can't be archived.
+             * @enum {string}
+             */
+            status?: "active" | "archived";
+        };
+        LanderClick: {
+            id: string;
+            /** Format: uuid */
+            lander_id: string | null;
+            /** @description The redirect click it continues (its ofclk). */
+            click_key: string;
+            /** @description The call to action, from /click/N; 0 for /click. */
+            cta: number;
+            /**
+             * Format: uuid
+             * @description Where it went; null for the link's own page.
+             */
+            destination_id: string | null;
+            /** Format: uuid */
+            offer_id: string | null;
+            likely_bot: boolean;
+            /** Format: date-time */
+            clicked_at: string;
+        };
+        AffiliateNetworkTemplate: {
+            id: string;
+            name: string;
+            /**
+             * @description platform: software many networks run on; network: one network.
+             * @enum {string}
+             */
+            kind: "platform" | "network";
+            /** @description The parameter in the network's offer links where the click id goes, such as sub1. */
+            click_id_param: string;
+            /** @description The network's macro for each postback value it has: cid, payout, txid, currency, status and type. */
+            macros: {
+                [key: string]: string;
+            };
+            note?: string;
         };
         TrafficSourceParam: {
             /** @description The URL parameter, such as clickid. '' for none. */
@@ -39286,6 +40813,7 @@ export interface components {
             cost: components["schemas"]["TrafficSourceParam"];
             parameters: components["schemas"]["TrafficSourceParameter"][];
             postback: components["schemas"]["TrafficSourcePostback"];
+            postback_rules: components["schemas"]["TrafficSourcePostbackRules"];
             /** @enum {string} */
             status: "active" | "archived";
             /** @description How many campaigns use it. */
@@ -39314,11 +40842,54 @@ export interface components {
                  */
                 method?: "GET" | "POST";
             };
+            /** @description The send-back rules to change; the others stay. */
+            postback_rules?: {
+                share?: number;
+                decimals?: number;
+                min_payout?: number | string;
+                types?: string[];
+                statuses?: ("approved" | "pending" | "declined")[];
+                resend?: boolean;
+            };
             /**
              * @description Update only.
              * @enum {string}
              */
             status?: "active" | "archived";
+        };
+        /** @description Which tracker conversions on the source's campaigns its postback is sent for, and with what payout. Each state of a conversion is sent once. */
+        TrafficSourcePostbackRules: {
+            /** @description The percentage of the payout sent: 100 (the default) sends it all. */
+            share: number;
+            /** @description The decimals the payout sent is rounded to; 2 by default. */
+            decimals: number;
+            /** @description The smallest payout sent, after the share; smaller conversions aren't sent. */
+            min_payout: string;
+            /** @description The conversion types sent; empty for every type. */
+            types: string[];
+            /** @description The statuses sent; approved by default. */
+            statuses: ("approved" | "pending" | "declined")[];
+            /** @description Send a conversion again when its status or payout changes. */
+            resend: boolean;
+        };
+        TrafficSourcePostbackSend: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversion_id: string;
+            /** @enum {string} */
+            status: "queued" | "sent" | "failed";
+            /** @description The payout sent: the source's share, rounded. */
+            payout: string;
+            /** @description The URL called, filled in. */
+            url: string;
+            http_status: number | null;
+            error: string;
+            attempts: number;
+            /** Format: date-time */
+            sent_at: string | null;
+            /** Format: date-time */
+            created_at: string;
         };
         /**
          * @description Who an automation leaves out: people on any of these lists (smart
@@ -46751,6 +48322,220 @@ export interface components {
         BacklinkFacet: {
             value: string;
             links: number;
+        };
+        LinkOrderSettings: {
+            /**
+             * Format: uuid
+             * @description The workspace member who may approve a link order and mark it paid. Null until set, which leaves Approve and Paid blocked.
+             */
+            approver_user_id: string | null;
+            /** @description Width of the domain-rating band used to suggest an equivalent donor; default 10. */
+            equivalent_dr_band: number;
+            /** Format: date-time */
+            updated_at: string | null;
+            /**
+             * Format: uuid
+             * @description The actor who last saved the settings.
+             */
+            updated_by: string | null;
+        };
+        /** @enum {string} */
+        LinkOrderStatus: "requested" | "quoted" | "negotiating" | "approved" | "published" | "paid" | "verified" | "lost";
+        LinkOrderMoney: {
+            /** @enum {string} */
+            currency: "USD" | "EUR";
+            /**
+             * Format: int64
+             * @description The donor price, in minor units. There is no commission or margin.
+             */
+            amount_minor: number;
+        };
+        LinkOrderDonor: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            publisher_id: string;
+            domain: string;
+            /** @description A manual flag. Nothing here detects a PBN automatically. */
+            pbn: boolean;
+            country: string;
+            languages: string[];
+            niches: string[];
+            casino_allowed: boolean;
+            rel_offered: string[];
+            slot_types: string[];
+            duration: string;
+            duration_days: number | null;
+            tat_days: number | null;
+            guarantee_days: number | null;
+            vendor_id: string;
+            /** @enum {string} */
+            source: "manual" | "csv" | "competitor_gap";
+            domain_rating: number | null;
+            /** Format: int64 */
+            traffic: number | null;
+            spam_score: number | null;
+            /** Format: date-time */
+            metrics_at: string | null;
+            metrics_source: string;
+            notes: string;
+            /** Format: date-time */
+            archived_at: string | null;
+            prices: components["schemas"]["LinkOrderMoney"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LinkOrderDonorWrite: {
+            /** @description Required on create. Cannot change later. */
+            domain?: string;
+            /** @description Used only when the publisher's company is created. */
+            name?: string;
+            pbn?: boolean;
+            country?: string | null;
+            languages?: string[];
+            niches?: string[];
+            casino_allowed?: boolean | null;
+            rel_offered?: string[];
+            slot_types?: string[];
+            duration?: string | null;
+            duration_days?: number | null;
+            tat_days?: number | null;
+            guarantee_days?: number | null;
+            vendor_id?: string | null;
+            notes?: string | null;
+            domain_rating?: number | null;
+            /** Format: int64 */
+            traffic?: number | null;
+            archived?: boolean;
+            prices?: components["schemas"]["LinkOrderMoney"][];
+        };
+        LinkOrderCatalogImport: {
+            created: number;
+            updated: number;
+            errors: {
+                /** @description 1-based line number, counting the header. */
+                row: number;
+                domain: string;
+                error: string;
+            }[];
+        };
+        LinkOrder: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            publisher_id: string;
+            /** Format: uuid */
+            donor_profile_id: string;
+            domain: string;
+            status: components["schemas"]["LinkOrderStatus"];
+            target_url: string;
+            slot_type: string;
+            rel_requested: string;
+            /** Format: int64 */
+            quoted_amount_minor: number | null;
+            /** @enum {string|null} */
+            quoted_currency: "USD" | "EUR" | null;
+            /**
+             * Format: int64
+             * @description Frozen at approval. The donor price only.
+             */
+            donor_amount_minor: number | null;
+            /** @enum {string|null} */
+            currency: "USD" | "EUR" | null;
+            guarantee_days: number | null;
+            /** Format: date-time */
+            guarantee_until: string | null;
+            published_url: string;
+            proof_url: string;
+            /** Format: date-time */
+            published_at: string | null;
+            /** Format: uuid */
+            placement_id: string | null;
+            /** Format: uuid */
+            agreement_id: string | null;
+            /** Format: uuid */
+            invoice_id: string | null;
+            /** Format: uuid */
+            payment_id: string | null;
+            /** Format: uuid */
+            credit_payment_id: string | null;
+            /** Format: uuid */
+            replaces_order_id: string | null;
+            /** Format: uuid */
+            owner_user_id: string | null;
+            /** Format: date-time */
+            last_check_at: string | null;
+            last_check_live: boolean | null;
+            last_check_target_match: boolean | null;
+            last_check_rel: string;
+            last_check_anchor: string;
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: uuid */
+            paid_by: string | null;
+            /** Format: date-time */
+            paid_at: string | null;
+            /** Format: date-time */
+            lost_at: string | null;
+            lost_reason: string;
+            notes: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LinkOrderEvent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            order_id: string;
+            action: string;
+            from_status: string | null;
+            to_status: string | null;
+            /** Format: uuid */
+            actor_id: string | null;
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+        };
+        LinkOrderSummary: {
+            /** @description How many orders are in each status. */
+            counts: {
+                [key: string]: number;
+            };
+            /** @description Approved plus published, not yet paid, by currency. */
+            committed: components["schemas"]["LinkOrderMoney"][];
+            /** @description Paid and verified, by currency. */
+            spent: components["schemas"]["LinkOrderMoney"][];
+            /** @description Lost donor amounts, by currency. */
+            lost: components["schemas"]["LinkOrderMoney"][];
+        };
+        LinkOrderBudget: {
+            budgets: {
+                /** Format: uuid */
+                budget_id: string;
+                title: string;
+                /** @enum {string} */
+                currency: "USD" | "EUR";
+                /** Format: int64 */
+                amount_minor: number;
+                /** Format: date */
+                starts_on: string;
+                /** Format: date */
+                ends_on: string;
+                /** Format: int64 */
+                committed: number;
+                /** Format: int64 */
+                spent: number;
+                /** Format: int64 */
+                remaining: number;
+            }[];
         };
         LinkBuildingSettings: {
             /** @description Days after a declined pitch before its website may be pitched again. */
@@ -55666,6 +57451,8 @@ export interface components {
              * @description The help centre the domain serves (at its root).
              */
             help_centre_id: string | null;
+            /** @description Where a redirect code that doesn't exist on the domain goes; '' for a not found page. */
+            fallback_url: string;
         };
         /**
          * @description replied means the lead answered and the sequence stops on reply. unsubscribed also covers a reply asking to be removed.
@@ -67093,8 +68880,18 @@ export interface operations {
                         id?: string;
                         /** @description What reports call it; '' shows the page. */
                         name?: string;
-                        /** @description The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does. */
-                        url: string;
+                        /** @description The page, which can carry tokens such as {click_id} and {field1}. It gets the campaign's tags, as the link's page does. Required unless offer_id is given. */
+                        url?: string;
+                        /**
+                         * Format: uuid
+                         * @description Send it to one of the brand's active offers (GET .../offers) instead of url: its URL is the offer's, with the click id its network takes, and the offer's cap and fallback apply.
+                         */
+                        offer_id?: string;
+                        /**
+                         * Format: uuid
+                         * @description Make it one of the brand's active landers (GET .../landers) instead of url. A list with landers sends each click to one of its landers, and the landers' calls to action (/click, /click/N) to its other destinations.
+                         */
+                        lander_id?: string;
                         /** @description Its share of the clicks against the others' weights; 100 when left out, 0 sends it none. */
                         weight?: number;
                         /** @description Clicks a day it takes; null or left out for no cap, 0 stops it. */
@@ -67114,6 +68911,1162 @@ export interface operations {
                 };
             };
             202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getTrackingLinkFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The link's flow. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkFlow"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setTrackingLinkFlow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description One of the brand's active flows; null for none.
+                     */
+                    flow_id: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The link's flow now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkFlow"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackingLinkPaths: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The paths. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkPaths"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setTrackingLinkPaths: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                /** @description The campaign's id, slug or ofc code. */
+                id: string;
+                /** @description The link's id. */
+                link: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    paths: {
+                        /**
+                         * Format: uuid
+                         * @description One of the link's paths, to change it; leave it out to add one.
+                         */
+                        id?: string;
+                        name?: string;
+                        /** @description Off skips the path; true when left out. */
+                        active?: boolean;
+                        conditions: components["schemas"]["TrackingPathCondition"][];
+                        destinations: {
+                            /** Format: uuid */
+                            id?: string;
+                            name?: string;
+                            /** @description Required unless offer_id is given. */
+                            url?: string;
+                            /**
+                             * Format: uuid
+                             * @description One of the brand's active offers, instead of url.
+                             */
+                            offer_id?: string;
+                            /**
+                             * Format: uuid
+                             * @description One of the brand's active landers, instead of url.
+                             */
+                            lander_id?: string;
+                            weight?: number;
+                            daily_click_cap?: number | null;
+                        }[];
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The paths now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingLinkPaths"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setTrackingDomainFallback: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A full address, such as https://northpeak.example/; '' for none. */
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The tracking domain. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingDomain"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listAffiliateNetworkTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Templates, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AffiliateNetworkTemplate"][];
+                        kinds: string[];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listFlows: {
+        parameters: {
+            query?: {
+                /** @description active when left out. */
+                status?: "active" | "archived" | "all";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Flows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerFlow"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createFlow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    paths?: components["schemas"]["TrackingPathInput"][];
+                    destinations?: components["schemas"]["TrackingDestinationInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The flow. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerFlow"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The flow. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerFlow"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateFlow: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    /** @enum {string} */
+                    status?: "active" | "archived";
+                };
+            };
+        };
+        responses: {
+            /** @description The flow. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerFlow"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setFlowDestinations: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    destinations: components["schemas"]["TrackingDestinationInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The flow now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerFlow"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    setFlowPaths: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    paths: components["schemas"]["TrackingPathInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description The flow now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerFlow"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLanders: {
+        parameters: {
+            query?: {
+                /** @description active when left out. */
+                status?: "active" | "archived" | "all";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Landers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerLander"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createLander: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackerLanderInput"];
+            };
+        };
+        responses: {
+            /** @description The lander. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerLander"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLander: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The lander. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerLander"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateLander: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackerLanderInput"];
+            };
+        };
+        responses: {
+            /** @description The lander. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerLander"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLanderClicks: {
+        parameters: {
+            query?: {
+                lander?: string;
+                /** @description The lander clicks of one redirect click. */
+                click_id?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Lander clicks. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LanderClick"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listOffers: {
+        parameters: {
+            query?: {
+                /** @description active when left out. */
+                status?: "active" | "archived" | "all";
+                /** @description Only the offers of one postback source. */
+                source?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Offers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerOffer"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createOffer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackerOfferInput"];
+            };
+        };
+        responses: {
+            /** @description The offer. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerOffer"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getOffer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The offer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerOffer"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateOffer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TrackerOfferInput"];
+            };
+        };
+        responses: {
+            /** @description The offer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerOffer"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listPostbackSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Postback sources, by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PostbackSource"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPostbackSource: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostbackSourceInput"];
+            };
+        };
+        responses: {
+            /** @description The source, with its postback URL. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostbackSource"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPostbackSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The source. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostbackSource"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updatePostbackSource: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostbackSourceInput"];
+            };
+        };
+        responses: {
+            /** @description The source. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostbackSource"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    rotatePostbackSource: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The source, with its new postback URL. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostbackSource"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackerConversions: {
+        parameters: {
+            query?: {
+                source?: string;
+                campaign?: string;
+                status?: "approved" | "pending" | "declined";
+                offer?: string;
+                before?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerConversion"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadTrackerConversions: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The postback source the conversions came from.
+                     */
+                    source: string;
+                    conversions: {
+                        /** @description The click's key (ofclk); leave it out to update by transaction_id. */
+                        click_id?: string;
+                        transaction_id?: string;
+                        payout?: number | string;
+                        currency?: string;
+                        type?: string;
+                        /** @enum {string} */
+                        status?: "approved" | "pending" | "declined";
+                        /** @description When it happened, such as 2026-11-10T09:30:00Z; now when left out. */
+                        converted_at?: string;
+                        /** @description p1 to p20. */
+                        params?: {
+                            [key: string]: string;
+                        };
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description What happened to each row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerConversionUpload"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadTrackerConversionsCSV: {
+        parameters: {
+            query: {
+                /** @description The postback source the conversions came from. */
+                source: string;
+            };
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/csv": string;
+            };
+        };
+        responses: {
+            /** @description What happened to each row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackerConversionUpload"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrackerConversionLog: {
+        parameters: {
+            query?: {
+                source?: string;
+                via?: "postback" | "pixel";
+                /** @description accepted, duplicate, updated, wrong_domain, ip_refused, invalid, unknown_click, expired_click, rate_limited or error. */
+                outcome?: string;
+                /** @description Calls that named this click key. */
+                click_id?: string;
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Calls. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrackerConversionCall"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -67218,6 +70171,49 @@ export interface operations {
             202: components["responses"]["MissionHeld"];
             400: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listTrafficSourcePostbacks: {
+        parameters: {
+            query?: {
+                status?: "queued" | "sent" | "failed";
+                limit?: number;
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sends. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TrafficSourcePostbackSend"][];
+                        next_cursor: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -74475,6 +77471,923 @@ export interface operations {
                     "application/json": components["schemas"]["Queued"] | components["schemas"]["MissionHeld"];
                 };
             };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderSettings"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandLinkOrderSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    approver_user_id?: string | null;
+                    equivalent_dr_band?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderSettings"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandLinkOrderCatalog: {
+        parameters: {
+            query?: {
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                /** @description Filter by domain. */
+                q?: string;
+                pbn?: boolean;
+                niche?: string;
+                /** @description Default omits archived rows. */
+                archived?: "true" | "false" | "all";
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of catalog rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkOrderDonor"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandLinkOrderCatalog: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkOrderDonorWrite"];
+            };
+        };
+        responses: {
+            /** @description The catalog row. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderDonor"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    importBrandLinkOrderCatalog: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/csv": string;
+                "application/json": {
+                    /** @description The CSV file contents, including the header row. */
+                    csv: string;
+                };
+            };
+        };
+        responses: {
+            /** @description How many rows were created or updated, and any row errors. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderCatalogImport"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderCatalogItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderDonor"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandLinkOrderCatalogItem: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkOrderDonorWrite"];
+            };
+        };
+        responses: {
+            /** @description The catalog row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderDonor"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrderBudget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The current budgets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrderBudget"];
+                };
+            };
+            403: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandLinkOrders: {
+        parameters: {
+            query?: {
+                /**
+                 * @description next_cursor from the previous page, unchanged. Every paged list takes it, so one loop pages them all:
+                 *     call, then call again with cursor=next_cursor until next_cursor is null. Cursors are opaque; don't build them.
+                 */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: number;
+                /**
+                 * @description Only these fields of each item, comma separated (fields=id,email,status); id always comes back.
+                 *     Paging fields stay. A field the items don't have answers 400 naming the ones they do. Any GET takes it.
+                 */
+                fields?: components["parameters"]["Fields"];
+                status?: components["schemas"]["LinkOrderStatus"];
+                donor_profile_id?: string;
+                /** @description Filter by domain, target URL, or published URL. */
+                q?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of orders. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkOrder"][];
+                        next_cursor: components["schemas"]["NextCursor"];
+                    };
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    donor_profile_id: string;
+                    target_url: string;
+                    slot_type?: string;
+                    rel_requested?: string;
+                    guarantee_days?: number | null;
+                    notes?: string | null;
+                    /** Format: uuid */
+                    owner_user_id?: string | null;
+                    /** Format: uuid */
+                    replaces_order_id?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The new order. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    donor_profile_id?: string;
+                    target_url?: string;
+                    slot_type?: string | null;
+                    rel_requested?: string | null;
+                    guarantee_days?: number | null;
+                    notes?: string | null;
+                    /** Format: uuid */
+                    owner_user_id?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrandLinkOrderHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["LinkOrderEvent"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    quoteBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    amount_minor: number;
+                    /** @enum {string} */
+                    currency: "USD" | "EUR";
+                };
+            };
+        };
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    negotiateBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    notes?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    approveBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    published_url: string;
+                    proof_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    checkBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The check was queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        queued: boolean;
+                        /** Format: uuid */
+                        placement_id: string;
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    payBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The order, now paid, with a payment row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    verifyBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    markBrandLinkOrderLost: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    notes?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    replaceBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    donor_profile_id: string;
+                    notes?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The new requested order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    creditBrandLinkOrder: {
+        parameters: {
+            query?: never;
+            header?: {
+                /**
+                 * @description Makes the write safe to retry. A repeat with the same key from the same caller within 24 hours gets the first
+                 *     answer back (with `Idempotent-Replayed: true`) instead of running again. The same key for a different request
+                 *     is refused with 422 `idempotency_key_reused`; while the first is still running, 409 `idempotency_in_progress`.
+                 *     Use a new random key, such as a UUID, for each distinct write.
+                 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                /** @description The brand's id. Brand data lives under /v1/brands/{brand}/, so it keeps its URLs wherever the brand is. */
+                brand: components["parameters"]["BrandID"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description The order, with a credit payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkOrder"];
+                };
+            };
+            202: components["responses"]["MissionHeld"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
@@ -119709,6 +123622,50 @@ export interface operations {
         };
     };
     webhook_partner_referral_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_tracker_conversion_created: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEvent"];
+            };
+        };
+        responses: {
+            /** @description Any 2xx answer means received; anything else is retried. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    webhook_tracker_conversion_updated: {
         parameters: {
             query?: never;
             header?: never;

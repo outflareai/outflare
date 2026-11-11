@@ -150,6 +150,27 @@ groups:
         annotations:
           summary: "Redirect link clicks have failed to be written for 10 minutes (people are still sent on): look for tracking_link.click_failed in the logs, usually the database. Past 100,000 waiting in a process, new clicks are dropped. See the Redirect links row."
 
+      - alert: OutflareTrackerPostbacksFailing
+        expr: sum(rate(outflare_tracker_postbacks_total{outcome="error"}[5m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Tracker conversion postbacks have failed to be recorded for 10 minutes, so networks' conversions are being lost or retried: look for /t/ errors in the logs, usually the database. See the Tracker conversion postbacks panel on the Redirect links row."
+
+      - alert: OutflareTrackerLanderClicksFailing
+        expr: sum(rate(outflare_tracker_lander_clicks_total{outcome="error"}[5m])) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Lander clicks (/click) have failed for 10 minutes, so visitors on landers reach the domain's fallback page instead of an offer: look for /click errors in the logs, usually the database. See the Lander clicks panel on the Redirect links row."
+
+      - alert: OutflareTrackerSourcePostbacksFailing
+        expr: sum(rate(outflare_tracker_source_postbacks_total{outcome=~"unreachable|invalid"}[15m])) > 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Conversions sent back to traffic sources have been given up on for 30 minutes, so networks aren't told of conversions and can't optimise: check the source postback sends (GET .../traffic-sources/{id}/postbacks) and the job logs. See the Conversions sent back panel on the Redirect links row."
+
       - alert: OutflareRedirectClickBacklog
         expr: max(outflare_redirect_click_buffer) > 20000
         for: 5m

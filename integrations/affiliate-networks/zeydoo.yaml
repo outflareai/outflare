@@ -1,0 +1,12 @@
+id: zeydoo
+name: "Zeydoo"
+kind: network
+click_id_param: ymid
+macros:
+  cid: "{ymid}"
+  payout: "{amount}"
+  type: "{goal}"
+note: "Paste the postback into the Postback URL field in your Zeydoo account; it can be made global for all offers. {goal} is 1 for registration and 2 for deposit or card submit."
+sources:
+  - https://help.zeydoo.com/en/articles/4362736-how-to-setup-zeydoo-s2s-conversion-tracking
+  - https://www.clickflare.com/docs/en/integrations/zeydoo-and-clickflare

@@ -1,0 +1,13 @@
+id: tune
+name: "TUNE (HasOffers)"
+kind: platform
+click_id_param: aff_sub
+macros:
+  cid: "{aff_sub}"
+  payout: "{payout}"
+  txid: "{transaction_id}-{goal_id}"
+  type: "{goal_id}"
+note: "Postbacks are added per offer under Your Pixels / Postbacks (only network staff can add one for all offers). {transaction_id} is TUNE's click session id, so it is combined with {goal_id} to stay unique per goal; {goal_id} is empty on the default goal, and there is no status macro."
+sources:
+  - https://doc.voluum.com/en/tracking_payout.html
+  - https://www.clickflare.com/docs/en/integrations/tune-click-flare-integration-guide

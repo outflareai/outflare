@@ -6,6 +6,36 @@ Each pull request that changes what Outflare does adds a change note in [changes
 
 ## [Unreleased]
 
+## [0.92.0] - 2026-11-11
+
+### Added
+
+- Brands can now manage a paid-link catalog and place link orders through the API (and the MCP tools that call it). Amounts are the donor price only, in USD or EUR, never summed together. Approving an order and marking it paid is limited to the person set as that brand's approver, and paid only after the link is published and a live-link check has passed. There is no commission or markup.
+- Rules on redirect links: send the clicks that match a path's conditions (country, device, network, IP range, hour, first or returning visitor, custom fields) to its own pages, in order, with the link's other pages for everyone else.
+- Redirect links can send people on with a 307 or a meta refresh that hides the referrer, and a tracking domain can send unknown links to a page of your choice. Destinations, rules and these modes now run only on your own tracking domain; on the shared domain, links go to their own page.
+- A conversion log for tracker postbacks and pixels: see every call from the last 30 days with what it sent and why it was or wasn't recorded. Recorded and changed conversions are also webhooks, tracker_conversion.created and tracker_conversion.updated.
+- Tracker conversions by pixel and upload: put a pixel or script on a thank-you page when a network can't send postbacks, or upload a network's report as CSV or through the API. Rows with only a transaction id update conversions already recorded, for approvals and reversals reported later.
+- Conversions by click id: give each affiliate network a postback URL on your tracking domain, and every conversion it reports is recorded against the redirect click it came from, with its payout and status, even when no person is known. Duplicates, late postbacks and unknown callers are handled per source.
+- Tracker flows: save a set of rule-based paths and destinations (pages, offers and landers) once and use it on as many campaign links as you like. An edit to the flow changes every link that uses it, and the flow shows how many do.
+- Tracker landers: send clicks to a review or quiz page before your offers. Each lander's buttons link to /click (an offer by weight) or /click/N (a chosen offer), with no cookies. Every lander click is kept and credits its conversion to the offer it led to.
+- Tracker offers: give each offer a payout (fixed, by country or from the postback) and a daily cap with a fallback offer, and send link clicks to it. Postback sources can start from 21 affiliate-network templates, such as Everflow, CAKE and ClickBank, so their postback URLs come in the network's own macros.
+- Tracker conversions now go back to your traffic sources: a source with a postback URL is told of each conversion on its campaigns. Its rules set the share of the payout sent, a minimum, which types and statuses are sent, and whether changes such as approvals are sent again. Every send is logged.
+
+### Fixed
+
+- Running a partner import again now brings over a partner's new email from Tolt. The new address replaces the old one when that was the only, unverified email on their record, and is added beside a verified one.
+
+### Upgrading
+
+- runs migration 0512.
+- runs migration 0513.
+- runs migration 0515.
+- runs migration 0514.
+- runs migration 0518.
+- runs migration 0517.
+- runs migration 0516.
+- runs migration 0519.
+
 ## [0.91.0] - 2026-11-10
 
 ### Added

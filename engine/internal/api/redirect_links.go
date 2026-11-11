@@ -91,9 +91,11 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	}
 	if !t.found {
 		metrics.RedirectClick("unknown")
-		http.Error(w, "This link has expired or was never valid.", http.StatusNotFound)
+		s.unknownCode(w, r)
 		return
 	}
+	// Tracker features run only on the workspace's own tracking domains.
+	_, own := s.ownDomain(r, t.ws)
 	bot := tracking.LikelyBot(r.UserAgent(), time.Time{}, now)
 	key := utm.NewShortCode(clickKeyLen)
 	c := bufferedClick{ws: t.ws, brand: t.brand, linkID: t.link.ID, key: key, bot: bot, at: now, detail: clickDetails(r)}
@@ -108,11 +110,16 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	var cost string
 	c.fields, c.sourceClickID, cost = t.source.capture(r.URL.Query())
 	c.costMicros = costMicros(cost)
-	// A link with destinations sends the click to one of them, by weight
-	// and cap, or to its own page when every one is capped or stopped.
+	// A link with destinations sends the click to the first matching
+	// path's, then its default ones, by weight and cap, or to its own page
+	// when every one is capped or stopped.
 	link := t.link
-	if d := s.route(t.dests, now, bot); d != nil {
-		link.URL, c.destinationID = d.url, d.id
+	if own {
+		if d, path := s.choose(r, t, c, now); d != nil {
+			link.URL, c.destinationID, c.pathID, c.offerID, c.landerID = d.url, d.id, path, d.offerID, d.landerID
+		}
+	} else if len(t.dests) > 0 || len(t.paths) > 0 {
+		routeMetric("shared_domain")
 	}
 	if strings.ContainsAny(link.URL, "{%") {
 		link.URL = tokens.ExpandKnown(link.URL, destinationValues(t, c, cost), trafficsources.DestinationTokens)
@@ -130,8 +137,11 @@ func (s *Server) redirect(w http.ResponseWriter, r *http.Request) {
 	} else {
 		metrics.RedirectClick("dropped")
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, target, http.StatusFound)
+	mode := t.campaign.RedirectMode
+	if !own {
+		mode = "302"
+	}
+	s.sendOn(w, r, target, mode)
 }
 
 // clickDetail is where a redirect click came from and on what, worked out

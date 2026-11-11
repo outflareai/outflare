@@ -1,0 +1,10 @@
+id: mobipium
+name: "Mobipium"
+kind: network
+click_id_param: tid
+macros:
+  cid: "{tid}"
+  payout: "{pay}"
+note: "In the Pixel page, paste the postback into Callback URL and enter tid as the tracker parameter name. There is no documented transaction id, currency or status placeholder; payouts are most likely in USD."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/mobipium-click-flare-integration-guide

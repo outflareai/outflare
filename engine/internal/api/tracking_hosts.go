@@ -19,8 +19,9 @@ import (
 // links): the rest of the app, sign-in above all, never appears under a
 // customer's domain.
 
-// trackingPaths are what a tracking domain serves.
-var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/", "/l/"}
+// trackingPaths are what a tracking domain serves; /t/ is tracker
+// conversion postbacks and /click landers' calls to action.
+var trackingPaths = []string{"/c/", "/o/", "/u/", "/r/", "/l/", "/t/", "/click"}
 
 const (
 	trackingHostTTL = time.Minute
@@ -41,7 +42,11 @@ type trackingHostEntry struct {
 	// centre is the slug of the help centre a verified domain tied to it
 	// serves.
 	centre string
-	until  time.Time
+	// workspace owns the domain, verified says it is, and fallback is
+	// where an unknown redirect code on it goes ('' for a not found page).
+	workspace, fallback string
+	verified            bool
+	until               time.Time
 }
 
 func requestHost(r *http.Request) string {
@@ -144,9 +149,10 @@ func (s *Server) hostEntry(r *http.Request, host string) (trackingHostEntry, err
 	}
 	e = trackingHostEntry{}
 	var program, centre *string
-	err := s.pool.QueryRow(r.Context(), `SELECT true, CASE WHEN d.status = 'verified' THEN p.id::text END, CASE WHEN d.status = 'verified' THEN h.slug END
+	err := s.pool.QueryRow(r.Context(), `SELECT true, CASE WHEN d.status = 'verified' THEN p.id::text END, CASE WHEN d.status = 'verified' THEN h.slug END,
+			d.workspace_id::text, d.status = 'verified', d.fallback_url
 		FROM tracking_domains d LEFT JOIN partner_programs p ON p.portal_domain_id = d.id LEFT JOIN help_centres h ON h.domain_id = d.id
-		WHERE d.domain = $1`, host).Scan(&e.tracking, &program, &centre)
+		WHERE d.domain = $1`, host).Scan(&e.tracking, &program, &centre, &e.workspace, &e.verified, &e.fallback)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return e, err
 	}

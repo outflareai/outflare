@@ -1,0 +1,13 @@
+id: leadbit
+name: "Leadbit"
+kind: network
+click_id_param: sub1
+macros:
+  cid: "{sub1}"
+  payout: "{cost}"
+  txid: "{id}"
+  currency: "{currency}"
+  status: "{status}"
+note: "Set it under Profile > Global Postback and tick only the approved status, or per flow. {cost} is your payout, not a traffic cost; {status} is new or confirm."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/leadbit-click-flare-integration-guide

@@ -437,6 +437,17 @@ Write (left out when `OUTFLARE_MCP_READ_ONLY=1`):
 | `create_tracking_campaign`, `update_tracking_campaign` | Make a campaign (channel, source, utm_campaign, ofc code), or rename, rebrand or archive it |
 | `list_tracking_links`, `create_tracking_link` | Tagged links in a campaign; make one for any page, with content and term, and optionally a short redirect link that counts clicks. A destination can carry tokens each click fills in, such as `{click_id}` and `{field1}` |
 | `list_tracking_link_destinations`, `set_tracking_link_destinations` | A redirect link's weighted destinations and daily click caps, with today's clicks; the link's own page takes the clicks once every destination is capped |
+| `list_postback_sources`, `create_postback_source`, `update_postback_source`, `rotate_postback_source` | Where tracker conversions come from: a secret postback URL on the brand's tracking domain per network, with an IP allowlist, click expiry, duplicate policy and the network's template |
+| `list_tracker_conversions` | The click ledger: each conversion a network reported, with the click it credits, its payout and status |
+| `list_flows`, `get_flow`, `create_flow`, `update_flow`, `set_flow_destinations`, `set_flow_paths`, `set_tracking_link_flow` | Reusable paths and destinations that campaign links route by, so one edit changes every link that uses the flow |
+| `list_landers`, `get_lander`, `create_lander`, `update_lander`, `list_lander_clicks` | The pages the brand sends tracker clicks to before its offers, their click URLs and script, and every click on their calls to action |
+| `list_affiliate_network_templates` | The affiliate networks and platforms Outflare has templates for: where each takes the click id, and its postback macros |
+| `list_offers`, `get_offer`, `create_offer`, `update_offer` | The pages the brand sends tracker clicks to, with payouts by country, daily caps on clicks or conversions and a fallback offer |
+| `list_tracker_conversion_log` | Every postback and pixel call of the last 30 days, with what it sent and why it was or wasn't recorded |
+| `upload_tracker_conversions` | Record conversions from a network's report, or update their status by transaction id |
+| `set_tracking_domain_fallback` | Where a redirect code that doesn't exist on a tracking domain goes, instead of a not found page |
+| `list_tracking_link_paths`, `set_tracking_link_paths` | A redirect link's rule-based paths: conditions on country, device, network, IP range, hour, first or returning visitor and custom fields, each with its own destinations; the first match wins |
+| `list_traffic_source_postbacks` | The tracker conversions sent back to a traffic source's postback URL, with the payout sent and what the network answered |
 | `list_traffic_source_templates`, `list_traffic_sources` | The networks Outflare has templates for, and the brand's traffic sources: which parameters carry each network's click id, cost and custom fields |
 | `create_traffic_source`, `update_traffic_source` | Add a traffic source from a template or by hand, change its parameters or postback, or archive it; a campaign that names it gets a campaign URL to paste into the network |
 | `get_attribution_settings`, `update_attribution_settings` | The default attribution model (last non-direct touch), the lookback and which events count as conversions |
@@ -696,6 +707,18 @@ Coverage CRUD tools also cover `rules`, `finance_tasks`, `documents` and `delive
 | `get_coverage_attributed_outcomes` | Read deduplicated publisher referral sessions and recorded attribution; also requires analytics read permission. |
 
 Placements can opt into `monitor_accuracy`. Scheduled reviews run no more often than daily, reuse unchanged page text and published Knowledge versions, and respect the workspace AI budget. They create review work and never send outreach. Discovery reconciliation processes at most 2,000 unseen source records per call; continue while `has_more` is true.
+
+
+### Link orders
+
+Paid link orders for a brand: the donor catalog, orders, and a summary of committed and spent amounts. Amounts are the donor price only; USD and EUR are never summed. There are no tools to approve or pay an order; those stay with the brand's designated approver.
+
+| Tools | Purpose |
+| --- | --- |
+| `list_link_order_catalog`, `import_link_order_catalog` | The donor catalog. Import accepts a CSV string; a repeated domain updates the existing profile, and a bad row does not abort the file. |
+| `list_link_orders`, `get_link_order`, `create_link_order` | List or request a paid link order against a catalog donor. |
+| `get_link_order_summary` | Counts by status, and donor amounts by currency (committed, spent, lost). |
+
 
 ### Search insights
 

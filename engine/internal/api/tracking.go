@@ -49,13 +49,16 @@ type trackingDomainView struct {
 	HelpCentreID *string `json:"help_centre_id"`
 	// BrandID is the brand whose links the domain carries.
 	BrandID *string `json:"brand_id"`
+	// FallbackURL is where a redirect code that doesn't exist on the domain
+	// goes; '' for a not found page.
+	FallbackURL string `json:"fallback_url"`
 }
 
 func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]trackingDomainView, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, domain, status, error, last_checked_at, verified_at, created_at, dns_install, https_status, https_error,
 			(SELECT p.id::text FROM partner_programs p WHERE p.portal_domain_id = d.id),
-			(SELECT h.id::text FROM help_centres h WHERE h.domain_id = d.id), d.brand_id::text FROM tracking_domains d
+			(SELECT h.id::text FROM help_centres h WHERE h.domain_id = d.id), d.brand_id::text, d.fallback_url FROM tracking_domains d
 		WHERE workspace_id = $1 AND ($2::uuid IS NULL OR id = $2) ORDER BY created_at`, ws, id)
 	if err != nil {
 		return nil, err
@@ -63,7 +66,7 @@ func (s *Server) trackingDomains(ctx context.Context, ws string, id *string) ([]
 	target := s.trackingHost()
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (trackingDomainView, error) {
 		v := trackingDomainView{Domain: tracking.Domain{Target: target}}
-		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID, &v.HelpCentreID, &v.BrandID)
+		err := row.Scan(&v.ID, &v.Domain.Domain, &v.Status, &v.Error, &v.LastCheckedAt, &v.VerifiedAt, &v.CreatedAt, &v.DNSInstall, &v.HTTPSStatus, &v.HTTPSError, &v.PartnerProgramID, &v.HelpCentreID, &v.BrandID, &v.FallbackURL)
 		return v, err
 	})
 	if err != nil || len(list) == 0 {

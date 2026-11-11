@@ -1,0 +1,16 @@
+id: affise
+name: "Affise"
+kind: platform
+click_id_param: sub1
+macros:
+  cid: "{sub1}"
+  payout: "{sum}"
+  txid: "{transactionid}-{goal}"
+  currency: "{currency}"
+  status: "{status}"
+  type: "{goal}"
+note: "Affise has no click id macro for affiliates, so the click id travels in sub1 and comes back as {sub1}. Add the postback per offer (Your Postbacks) or globally under Profile > Settings > Postback information, not both; {status} is numeric (1 approved, 2 pending, 3 declined, 5 hold)."
+sources:
+  - https://help-center.affise.com/en/articles/6483741-affiliate-postback-url-macros
+  - https://help-center.affise.com/en/articles/6655842-affiliate-postback-macros-affiliates
+  - https://www.clickflare.com/docs/en/integrations/affise-click-flare-integration-guide

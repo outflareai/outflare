@@ -1,0 +1,13 @@
+id: digistore24
+name: "Digistore24"
+kind: network
+click_id_param: cid
+macros:
+  cid: "{cid}"
+  payout: "{amount_affiliate}"
+  txid: "{transaction_id}"
+note: "As an affiliate, add the postback as a new S2S postback connection in your Digistore24 account settings; vendors use a different (IPN) setting with different placeholders such as {amount_vendor}."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/digistore24-click-flare-integration-guide
+  - https://doc.voluum.com/article/digistore24-and-voluum
+  - https://help.redtrack.io/knowledgebase/kb/automation/integrated-affiliate-networks/digistore24/

@@ -1,0 +1,13 @@
+id: clickbank
+name: "ClickBank"
+kind: network
+click_id_param: tid
+macros:
+  cid: "{tid}"
+  payout: "{affiliate_earnings}"
+  txid: "{receipt_id}"
+  type: "{event_type}"
+note: "Set it up under Integrations > Postback/Pixels > Add Integration (Custom Postback/Pixel) and pick the event types to send. {affiliate_earnings} is always in USD ({order_currency} is the buyer's currency, not the payout's), and {receipt_id} is empty for order-form impression events."
+sources:
+  - https://support.clickbank.com/en/articles/10535373-postback-pixels-integration-guide
+  - https://help.redtrack.io/knowledgebase/kb/automation/integrated-affiliate-networks/clickbank/clickbank-s2s-integration/

@@ -1,0 +1,13 @@
+id: mylead
+name: "MyLead"
+kind: network
+click_id_param: ml_sub1
+macros:
+  cid: "[ml_sub1]"
+  payout: "[payout_decimal]"
+  txid: "[transaction_id]"
+  currency: "[currency]"
+  status: "[status]"
+note: "Add it under Postback and API > Add a new Postback URL and set the lead status that activates it to Accepted or Available to pay, not Any. Use [payout_decimal]; [payout] is in cents."
+sources:
+  - https://www.clickflare.com/docs/en/integrations/mylead-click-flare-integration-guide

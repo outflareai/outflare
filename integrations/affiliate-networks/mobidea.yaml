@@ -1,0 +1,11 @@
+id: mobidea
+name: "Mobidea"
+kind: network
+click_id_param: pub_click_id
+macros:
+  cid: "{{EXTERNAL_ID}}"
+  payout: "{{MONEY}}"
+note: "Set the global postback under Account > Global Postback. {{EXTERNAL_ID}} is the only mandatory token; Mobidea documents no transaction id, currency or status token."
+sources:
+  - https://intercom.help/mobidea-2683260c4d01/en/articles/7436049-which-tokens-are-to-be-used-on-tracking-url
+  - https://intercom.help/mobidea-2683260c4d01/en/articles/7336593-how-to-configure-postback-in-your-account

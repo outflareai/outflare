@@ -1,0 +1,16 @@
+id: impact
+name: "impact.com"
+kind: platform
+click_id_param: subId1
+macros:
+  cid: "{SubId1}"
+  payout: "{Payout}"
+  txid: "{ActionId}"
+  status: "{Status}"
+  type: "{ActionTrackerName}"
+note: "Set a global postback under Settings > Technical > Event Notifications (Action Life Cycle Events), or per brand under Brands > More > Tracking Integration > Add Postback. Macros are case-sensitive; a {Currency} macro exists but sources differ on whether {Payout} is in your partner currency or the brand's, so set the payout currency in the tracker."
+sources:
+  - https://integrations.impact.com/brand-api-reference/brand-api-reference-v13/reference/webhooks/set-up-postbacks-for-partners
+  - https://help.impact.com/partner/what-would-you-like-to-learn-about/platform-features/action-management/event-notifications-and-postbacks/set-up-action-lifecycle-postbacks
+  - https://help.impact.com/partner/what-would-you-like-to-learn-about/platform-features/tracking/tracking-links/link-parameters/sub-id-and-shared-id-parameters-explained-for-partners
+  - https://www.clickflare.com/docs/en/integrations/impact-click-flare-integration-guide

@@ -1029,6 +1029,11 @@ func housekeeping(ctx context.Context, log *slog.Logger, s *api.Server, logReten
 		} else if n > 0 {
 			log.Info("pruned the partner conversion log", "deleted", n)
 		}
+		if n, err := s.PruneTrackerConversionLog(ctx); err != nil && ctx.Err() == nil {
+			log.Error("prune tracker conversion log", "err", err)
+		} else if n > 0 {
+			log.Info("pruned the tracker conversion log", "deleted", n)
+		}
 		if n, err := s.PruneInboundWebhookIDs(ctx); err != nil && ctx.Err() == nil {
 			log.Error("prune inbound webhook ids", "err", err)
 		} else if n > 0 {

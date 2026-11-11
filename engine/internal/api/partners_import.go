@@ -1014,6 +1014,58 @@ func (r *partnerImportRun) keep(ctx context.Context, tx pgx.Tx, kind, external, 
 	return err
 }
 
+// partnerEmail brings over a partner's new email from the platform onto
+// their record. It replaces the address the record had when that was its
+// only email and nobody verified it; beside a verified email or several,
+// it is added and nothing closes. A record that was deleted, merged away or
+// is out of reach is left as it is.
+func (r *partnerImportRun) partnerEmail(ctx context.Context, tx pgx.Tx, member string, p connectors.ImportPartner) (bool, error) {
+	email, err := normalizeEmail(p.Email)
+	if err != nil || email == "" {
+		return false, nil
+	}
+	var recordID string
+	if err := tx.QueryRow(ctx, `SELECT record_id::text FROM partner_memberships WHERE id = $1`, member).Scan(&recordID); err != nil {
+		return false, err
+	}
+	a := &access{principal: r.by, WorkspaceID: r.ws}
+	rec, err := lockRecord(ctx, tx, a, recordID)
+	var conflict recordConflict
+	if errors.Is(err, errNotFound) || errors.Is(err, errSharedRecord) || errors.As(err, &conflict) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+identityColumns+` FROM record_identities i
+		WHERE i.record_id = $1 AND i.namespace = 'email' AND i.valid_to IS NULL`, rec.ID)
+	if err != nil {
+		return false, err
+	}
+	emails, err := pgx.CollectRows(rows, scanIdentity)
+	if err != nil {
+		return false, err
+	}
+	if slices.ContainsFunc(emails, func(i identityView) bool { return i.Value == email }) {
+		return false, nil
+	}
+	in := identityInput{Namespace: "email", Value: email, Verified: ptr(false), Source: "partner_import"}
+	if len(emails) == 1 && !emails[0].Verified {
+		in.Replaces = &emails[0].ID
+	}
+	if err := in.normalize(); err != nil {
+		return false, nil
+	}
+	if _, _, err := putIdentity(ctx, tx, a, &rec, in); err != nil {
+		return false, err
+	}
+	if err := touch(ctx, tx, rec.ID); err != nil {
+		return false, err
+	}
+	r.warn("partners", p.ID, "email_changed")
+	return true, nil
+}
+
 func (r *partnerImportRun) partner(ctx context.Context, tx pgx.Tx, p connectors.ImportPartner) (string, error) {
 	if p.ID == "" {
 		return "", importSkip("incomplete")
@@ -1029,7 +1081,11 @@ func (r *partnerImportRun) partner(ctx context.Context, tx pgx.Tx, p connectors.
 			return "", err
 		}
 		moved, err := r.partnerGroup(ctx, tx, id, p.GroupID, true)
-		if err != nil || (tag.RowsAffected() == 0 && !moved) {
+		if err != nil {
+			return "", err
+		}
+		emailed, err := r.partnerEmail(ctx, tx, id, p)
+		if err != nil || (tag.RowsAffected() == 0 && !moved && !emailed) {
 			return "unchanged", err
 		}
 		return "updated", nil

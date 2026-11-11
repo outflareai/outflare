@@ -7,8 +7,8 @@ package integrations
 
 import "embed"
 
-// FS is publishers.yaml, every connector folder and the traffic-source
-// templates.
+// FS is publishers.yaml, every connector folder and the traffic-source and
+// affiliate-network templates.
 //
-//go:embed publishers.yaml connectors traffic-sources
+//go:embed publishers.yaml connectors traffic-sources affiliate-networks
 var FS embed.FS
